@@ -830,7 +830,7 @@ func buildModernUI(hInstance uintptr) {
 
 	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 80, cw, 22, hFontHeader)
 	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 114, 200, 20, hFontNormal)
-	hEditTgToken = createEdit(hInstance, "", cx+210, 110, 380, 28, false, true, hFontNormal)
+	hEditTgToken = createEdit(hInstance, "", cx+210, 110, 380, 28, false, false, hFontNormal)
 	hBtnTestTg = createOwnerDrawButton(hInstance, "🧪 Проверить бот", cx+600, 108, 160, 32, ID_BTN_TEST_TG, "normal")
 
 	lblTgChat := createLabel(hInstance, "Chat ID (@userinfobot):", cx, 154, 200, 20, hFontNormal)
