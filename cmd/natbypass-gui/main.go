@@ -84,8 +84,8 @@ const (
 	WS_VSCROLL          = 0x00200000
 	WS_TABSTOP          = 0x00010000
 
-	BS_PUSHBUTTON    = 0x00000000
-	BS_OWNERDRAW     = 0x0000000B
+	BS_PUSHBUTTON = 0x00000000
+	BS_OWNERDRAW  = 0x0000000B
 
 	ES_LEFT        = 0x0000
 	ES_MULTILINE   = 0x0004
@@ -138,22 +138,21 @@ const (
 	DT_LEFT       = 0x00000000
 )
 
-// Современная цветовая палитра Slate Dark (GitHub / Modern Fluent Theme)
+// Цветовая палитра Slate Dark (GitHub / Modern Fluent Theme)
 const (
-	COLOR_BG        = 0x1A140F // #0F141A (Глубокий мягкий темный фон)
-	COLOR_SIDEBAR   = 0x221B16 // #161B22 (Боковая панель)
-	COLOR_CARD      = 0x2B231C // #1C232B (Карточки и контейнеры)
-	COLOR_INPUT     = 0x2D2621 // #21262D (Поля ввода)
-	COLOR_BORDER    = 0x423830 // #303842 (Мягкие разделители)
-	COLOR_BORDER_LT = 0x54473C // #3C4754 (Границы кнопок)
-	COLOR_TEXT      = 0xF3EDE6 // #E6EDF3 (Основной текст)
-	COLOR_MUTED     = 0xA69B8F // #8F9BA6 (Вторичный текст)
-	COLOR_ACCENT    = 0xFFA658 // #58A6FF (Акцентный голубой)
+	COLOR_BG        = 0x18120D // #0D1218 (Глубокий темный фон)
+	COLOR_SIDEBAR   = 0x221A15 // #151A22 (Боковая панель)
+	COLOR_CARD      = 0x29211A // #1A2129 (Контейнеры контента)
+	COLOR_INPUT     = 0x332820 // #202833 (Четко различимые поля ввода)
+	COLOR_BORDER    = 0x473B32 // #323B47 (Контуры полей и карточек)
+	COLOR_BORDER_LT = 0x5E4E42 // #424E5E (Границы кнопок)
+	COLOR_TEXT      = 0xF3EDE6 // #E6EDF3 (Основной белый текст)
+	COLOR_MUTED     = 0xA89D91 // #919DA8 (Мягкий серый для подписей)
+	COLOR_ACCENT    = 0xFFA658 // #58A6FF (Голубой акцент)
 	COLOR_ACCENT_BG = 0xEB6F1F // #1F6FEB (Синяя кнопка)
 	COLOR_GREEN_BG  = 0x368623 // #238636 (Зеленая кнопка)
-	COLOR_GREEN_LT  = 0x50B93F // #3FB950 (Яркий зеленый)
+	COLOR_GREEN_LT  = 0x50B93F // #3FB950
 	COLOR_RED_BG    = 0x3336DA // #DA3633 (Красная кнопка)
-	COLOR_BTN_HOVER = 0x3D3328 // #28333D (Кнопка при наведении)
 )
 
 type RECT struct {
@@ -384,8 +383,8 @@ func main() {
 
 	hFontNormal = createFont("Segoe UI", 15, 400)
 	hFontBold = createFont("Segoe UI", 15, 600)
-	hFontHeader = createFont("Segoe UI", 18, 700)
-	hFontTitle = createFont("Segoe UI", 22, 700)
+	hFontHeader = createFont("Segoe UI", 17, 700)
+	hFontTitle = createFont("Segoe UI", 21, 700)
 	hFontMono = createFont("Consolas", 13, 400)
 
 	// 4. Регистрация класса окна
@@ -504,7 +503,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	case WM_CTLCOLOREDIT:
 		hdc := wParam
 		procSetBkColor.Call(hdc, COLOR_INPUT)
-		procSetTextColor.Call(hdc, COLOR_TEXT)
+		procSetTextColor.Call(hdc, 0xFFFFFF) // Яркий белый цвет вводимого текста
 		return hBrushInput
 
 	case WM_CTLCOLORLISTBOX:
@@ -542,10 +541,21 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 	text := buttonLabels[id]
 	bType := buttonTypes[id]
 
+	isNav := bType == "nav"
+
+	// 1. Устранение артефактов по краям: заливаем фон кнопки цветом родителя
+	var parentBrush uintptr
+	if isNav {
+		parentBrush = hBrushSidebar
+	} else {
+		parentBrush = hBrushCard
+	}
+	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&rc)), parentBrush)
+
+	// 2. Выбор цвета заливки и текста кнопки
 	var bgBrush uintptr
 	var txtColor uint32 = COLOR_TEXT
 
-	isNav := bType == "nav"
 	isActiveNav := false
 	if isNav {
 		if (id == ID_NAV_DASHBOARD && currentTab == 0) ||
@@ -577,7 +587,7 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 		txtColor = COLOR_TEXT
 	}
 
-	// Заливка с закругленными углами
+	// 3. Рамка кнопки
 	penBorder, _, _ := procCreatePen.Call(0, 1, COLOR_BORDER_LT)
 	if isActiveNav {
 		penBorder, _, _ = procCreatePen.Call(0, 1, COLOR_ACCENT)
@@ -587,7 +597,7 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 	procSelectObject.Call(hdc, penBorder)
 	procRoundRect.Call(hdc, uintptr(rc.Left), uintptr(rc.Top), uintptr(rc.Right), uintptr(rc.Bottom), 8, 8)
 
-	// Текст
+	// 4. Текст
 	procSetBkMode.Call(hdc, 1) // TRANSPARENT
 	procSetTextColor.Call(hdc, uintptr(txtColor))
 
@@ -739,33 +749,34 @@ func buildModernUI(hInstance uintptr) {
 	hBtnAwgStealth = createOwnerDrawButton(hInstance, "🔴 Скрытный режим", cx+384, 100, 180, 36, ID_BTN_AWG_STEALTH, "normal")
 	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайные ключи", cx+576, 100, 180, 36, ID_BTN_RAND_AWG, "normal")
 
-	// Параметры
-	lblJc := createLabel(hInstance, "Jc (мусор):", cx, 152, 75, 20, hFontNormal)
-	hEditAwgJc = createEdit(hInstance, "4", cx+80, 148, 55, 26, false, false, hFontNormal)
+	// Ряд 1 параметров: Jc, Jmin, Jmax, S1, S2
+	lblJc := createLabel(hInstance, "Jc (мусор):", cx, 150, 75, 20, hFontNormal)
+	hEditAwgJc = createEdit(hInstance, "4", cx+80, 146, 55, 28, false, false, hFontNormal)
 
-	lblJmin := createLabel(hInstance, "Jmin:", cx+150, 152, 45, 20, hFontNormal)
-	hEditAwgJmin = createEdit(hInstance, "40", cx+198, 148, 55, 26, false, false, hFontNormal)
+	lblJmin := createLabel(hInstance, "Jmin:", cx+150, 150, 45, 20, hFontNormal)
+	hEditAwgJmin = createEdit(hInstance, "40", cx+198, 146, 55, 28, false, false, hFontNormal)
 
-	lblJmax := createLabel(hInstance, "Jmax:", cx+268, 152, 45, 20, hFontNormal)
-	hEditAwgJmax = createEdit(hInstance, "70", cx+318, 148, 55, 26, false, false, hFontNormal)
+	lblJmax := createLabel(hInstance, "Jmax:", cx+268, 150, 45, 20, hFontNormal)
+	hEditAwgJmax = createEdit(hInstance, "70", cx+318, 146, 55, 28, false, false, hFontNormal)
 
-	lblS1 := createLabel(hInstance, "S1:", cx+388, 152, 30, 20, hFontNormal)
-	hEditAwgS1 = createEdit(hInstance, "48", cx+422, 148, 55, 26, false, false, hFontNormal)
+	lblS1 := createLabel(hInstance, "S1:", cx+388, 150, 30, 20, hFontNormal)
+	hEditAwgS1 = createEdit(hInstance, "48", cx+422, 146, 55, 28, false, false, hFontNormal)
 
-	lblS2 := createLabel(hInstance, "S2:", cx+492, 152, 30, 20, hFontNormal)
-	hEditAwgS2 = createEdit(hInstance, "32", cx+526, 148, 55, 26, false, false, hFontNormal)
+	lblS2 := createLabel(hInstance, "S2:", cx+492, 150, 30, 20, hFontNormal)
+	hEditAwgS2 = createEdit(hInstance, "32", cx+526, 146, 55, 28, false, false, hFontNormal)
 
-	lblH1 := createLabel(hInstance, "H1:", cx, 188, 30, 20, hFontNormal)
-	hEditAwgH1 = createEdit(hInstance, "1428571428", cx+35, 184, 110, 26, false, false, hFontNormal)
+	// Ряд 2 параметров: H1, H2, H3, H4
+	lblH1 := createLabel(hInstance, "H1 (Init):", cx, 188, 65, 20, hFontNormal)
+	hEditAwgH1 = createEdit(hInstance, "1428571428", cx+70, 184, 110, 28, false, false, hFontNormal)
 
-	lblH2 := createLabel(hInstance, "H2:", cx+160, 188, 30, 20, hFontNormal)
-	hEditAwgH2 = createEdit(hInstance, "2147483647", cx+195, 184, 110, 26, false, false, hFontNormal)
+	lblH2 := createLabel(hInstance, "H2 (Resp):", cx+195, 188, 70, 20, hFontNormal)
+	hEditAwgH2 = createEdit(hInstance, "2147483647", cx+270, 184, 110, 28, false, false, hFontNormal)
 
-	lblH3 := createLabel(hInstance, "H3:", cx+320, 188, 30, 20, hFontNormal)
-	hEditAwgH3 = createEdit(hInstance, "857142857", cx+355, 184, 110, 26, false, false, hFontNormal)
+	lblH3 := createLabel(hInstance, "H3 (Cookie):", cx+395, 188, 80, 20, hFontNormal)
+	hEditAwgH3 = createEdit(hInstance, "857142857", cx+480, 184, 110, 28, false, false, hFontNormal)
 
-	lblH4 := createLabel(hInstance, "H4:", cx+480, 188, 30, 20, hFontNormal)
-	hEditAwgH4 = createEdit(hInstance, "1122334455", cx+515, 184, 110, 26, false, false, hFontNormal)
+	lblH4 := createLabel(hInstance, "H4 (Data):", cx+605, 188, 70, 20, hFontNormal)
+	hEditAwgH4 = createEdit(hInstance, "1122334455", cx+680, 184, 88, 28, false, false, hFontNormal)
 
 	lblConfTitle := createLabel(hInstance, "Конфигурация AmneziaWG (.conf):", cx, 226, cw, 22, hFontHeader)
 	hEditAwgConf = createEdit(hInstance, "", cx, 254, cw, 345, true, true, hFontMono)
@@ -973,6 +984,9 @@ func updateAWGText() {
 		AWGParams: awgParams,
 	}
 	conf, _ := wireguard.GenerateAWGConfig(&awgCfg)
+	// ВАЖНО: Win32 Edit Control требует \r\n для переноса строк!
+	conf = strings.ReplaceAll(conf, "\r\n", "\n")
+	conf = strings.ReplaceAll(conf, "\n", "\r\n")
 	setControlText(hEditAwgConf, conf)
 }
 
@@ -1219,7 +1233,7 @@ func createOwnerDrawButton(hInstance uintptr, text string, x, y, w, h int, id ui
 func createEdit(hInstance uintptr, text string, x, y, w, h int, multiline, readonly bool, font uintptr) uintptr {
 	editClass, _ := windows.UTF16PtrFromString("EDIT")
 	textPtr, _ := windows.UTF16PtrFromString(text)
-	style := uint32(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT)
+	style := uint32(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_LEFT)
 	if multiline {
 		style |= ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL
 	} else {
@@ -1239,9 +1253,6 @@ func createEdit(hInstance uintptr, text string, x, y, w, h int, multiline, reado
 	if font != 0 {
 		procSendMessageW.Call(hwnd, 0x0030, font, 1)
 	}
-	uxtheme, _ := windows.UTF16PtrFromString("DarkMode_Explorer")
-	procSetWindowTheme.Call(hwnd, uintptr(unsafe.Pointer(uxtheme)), 0)
-
 	allControls = append(allControls, hwnd)
 	return hwnd
 }
@@ -1252,16 +1263,13 @@ func createListBox(hInstance uintptr, x, y, w, h int, font uintptr) uintptr {
 		0,
 		uintptr(unsafe.Pointer(lbClass)),
 		0,
-		WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT,
+		WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT,
 		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 		hMainWnd, 0, hInstance, 0,
 	)
 	if font != 0 {
 		procSendMessageW.Call(hwnd, 0x0030, font, 1)
 	}
-	uxtheme, _ := windows.UTF16PtrFromString("DarkMode_Explorer")
-	procSetWindowTheme.Call(hwnd, uintptr(unsafe.Pointer(uxtheme)), 0)
-
 	allControls = append(allControls, hwnd)
 	return hwnd
 }
