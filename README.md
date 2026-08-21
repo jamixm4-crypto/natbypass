@@ -125,9 +125,20 @@ signaling:
 
 ---
 
-## 🔨 Сборка из исходников
+## 🔨 Сборка собственных пакетов (Builder)
 
-### Через Makefile:
+Для встраивания параметров Telegram/MQTT и компиляции под ваши устройства предусмотрено 2 удобных способа:
+
+### Вариант А: Через графический сборщик (NatBypass Builder GUI)
+1. Скачайте архив **`NatBypass-Builder-Toolkit-windows.zip`** со страницы [Releases](../../releases) (либо скачайте исходники через `git clone https://github.com/jamixm4-crypto/natbypass.git`).
+2. Распакуйте архив и запустите **`NatBypass-Builder.exe`**.
+3. Заполните токены Telegram / MQTT, выберите целевые платформы галочками и нажмите **«🔨 Начать сборку»**.
+4. Сборщик автоматически скомпилирует готовые бинарники в папку `dist\`.
+
+> [!NOTE]
+> Графический сборщик `NatBypass-Builder.exe` компилирует код локально на вашей машине, поэтому для его работы необходимы файлы исходного кода проекта (`cmd/`, `internal/`, `go.mod`), которые уже включены в архив **`NatBypass-Builder-Toolkit-windows.zip`**.
+
+### Вариант Б: Через Makefile (Консоль / Linux / CI)
 ```bash
 make all            # Сборка под все платформы
 make windows-amd64  # Сборка под Windows (.exe)
@@ -137,9 +148,6 @@ make router-arm64   # Сборка под ARM64
 make android-arm64  # Сборка под Android
 make android-apk    # Сборка APK пакета
 ```
-
-### Через графический сборщик (Builder GUI):
-На Windows запустите **`NatBypass-Builder.exe`**, введите параметры Telegram/MQTT и нажмите **«🔨 Начать сборку»**.
 
 ---
 

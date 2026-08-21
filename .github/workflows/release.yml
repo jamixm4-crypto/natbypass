@@ -28,11 +28,12 @@ jobs:
           TAG_NAME="${{ github.ref_name }}"
           LDFLAGS="-s -w -X github.com/natbypass/natbypass/cmd/natbypass.Version=${TAG_NAME} -X github.com/natbypass/natbypass/cmd/natbypass.Commit=${{ github.sha }} -X github.com/natbypass/natbypass/cmd/natbypass.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          # Windows
+          # Windows Binaries
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-windows-amd64.exe ./cmd/natbypass-cli
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS} -H=windowsgui" -o release/natbypass-builder-${TAG_NAME}-windows-amd64.exe ./cmd/builder
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS} -H=windowsgui" -o release/NatBypass-${TAG_NAME}.exe ./cmd/natbypass-cli
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS} -H=windowsgui" -o release/NatBypass-Builder-${TAG_NAME}.exe ./cmd/builder
 
-          # Linux
+          # Linux Binaries
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-linux-amd64 ./cmd/natbypass-cli
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-linux-arm64 ./cmd/natbypass-cli
 
@@ -45,6 +46,13 @@ jobs:
 
           # Copy default config template
           cp config.yaml.example release/config.yaml.example
+
+          # Build pre-packaged NatBypass-Builder-Toolkit.zip (Builder + Source code + Config + Docs)
+          mkdir -p toolkit/natbypass-builder
+          cp release/NatBypass-Builder-${TAG_NAME}.exe toolkit/natbypass-builder/NatBypass-Builder.exe
+          cp -r cmd internal pkg docs config.yaml.example go.mod go.sum README.md toolkit/natbypass-builder/
+          cd toolkit && zip -r ../release/NatBypass-Builder-Toolkit-${TAG_NAME}-windows.zip natbypass-builder && cd ..
+          rm -rf toolkit
 
           ls -lh release/
 
