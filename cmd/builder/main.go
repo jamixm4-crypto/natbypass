@@ -577,7 +577,7 @@ func startBuild(mode string) {
 	if isChecked(hChkWin) || mode == "all" {
 		guiOut := filepath.Join(distDir, "natbypass-gui.exe")
 		appendLog("   🔨 Компиляция GUI версии natbypass-gui.exe... ")
-		cmd := exec.Command(goExe, "build", "-trimpath", "-ldflags", ldflags+" -H=windowsgui", "-o", guiOut, "./cmd/natbypass")
+		cmd := exec.Command(goExe, "build", "-trimpath", "-ldflags", ldflags+" -H=windowsgui", "-o", guiOut, "./cmd/natbypass-gui")
 		cmd.Dir = projectRoot
 		cmd.Env = append(envBase, "GOOS=windows", "GOARCH=amd64")
 		if out, err := cmd.CombinedOutput(); err != nil {
