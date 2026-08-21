@@ -289,9 +289,19 @@ tr:hover td{background:rgba(255,255,255,0.02)}
                 <span class="tooltip-popup">Адрес MQTT-сервера для обмена данными. По умолчанию используется публичный бесплатный брокер.</span>
               </span>
             </label>
-            <div class="input-with-btn">
-              <input type="text" id="wizMqttBroker" class="form-input" value="tcp://mqtt.eclipseprojects.io:1883">
-              <button class="btn btn-blue" onclick="wizTestMQTT()">🧪 Проверить</button>
+            <div class="input-with-btn" style="flex-direction:column;gap:8px;">
+              <select class="form-input" style="background:#1c2430;color:var(--accent);font-weight:500;" onchange="if(this.value){document.getElementById('wizMqttBroker').value=this.value;}">
+                <option value="">⚡ Выберите популярный публичный MQTT брокер или введите свой ниже:</option>
+                <option value="tcp://broker.emqx.io:1883" selected>🚀 EMQX (broker.emqx.io:1883) — Высокая скорость (Рекомендуется)</option>
+                <option value="tcp://broker.hivemq.com:1883">⚡ HiveMQ (broker.hivemq.com:1883) — Публичный кластер</option>
+                <option value="tcp://mqtt.eclipseprojects.io:1883">🌐 Eclipse (mqtt.eclipseprojects.io:1883) — Mosquitto Sandbox</option>
+                <option value="tcp://test.mosquitto.org:1883">📡 Mosquitto Org (test.mosquitto.org:1883)</option>
+                <option value="tcp://public.cloud.shiftr.io:1883">☁️ Shiftr.io (public.cloud.shiftr.io:1883)</option>
+              </select>
+              <div style="display:flex;gap:6px;width:100%;">
+                <input type="text" id="wizMqttBroker" class="form-input" value="tcp://broker.emqx.io:1883" placeholder="tcp://broker.emqx.io:1883">
+                <button class="btn btn-blue" onclick="wizTestMQTT()">🧪 Проверить</button>
+              </div>
             </div>
           </div>
           <div class="form-group" style="grid-column:span 2;">
@@ -492,9 +502,19 @@ tr:hover td{background:rgba(255,255,255,0.02)}
                 <span class="tooltip-popup">Адрес MQTT сервера. Формат: tcp://host:1883 или ssl://host:8883</span>
               </span>
             </label>
-            <div class="input-with-btn">
-              <input type="text" id="cfgMqttBroker" class="form-input" value="tcp://mqtt.eclipseprojects.io:1883">
-              <button class="btn btn-blue" onclick="testMQTT()">🧪 Проверить</button>
+            <div class="input-with-btn" style="flex-direction:column;gap:8px;">
+              <select class="form-input" style="background:#1c2430;color:var(--accent);font-weight:500;" onchange="if(this.value){document.getElementById('cfgMqttBroker').value=this.value;}">
+                <option value="">⚡ Выберите популярный публичный MQTT брокер или введите свой ниже:</option>
+                <option value="tcp://broker.emqx.io:1883">🚀 EMQX (broker.emqx.io:1883) — Высокая скорость (Рекомендуется)</option>
+                <option value="tcp://broker.hivemq.com:1883">⚡ HiveMQ (broker.hivemq.com:1883) — Публичный кластер</option>
+                <option value="tcp://mqtt.eclipseprojects.io:1883">🌐 Eclipse (mqtt.eclipseprojects.io:1883) — Mosquitto Sandbox</option>
+                <option value="tcp://test.mosquitto.org:1883">📡 Mosquitto Org (test.mosquitto.org:1883)</option>
+                <option value="tcp://public.cloud.shiftr.io:1883">☁️ Shiftr.io (public.cloud.shiftr.io:1883)</option>
+              </select>
+              <div style="display:flex;gap:6px;width:100%;">
+                <input type="text" id="cfgMqttBroker" class="form-input" value="tcp://broker.emqx.io:1883" placeholder="tcp://broker.emqx.io:1883">
+                <button class="btn btn-blue" onclick="testMQTT()">🧪 Проверить</button>
+              </div>
             </div>
           </div>
           <div class="form-group">

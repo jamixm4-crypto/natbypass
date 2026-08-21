@@ -836,19 +836,34 @@ func buildModernUI(hInstance uintptr) {
 	lblTgChat := createLabel(hInstance, "Chat ID (@userinfobot):", cx, 154, 200, 20, hFontNormal)
 	hEditTgChat = createEdit(hInstance, "", cx+210, 150, 380, 28, false, false, hFontNormal)
 
-	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", cx, 215, cw, 22, hFontHeader)
-	lblMqBr := createLabel(hInstance, "URL Брокера:", cx, 249, 200, 20, hFontNormal)
-	hEditMqttBr = createEdit(hInstance, "tcp://mqtt.eclipseprojects.io:1883", cx+210, 245, 380, 28, false, false, hFontNormal)
-	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+600, 243, 160, 32, ID_BTN_TEST_MQTT, "normal")
+	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", cx, 212, cw, 22, hFontHeader)
+	lblMqBr := createLabel(hInstance, "URL Брокера:", cx, 246, 200, 20, hFontNormal)
+	hEditMqttBr = createComboBox(hInstance, cx+210, 242, 380, 220, hFontNormal)
+	brokers := []string{
+		"tcp://broker.emqx.io:1883",
+		"tcp://broker.hivemq.com:1883",
+		"tcp://mqtt.eclipseprojects.io:1883",
+		"tcp://test.mosquitto.org:1883",
+		"tcp://public.cloud.shiftr.io:1883",
+		"tcp://broker.flespi.io:1883",
+	}
+	for _, b := range brokers {
+		tPtr, _ := windows.UTF16PtrFromString(b)
+		procSendMessageW.Call(hEditMqttBr, 0x0143, 0, uintptr(unsafe.Pointer(tPtr)))
+	}
+	setControlText(hEditMqttBr, "tcp://broker.emqx.io:1883")
+	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+600, 240, 160, 32, ID_BTN_TEST_MQTT, "normal")
 
-	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 289, 200, 20, hFontNormal)
-	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 285, 380, 28, false, false, hFontNormal)
+	lblMqHint := createLabel(hInstance, "💡 Выберите брокер из списка или введите адрес любого своего сервера", cx+210, 276, 550, 18, hFontNormal)
 
-	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx+210, 345, 380, 44, ID_BTN_SAVE_CFG, "primary")
+	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 304, 200, 20, hFontNormal)
+	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 300, 380, 28, false, false, hFontNormal)
+
+	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx+210, 350, 380, 44, ID_BTN_SAVE_CFG, "primary")
 
 	tabPages[2] = []uintptr{
 		lblSetTitle, lblTgHead, lblTgToken, hEditTgToken, hBtnTestTg, lblTgChat, hEditTgChat,
-		lblMqHead, lblMqBr, hEditMqttBr, hBtnTestMqtt, lblMqTp, hEditMqttTp, hBtnSaveCfg,
+		lblMqHead, lblMqBr, hEditMqttBr, hBtnTestMqtt, lblMqHint, lblMqTp, hEditMqttTp, hBtnSaveCfg,
 	}
 
 	// ══════════════════════════════════════════════════════════════
@@ -1316,6 +1331,23 @@ func createEdit(hInstance uintptr, text string, x, y, w, h int, multiline, reado
 		uintptr(unsafe.Pointer(editClass)),
 		uintptr(unsafe.Pointer(textPtr)),
 		uintptr(style),
+		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
+		hMainWnd, 0, hInstance, 0,
+	)
+	if font != 0 {
+		procSendMessageW.Call(hwnd, 0x0030, font, 1)
+	}
+	allControls = append(allControls, hwnd)
+	return hwnd
+}
+
+func createComboBox(hInstance uintptr, x, y, w, h int, font uintptr) uintptr {
+	cbClass, _ := windows.UTF16PtrFromString("COMBOBOX")
+	hwnd, _, _ := procCreateWindowExW.Call(
+		0,
+		uintptr(unsafe.Pointer(cbClass)),
+		0,
+		uintptr(WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_VSCROLL|0x0002|0x0100), // CBS_DROPDOWN | CBS_AUTOHSCROLL
 		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 		hMainWnd, 0, hInstance, 0,
 	)
