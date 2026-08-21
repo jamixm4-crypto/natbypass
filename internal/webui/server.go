@@ -6,16 +6,21 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/wireguard"
+	"golang.org/x/net/proxy"
 )
 
 //go:embed static/index.html
@@ -40,26 +45,35 @@ type AppState struct {
 
 // Server — встроенный Web UI HTTP-сервер
 type Server struct {
-	port     int
-	user     string
-	password string
-	registry *peer.Registry
-	sigMgr   *signaling.FallbackManager
-	state    *AppState
-	srv      *http.Server
+	port       int
+	user       string
+	password   string
+	configPath string
+	registry   *peer.Registry
+	sigMgr     *signaling.FallbackManager
+	state      *AppState
+	srv        *http.Server
 }
 
 // NewServer создаёт новый экземпляр Web UI сервера
 func NewServer(port int, user, password string, registry *peer.Registry, sigMgr *signaling.FallbackManager) *Server {
 	return &Server{
-		port:     port,
-		user:     user,
-		password: password,
-		registry: registry,
-		sigMgr:   sigMgr,
+		port:       port,
+		user:       user,
+		password:   password,
+		configPath: "config.yaml",
+		registry:   registry,
+		sigMgr:     sigMgr,
 		state: &AppState{
 			StartedAt: time.Now(),
 		},
+	}
+}
+
+// SetConfigPath задает путь к файлу конфигурации
+func (s *Server) SetConfigPath(path string) {
+	if path != "" {
+		s.configPath = path
 	}
 }
 
@@ -87,6 +101,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/refresh-ip", s.handleRefreshIP)
 	mux.HandleFunc("/api/channel/switch", s.handleChannelSwitch)
 	mux.HandleFunc("/api/channel/status", s.handleChannelStatus)
+	mux.HandleFunc("/api/config", s.handleConfig)
+	mux.HandleFunc("/api/test/telegram", s.handleTestTelegram)
+	mux.HandleFunc("/api/test/mqtt", s.handleTestMQTT)
 	mux.HandleFunc("/api/wg/config", s.handleWgConfig)
 	mux.HandleFunc("/api/restart", s.handleRestart)
 
@@ -292,6 +309,185 @@ func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, statuses, "")
 }
 
+// handleConfig — GET & POST /api/config — чтение и сохранение настроек
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg, err := config.Load(s.configPath)
+		if err != nil {
+			// Возвращаем дефолтный если файла нет
+			cfg = &config.Config{}
+			cfg.WebUI.Port = s.port
+			cfg.WebUI.Enabled = true
+		}
+		s.jsonResponse(w, http.StatusOK, cfg, "")
+
+	case http.MethodPost:
+		var req config.Config
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON: "+err.Error())
+			return
+		}
+
+		// Сохраняем в YAML
+		yamlData := fmt.Sprintf(`# ============================================================
+# NatBypass — Конфигурационный файл (Сохранено через Web UI)
+# ============================================================
+
+app:
+  name: "%s"
+  version: "1.0.0"
+  log_level: "%s"
+  publish_interval: %d
+
+web_ui:
+  enabled: %t
+  port: %d
+  username: "%s"
+  password: "%s"
+
+network:
+  upnp_enabled: %t
+  stun_servers:
+`, req.App.Name, req.App.LogLevel, req.App.PublishInterval, req.WebUI.Enabled, req.WebUI.Port, req.WebUI.Username, req.WebUI.Password, req.Network.UpnpEnabled)
+
+		for _, st := range req.Network.StunServers {
+			yamlData += fmt.Sprintf("    - \"%s\"\n", st)
+		}
+		yamlData += "  ip_apis:\n"
+		for _, ipa := range req.Network.IPApis {
+			yamlData += fmt.Sprintf("    - \"%s\"\n", ipa)
+		}
+
+		yamlData += "signaling:\n  channels:\n"
+		for _, ch := range req.Signaling.Channels {
+			yamlData += fmt.Sprintf("    - type: \"%s\"\n      priority: %d\n      enabled: %t\n      params:\n", ch.Type, ch.Priority, ch.Enabled)
+			for k, v := range ch.Params {
+				yamlData += fmt.Sprintf("        %s: \"%s\"\n", k, v)
+			}
+		}
+
+		yamlData += fmt.Sprintf(`wireguard:
+  enabled: %t
+  interface: "%s"
+  listen_port: %d
+  mtu: %d
+`, req.WireGuard.Enabled, req.WireGuard.Interface, req.WireGuard.ListenPort, req.WireGuard.MTU)
+
+		targetPath := s.configPath
+		if targetPath == "" {
+			targetPath = "config.yaml"
+		}
+		_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
+		if err := os.WriteFile(targetPath, []byte(yamlData), 0644); err != nil {
+			s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка записи файла: "+err.Error())
+			return
+		}
+
+		slog.Info("Настройки сохранены через Web UI", "file", targetPath)
+		s.jsonResponse(w, http.StatusOK, map[string]string{"message": "Конфигурация успешно сохранена!"}, "")
+
+	default:
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+	}
+}
+
+// handleTestTelegram — POST /api/test/telegram — проверка Telegram токена и чата
+func (s *Server) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	var req struct {
+		Token  string `json:"token"`
+		ChatID string `json:"chat_id"`
+		Proxy  string `json:"proxy"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "некорректный JSON")
+		return
+	}
+	if req.Token == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "укажите токен бота")
+		return
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	if req.Proxy != "" {
+		if u, err := url.Parse(req.Proxy); err == nil && u.Scheme == "socks5" {
+			if dialer, err := proxy.SOCKS5("tcp", u.Host, nil, proxy.Direct); err == nil {
+				client.Transport = &http.Transport{
+					DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+						return dialer.Dial(network, addr)
+					},
+				}
+			}
+		}
+	}
+
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", req.Token)
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка подключения к Telegram API: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	var tgResp struct {
+		Ok          bool   `json:"ok"`
+		Description string `json:"description"`
+		Result      struct {
+			Username  string `json:"username"`
+			FirstName string `json:"first_name"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(bodyBytes, &tgResp)
+
+	if !tgResp.Ok {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "Telegram API ошибка: "+tgResp.Description)
+		return
+	}
+
+	res := map[string]interface{}{
+		"bot_username": "@" + tgResp.Result.Username,
+		"bot_name":     tgResp.Result.FirstName,
+		"status":       "Подключение успешно!",
+	}
+	s.jsonResponse(w, http.StatusOK, res, "")
+}
+
+// handleTestMQTT — POST /api/test/mqtt — проверка доступности брокера
+func (s *Server) handleTestMQTT(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		BrokerURL string `json:"broker_url"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.BrokerURL == "" {
+		req.BrokerURL = "tcp://mqtt.eclipseprojects.io:1883"
+	}
+
+	u, err := url.Parse(req.BrokerURL)
+	host := req.BrokerURL
+	if err == nil && u.Host != "" {
+		host = u.Host
+	}
+
+	conn, err := net.DialTimeout("tcp", host, 5*time.Second)
+	if err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не удалось подключиться к MQTT брокеру: "+err.Error())
+		return
+	}
+	conn.Close()
+
+	s.jsonResponse(w, http.StatusOK, map[string]string{"status": "MQTT брокер доступен!"}, "")
+}
+
 // handleWgConfig — GET /api/wg/config — генерация WireGuard конфига
 func (s *Server) handleWgConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -305,7 +501,6 @@ func (s *Server) handleWgConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Добавляем пиров из реестра
 	var wgPeers []wireguard.WGPeer
 	for i, p := range s.registry.List() {
 		if p.WGPubKey != "" {
@@ -347,7 +542,6 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	slog.Warn("Получен сигнал перезапуска через Web UI")
 	s.jsonResponse(w, http.StatusOK, map[string]string{"message": "Сигнал перезапуска отправлен"}, "")
 
-	// Отправляем SIGTERM самому себе для graceful restart
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		if proc, err := os.FindProcess(os.Getpid()); err == nil {

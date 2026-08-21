@@ -1,91 +1,240 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NatBypass</title>
+<title>NatBypass Panel</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🚀%3C/text%3E%3C/svg%3E">
 <style>
-:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--green:#238636;--green-h:#2ea043;--red:#da3633;--red-h:#f85149;--blue:#1f6feb;--accent:#58a6ff}
+:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--green:#238636;--green-h:#2ea043;--red:#da3633;--red-h:#f85149;--blue:#1f6feb;--blue-h:#388bfd;--accent:#58a6ff;--input-bg:#21262d}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Courier New',Courier,monospace;font-size:14px;padding:20px}
-.container{max-width:1100px;margin:0 auto}
-header{display:flex;align-items:center;gap:15px;margin-bottom:20px;padding-bottom:15px;border-bottom:1px solid var(--border)}
-header h1{font-size:1.8em;color:var(--accent)}
-header h1 span{color:var(--muted);font-size:0.5em;vertical-align:middle}
-.meta{display:flex;flex-wrap:wrap;gap:20px;font-size:0.9em;color:var(--muted)}
-.meta b{color:var(--text)}
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:16px}
-.panel h2{font-size:1em;margin-bottom:12px;color:var(--accent);text-transform:uppercase;letter-spacing:0.1em}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;padding:20px;line-height:1.5}
+.container{max-width:1150px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:15px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:10px}
+.logo-title{font-size:1.5em;font-weight:bold;color:var(--accent);display:flex;align-items:center;gap:8px}
+.meta-grid{display:flex;flex-wrap:wrap;gap:14px;font-size:0.85em;color:var(--muted)}
+.meta-item b{color:var(--text)}
+
+/* Nav Tabs */
+nav{display:flex;gap:6px;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap}
+.nav-tab{padding:10px 18px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-size:0.95em;font-weight:bold;cursor:pointer;display:flex;align-items:center;gap:8px;transition:all .2s}
+.nav-tab:hover{color:var(--text)}
+.nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+/* Panels & Cards */
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:20px}
+.panel-title{font-size:1.05em;margin-bottom:16px;color:var(--accent);font-weight:bold;display:flex;justify-content:space-between;align-items:center}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:20px}
+.stat-box{background:var(--input-bg);border:1px solid var(--border);border-radius:6px;padding:14px}
+.stat-lbl{font-size:0.75em;color:var(--muted);text-transform:uppercase;margin-bottom:4px}
+.stat-val{font-size:1.15em;font-weight:bold;word-break:break-all}
+
+/* Tables */
 table{width:100%;border-collapse:collapse}
-th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
-th{color:var(--muted);font-weight:normal;font-size:0.85em;text-transform:uppercase}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+th{color:var(--muted);font-weight:600;font-size:0.8em;text-transform:uppercase}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:rgba(255,255,255,0.03)}
-.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:0.8em;font-weight:bold}
-.badge.online{background:#1a4a1a;color:#3fb950;border:1px solid #238636}
-.badge.offline{background:#4a1a1a;color:#f85149;border:1px solid #da3633}
-.badge.avail{background:#1a3a4a;color:var(--accent);border:1px solid var(--blue)}
-.badge.unavail{background:#4a1a1a;color:#f85149;border:1px solid var(--red)}
-.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-button{background:var(--green);color:#fff;border:none;padding:7px 14px;cursor:pointer;border-radius:5px;font-family:inherit;font-size:13px;transition:background .2s}
-button:hover{background:var(--green-h)}
-button.danger{background:var(--red)}
-button.danger:hover{background:var(--red-h)}
-button.secondary{background:var(--blue)}
-button.secondary:hover{background:#388bfd}
-select{padding:7px 10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:5px;font-family:inherit;font-size:13px}
-.channels-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
-.channel-card{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:12px;display:flex;justify-content:space-between;align-items:center}
-.channel-name{font-weight:bold}
-.toast{position:fixed;bottom:20px;right:20px;background:#333;color:#fff;padding:10px 18px;border-radius:5px;opacity:0;transition:opacity .3s;z-index:999;max-width:300px}
+tr:hover td{background:rgba(255,255,255,0.02)}
+
+/* Badges */
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.78em;font-weight:bold}
+.badge.online{background:rgba(63,185,80,0.15);color:#3fb950;border:1px solid #238636}
+.badge.offline{background:rgba(248,81,73,0.15);color:#f85149;border:1px solid #da3633}
+
+/* Forms */
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-group label{font-size:0.85em;color:var(--text);font-weight:600}
+.form-group .hint{font-size:0.75em;color:var(--muted)}
+.form-input{width:100%;padding:9px 12px;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.9em;font-family:inherit}
+.form-input:focus{outline:none;border-color:var(--accent)}
+.input-with-btn{display:flex;gap:6px}
+
+/* Buttons */
+.btn{padding:8px 16px;border:none;border-radius:6px;font-weight:600;font-size:0.85em;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .2s}
+.btn-primary{background:var(--green);color:#fff}.btn-primary:hover{background:var(--green-h)}
+.btn-blue{background:var(--blue);color:#fff}.btn-blue:hover{background:var(--blue-h)}
+.btn-danger{background:var(--red);color:#fff}.btn-danger:hover{background:var(--red-h)}
+.btn-secondary{background:var(--input-bg);color:var(--text);border:1px solid var(--border)}.btn-secondary:hover{background:#30363d}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;right:24px;background:#1f242c;border:1px solid var(--border);color:#fff;padding:12px 20px;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,0.5);opacity:0;transition:opacity .3s;z-index:999;pointer-events:none}
 .toast.show{opacity:1}
-.empty{color:var(--muted);text-align:center;padding:20px}
-.refresh-info{float:right;color:var(--muted);font-size:0.8em}
+.empty{color:var(--muted);text-align:center;padding:24px}
 </style>
 </head>
 <body>
 <div class="container">
   <header>
-    <h1>🚀 NatBypass <span id="ver"></span></h1>
-    <div class="meta">
-      <div>Device ID: <b id="hDeviceID">—</b></div>
-      <div>Публичный IP: <b id="hPublicIP">—</b></div>
-      <div>STUN: <b id="hStun">—</b></div>
-      <div>Uptime: <b id="hUptime">—</b></div>
-      <div>Канал: <b id="hChannel">—</b></div>
+    <div class="logo-title">🛸 NatBypass <span style="font-size:0.6em;color:var(--muted);font-weight:normal;">P2P Network</span></div>
+    <div class="meta-grid">
+      <div class="meta-item">Device: <b id="hDeviceID">—</b></div>
+      <div class="meta-item">IP: <b id="hPublicIP">—</b></div>
+      <div class="meta-item">STUN: <b id="hStun">—</b></div>
+      <div class="meta-item">Канал: <b id="hChannel">—</b></div>
+      <div class="meta-item">Uptime: <b id="hUptime">—</b></div>
     </div>
   </header>
 
-  <div class="panel">
-    <h2>Устройства в сети <span class="refresh-info" id="lastUpdate"></span></h2>
-    <table>
-      <thead><tr>
-        <th>Устройство</th><th>Публичный IP</th><th>STUN адрес</th>
-        <th>WireGuard ключ</th><th>WG порт</th><th>Статус</th><th>Последний раз виден</th>
-      </tr></thead>
-      <tbody id="peersTable"><tr><td class="empty" colspan="7">Загрузка...</td></tr></tbody>
-    </table>
+  <nav>
+    <button class="nav-tab active" onclick="showTab('tab-peers')">👥 Устройства в сети</button>
+    <button class="nav-tab" onclick="showTab('tab-settings')">⚙ Настройки Telegram & Сети</button>
+    <button class="nav-tab" onclick="showTab('tab-channels')">📡 Сигнальные каналы</button>
+    <button class="nav-tab" onclick="showTab('tab-wireguard')">🔒 WireGuard Mesh</button>
+  </nav>
+
+  <!-- TAB 1: PEERS -->
+  <div id="tab-peers" class="tab-pane active">
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-lbl">Статус сети</div>
+        <div class="stat-val" style="color:#3fb950;">🟢 ОНЛАЙН</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-lbl">Устройств в сети</div>
+        <div class="stat-val" id="statPeersCount">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-lbl">Активный канал</div>
+        <div class="stat-val" id="statCurChannel">telegram</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-lbl">Публичный сокет</div>
+        <div class="stat-val" id="statPublicSocket">—</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">
+        <span>Обнаруженные P2P узлы</span>
+        <button class="btn btn-secondary" onclick="loadPeers()">🔄 Обновить список</button>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Устройство</th><th>Публичный IP</th><th>STUN сокет</th>
+          <th>WireGuard Key</th><th>Порт</th><th>Статус</th><th>Был в сети</th>
+        </tr></thead>
+        <tbody id="peersTable"><tr><td class="empty" colspan="7">Поиск устройств в сети...</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Быстрые действия</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="refreshIP()">⚡ Обновить внешний IP</button>
+        <button class="btn btn-blue" onclick="downloadWG()">📥 Скачать WireGuard wg-mesh.conf</button>
+        <button class="btn btn-danger" onclick="restartDaemon()">⚠️ Перезапустить сервис</button>
+      </div>
+    </div>
   </div>
 
-  <div class="panel">
-    <h2>Статус сигнальных каналов</h2>
-    <div class="channels-grid" id="channelsGrid"><p class="empty">Загрузка...</p></div>
+  <!-- TAB 2: SETTINGS -->
+  <div id="tab-settings" class="tab-pane">
+    <div class="panel">
+      <div class="panel-title">💬 Настройка Telegram Bot API</div>
+      <div class="form-grid">
+        <div class="form-group" style="grid-column: span 2;">
+          <label>Telegram Bot Token:</label>
+          <div class="input-with-btn">
+            <input type="password" id="cfgTgToken" class="form-input" placeholder="7123456789:AAFlkjhsdf987..." />
+            <button class="btn btn-secondary" onclick="togglePass('cfgTgToken')">👁</button>
+            <button class="btn btn-blue" onclick="testTelegram()">🧪 Проверить Telegram</button>
+          </div>
+          <span class="hint">Токен бота, полученный у @BotFather в Telegram.</span>
+        </div>
+
+        <div class="form-group">
+          <label>Chat ID / ID Канала:</label>
+          <input type="text" id="cfgTgChatID" class="form-input" placeholder="-1001234567890" />
+          <span class="hint">ID приватной группы или канала (обычно начинается с -100).</span>
+        </div>
+
+        <div class="form-group">
+          <label>SOCKS5 / HTTP Прокси (опционально):</label>
+          <input type="text" id="cfgTgProxy" class="form-input" placeholder="socks5://127.0.0.1:1080" />
+          <span class="hint">Используется при блокировках доступа к Telegram API.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">⚡ Настройка MQTT Брокера</div>
+      <div class="form-grid">
+        <div class="form-group" style="grid-column: span 2;">
+          <label>MQTT Broker URL:</label>
+          <div class="input-with-btn">
+            <input type="text" id="cfgMqttBroker" class="form-input" value="tcp://mqtt.eclipseprojects.io:1883" />
+            <button class="btn btn-blue" onclick="testMQTT()">🧪 Проверить MQTT</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>MQTT Topic:</label>
+          <input type="text" id="cfgMqttTopic" class="form-input" value="natbypass/mynet/peers" />
+        </div>
+
+        <div class="form-group">
+          <label>Логин / Пароль (опционально):</label>
+          <div class="input-with-btn">
+            <input type="text" id="cfgMqttUser" class="form-input" placeholder="User" style="width:50%" />
+            <input type="password" id="cfgMqttPass" class="form-input" placeholder="Pass" style="width:50%" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">🔒 Параметры WireGuard & Сети</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>WireGuard Listen Port:</label>
+          <input type="number" id="cfgWgPort" class="form-input" value="51820" />
+        </div>
+        <div class="form-group">
+          <label>WireGuard MTU:</label>
+          <input type="number" id="cfgWgMTU" class="form-input" value="1420" />
+        </div>
+        <div class="form-group">
+          <label>UPnP автоматический проброс портов:</label>
+          <label style="font-weight:normal;display:flex;align-items:center;gap:8px;margin-top:6px;">
+            <input type="checkbox" id="cfgUpnp" checked /> Включить UPnP/NAT-PMP
+          </label>
+        </div>
+        <div class="form-group">
+          <label>Web UI Порт:</label>
+          <input type="number" id="cfgWebPort" class="form-input" value="8080" />
+        </div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <button class="btn btn-primary" style="padding:10px 24px;font-size:1em;" onclick="saveConfig()">💾 Сохранить и применить настройки</button>
+      </div>
+    </div>
   </div>
 
-  <div class="panel">
-    <h2>Управление</h2>
-    <div class="controls">
-      <button onclick="refreshIP()">🔄 Обновить IP</button>
-      <button class="secondary" onclick="downloadWG()">⬇ WireGuard-конфиг</button>
-      <select id="channelSelect">
-        <option value="telegram">Telegram</option>
-        <option value="mqtt">MQTT</option>
-        <option value="webhook">HTTP Webhook</option>
-        <option value="dns">DNS TXT</option>
-      </select>
-      <button onclick="switchChannel()">🔀 Сменить канал</button>
-      <button class="danger" onclick="restartDaemon()">⚡ Перезапустить</button>
+  <!-- TAB 3: CHANNELS -->
+  <div id="tab-channels" class="tab-pane">
+    <div class="panel">
+      <div class="panel-title">Состояние цепочки Fallback Manager</div>
+      <div id="channelsGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;"></div>
+    </div>
+  </div>
+
+  <!-- TAB 4: WIREGUARD -->
+  <div id="tab-wireguard" class="tab-pane">
+    <div class="panel">
+      <div class="panel-title">
+        <span>Актуальный wg-mesh.conf</span>
+        <button class="btn btn-primary" onclick="loadWGText()">⚡ Обновить конфиг</button>
+      </div>
+      <textarea id="wgConfText" class="form-input" style="height:350px;font-family:monospace;font-size:0.85em;white-space:pre;" readonly>Загрузка...</textarea>
+      <div style="margin-top:12px;display:flex;gap:10px;">
+        <button class="btn btn-blue" onclick="copyWGText()">📋 Скопировать в буфер</button>
+        <button class="btn btn-secondary" onclick="downloadWG()">📥 Скачать файл .conf</button>
+      </div>
     </div>
   </div>
 </div>
@@ -93,135 +242,248 @@ select{padding:7px 10px;background:var(--bg);color:var(--text);border:1px solid 
 <div class="toast" id="toast"></div>
 
 <script>
-function xhr(method, url, body, cb) {
+function showTab(id){
+  document.querySelectorAll('.tab-pane').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(el=>el.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.target.classList.add('active');
+  if(id==='tab-settings') loadConfig();
+  if(id==='tab-wireguard') loadWGText();
+}
+
+function showToast(msg, duration){
+  var t = document.getElementById('toast');
+  t.innerText = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), duration||3000);
+}
+
+function togglePass(id){
+  var el = document.getElementById(id);
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+function api(method, url, body, cb){
   var x = new XMLHttpRequest();
   x.open(method, url, true);
-  if (body) x.setRequestHeader('Content-Type', 'application/json');
-  x.onreadystatechange = function() {
-    if (x.readyState === 4) {
-      var data = null;
-      try { data = JSON.parse(x.responseText); } catch(e) {}
-      if (cb) cb(x.status, data);
+  if(body) x.setRequestHeader('Content-Type', 'application/json');
+  x.onreadystatechange = function(){
+    if(x.readyState === 4){
+      try{
+        var res = JSON.parse(x.responseText);
+        cb(res);
+      }catch(e){
+        cb({ok: false, error: 'Ошибка ответа сервера'});
+      }
     }
   };
   x.send(body ? JSON.stringify(body) : null);
 }
 
-function toast(msg, dur) {
-  var t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'toast show';
-  setTimeout(function(){ t.className = 'toast'; }, dur || 3000);
-}
-
-function fmtDate(s) {
-  if (!s) return '—';
-  var d = new Date(s);
-  if (isNaN(d.getTime())) return s;
-  return d.toLocaleString('ru-RU');
-}
-
-function loadStatus() {
-  xhr('GET', '/api/status', null, function(s, d) {
-    if (s === 200 && d && d.data) {
-      var r = d.data;
-      document.getElementById('hDeviceID').textContent = r.device_id || '—';
-      document.getElementById('hPublicIP').textContent = r.public_ip || '—';
-      document.getElementById('hStun').textContent = r.stun_addr || '—';
-      document.getElementById('hUptime').textContent = r.uptime || '—';
-      document.getElementById('hChannel').textContent = r.current_channel || '—';
+function loadStatus(){
+  api('GET', '/api/status', null, function(res){
+    if(res.ok && res.data){
+      var d = res.data;
+      document.getElementById('hDeviceID').innerText = d.device_id || '—';
+      document.getElementById('hPublicIP').innerText = d.public_ip || '—';
+      document.getElementById('hStun').innerText = d.stun_addr || '—';
+      document.getElementById('hChannel').innerText = d.current_channel || '—';
+      document.getElementById('hUptime').innerText = d.uptime || '—';
+      document.getElementById('statPeersCount').innerText = d.peers_count || 0;
+      document.getElementById('statCurChannel').innerText = d.current_channel || '—';
+      document.getElementById('statPublicSocket').innerText = (d.public_ip && d.stun_addr) ? d.stun_addr : '—';
     }
-    document.getElementById('lastUpdate').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
   });
 }
 
-function loadPeers() {
-  xhr('GET', '/api/peers', null, function(s, d) {
+function loadPeers(){
+  api('GET', '/api/peers', null, function(res){
     var tbody = document.getElementById('peersTable');
-    if (s !== 200 || !d || !d.data) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty">Ошибка загрузки</td></tr>';
+    if(!res.ok || !res.data || res.data.length === 0){
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">Устройства пока не обнаружены</td></tr>';
       return;
     }
-    var peers = d.data;
-    if (!peers || peers.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty">Нет устройств в сети</td></tr>';
-      return;
-    }
-    var html = '';
-    for (var i = 0; i < peers.length; i++) {
-      var p = peers[i];
-      var onl = p.online ? '<span class="badge online">ОНЛАЙН</span>' : '<span class="badge offline">ОФЛАЙН</span>';
-      var wgKey = p.wg_pub_key ? p.wg_pub_key.substring(0, 16) + '...' : '—';
-      html += '<tr><td>' + (p.device_id||'—') + '</td>' +
-              '<td>' + (p.public_ip||'—') + '</td>' +
-              '<td>' + (p.stun_addr||'—') + '</td>' +
-              '<td title="' + (p.wg_pub_key||'') + '">' + wgKey + '</td>' +
-              '<td>' + (p.wg_port||'—') + '</td>' +
-              '<td>' + onl + '</td>' +
-              '<td>' + fmtDate(p.last_seen) + '</td></tr>';
-    }
-    tbody.innerHTML = html;
+    tbody.innerHTML = res.data.map(function(p){
+      var onl = p.online ? '<span class="badge online">🟢 Онлайн</span>' : '<span class="badge offline">🔴 Офлайн</span>';
+      var seen = p.last_seen ? new Date(p.last_seen).toLocaleTimeString() : '—';
+      var key = p.wg_pub_key ? p.wg_pub_key.substring(0, 16) + '...' : '—';
+      return '<tr><td><b>' + p.device_id + '</b></td><td>' + p.public_ip + '</td><td>' + (p.stun_addr||'—') + '</td><td><code>' + key + '</code></td><td>' + (p.wg_port||'—') + '</td><td>' + onl + '</td><td>' + seen + '</td></tr>';
+    }).join('');
   });
 }
 
-function loadChannels() {
-  xhr('GET', '/api/channel/status', null, function(s, d) {
-    var grid = document.getElementById('channelsGrid');
-    if (s !== 200 || !d || !d.data) {
-      grid.innerHTML = '<p class="empty">Нет данных о каналах</p>';
+function loadChannels(){
+  api('GET', '/api/channel/status', null, function(res){
+    var el = document.getElementById('channelsGrid');
+    if(!res.ok || !res.data || res.data.length === 0){
+      el.innerHTML = '<p class="empty">Каналы не настроены</p>';
       return;
     }
-    var chs = d.data;
-    if (!chs || chs.length === 0) {
-      grid.innerHTML = '<p class="empty">Нет каналов</p>';
-      return;
-    }
-    var html = '';
-    for (var i = 0; i < chs.length; i++) {
-      var c = chs[i];
-      var b = c.available ? '<span class="badge avail">ДОСТУПЕН</span>' : '<span class="badge unavail">НЕДОСТУПЕН</span>';
-      html += '<div class="channel-card"><span class="channel-name">' + c.name + '</span>' + b + '</div>';
-    }
-    grid.innerHTML = html;
+    el.innerHTML = res.data.map(function(c){
+      var st = c.available ? '<span class="badge online">🟢 Доступен</span>' : '<span class="badge offline">🔴 Недоступен</span>';
+      return '<div class="stat-box"><div class="stat-lbl">' + c.name.toUpperCase() + '</div><div style="margin:8px 0;">' + st + '</div><div style="font-size:0.75em;color:var(--muted);">' + (c.last_error || 'Ошибок нет') + '</div></div>';
+    }).join('');
   });
 }
 
-function refreshIP() {
-  xhr('POST', '/api/refresh-ip', {}, function(s, d) {
-    if (s === 200) { toast('✓ IP обновляется...'); loadStatus(); }
-    else { toast('✗ Ошибка обновления IP'); }
+function loadConfig(){
+  api('GET', '/api/config', null, function(res){
+    if(res.ok && res.data){
+      var c = res.data;
+      if(c.web_ui) document.getElementById('cfgWebPort').value = c.web_ui.port || 8080;
+      if(c.network) document.getElementById('cfgUpnp').checked = c.network.upnp_enabled !== false;
+      if(c.wireguard){
+        document.getElementById('cfgWgPort').value = c.wireguard.listen_port || 51820;
+        document.getElementById('cfgWgMTU').value = c.wireguard.mtu || 1420;
+      }
+      if(c.signaling && c.signaling.channels){
+        c.signaling.channels.forEach(function(ch){
+          if(ch.type === 'telegram' && ch.params){
+            document.getElementById('cfgTgToken').value = ch.params.token || '';
+            document.getElementById('cfgTgChatID').value = ch.params.chat_id || '';
+            document.getElementById('cfgTgProxy').value = ch.params.proxy || '';
+          }
+          if(ch.type === 'mqtt' && ch.params){
+            document.getElementById('cfgMqttBroker').value = ch.params.broker_url || '';
+            document.getElementById('cfgMqttTopic').value = ch.params.topic || '';
+            document.getElementById('cfgMqttUser').value = ch.params.username || '';
+            document.getElementById('cfgMqttPass').value = ch.params.password || '';
+          }
+        });
+      }
+    }
   });
 }
 
-function downloadWG() {
+function saveConfig(){
+  var tgToken = document.getElementById('cfgTgToken').value.trim();
+  var tgChat = document.getElementById('cfgTgChatID').value.trim();
+  var tgProxy = document.getElementById('cfgTgProxy').value.trim();
+  var mqttBroker = document.getElementById('cfgMqttBroker').value.trim();
+  var mqttTopic = document.getElementById('cfgMqttTopic').value.trim();
+  var mqttUser = document.getElementById('cfgMqttUser').value.trim();
+  var mqttPass = document.getElementById('cfgMqttPass').value.trim();
+  var webPort = parseInt(document.getElementById('cfgWebPort').value) || 8080;
+  var upnp = document.getElementById('cfgUpnp').checked;
+  var wgPort = parseInt(document.getElementById('cfgWgPort').value) || 51820;
+  var wgMTU = parseInt(document.getElementById('cfgWgMTU').value) || 1420;
+
+  var channels = [];
+  if(tgToken && tgChat){
+    channels.push({
+      type: 'telegram',
+      priority: 1,
+      enabled: true,
+      params: { token: tgToken, chat_id: tgChat, proxy: tgProxy }
+    });
+  }
+  if(mqttBroker && mqttTopic){
+    channels.push({
+      type: 'mqtt',
+      priority: 2,
+      enabled: true,
+      params: { broker_url: mqttBroker, topic: mqttTopic, username: mqttUser, password: mqttPass }
+    });
+  }
+
+  var payload = {
+    app: { name: "NatBypass", log_level: "info", publish_interval: 60 },
+    web_ui: { enabled: true, port: webPort, username: "admin", password: "" },
+    network: {
+      upnp_enabled: upnp,
+      stun_servers: ["stun.l.google.com:19302", "stun1.l.google.com:19302", "stun.cloudflare.com:3478"],
+      ip_apis: ["https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"]
+    },
+    signaling: { channels: channels },
+    wireguard: { enabled: true, interface: "wg0", listen_port: wgPort, mtu: wgMTU }
+  };
+
+  api('POST', '/api/config', payload, function(res){
+    if(res.ok){
+      showToast('✓ Настройки успешно сохранены и применены!');
+    } else {
+      showToast('❌ Ошибка сохранения: ' + res.error);
+    }
+  });
+}
+
+function testTelegram(){
+  var token = document.getElementById('cfgTgToken').value.trim();
+  var chat = document.getElementById('cfgTgChatID').value.trim();
+  var proxy = document.getElementById('cfgTgProxy').value.trim();
+  if(!token){
+    showToast('Укажите токен бота');
+    return;
+  }
+  showToast('Проверка подключения к Telegram...');
+  api('POST', '/api/test/telegram', { token: token, chat_id: chat, proxy: proxy }, function(res){
+    if(res.ok && res.data){
+      showToast('✓ Успех! Бот: ' + res.data.bot_username + ' (' + res.data.bot_name + ')', 4000);
+    } else {
+      showToast('❌ Ошибка Telegram: ' + (res.error || 'Не удалось связаться с API'), 5000);
+    }
+  });
+}
+
+function testMQTT(){
+  var broker = document.getElementById('cfgMqttBroker').value.trim();
+  showToast('Проверка подключения к MQTT...');
+  api('POST', '/api/test/mqtt', { broker_url: broker }, function(res){
+    if(res.ok){
+      showToast('✓ ' + res.data.status);
+    } else {
+      showToast('❌ ' + res.error, 5000);
+    }
+  });
+}
+
+function loadWGText(){
+  var x = new XMLHttpRequest();
+  x.open('GET', '/api/wg/config', true);
+  x.onreadystatechange = function(){
+    if(x.readyState === 4 && x.status === 200){
+      document.getElementById('wgConfText').value = x.responseText;
+    }
+  };
+  x.send();
+}
+
+function copyWGText(){
+  var el = document.getElementById('wgConfText');
+  el.select();
+  document.execCommand('copy');
+  showToast('✓ WireGuard конфигурация скопирована в буфер!');
+}
+
+function refreshIP(){
+  api('POST', '/api/refresh-ip', null, function(res){
+    showToast(res.data ? res.data.message : 'Запрос отправлен');
+    setTimeout(loadStatus, 1500);
+  });
+}
+
+function downloadWG(){
   window.location.href = '/api/wg/config';
 }
 
-function switchChannel() {
-  var val = document.getElementById('channelSelect').value;
-  if (!val) { toast('Выберите канал'); return; }
-  xhr('POST', '/api/channel/switch', {name: val}, function(s, d) {
-    if (s === 200) { toast('✓ Канал переключён: ' + val); loadStatus(); loadChannels(); }
-    else { toast('✗ Ошибка: ' + (d && d.error ? d.error : 'неизвестная')); }
-  });
+function restartDaemon(){
+  if(confirm('Перезапустить сервис NatBypass?')){
+    api('POST', '/api/restart', null, function(){
+      showToast('Сервис перезапускается...');
+    });
+  }
 }
 
-function restartDaemon() {
-  if (!confirm('Перезапустить NatBypass?')) return;
-  xhr('POST', '/api/restart', {}, function(s, d) {
-    if (s === 200) { toast('✓ Сигнал перезапуска отправлен'); }
-    else { toast('✗ Ошибка перезапуска'); }
-  });
-}
-
-function refresh() {
+// Периодическое обновление
+setInterval(function(){
   loadStatus();
   loadPeers();
   loadChannels();
-}
+}, 4000);
 
-refresh();
-setInterval(refresh, 30000);
+loadStatus();
+loadPeers();
+loadChannels();
 </script>
 </body>
 </html>
