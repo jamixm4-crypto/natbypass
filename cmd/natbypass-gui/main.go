@@ -62,9 +62,14 @@ var (
 	procSetTextColor         = modgdi32.NewProc("SetTextColor")
 	procSetBkColor           = modgdi32.NewProc("SetBkColor")
 	procSelectObject         = modgdi32.NewProc("SelectObject")
-	procRectangle            = modgdi32.NewProc("Rectangle")
+	procRoundRect            = modgdi32.NewProc("RoundRect")
 	procCreatePen            = modgdi32.NewProc("CreatePen")
 	procDeleteObject         = modgdi32.NewProc("DeleteObject")
+	procDrawTextW            = moduser32.NewProc("DrawTextW")
+	procFillRect             = moduser32.NewProc("FillRect")
+	procBeginPaint           = moduser32.NewProc("BeginPaint")
+	procEndPaint             = moduser32.NewProc("EndPaint")
+	procInvalidateRect       = moduser32.NewProc("InvalidateRect")
 	procInitCommonControlsEx = modcomctl32.NewProc("InitCommonControlsEx")
 	procShellNotifyIconW     = modshell32.NewProc("Shell_NotifyIconW")
 	procDwmSetWindowAttribute= moddwmapi.NewProc("DwmSetWindowAttribute")
@@ -79,17 +84,14 @@ const (
 	WS_VSCROLL          = 0x00200000
 	WS_TABSTOP          = 0x00010000
 
-	WS_EX_CLIENTEDGE = 0x00000200
-
 	BS_PUSHBUTTON    = 0x00000000
-	BS_DEFPUSHBUTTON = 0x00000001
+	BS_OWNERDRAW     = 0x0000000B
 
 	ES_LEFT        = 0x0000
 	ES_MULTILINE   = 0x0004
 	ES_AUTOVSCROLL = 0x0040
 	ES_AUTOHSCROLL = 0x0080
 	ES_READONLY    = 0x0800
-	ES_PASSWORD    = 0x0020
 
 	SS_LEFT = 0x0000
 
@@ -97,11 +99,11 @@ const (
 	LBS_NOINTEGRALHEIGHT = 0x0100
 
 	WM_DESTROY        = 0x0002
-	WM_SIZE           = 0x0005
 	WM_PAINT          = 0x000F
 	WM_COMMAND        = 0x0111
 	WM_SYSCOMMAND     = 0x0112
 	WM_TIMER          = 0x0113
+	WM_DRAWITEM       = 0x002B
 	WM_CTLCOLORSTATIC = 0x0138
 	WM_CTLCOLOREDIT   = 0x0133
 	WM_CTLCOLORBTN    = 0x0135
@@ -129,23 +131,58 @@ const (
 	MF_STRING       = 0x00000000
 	MF_SEPARATOR    = 0x00000800
 	TPM_RIGHTBUTTON = 0x0002
+
+	DT_CENTER     = 0x00000001
+	DT_VCENTER    = 0x00000004
+	DT_SINGLELINE = 0x00000020
+	DT_LEFT       = 0x00000000
 )
 
-// Цветовая палитра Dark Mode
+// Современная цветовая палитра Slate Dark (GitHub / Modern Fluent Theme)
 const (
-	COLOR_BG      = 0x17110D // #0D1117 in BGR
-	COLOR_SIDEBAR = 0x221B16 // #161B22
-	COLOR_CARD    = 0x2D2621 // #21262D
-	COLOR_BORDER  = 0x3D3630 // #30363D
-	COLOR_TEXT    = 0xD9D1C9 // #C9D1D9
-	COLOR_MUTED   = 0x9E948B // #8B949E
-	COLOR_ACCENT  = 0xFFA658 // #58A6FF
-	COLOR_GREEN   = 0x50B93F // #3FB950
-	COLOR_RED     = 0x4951F8 // #F85149
+	COLOR_BG        = 0x1A140F // #0F141A (Глубокий мягкий темный фон)
+	COLOR_SIDEBAR   = 0x221B16 // #161B22 (Боковая панель)
+	COLOR_CARD      = 0x2B231C // #1C232B (Карточки и контейнеры)
+	COLOR_INPUT     = 0x2D2621 // #21262D (Поля ввода)
+	COLOR_BORDER    = 0x423830 // #303842 (Мягкие разделители)
+	COLOR_BORDER_LT = 0x54473C // #3C4754 (Границы кнопок)
+	COLOR_TEXT      = 0xF3EDE6 // #E6EDF3 (Основной текст)
+	COLOR_MUTED     = 0xA69B8F // #8F9BA6 (Вторичный текст)
+	COLOR_ACCENT    = 0xFFA658 // #58A6FF (Акцентный голубой)
+	COLOR_ACCENT_BG = 0xEB6F1F // #1F6FEB (Синяя кнопка)
+	COLOR_GREEN_BG  = 0x368623 // #238636 (Зеленая кнопка)
+	COLOR_GREEN_LT  = 0x50B93F // #3FB950 (Яркий зеленый)
+	COLOR_RED_BG    = 0x3336DA // #DA3633 (Красная кнопка)
+	COLOR_BTN_HOVER = 0x3D3328 // #28333D (Кнопка при наведении)
 )
+
+type RECT struct {
+	Left, Top, Right, Bottom int32
+}
 
 type POINT struct {
 	X, Y int32
+}
+
+type PAINTSTRUCT struct {
+	Hdc         uintptr
+	FErase      int32
+	RcPaint     RECT
+	FRestore    int32
+	FIncUpdate  int32
+	RgbReserved [32]byte
+}
+
+type DRAWITEMSTRUCT struct {
+	CtlType    uint32
+	CtlID      uint32
+	ItemID     uint32
+	ItemAction uint32
+	ItemState  uint32
+	HwndItem   uintptr
+	Hdc        uintptr
+	RcItem     RECT
+	ItemData   uintptr
 }
 
 type WNDCLASSEXW struct {
@@ -193,21 +230,21 @@ var (
 	hMainWnd    uintptr
 	hFontNormal uintptr
 	hFontBold   uintptr
-	hFontTitle  uintptr
 	hFontHeader uintptr
+	hFontTitle  uintptr
 	hFontMono   uintptr
 
 	hBrushBg      uintptr
 	hBrushSidebar uintptr
 	hBrushCard    uintptr
+	hBrushInput   uintptr
 	hPenBorder    uintptr
 
-	// Навигация (Sidebar)
-	navButtons [5]uintptr
-	currentTab = 0
+	buttonLabels = make(map[uint32]string)
+	buttonTypes  = make(map[uint32]string) // "nav", "primary", "green", "red", "normal"
 
-	// Страницы
-	tabPages [5][]uintptr
+	currentTab = 0
+	tabPages   [5][]uintptr
 
 	// Вкладка 0: Обзор
 	hLblStatus   uintptr
@@ -272,7 +309,6 @@ var (
 const (
 	ID_TIMER_POLL = 1001
 
-	// Меню трея
 	IDM_TRAY_OPEN    = 2001
 	IDM_TRAY_REFRESH = 2002
 	IDM_TRAY_EXIT    = 2003
@@ -343,17 +379,18 @@ func main() {
 	hBrushBg, _, _ = procCreateSolidBrush.Call(COLOR_BG)
 	hBrushSidebar, _, _ = procCreateSolidBrush.Call(COLOR_SIDEBAR)
 	hBrushCard, _, _ = procCreateSolidBrush.Call(COLOR_CARD)
+	hBrushInput, _, _ = procCreateSolidBrush.Call(COLOR_INPUT)
 	hPenBorder, _, _ = procCreatePen.Call(0, 1, COLOR_BORDER)
 
 	hFontNormal = createFont("Segoe UI", 15, 400)
-	hFontBold = createFont("Segoe UI", 15, 700)
+	hFontBold = createFont("Segoe UI", 15, 600)
 	hFontHeader = createFont("Segoe UI", 18, 700)
 	hFontTitle = createFont("Segoe UI", 22, 700)
 	hFontMono = createFont("Consolas", 13, 400)
 
 	// 4. Регистрация класса окна
-	className, _ := windows.UTF16PtrFromString("NatBypassNativeAppClass")
-	windowTitle, _ := windows.UTF16PtrFromString("NatBypass — Нативное приложение P2P Mesh & AmneziaWG 2.0")
+	className, _ := windows.UTF16PtrFromString("NatBypassModernAppClass")
+	windowTitle, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Сеть & AmneziaWG 2.0")
 
 	wc := WNDCLASSEXW{
 		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),
@@ -373,17 +410,17 @@ func main() {
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowTitle)),
 		WS_OVERLAPPEDWINDOW,
-		120, 120, 1060, 720,
+		120, 120, 1080, 740,
 		0, 0, hInstance, 0,
 	)
 	hMainWnd = hwnd
 
-	// Включаем DWM Dark Mode заголовок
+	// DWM Dark Mode заголовок
 	darkMode := int32(1)
 	procDwmSetWindowAttribute.Call(hMainWnd, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
 	// Построение элементов интерфейса
-	buildNativeUI(hInstance)
+	buildModernUI(hInstance)
 
 	// Переключаем на 1 вкладку
 	selectTab(0)
@@ -416,10 +453,36 @@ func main() {
 
 func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	switch msg {
+	case WM_PAINT:
+		var ps PAINTSTRUCT
+		hdc, _, _ := procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+
+		// 1. Отрисовка левой боковой панели (Sidebar)
+		sidebarRect := RECT{Left: 0, Top: 0, Right: 220, Bottom: 740}
+		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&sidebarRect)), hBrushSidebar)
+
+		// 2. Линия разделения сайдбара
+		procSelectObject.Call(hdc, hPenBorder)
+		var pt POINT
+		procMoveToEx(hdc, 220, 0, &pt)
+		procLineTo(hdc, 220, 740)
+
+		// 3. Отрисовка фоновой карточки контентной зоны
+		cardRect := RECT{Left: 236, Top: 16, Right: 1044, Bottom: 680}
+		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&cardRect)), hBrushCard)
+
+		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+		return 0
+
+	case WM_DRAWITEM:
+		pDIS := (*DRAWITEMSTRUCT)(unsafe.Pointer(lParam))
+		drawCustomButton(pDIS)
+		return 1
+
 	case WM_SYSCOMMAND:
 		if wParam == SC_MINIMIZE || wParam == SC_CLOSE {
 			procShowWindow.Call(hMainWnd, SW_HIDE)
-			showBalloon("NatBypass работает в фоне", "Двойной клик по значку у часов для открытия окна.")
+			showBalloon("NatBypass работает в трее", "Двойной клик по значку у часов для вызова панели.")
 			return 0
 		}
 
@@ -436,19 +499,19 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		hdc := wParam
 		procSetBkMode.Call(hdc, 1) // TRANSPARENT
 		procSetTextColor.Call(hdc, COLOR_TEXT)
-		return hBrushBg
+		return hBrushCard
 
 	case WM_CTLCOLOREDIT:
 		hdc := wParam
-		procSetBkColor.Call(hdc, COLOR_CARD)
+		procSetBkColor.Call(hdc, COLOR_INPUT)
 		procSetTextColor.Call(hdc, COLOR_TEXT)
-		return hBrushCard
+		return hBrushInput
 
 	case WM_CTLCOLORLISTBOX:
 		hdc := wParam
-		procSetBkColor.Call(hdc, COLOR_CARD)
+		procSetBkColor.Call(hdc, COLOR_INPUT)
 		procSetTextColor.Call(hdc, COLOR_TEXT)
-		return hBrushCard
+		return hBrushInput
 
 	case WM_TIMER:
 		if wParam == ID_TIMER_POLL {
@@ -472,9 +535,79 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	return ret
 }
 
+func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
+	hdc := pDIS.Hdc
+	rc := pDIS.RcItem
+	id := pDIS.CtlID
+	text := buttonLabels[id]
+	bType := buttonTypes[id]
+
+	var bgBrush uintptr
+	var txtColor uint32 = COLOR_TEXT
+
+	isNav := bType == "nav"
+	isActiveNav := false
+	if isNav {
+		if (id == ID_NAV_DASHBOARD && currentTab == 0) ||
+			(id == ID_NAV_AWG && currentTab == 1) ||
+			(id == ID_NAV_SETTINGS && currentTab == 2) ||
+			(id == ID_NAV_DIAG && currentTab == 3) ||
+			(id == ID_NAV_LOGS && currentTab == 4) {
+			isActiveNav = true
+		}
+	}
+
+	if isActiveNav {
+		bgBrush, _, _ = procCreateSolidBrush.Call(COLOR_CARD)
+		txtColor = COLOR_ACCENT
+	} else if isNav {
+		bgBrush, _, _ = procCreateSolidBrush.Call(COLOR_SIDEBAR)
+		txtColor = COLOR_MUTED
+	} else if bType == "green" {
+		bgBrush, _, _ = procCreateSolidBrush.Call(COLOR_GREEN_BG)
+		txtColor = 0xFFFFFF
+	} else if bType == "red" {
+		bgBrush, _, _ = procCreateSolidBrush.Call(COLOR_RED_BG)
+		txtColor = 0xFFFFFF
+	} else if bType == "primary" {
+		bgBrush, _, _ = procCreateSolidBrush.Call(COLOR_ACCENT_BG)
+		txtColor = 0xFFFFFF
+	} else {
+		bgBrush, _, _ = procCreateSolidBrush.Call(COLOR_INPUT)
+		txtColor = COLOR_TEXT
+	}
+
+	// Заливка с закругленными углами
+	penBorder, _, _ := procCreatePen.Call(0, 1, COLOR_BORDER_LT)
+	if isActiveNav {
+		penBorder, _, _ = procCreatePen.Call(0, 1, COLOR_ACCENT)
+	}
+
+	procSelectObject.Call(hdc, bgBrush)
+	procSelectObject.Call(hdc, penBorder)
+	procRoundRect.Call(hdc, uintptr(rc.Left), uintptr(rc.Top), uintptr(rc.Right), uintptr(rc.Bottom), 8, 8)
+
+	// Текст
+	procSetBkMode.Call(hdc, 1) // TRANSPARENT
+	procSetTextColor.Call(hdc, uintptr(txtColor))
+
+	tPtr, _ := windows.UTF16FromString(text)
+	var textRect = rc
+	if isNav {
+		textRect.Left += 14
+		procSelectObject.Call(hdc, hFontBold)
+		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&tPtr[0])), uintptr(int32(len(tPtr)-1)), uintptr(unsafe.Pointer(&textRect)), DT_LEFT|DT_VCENTER|DT_SINGLELINE)
+	} else {
+		procSelectObject.Call(hdc, hFontBold)
+		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&tPtr[0])), uintptr(int32(len(tPtr)-1)), uintptr(unsafe.Pointer(&textRect)), DT_CENTER|DT_VCENTER|DT_SINGLELINE)
+	}
+
+	procDeleteObject.Call(bgBrush)
+	procDeleteObject.Call(penBorder)
+}
+
 func handleCommand(id uint16) {
 	switch id {
-	// Навигация
 	case ID_NAV_DASHBOARD:
 		selectTab(0)
 	case ID_NAV_AWG:
@@ -486,43 +619,42 @@ func handleCommand(id uint16) {
 	case ID_NAV_LOGS:
 		selectTab(4)
 
-	// Действия
 	case ID_BTN_VPN:
 		toggleVPN()
 
 	case ID_BTN_REFRESH:
-		addLog("⚡ Запрос на обновление внешнего IP...")
+		addLog("⚡ Обновление публичного IP...")
 		if ipDisc != nil {
 			go func() {
 				if ip, err := ipDisc.GetPublicIP(context.Background()); err == nil {
 					myPublicIP = ip.String()
-					addLog("✓ Новый публичный IP: " + myPublicIP)
+					addLog("✓ Получен публичный IP: " + myPublicIP)
 				}
 			}()
 		}
 
 	case ID_BTN_AWG_STD:
 		setAWGPreset(wireguard.AWGParams{Enabled: true, Jc: 0, Jmin: 0, Jmax: 0, S1: 0, S2: 0, H1: 1, H2: 2, H3: 3, H4: 4})
-		addLog("🛡️ Выбран пресет: 🟢 Стандартный WireGuard")
+		addLog("🛡️ Включен пресет: 🟢 Стандартный WireGuard")
 
 	case ID_BTN_AWG_DPI:
 		setAWGPreset(wireguard.DefaultAWGParams())
-		addLog("🛡️ Выбран пресет: 🟡 Обход DPI (AmneziaWG 2.0)")
+		addLog("🛡️ Включен пресет: 🟡 Обход DPI (AmneziaWG 2.0)")
 
 	case ID_BTN_AWG_STEALTH:
 		randP := wireguard.GenerateRandomAWGParams()
 		setAWGPreset(randP)
-		addLog("🛡️ Выбран пресет: 🔴 Максимальная скрытность")
+		addLog("🛡️ Включен пресет: 🔴 Максимальная скрытность")
 
 	case ID_BTN_RAND_AWG:
 		randP := wireguard.GenerateRandomAWGParams()
 		setAWGPreset(randP)
-		addLog("🎲 Сгенерированы новые уникальные параметры AWG")
+		addLog("🎲 Сгенерированы новые уникальные сигнатуры AWG")
 
 	case ID_BTN_COPY_AWG:
 		conf := getControlText(hEditAwgConf)
 		copyToClipboard(conf)
-		addLog("📋 Конфиг AmneziaWG скопирован в буфер обмена")
+		addLog("📋 Конфигурация AmneziaWG скопирована в буфер обмена")
 		showBalloon("AmneziaWG 2.0", "Конфигурация скопирована в буфер.")
 
 	case ID_BTN_TEST_TG:
@@ -543,7 +675,6 @@ func handleCommand(id uint16) {
 		logsMutex.Unlock()
 		setControlText(hEditLogs, "")
 
-	// Трей
 	case IDM_TRAY_OPEN:
 		procShowWindow.Call(hMainWnd, SW_RESTORE)
 		procSetForegroundWindow.Call(hMainWnd)
@@ -557,90 +688,88 @@ func handleCommand(id uint16) {
 	}
 }
 
-func buildNativeUI(hInstance uintptr) {
+func buildModernUI(hInstance uintptr) {
 	// ══════════════════════════════════════════════════════════════
-	// БОКОВАЯ ПАНЕЛЬ НАВИГАЦИИ (SIDEBAR)
+	// SIDEBAR (X: 0..220)
 	// ══════════════════════════════════════════════════════════════
-	lblLogo := createLabel(hInstance, "🛸 NatBypass", 24, 24, 180, 32, hFontTitle)
-	lblVer := createLabel(hInstance, "Native v1.0 • P2P Mesh", 24, 60, 180, 20, hFontNormal)
+	lblLogo := createLabel(hInstance, "🛸 NatBypass", 20, 24, 180, 30, hFontTitle)
+	lblVer := createLabel(hInstance, "Desktop Client • P2P Mesh", 20, 56, 180, 20, hFontNormal)
 
 	navTitles := []string{
-		"🚀 Обзор и Сеть",
-		"🛡️ AmneziaWG 2.0",
-		"⚙️ Настройки",
-		"🩺 Диагностика",
-		"📋 Журнал логов",
+		"🚀  Обзор и Сеть",
+		"🛡️  AmneziaWG 2.0",
+		"⚙️  Настройки",
+		"🩺  Диагностика",
+		"📋  Журнал событий",
 	}
-	navIDs := []uintptr{ID_NAV_DASHBOARD, ID_NAV_AWG, ID_NAV_SETTINGS, ID_NAV_DIAG, ID_NAV_LOGS}
+	navIDs := []uint32{ID_NAV_DASHBOARD, ID_NAV_AWG, ID_NAV_SETTINGS, ID_NAV_DIAG, ID_NAV_LOGS}
 
 	for i, t := range navTitles {
-		btn := createButton(hInstance, t, 16, 110+(i*48), 188, 40, navIDs[i], hFontBold)
-		navButtons[i] = btn
-		allControls = append(allControls, btn)
+		createOwnerDrawButton(hInstance, t, 16, 100+(i*46), 188, 38, navIDs[i], "nav")
 	}
 
 	allControls = append(allControls, lblLogo, lblVer)
 
-	// Контентная область начинается с X = 230
-	contentX := 230
-	contentW := 790
+	// Контентная зона (X: 256..1024)
+	cx := 256
+	cw := 768
 
 	// ══════════════════════════════════════════════════════════════
 	// СТРАНИЦА 0: ОБЗОР (DASHBOARD)
 	// ══════════════════════════════════════════════════════════════
-	hLblStatus = createLabel(hInstance, "🟢 P2P МЕШ-СЕТЬ АКТИВНА", contentX, 24, contentW, 30, hFontTitle)
-	hLblIpInfo = createLabel(hInstance, "Устройство: Определение... | Внешний IP: — | STUN: — | Канал: mqtt", contentX, 60, contentW, 22, hFontNormal)
+	hLblStatus = createLabel(hInstance, "🟢 P2P МЕШ-СЕТЬ АКТИВНА", cx, 36, cw, 28, hFontTitle)
+	hLblIpInfo = createLabel(hInstance, "Устройство: Определение... | Внешний IP: — | STUN: — | Канал: mqtt", cx, 68, cw, 22, hFontNormal)
 
-	hBtnVpn = createButton(hInstance, "🟢 ВКЛЮЧЕНО (Адрес в сети: 10.200.0.1)", contentX, 96, 360, 48, ID_BTN_VPN, hFontBold)
-	hBtnRefresh = createButton(hInstance, "⚡ Обновить IP", contentX+380, 96, 140, 48, ID_BTN_REFRESH, hFontBold)
+	hBtnVpn = createOwnerDrawButton(hInstance, "🟢 ПОДКЛЮЧЕНО (Адрес: 10.200.0.1)", cx, 106, 340, 44, ID_BTN_VPN, "green")
+	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить IP", cx+355, 106, 150, 44, ID_BTN_REFRESH, "normal")
 
-	lblPeersHeader := createLabel(hInstance, "👥 Обнаруженные устройства в вашей сети:", contentX, 165, contentW, 24, hFontHeader)
-	hListPeers = createListBox(hInstance, contentX, 195, contentW, 460, hFontMono)
+	lblPeersTitle := createLabel(hInstance, "👥 Устройства в вашей локальной mesh-сети:", cx, 172, cw, 24, hFontHeader)
+	hListPeers = createListBox(hInstance, cx, 204, cw, 450, hFontMono)
 
-	tabPages[0] = []uintptr{hLblStatus, hLblIpInfo, hBtnVpn, hBtnRefresh, lblPeersHeader, hListPeers}
+	tabPages[0] = []uintptr{hLblStatus, hLblIpInfo, hBtnVpn, hBtnRefresh, lblPeersTitle, hListPeers}
 
 	// ══════════════════════════════════════════════════════════════
 	// СТРАНИЦА 1: AMNEZIAWG 2.0
 	// ══════════════════════════════════════════════════════════════
-	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 2.0 — Встроенная защита от блокировок DPI", contentX, 24, contentW, 30, hFontTitle)
-	lblAwgDesc := createLabel(hInstance, "Модифицирует заголовки пакетов и подмешивает мусорный трафик, обходя ТСПУ / РКН.", contentX, 58, contentW, 20, hFontNormal)
+	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 2.0 — Защита от блокировок DPI", cx, 36, cw, 28, hFontTitle)
+	lblAwgDesc := createLabel(hInstance, "Маскирует протокол WireGuard мусорными пакетами и заголовками (ТСПУ / РКН).", cx, 66, cw, 20, hFontNormal)
 
-	hBtnAwgStd = createButton(hInstance, "🟢 Стандартный WG", contentX, 90, 180, 36, ID_BTN_AWG_STD, hFontBold)
-	hBtnAwgDpi = createButton(hInstance, "🟡 Обход DPI (AWG)", contentX+195, 90, 180, 36, ID_BTN_AWG_DPI, hFontBold)
-	hBtnAwgStealth = createButton(hInstance, "🔴 Макс. скрытность", contentX+390, 90, 180, 36, ID_BTN_AWG_STEALTH, hFontBold)
-	hBtnRandomAwg = createButton(hInstance, "🎲 Случайные ключи", contentX+585, 90, 180, 36, ID_BTN_RAND_AWG, hFontNormal)
+	hBtnAwgStd = createOwnerDrawButton(hInstance, "🟢 Стандартный WG", cx, 100, 180, 36, ID_BTN_AWG_STD, "normal")
+	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🟡 Обход DPI (AWG)", cx+192, 100, 180, 36, ID_BTN_AWG_DPI, "primary")
+	hBtnAwgStealth = createOwnerDrawButton(hInstance, "🔴 Скрытный режим", cx+384, 100, 180, 36, ID_BTN_AWG_STEALTH, "normal")
+	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайные ключи", cx+576, 100, 180, 36, ID_BTN_RAND_AWG, "normal")
 
 	// Параметры
-	lblJc := createLabel(hInstance, "Jc (мусор):", contentX, 142, 80, 20, hFontNormal)
-	hEditAwgJc = createEdit(hInstance, "4", contentX+85, 138, 55, 26, false, false, hFontNormal)
+	lblJc := createLabel(hInstance, "Jc (мусор):", cx, 152, 75, 20, hFontNormal)
+	hEditAwgJc = createEdit(hInstance, "4", cx+80, 148, 55, 26, false, false, hFontNormal)
 
-	lblJmin := createLabel(hInstance, "Jmin:", contentX+155, 142, 45, 20, hFontNormal)
-	hEditAwgJmin = createEdit(hInstance, "40", contentX+205, 138, 55, 26, false, false, hFontNormal)
+	lblJmin := createLabel(hInstance, "Jmin:", cx+150, 152, 45, 20, hFontNormal)
+	hEditAwgJmin = createEdit(hInstance, "40", cx+198, 148, 55, 26, false, false, hFontNormal)
 
-	lblJmax := createLabel(hInstance, "Jmax:", contentX+275, 142, 45, 20, hFontNormal)
-	hEditAwgJmax = createEdit(hInstance, "70", contentX+325, 138, 55, 26, false, false, hFontNormal)
+	lblJmax := createLabel(hInstance, "Jmax:", cx+268, 152, 45, 20, hFontNormal)
+	hEditAwgJmax = createEdit(hInstance, "70", cx+318, 148, 55, 26, false, false, hFontNormal)
 
-	lblS1 := createLabel(hInstance, "S1:", contentX+395, 142, 30, 20, hFontNormal)
-	hEditAwgS1 = createEdit(hInstance, "48", contentX+430, 138, 55, 26, false, false, hFontNormal)
+	lblS1 := createLabel(hInstance, "S1:", cx+388, 152, 30, 20, hFontNormal)
+	hEditAwgS1 = createEdit(hInstance, "48", cx+422, 148, 55, 26, false, false, hFontNormal)
 
-	lblS2 := createLabel(hInstance, "S2:", contentX+500, 142, 30, 20, hFontNormal)
-	hEditAwgS2 = createEdit(hInstance, "32", contentX+535, 138, 55, 26, false, false, hFontNormal)
+	lblS2 := createLabel(hInstance, "S2:", cx+492, 152, 30, 20, hFontNormal)
+	hEditAwgS2 = createEdit(hInstance, "32", cx+526, 148, 55, 26, false, false, hFontNormal)
 
-	lblH1 := createLabel(hInstance, "H1:", contentX, 178, 30, 20, hFontNormal)
-	hEditAwgH1 = createEdit(hInstance, "1428571428", contentX+35, 174, 110, 26, false, false, hFontNormal)
+	lblH1 := createLabel(hInstance, "H1:", cx, 188, 30, 20, hFontNormal)
+	hEditAwgH1 = createEdit(hInstance, "1428571428", cx+35, 184, 110, 26, false, false, hFontNormal)
 
-	lblH2 := createLabel(hInstance, "H2:", contentX+160, 178, 30, 20, hFontNormal)
-	hEditAwgH2 = createEdit(hInstance, "2147483647", contentX+195, 174, 110, 26, false, false, hFontNormal)
+	lblH2 := createLabel(hInstance, "H2:", cx+160, 188, 30, 20, hFontNormal)
+	hEditAwgH2 = createEdit(hInstance, "2147483647", cx+195, 184, 110, 26, false, false, hFontNormal)
 
-	lblH3 := createLabel(hInstance, "H3:", contentX+320, 178, 30, 20, hFontNormal)
-	hEditAwgH3 = createEdit(hInstance, "857142857", contentX+355, 174, 110, 26, false, false, hFontNormal)
+	lblH3 := createLabel(hInstance, "H3:", cx+320, 188, 30, 20, hFontNormal)
+	hEditAwgH3 = createEdit(hInstance, "857142857", cx+355, 184, 110, 26, false, false, hFontNormal)
 
-	lblH4 := createLabel(hInstance, "H4:", contentX+480, 178, 30, 20, hFontNormal)
-	hEditAwgH4 = createEdit(hInstance, "1122334455", contentX+515, 174, 110, 26, false, false, hFontNormal)
+	lblH4 := createLabel(hInstance, "H4:", cx+480, 188, 30, 20, hFontNormal)
+	hEditAwgH4 = createEdit(hInstance, "1122334455", cx+515, 184, 110, 26, false, false, hFontNormal)
 
-	lblConfTitle := createLabel(hInstance, "Конфигурация туннеля AmneziaWG (.conf):", contentX, 218, contentW, 22, hFontBold)
-	hEditAwgConf = createEdit(hInstance, "", contentX, 245, contentW, 360, true, true, hFontMono)
-	hBtnCopyAwg = createButton(hInstance, "📋 Скопировать конфигурацию в буфер обмена", contentX, 615, 360, 40, ID_BTN_COPY_AWG, hFontBold)
+	lblConfTitle := createLabel(hInstance, "Конфигурация AmneziaWG (.conf):", cx, 226, cw, 22, hFontHeader)
+	hEditAwgConf = createEdit(hInstance, "", cx, 254, cw, 345, true, true, hFontMono)
+	hBtnCopyAwg = createOwnerDrawButton(hInstance, "📋 Скопировать конфигурацию в буфер обмена", cx, 612, 360, 40, ID_BTN_COPY_AWG, "primary")
 
 	tabPages[1] = []uintptr{
 		lblAwgTitle, lblAwgDesc, hBtnAwgStd, hBtnAwgDpi, hBtnAwgStealth, hBtnRandomAwg,
@@ -652,25 +781,25 @@ func buildNativeUI(hInstance uintptr) {
 	// ══════════════════════════════════════════════════════════════
 	// СТРАНИЦА 2: НАСТРОЙКИ
 	// ══════════════════════════════════════════════════════════════
-	lblSetTitle := createLabel(hInstance, "⚙️ Сигнальные каналы (Обмен пирами)", contentX, 24, contentW, 30, hFontTitle)
+	lblSetTitle := createLabel(hInstance, "⚙️ Сигнальные каналы (Обмен пирами)", cx, 36, cw, 28, hFontTitle)
 
-	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API (Рекомендуется):", contentX, 75, contentW, 22, hFontHeader)
-	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", contentX, 110, 200, 20, hFontNormal)
-	hEditTgToken = createEdit(hInstance, "", contentX+210, 106, 380, 28, false, true, hFontNormal)
-	hBtnTestTg = createButton(hInstance, "🧪 Проверить бот", contentX+600, 104, 170, 32, ID_BTN_TEST_TG, hFontBold)
+	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 80, cw, 22, hFontHeader)
+	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 114, 200, 20, hFontNormal)
+	hEditTgToken = createEdit(hInstance, "", cx+210, 110, 380, 28, false, true, hFontNormal)
+	hBtnTestTg = createOwnerDrawButton(hInstance, "🧪 Проверить бот", cx+600, 108, 160, 32, ID_BTN_TEST_TG, "normal")
 
-	lblTgChat := createLabel(hInstance, "Chat ID (@userinfobot):", contentX, 150, 200, 20, hFontNormal)
-	hEditTgChat = createEdit(hInstance, "", contentX+210, 146, 380, 28, false, false, hFontNormal)
+	lblTgChat := createLabel(hInstance, "Chat ID (@userinfobot):", cx, 154, 200, 20, hFontNormal)
+	hEditTgChat = createEdit(hInstance, "", cx+210, 150, 380, 28, false, false, hFontNormal)
 
-	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", contentX, 210, contentW, 22, hFontHeader)
-	lblMqBr := createLabel(hInstance, "URL Брокера:", contentX, 245, 200, 20, hFontNormal)
-	hEditMqttBr = createEdit(hInstance, "tcp://mqtt.eclipseprojects.io:1883", contentX+210, 241, 380, 28, false, false, hFontNormal)
-	hBtnTestMqtt = createButton(hInstance, "🧪 Проверить MQTT", contentX+600, 239, 170, 32, ID_BTN_TEST_MQTT, hFontBold)
+	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", cx, 215, cw, 22, hFontHeader)
+	lblMqBr := createLabel(hInstance, "URL Брокера:", cx, 249, 200, 20, hFontNormal)
+	hEditMqttBr = createEdit(hInstance, "tcp://mqtt.eclipseprojects.io:1883", cx+210, 245, 380, 28, false, false, hFontNormal)
+	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+600, 243, 160, 32, ID_BTN_TEST_MQTT, "normal")
 
-	lblMqTp := createLabel(hInstance, "Уникальный топик:", contentX, 285, 200, 20, hFontNormal)
-	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", contentX+210, 281, 380, 28, false, false, hFontNormal)
+	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 289, 200, 20, hFontNormal)
+	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 285, 380, 28, false, false, hFontNormal)
 
-	hBtnSaveCfg = createButton(hInstance, "💾 Сохранить настройки в config.yaml", contentX+210, 340, 380, 46, ID_BTN_SAVE_CFG, hFontBold)
+	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx+210, 345, 380, 44, ID_BTN_SAVE_CFG, "primary")
 
 	tabPages[2] = []uintptr{
 		lblSetTitle, lblTgHead, lblTgToken, hEditTgToken, hBtnTestTg, lblTgChat, hEditTgChat,
@@ -680,18 +809,18 @@ func buildNativeUI(hInstance uintptr) {
 	// ══════════════════════════════════════════════════════════════
 	// СТРАНИЦА 3: ДИАГНОСТИКА
 	// ══════════════════════════════════════════════════════════════
-	lblDiagTitle := createLabel(hInstance, "🩺 Диагностика связности и NAT", contentX, 24, contentW, 30, hFontTitle)
-	hBtnRunDiag = createButton(hInstance, "🔄 Запустить полную диагностику", contentX, 70, 280, 42, ID_BTN_RUN_DIAG, hFontBold)
-	hEditDiagLog = createEdit(hInstance, "Нажмите кнопку выше для проверки внешнего IP, доступности Telegram/MQTT и STUN сокета...", contentX, 130, contentW, 520, true, true, hFontMono)
+	lblDiagTitle := createLabel(hInstance, "🩺 Диагностика связности сети", cx, 36, cw, 28, hFontTitle)
+	hBtnRunDiag = createOwnerDrawButton(hInstance, "🔄 Запустить полную диагностику", cx, 75, 280, 40, ID_BTN_RUN_DIAG, "primary")
+	hEditDiagLog = createEdit(hInstance, "Нажмите кнопку выше для проверки внешнего IP, доступности Telegram/MQTT и STUN сокета...", cx, 130, cw, 520, true, true, hFontMono)
 
 	tabPages[3] = []uintptr{lblDiagTitle, hBtnRunDiag, hEditDiagLog}
 
 	// ══════════════════════════════════════════════════════════════
-	// СТРАНИЦА 4: ЖУРНАЛ ЛОГОВ
+	// СТРАНИЦА 4: ЖУРНАЛ СОБЫТИЙ
 	// ══════════════════════════════════════════════════════════════
-	lblLogTitle := createLabel(hInstance, "📋 Журнал событий в реальном времени", contentX, 24, contentW-120, 30, hFontTitle)
-	hBtnClrLogs = createButton(hInstance, "🗑 Очистить", contentX+contentW-120, 24, 120, 32, ID_BTN_CLR_LOGS, hFontNormal)
-	hEditLogs = createEdit(hInstance, "", contentX, 70, contentW, 585, true, true, hFontMono)
+	lblLogTitle := createLabel(hInstance, "📋 Журнал событий в реальном времени", cx, 36, cw-120, 28, hFontTitle)
+	hBtnClrLogs = createOwnerDrawButton(hInstance, "🗑 Очистить", cx+cw-120, 36, 120, 32, ID_BTN_CLR_LOGS, "normal")
+	hEditLogs = createEdit(hInstance, "", cx, 75, cw, 575, true, true, hFontMono)
 
 	tabPages[4] = []uintptr{lblLogTitle, hBtnClrLogs, hEditLogs}
 
@@ -713,18 +842,22 @@ func selectTab(index int) {
 	if index == 1 {
 		updateAWGText()
 	}
+	procInvalidateRect.Call(hMainWnd, 0, 1)
 }
 
 func toggleVPN() {
 	vpnConnected = !vpnConnected
 	if vpnConnected {
-		setControlText(hBtnVpn, "🟢 ВКЛЮЧЕНО (Адрес в сети: 10.200.0.1)")
+		buttonLabels[ID_BTN_VPN] = "🟢 ПОДКЛЮЧЕНО (Адрес: 10.200.0.1)"
+		buttonTypes[ID_BTN_VPN] = "green"
 		addLog("🟢 Туннель активен")
 		showBalloon("NatBypass", "Защищенная mesh-сеть активна.")
 	} else {
-		setControlText(hBtnVpn, "🔴 ОТКЛЮЧЕНО (Нажмите для старта)")
+		buttonLabels[ID_BTN_VPN] = "🔴 ОТКЛЮЧЕНО (Нажмите для включения)"
+		buttonTypes[ID_BTN_VPN] = "red"
 		addLog("🔴 Туннель приостановлен")
 	}
+	procInvalidateRect.Call(hBtnVpn, 0, 1)
 }
 
 func startEngine() {
@@ -760,7 +893,7 @@ func startEngine() {
 		if extIP, port, err := stunClient.GetMappedAddress(ctx); err == nil {
 			mySTUNAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
 		}
-		addLog(fmt.Sprintf("✓ Ядро инициализировано. Публичный IP: %s | STUN: %s", myPublicIP, mySTUNAddr))
+		addLog(fmt.Sprintf("✓ Ядро запущено. Публичный IP: %s | STUN: %s", myPublicIP, mySTUNAddr))
 	}()
 
 	addLog("🛸 NatBypass нативное ядро запущено")
@@ -793,14 +926,14 @@ func updateData() {
 		peers := registry.List()
 		procSendMessageW.Call(hListPeers, 0x0184, 0, 0)
 		if len(peers) == 0 {
-			addListBoxItem(hListPeers, "📡 Ожидание подключения других устройств... (0 пиров онлайн)")
+			addListBoxItem(hListPeers, "  📡 Ожидание подключения других устройств... (0 пиров онлайн)")
 		} else {
 			for _, p := range peers {
 				st := "🟢 Онлайн"
 				if !p.Online {
 					st = "🔴 Офлайн"
 				}
-				itemStr := fmt.Sprintf("%-20s | %-16s | %-22s | %s", p.DeviceID, p.PublicIP, p.STUNAddr, st)
+				itemStr := fmt.Sprintf("  %-20s | %-16s | %-22s | %s", p.DeviceID, p.PublicIP, p.STUNAddr, st)
 				addListBoxItem(hListPeers, itemStr)
 			}
 		}
@@ -1066,24 +1199,19 @@ func createLabel(hInstance uintptr, text string, x, y, w, h int, font uintptr) u
 	return hwnd
 }
 
-func createButton(hInstance uintptr, text string, x, y, w, h int, id uintptr, font uintptr) uintptr {
+func createOwnerDrawButton(hInstance uintptr, text string, x, y, w, h int, id uint32, bType string) uintptr {
 	btnClass, _ := windows.UTF16PtrFromString("BUTTON")
 	textPtr, _ := windows.UTF16PtrFromString(text)
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(btnClass)),
 		uintptr(unsafe.Pointer(textPtr)),
-		WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_PUSHBUTTON,
+		WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
 		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
-		hMainWnd, id, hInstance, 0,
+		hMainWnd, uintptr(id), hInstance, 0,
 	)
-	if font != 0 {
-		procSendMessageW.Call(hwnd, 0x0030, font, 1)
-	}
-	// Применяем тему Explorer
-	uxtheme, _ := windows.UTF16PtrFromString("Explorer")
-	procSetWindowTheme.Call(hwnd, uintptr(unsafe.Pointer(uxtheme)), 0)
-
+	buttonLabels[id] = text
+	buttonTypes[id] = bType
 	allControls = append(allControls, hwnd)
 	return hwnd
 }
@@ -1091,7 +1219,7 @@ func createButton(hInstance uintptr, text string, x, y, w, h int, id uintptr, fo
 func createEdit(hInstance uintptr, text string, x, y, w, h int, multiline, readonly bool, font uintptr) uintptr {
 	editClass, _ := windows.UTF16PtrFromString("EDIT")
 	textPtr, _ := windows.UTF16PtrFromString(text)
-	style := uint32(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_LEFT)
+	style := uint32(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT)
 	if multiline {
 		style |= ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL
 	} else {
@@ -1101,7 +1229,7 @@ func createEdit(hInstance uintptr, text string, x, y, w, h int, multiline, reado
 		style |= ES_READONLY
 	}
 	hwnd, _, _ := procCreateWindowExW.Call(
-		WS_EX_CLIENTEDGE,
+		0,
 		uintptr(unsafe.Pointer(editClass)),
 		uintptr(unsafe.Pointer(textPtr)),
 		uintptr(style),
@@ -1121,10 +1249,10 @@ func createEdit(hInstance uintptr, text string, x, y, w, h int, multiline, reado
 func createListBox(hInstance uintptr, x, y, w, h int, font uintptr) uintptr {
 	lbClass, _ := windows.UTF16PtrFromString("LISTBOX")
 	hwnd, _, _ := procCreateWindowExW.Call(
-		WS_EX_CLIENTEDGE,
+		0,
 		uintptr(unsafe.Pointer(lbClass)),
 		0,
-		WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT,
+		WS_CHILD|WS_VISIBLE|WS_TABSTOP|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT,
 		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 		hMainWnd, 0, hInstance, 0,
 	)
@@ -1173,4 +1301,12 @@ func copyToClipboard(text string) {
 
 func LOWORD(l uintptr) uint16 {
 	return uint16(l & 0xFFFF)
+}
+
+func procMoveToEx(hdc uintptr, x, y int, pt *POINT) {
+	modgdi32.NewProc("MoveToEx").Call(hdc, uintptr(x), uintptr(y), uintptr(unsafe.Pointer(pt)))
+}
+
+func procLineTo(hdc uintptr, x, y int) {
+	modgdi32.NewProc("LineTo").Call(hdc, uintptr(x), uintptr(y))
 }
