@@ -2,7 +2,7 @@
 
 # 🛸 NatBypass
 
-**Кроссплатформенное приложение для обхода NAT (включая двойной NAT / CGNAT) и организации прямого P2P Mesh-доступа между устройствами.**
+**Кроссплатформенное приложение для обхода NAT (включая двойной NAT / CGNAT) и организации прямого зашифрованного P2P Mesh-доступа между всеми вашими устройствами.**
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -34,6 +34,22 @@
 
 ---
 
+## 📚 Подробные инструкции по настройке клиентов
+
+Подробные пошаговые руководства с примерами конфигураций для каждой платформы:
+
+| Платформа | Документация | Особенности |
+|---|---|---|
+| 🪟 **Windows** | [**Инструкция для Windows (docs/WINDOWS.md)**](docs/WINDOWS.md) | Desktop GUI, System Tray, служба Windows Service, WireGuard клиент |
+| 🐧 **Linux** | [**Инструкция для Linux (docs/LINUX.md)**](docs/LINUX.md) | Автоматический Systemd сервис, headless демон, автозапуск |
+| 🌐 **Keenetic** | [**Инструкция для Keenetic (docs/ROUTERS_KEENETIC.md)**](docs/ROUTERS_KEENETIC.md) | Установка через Entware/OPKG, автозапуск `init.d`, модели MIPS/ARM64 |
+| 📡 **OpenWrt** | [**Инструкция для OpenWrt (docs/ROUTERS_OPENWRT.md)**](docs/ROUTERS_OPENWRT.md) | Служба `procd`, интеграция в систему, минимальное потребление RAM |
+| 📱 **Android** | [**Инструкция для Android (docs/ANDROID.md)**](docs/ANDROID.md) | Запуск через Termux, мобильный Web UI, WireGuard Android App |
+| 💬 **Сигнализация** | [**Настройка Telegram / MQTT / DNS (docs/SIGNALING_SETUP.md)**](docs/SIGNALING_SETUP.md) | Пошаговое создание бота, настройка брокеров и топиков |
+| 🔒 **WireGuard** | [**Принцип работы Mesh-сети (docs/WIREGUARD_MESH.md)**](docs/WIREGUARD_MESH.md) | UDP Hole Punching, адресация подсети `10.200.0.0/24` |
+
+---
+
 ## 📐 Архитектура системы
 
 ```
@@ -57,71 +73,73 @@
 
 ---
 
-## 💻 Поддерживаемые платформы
+## 💻 Поддерживаемые платформы и бинарники
 
-| Платформа | Архитектура | Целевые устройства | Статус |
+| Платформа | Архитектура | Целевые устройства | Готовый файл |
 |---|---|---|---|
-| **Windows** | `amd64` | Windows 10/11, Server (GUI + Tray + Service) | ✅ Поддерживается |
-| **Linux** | `amd64` | Ubuntu, Debian, CentOS, Arch | ✅ Поддерживается |
-| **Linux ARM64** | `arm64` | Keenetic Ultra/Giga/Peak, Raspberry Pi 3/4/5 | ✅ Поддерживается |
-| **Linux MIPS** | `mips` *(Big Endian)* | Роутеры OpenWrt, Mikrotik MIPSBE | ✅ Поддерживается |
-| **Linux MIPSLE** | `mipsle` *(Little Endian)* | Keenetic Start/City/Air, Xiaomi 3G/4A | ✅ Поддерживается |
-| **Android** | `arm64` | Смартфоны (Termux / ADB / AAR / APK) | ✅ Поддерживается |
-| **macOS / iOS** | `arm64` | Apple Silicon Mac, iPhone (Framework) | ✅ Поддерживается |
+| **Windows** | `amd64` | Windows 10/11, Server (GUI + Tray + Service) | `natbypass-windows-amd64.exe` / `NatBypass.exe` |
+| **Linux** | `amd64` | Ubuntu, Debian, CentOS, Arch | `natbypass-linux-amd64` |
+| **Linux ARM64** | `arm64` | Keenetic Ultra/Giga/Peak, Raspberry Pi 3/4/5 | `natbypass-linux-arm64` |
+| **Linux MIPS** | `mips` *(Big Endian)* | Роутеры OpenWrt, Mikrotik MIPSBE | `natbypass-linux-mips` |
+| **Linux MIPSLE** | `mipsle` *(Little Endian)* | Keenetic Start/City/Air, Xiaomi 3G/4A | `natbypass-linux-mipsle` |
+| **Android** | `arm64` | Смартфоны (Termux / ADB / AAR / APK) | `natbypass-android-arm64` |
+| **macOS / iOS** | `arm64` | Apple Silicon Mac, iPhone (Framework) | `natbypass-darwin-arm64` |
 
 ---
 
-## 🚀 Быстрый старт
+## 🚀 Быстрый старт за 3 шага
 
-### 1. Windows:
-1. Скачайте архив из [Releases](../../releases) или соберите проект.
-2. Скопируйте `config.yaml.example` в `config.yaml` и укажите данные Telegram / MQTT:
-   ```yaml
-   signaling:
-     channels:
-       - type: "telegram"
-         enabled: true
-         params:
-           token: "ВАШ_ТОКЕН_БОТА"
-           chat_id: "ВАШ_CHAT_ID"
-   ```
-3. Запустите **`NatBypass.exe`** — программа свернется в трей и откроет панель управления.
+### 1. Подготовка конфигурации (`config.yaml`)
+Скопируйте `config.yaml.example` в `config.yaml` и укажите данные вашего Telegram-бота (или MQTT):
+```yaml
+app:
+  log_level: "info"
+  publish_interval: 60
 
-### 2. Linux / Роутеры (Keenetic / OpenWrt):
-```bash
-# 1. Скачайте бинарник под вашу архитектуру
-wget https://github.com/natbypass/natbypass/releases/latest/download/natbypass-linux-mipsle
-chmod +x natbypass-linux-mipsle
+web_ui:
+  enabled: true
+  port: 8080
 
-# 2. Создайте конфигурацию
-cp config.yaml.example config.yaml
-
-# 3. Запустите приложение в фоновом режиме
-./natbypass-linux-mipsle start --config config.yaml
+signaling:
+  channels:
+    - type: "telegram"
+      priority: 1
+      enabled: true
+      params:
+        token: "7123456789:AAFlkjhsdf..."
+        chat_id: "-1001234567890"
+    - type: "mqtt"
+      priority: 2
+      enabled: true
+      params:
+        broker_url: "tcp://mqtt.eclipseprojects.io:1883"
+        topic: "natbypass/secret-mesh/peers"
 ```
+
+### 2. Запуск
+* **На Windows:** Дважды кликните по **`NatBypass.exe`** (программа появится в трее и откроет окно панели управления).
+* **На Linux / Роутере:** Выполните `./natbypass start --config config.yaml`.
+
+### 3. Проверка подключения
+Откройте браузер по адресу **`http://localhost:8080`** — вы увидите список всех обнаруженных узлов сети, их реальные внешние сокеты и сможете в один клик сгенерировать WireGuard-конфиг для защищенного P2P соединения!
 
 ---
 
 ## 🔨 Сборка из исходников
 
-### Сборка через Makefile:
+### Через Makefile:
 ```bash
-# Сборка под все платформы
-make all
-
-# Сборка отдельных целевых платформ
-make windows-amd64   # Windows x64 (.exe)
-make linux-cli       # Linux x64
-make router-mips     # MIPS Big Endian
-make router-mipsle   # MIPSLE Little Endian (Keenetic)
-make router-arm64    # ARM64
-make android-arm64   # Android ARM64
-make android-apk     # Android APK пакет
-make windows-gui     # Wails GUI
+make all            # Сборка под все платформы
+make windows-amd64  # Сборка под Windows (.exe)
+make linux-cli      # Сборка под Linux x64
+make router-mipsle  # Сборка под Keenetic (MIPSLE)
+make router-arm64   # Сборка под ARM64
+make android-arm64  # Сборка под Android
+make android-apk    # Сборка APK пакета
 ```
 
-### Сборка через графический интерфейс (Builder GUI):
-На Windows запустите **`NatBypass-Builder.exe`**, укажите параметры Telegram/MQTT и нажмите **«🔨 Начать сборку»**.
+### Через графический сборщик (Builder GUI):
+На Windows запустите **`NatBypass-Builder.exe`**, введите параметры Telegram/MQTT и нажмите **«🔨 Начать сборку»**.
 
 ---
 
