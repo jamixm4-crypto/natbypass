@@ -415,16 +415,26 @@ func getDistDir() string {
 	return d
 }
 
-func getGoExe() string {
+func getGoExe() (string, string) {
 	root := getProjectRoot()
-	localGo := filepath.Join(root, "soft", "go", "bin", "go.exe")
-	if _, err := os.Stat(localGo); err == nil {
-		return localGo
+	candidates := []string{
+		filepath.Join(root, "soft", "go", "bin", "go.exe"),
+		`C:\Program Files\Go\bin\go.exe`,
+		`C:\Go\bin\go.exe`,
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			goroot := filepath.Dir(filepath.Dir(c))
+			return c, goroot
+		}
 	}
 	if p, err := exec.LookPath("go.exe"); err == nil {
-		return p
+		if abs, err := filepath.Abs(p); err == nil {
+			return abs, filepath.Dir(filepath.Dir(abs))
+		}
+		return p, ""
 	}
-	return "go"
+	return "go", ""
 }
 
 func startBuild(mode string) {
@@ -440,7 +450,7 @@ func startBuild(mode string) {
 	appendLog(fmt.Sprintf(">> Запуск компиляции NatBypass [%s]...\r\n", mode))
 
 	projectRoot := getProjectRoot()
-	goExe := getGoExe()
+	goExe, goroot := getGoExe()
 	distDir := getDistDir()
 	appendLog(fmt.Sprintf("   Папка проекта: %s\r\n", projectRoot))
 	appendLog(fmt.Sprintf("   Компилятор Go: %s\r\n", goExe))
@@ -497,7 +507,6 @@ func startBuild(mode string) {
 		{"linux", "mipsle", "", "softfloat", "MIPSLE (Keenetic)", isChecked(hChkMipsle) || mode == "all" || mode == "router"},
 	}
 
-	goroot := filepath.Dir(filepath.Dir(goExe))
 	gopath := filepath.Join(projectRoot, "soft", "gopath")
 	gocache := filepath.Join(projectRoot, "soft", "gocache")
 	os.MkdirAll(gopath, 0755)
@@ -506,11 +515,15 @@ func startBuild(mode string) {
 	envBase := os.Environ()
 	envBase = append(envBase,
 		"CGO_ENABLED=0",
-		"GOROOT="+goroot,
 		"GOPATH="+gopath,
 		"GOCACHE="+gocache,
-		"PATH="+filepath.Join(goroot, "bin")+";"+os.Getenv("PATH"),
 	)
+	if goroot != "" {
+		envBase = append(envBase,
+			"GOROOT="+goroot,
+			"PATH="+filepath.Join(goroot, "bin")+";"+os.Getenv("PATH"),
+		)
+	}
 
 	allOk := true
 	countChecked := 0
