@@ -136,14 +136,16 @@ const (
 	DT_VCENTER    = 0x00000004
 	DT_SINGLELINE = 0x00000020
 	DT_LEFT       = 0x00000000
+
+	ODS_SELECTED = 0x0001
 )
 
-// Цветовая палитра Slate Dark (GitHub / Modern Fluent Theme)
+// Цветовая палитра Slate Dark (Modern Fluent Theme)
 const (
 	COLOR_BG        = 0x18120D // #0D1218 (Глубокий темный фон)
 	COLOR_SIDEBAR   = 0x221A15 // #151A22 (Боковая панель)
 	COLOR_CARD      = 0x29211A // #1A2129 (Контейнеры контента)
-	COLOR_INPUT     = 0x332820 // #202833 (Четко различимые поля ввода)
+	COLOR_INPUT     = 0x332820 // #202833 (Поля ввода)
 	COLOR_BORDER    = 0x473B32 // #323B47 (Контуры полей и карточек)
 	COLOR_BORDER_LT = 0x5E4E42 // #424E5E (Границы кнопок)
 	COLOR_TEXT      = 0xF3EDE6 // #E6EDF3 (Основной белый текст)
@@ -153,6 +155,7 @@ const (
 	COLOR_GREEN_BG  = 0x368623 // #238636 (Зеленая кнопка)
 	COLOR_GREEN_LT  = 0x50B93F // #3FB950
 	COLOR_RED_BG    = 0x3336DA // #DA3633 (Красная кнопка)
+	COLOR_BTN_HOVER = 0x3D3328 // #28333D
 )
 
 type RECT struct {
@@ -242,6 +245,7 @@ var (
 	buttonLabels = make(map[uint32]string)
 	buttonTypes  = make(map[uint32]string) // "nav", "primary", "green", "red", "normal"
 
+	navButtons [5]uintptr
 	currentTab = 0
 	tabPages   [5][]uintptr
 
@@ -540,6 +544,7 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 	id := pDIS.CtlID
 	text := buttonLabels[id]
 	bType := buttonTypes[id]
+	isPressed := (pDIS.ItemState & ODS_SELECTED) != 0
 
 	isNav := bType == "nav"
 
@@ -567,7 +572,10 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 		}
 	}
 
-	if isActiveNav {
+	if isPressed {
+		bgBrush, _, _ = procCreateSolidBrush.Call(COLOR_BTN_HOVER)
+		txtColor = 0xFFFFFF
+	} else if isActiveNav {
 		bgBrush, _, _ = procCreateSolidBrush.Call(COLOR_CARD)
 		txtColor = COLOR_ACCENT
 	} else if isNav {
@@ -589,7 +597,7 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 
 	// 3. Рамка кнопки
 	penBorder, _, _ := procCreatePen.Call(0, 1, COLOR_BORDER_LT)
-	if isActiveNav {
+	if isActiveNav || bType == "primary" {
 		penBorder, _, _ = procCreatePen.Call(0, 1, COLOR_ACCENT)
 	}
 
@@ -603,6 +611,11 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 
 	tPtr, _ := windows.UTF16FromString(text)
 	var textRect = rc
+	if isPressed {
+		textRect.Top += 1
+		textRect.Bottom += 1
+	}
+
 	if isNav {
 		textRect.Left += 14
 		procSelectObject.Call(hdc, hFontBold)
@@ -645,26 +658,36 @@ func handleCommand(id uint16) {
 
 	case ID_BTN_AWG_STD:
 		setAWGPreset(wireguard.AWGParams{Enabled: true, Jc: 0, Jmin: 0, Jmax: 0, S1: 0, S2: 0, H1: 1, H2: 2, H3: 3, H4: 4})
+		setActiveAWGPresetButton(ID_BTN_AWG_STD)
 		addLog("🛡️ Включен пресет: 🟢 Стандартный WireGuard")
 
 	case ID_BTN_AWG_DPI:
 		setAWGPreset(wireguard.DefaultAWGParams())
+		setActiveAWGPresetButton(ID_BTN_AWG_DPI)
 		addLog("🛡️ Включен пресет: 🟡 Обход DPI (AmneziaWG 2.0)")
 
 	case ID_BTN_AWG_STEALTH:
 		randP := wireguard.GenerateRandomAWGParams()
 		setAWGPreset(randP)
+		setActiveAWGPresetButton(ID_BTN_AWG_STEALTH)
 		addLog("🛡️ Включен пресет: 🔴 Максимальная скрытность")
 
 	case ID_BTN_RAND_AWG:
 		randP := wireguard.GenerateRandomAWGParams()
 		setAWGPreset(randP)
+		setActiveAWGPresetButton(ID_BTN_AWG_STEALTH)
 		addLog("🎲 Сгенерированы новые уникальные сигнатуры AWG")
 
 	case ID_BTN_COPY_AWG:
 		conf := getControlText(hEditAwgConf)
 		copyToClipboard(conf)
 		addLog("📋 Конфигурация AmneziaWG скопирована в буфер обмена")
+		buttonLabels[ID_BTN_COPY_AWG] = "✓ СКОПИРОВАНО В БУФЕР ОБМЕНА!"
+		procInvalidateRect.Call(hBtnCopyAwg, 0, 1)
+		time.AfterFunc(2*time.Second, func() {
+			buttonLabels[ID_BTN_COPY_AWG] = "📋 Скопировать конфигурацию в буфер обмена"
+			procInvalidateRect.Call(hBtnCopyAwg, 0, 1)
+		})
 		showBalloon("AmneziaWG 2.0", "Конфигурация скопирована в буфер.")
 
 	case ID_BTN_TEST_TG:
@@ -698,6 +721,17 @@ func handleCommand(id uint16) {
 	}
 }
 
+func setActiveAWGPresetButton(activeID uint32) {
+	buttonTypes[ID_BTN_AWG_STD] = "normal"
+	buttonTypes[ID_BTN_AWG_DPI] = "normal"
+	buttonTypes[ID_BTN_AWG_STEALTH] = "normal"
+	buttonTypes[activeID] = "primary"
+
+	procInvalidateRect.Call(hBtnAwgStd, 0, 1)
+	procInvalidateRect.Call(hBtnAwgDpi, 0, 1)
+	procInvalidateRect.Call(hBtnAwgStealth, 0, 1)
+}
+
 func buildModernUI(hInstance uintptr) {
 	// ══════════════════════════════════════════════════════════════
 	// SIDEBAR (X: 0..220)
@@ -715,7 +749,7 @@ func buildModernUI(hInstance uintptr) {
 	navIDs := []uint32{ID_NAV_DASHBOARD, ID_NAV_AWG, ID_NAV_SETTINGS, ID_NAV_DIAG, ID_NAV_LOGS}
 
 	for i, t := range navTitles {
-		createOwnerDrawButton(hInstance, t, 16, 100+(i*46), 188, 38, navIDs[i], "nav")
+		navButtons[i] = createOwnerDrawButton(hInstance, t, 16, 100+(i*46), 188, 38, navIDs[i], "nav")
 	}
 
 	allControls = append(allControls, lblLogo, lblVer)
@@ -848,6 +882,12 @@ func selectTab(index int) {
 		}
 		for _, h := range page {
 			procShowWindow.Call(h, uintptr(show))
+		}
+	}
+	// Мгновенно обновляем подсветку всех 5 кнопок сайдбара
+	for _, btn := range navButtons {
+		if btn != 0 {
+			procInvalidateRect.Call(btn, 0, 1)
 		}
 	}
 	if index == 1 {
@@ -1056,6 +1096,12 @@ wireguard:
 
 	_ = os.WriteFile(configPath, []byte(cfgContent), 0644)
 	addLog("💾 Настройки сохранены в " + configPath)
+	buttonLabels[ID_BTN_SAVE_CFG] = "✓ НАСТРОЙКИ СОХРАНЕНЫ!"
+	procInvalidateRect.Call(hBtnSaveCfg, 0, 1)
+	time.AfterFunc(2*time.Second, func() {
+		buttonLabels[ID_BTN_SAVE_CFG] = "💾 Сохранить настройки в config.yaml"
+		procInvalidateRect.Call(hBtnSaveCfg, 0, 1)
+	})
 	showBalloon("NatBypass", "Настройки сохранены в config.yaml")
 }
 
@@ -1065,31 +1111,51 @@ func testTelegram() {
 		addLog("⚠️ Введите токен бота")
 		return
 	}
+	buttonLabels[ID_BTN_TEST_TG] = "⏳ Проверка..."
+	procInvalidateRect.Call(hBtnTestTg, 0, 1)
 	addLog("⏳ Проверка Telegram Bot API...")
 	go func() {
 		ch := signaling.NewTelegramChannel(tok, "123", "")
 		if ch.IsAvailable(context.Background()) {
 			addLog("✅ Успех! Telegram бот активен и отвечает на запросы.")
+			buttonLabels[ID_BTN_TEST_TG] = "✅ Бот активен"
 		} else {
 			addLog("❌ Ошибка: не удалось подключиться к Telegram API.")
+			buttonLabels[ID_BTN_TEST_TG] = "❌ Ошибка"
 		}
+		procInvalidateRect.Call(hBtnTestTg, 0, 1)
+		time.AfterFunc(3*time.Second, func() {
+			buttonLabels[ID_BTN_TEST_TG] = "🧪 Проверить бот"
+			procInvalidateRect.Call(hBtnTestTg, 0, 1)
+		})
 	}()
 }
 
 func testMQTT() {
 	br := getControlText(hEditMqttBr)
+	buttonLabels[ID_BTN_TEST_MQTT] = "⏳ Проверка..."
+	procInvalidateRect.Call(hBtnTestMqtt, 0, 1)
 	addLog("⏳ Проверка MQTT брокера...")
 	go func() {
 		ch := signaling.NewMQTTChannel(br, "test", "tester", "", "")
 		if ch.IsAvailable(context.Background()) {
 			addLog("✅ Успех! MQTT брокер доступен.")
+			buttonLabels[ID_BTN_TEST_MQTT] = "✅ Доступен"
 		} else {
 			addLog("❌ Ошибка: MQTT брокер недоступен.")
+			buttonLabels[ID_BTN_TEST_MQTT] = "❌ Недоступен"
 		}
+		procInvalidateRect.Call(hBtnTestMqtt, 0, 1)
+		time.AfterFunc(3*time.Second, func() {
+			buttonLabels[ID_BTN_TEST_MQTT] = "🧪 Проверить MQTT"
+			procInvalidateRect.Call(hBtnTestMqtt, 0, 1)
+		})
 	}()
 }
 
 func runDiag() {
+	buttonLabels[ID_BTN_RUN_DIAG] = "⏳ Выполняется диагностика..."
+	procInvalidateRect.Call(hBtnRunDiag, 0, 1)
 	setControlText(hEditDiagLog, "⏳ Выполняется тестирование сети...\r\n")
 	go func() {
 		res := "═══════════════════════════════════════════════════\r\n"
@@ -1125,6 +1191,9 @@ func runDiag() {
 
 		setControlText(hEditDiagLog, res)
 		addLog("🩺 Диагностика сети успешно завершена")
+
+		buttonLabels[ID_BTN_RUN_DIAG] = "🔄 Запустить повторно"
+		procInvalidateRect.Call(hBtnRunDiag, 0, 1)
 	}()
 }
 
