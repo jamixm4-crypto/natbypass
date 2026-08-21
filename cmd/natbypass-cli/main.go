@@ -266,7 +266,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	deviceID := cfg.App.DeviceID
 	if deviceID == "" {
-		deviceID = generateDeviceID(pubKey)
+		if hn, err := os.Hostname(); err == nil && hn != "" {
+			deviceID = hn
+		} else {
+			deviceID = generateDeviceID(pubKey)
+		}
 	}
 	log.Info().Str("device_id", deviceID).Msg("Идентификатор устройства")
 
@@ -299,6 +303,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	if !noWebUI && cfg.WebUI.Enabled {
 		uiServer = webui.NewServer(port, cfg.WebUI.Username, cfg.WebUI.Password, registry, sigMgr)
 		uiServer.SetAppState(deviceID, "Определяется...", "Определяется...")
+		uiServer.SetDeviceName(deviceID)
+		uiServer.AddEvent("info", "NatBypass запущен", "version="+Version)
 		go func() {
 			if err := uiServer.Start(engineCtx); err != nil {
 				log.Error().Err(err).Msg("Web UI остановлен")

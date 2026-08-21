@@ -40,14 +40,15 @@
 
 Подробные пошаговые руководства с примерами конфигураций для каждой платформы:
 
-| Платформа | Документация | Особенности |
+| Платформа / Тема | Документация | Особенности |
 |---|---|---|
+| ⚡ **Быстрый старт** | [**Пошаговый гайд за 5 минут (docs/QUICKSTART.md)**](docs/QUICKSTART.md) | Для новичков: от скачивания до первого P2P соединения |
 | 🪟 **Windows** | [**Инструкция для Windows (docs/WINDOWS.md)**](docs/WINDOWS.md) | Desktop GUI, System Tray, служба Windows Service, WireGuard клиент |
 | 🛡️ **AmneziaWG 2.0** | [**Обход блокировок DPI (docs/AMNEZIA_WG.md)**](docs/AMNEZIA_WG.md) | Обфускация трафика `H1-H4`, `Jc`, `S1/S2` против ТСПУ / РКН |
 | 🐧 **Linux** | [**Инструкция для Linux (docs/LINUX.md)**](docs/LINUX.md) | Автоматический Systemd сервис, headless демон, автозапуск |
 | 🌐 **Keenetic** | [**Инструкция для Keenetic (docs/ROUTERS_KEENETIC.md)**](docs/ROUTERS_KEENETIC.md) | Установка через Entware/OPKG, автозапуск `init.d`, модели MIPS/ARM64 |
 | 📡 **OpenWrt** | [**Инструкция для OpenWrt (docs/ROUTERS_OPENWRT.md)**](docs/ROUTERS_OPENWRT.md) | Служба `procd`, интеграция в систему, минимальное потребление RAM |
-| 📱 **Android** | [**Инструкция для Android (docs/ANDROID.md)**](docs/ANDROID.md) | Запуск через Termux, мобильный Web UI, WireGuard Android App |
+| 📱 **Android** | [**Инструкция для Android (docs/ANDROID.md)**](docs/ANDROID.md) | Запуск через Termux, QR-код сканирование, AmneziaWG Android App |
 | 💬 **Сигнализация** | [**Настройка Telegram / MQTT / DNS (docs/SIGNALING_SETUP.md)**](docs/SIGNALING_SETUP.md) | Пошаговое создание бота, настройка брокеров и топиков |
 | 🔒 **WireGuard** | [**Принцип работы Mesh-сети (docs/WIREGUARD_MESH.md)**](docs/WIREGUARD_MESH.md) | UDP Hole Punching, адресация подсети `10.200.0.0/24` |
 

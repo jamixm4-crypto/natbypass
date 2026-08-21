@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -43,6 +44,14 @@ type AppState struct {
 	StartedAt      time.Time `json:"started_at"`
 }
 
+// EventEntry — запись в журнале событий NatBypass
+type EventEntry struct {
+	Time    time.Time `json:"time"`
+	Type    string    `json:"type"`   // peer_online, peer_offline, channel_switch, ip_change, info, warn, error
+	Message string    `json:"message"`
+	Detail  string    `json:"detail,omitempty"`
+}
+
 // Server — встроенный Web UI HTTP-сервер
 type Server struct {
 	port       int
@@ -53,6 +62,10 @@ type Server struct {
 	sigMgr     *signaling.FallbackManager
 	state      *AppState
 	srv        *http.Server
+	events     []EventEntry
+	eventsMu   sync.Mutex
+	setupDone  bool
+	deviceName string
 }
 
 // NewServer создаёт новый экземпляр Web UI сервера
@@ -86,9 +99,30 @@ func (s *Server) SetAppState(deviceID, publicIP, stunAddr string) {
 	}
 }
 
+// SetDeviceName задаёт человекочитаемое имя устройства
+func (s *Server) SetDeviceName(name string) {
+	s.deviceName = name
+}
+
 // GetPort возвращает актуальный порт, на котором работает сервер
 func (s *Server) GetPort() int {
 	return s.port
+}
+
+// AddEvent добавляет событие в кольцевой буфер (до 200 записей)
+func (s *Server) AddEvent(eventType, message, detail string) {
+	s.eventsMu.Lock()
+	defer s.eventsMu.Unlock()
+	entry := EventEntry{
+		Time:    time.Now(),
+		Type:    eventType,
+		Message: message,
+		Detail:  detail,
+	}
+	s.events = append(s.events, entry)
+	if len(s.events) > 200 {
+		s.events = s.events[len(s.events)-200:]
+	}
 }
 
 // Start запускает HTTP-сервер и ждёт отмены контекста (с авто-перебором порта при занятости)
@@ -106,6 +140,16 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/awg/config", s.handleAWGConfig)
 	mux.HandleFunc("/api/awg/random-params", s.handleAWGRandomParams)
 	mux.HandleFunc("/api/restart", s.handleRestart)
+	// Тест подключений
+	mux.HandleFunc("/api/test/telegram", s.handleTestTelegram)
+	mux.HandleFunc("/api/test/mqtt", s.handleTestMQTT)
+	// Новые UX-эндпоинты
+	mux.HandleFunc("/api/diagnose", s.handleDiagnose)
+	mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
+	mux.HandleFunc("/api/setup/complete", s.handleSetupComplete)
+	mux.HandleFunc("/api/events", s.handleEvents)
+	mux.HandleFunc("/api/device/rename", s.handleDeviceRename)
+	mux.HandleFunc("/api/qr/invite", s.handleQRInvite)
 
 	handler := s.corsMiddleware(s.authMiddleware(mux))
 
@@ -249,6 +293,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	status := map[string]interface{}{
 		"device_id":       s.state.DeviceID,
+		"device_name":     s.deviceName,
 		"public_ip":       s.state.PublicIP,
 		"stun_addr":       s.state.STUNAddr,
 		"uptime":          uptime,
@@ -623,4 +668,219 @@ func (s *Server) handleAWGConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="amneziawg-mesh.conf"`)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(content))
+}
+
+// handleDiagnose — GET /api/diagnose — полная диагностика подключения
+func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	type check struct {
+		Ok     bool   `json:"ok"`
+		Detail string `json:"detail"`
+		Extra  string `json:"extra,omitempty"`
+	}
+
+	result := map[string]interface{}{}
+
+	// Проверка доступности интернета
+	conn, err := net.DialTimeout("tcp", "1.1.1.1:80", 3*time.Second)
+	if err == nil {
+		conn.Close()
+		result["internet"] = check{Ok: true, Detail: "Интернет доступен"}
+	} else {
+		result["internet"] = check{Ok: false, Detail: "Нет доступа к интернету: " + err.Error()}
+	}
+
+	// Проверка публичного IP
+	pip := ""
+	if s.state != nil {
+		pip = s.state.PublicIP
+	}
+	if pip != "" && pip != "Определяется..." && pip != "<nil>" && pip != "0.0.0.0" {
+		result["public_ip"] = check{Ok: true, Detail: "Внешний IP определён", Extra: pip}
+	} else {
+		result["public_ip"] = check{Ok: false, Detail: "Внешний IP ещё не определён. Подождите несколько секунд."}
+	}
+
+	// Проверка STUN
+	stun := ""
+	if s.state != nil {
+		stun = s.state.STUNAddr
+	}
+	if stun != "" && stun != "Определяется..." {
+		result["stun"] = check{Ok: true, Detail: "STUN-адрес определён (возможен P2P)", Extra: stun}
+		result["nat_type"] = check{Ok: true, Detail: "Возможен Full Cone NAT — P2P соединение доступно"}
+	} else {
+		result["stun"] = check{Ok: false, Detail: "STUN-адрес не определён. Возможно симметричный NAT."}
+		result["nat_type"] = check{Ok: false, Detail: "Симметричный NAT или CGNAT — потребуется relay-канал"}
+	}
+
+	// Проверка сигнального канала
+	ch := ""
+	if s.sigMgr != nil {
+		ch = s.sigMgr.CurrentChannel()
+	}
+	if ch != "" {
+		result["channel"] = check{Ok: true, Detail: "Сигнальный канал активен", Extra: ch}
+	} else {
+		result["channel"] = check{Ok: false, Detail: "Сигнальный канал не настроен. Настройте Telegram или MQTT в разделе Настройки."}
+	}
+
+	// Проверка пиров
+	peers := s.registry.List()
+	if len(peers) > 0 {
+		result["peers"] = check{Ok: true, Detail: fmt.Sprintf("Обнаружено %d устройств в сети", len(peers)), Extra: fmt.Sprintf("%d", len(peers))}
+	} else {
+		result["peers"] = check{Ok: false, Detail: "Устройства не обнаружены. Запустите NatBypass на втором устройстве с теми же настройками.", Extra: "0"}
+	}
+
+	s.AddEvent("info", "Запущена диагностика подключения", fmt.Sprintf("channel=%s ip=%s", ch, pip))
+	s.jsonResponse(w, http.StatusOK, result, "")
+}
+
+// handleSetupStatus — GET /api/setup/status — статус мастера первоначальной настройки
+func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	hasChannels := false
+	if s.sigMgr != nil {
+		statuses := s.sigMgr.Status()
+		hasChannels = len(statuses) > 0
+	}
+
+	// Считаем настроенным, если в config.yaml есть не-публичный канал
+	configuredProperly := false
+	if cfg, err := config.Load(s.configPath); err == nil {
+		for _, ch := range cfg.Signaling.Channels {
+			if ch.Enabled && ch.Type != "" {
+				if p := ch.Params; p != nil {
+					if ch.Type == "telegram" && p["token"] != "" && p["token"] != "YOUR_BOT_TOKEN_HERE" {
+						configuredProperly = true
+					} else if ch.Type == "mqtt" && p["broker_url"] != "" {
+						configuredProperly = true
+					}
+				}
+			}
+		}
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"setup_done":          s.setupDone || configuredProperly,
+		"has_channels":        hasChannels,
+		"peers_count":         len(s.registry.List()),
+		"device_name":         s.deviceName,
+		"configured_properly": configuredProperly,
+	}, "")
+}
+
+// handleSetupComplete — POST /api/setup/complete — завершение мастера настройки
+func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		DeviceName string `json:"device_name"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	s.setupDone = true
+	if req.DeviceName != "" {
+		s.deviceName = req.DeviceName
+		if s.state != nil {
+			s.state.DeviceID = req.DeviceName
+		}
+	}
+	s.AddEvent("info", "Мастер настройки завершён", "device="+s.deviceName)
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "device_name": s.deviceName}, "")
+}
+
+// handleEvents — GET /api/events — журнал событий
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	limit := 50
+	if lq := r.URL.Query().Get("limit"); lq != "" {
+		var n int
+		if _, err := fmt.Sscanf(lq, "%d", &n); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+
+	s.eventsMu.Lock()
+	evts := make([]EventEntry, len(s.events))
+	copy(evts, s.events)
+	s.eventsMu.Unlock()
+
+	// Возвращаем последние N в обратном порядке (новые первые)
+	if len(evts) > limit {
+		evts = evts[len(evts)-limit:]
+	}
+	// Реверс — новые события первыми
+	for i, j := 0, len(evts)-1; i < j; i, j = i+1, j-1 {
+		evts[i], evts[j] = evts[j], evts[i]
+	}
+
+	s.jsonResponse(w, http.StatusOK, evts, "")
+}
+
+// handleDeviceRename — POST /api/device/rename — переименование устройства
+func (s *Server) handleDeviceRename(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "укажите новое имя устройства")
+		return
+	}
+	oldName := s.deviceName
+	s.deviceName = req.Name
+	if s.state != nil {
+		s.state.DeviceID = req.Name
+	}
+	s.AddEvent("info", fmt.Sprintf("Устройство переименовано: %s → %s", oldName, req.Name), "")
+	slog.Info("Устройство переименовано через Web UI", "old", oldName, "new", req.Name)
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "name": req.Name}, "")
+}
+
+// handleQRInvite — GET /api/qr/invite — данные для QR-кода приглашения
+func (s *Server) handleQRInvite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	ip := ""
+	stun := ""
+	devID := ""
+	devName := s.deviceName
+	if s.state != nil {
+		ip = s.state.PublicIP
+		stun = s.state.STUNAddr
+		devID = s.state.DeviceID
+	}
+
+	// Данные для QR-кода: ссылка для скачивания + информация об устройстве
+	inviteURL := "https://github.com/jamixm4-crypto/natbypass/releases/latest"
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"invite_url":  inviteURL,
+		"device_id":   devID,
+		"device_name": devName,
+		"public_ip":   ip,
+		"stun_addr":   stun,
+		"qr_text":     fmt.Sprintf("NatBypass|%s|%s|%s", devName, ip, inviteURL),
+	}, "")
 }

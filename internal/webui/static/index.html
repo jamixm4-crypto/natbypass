@@ -3,10 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NatBypass Panel</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🚀%3C/text%3E%3C/svg%3E">
+<title>NatBypass — Панель управления</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🛸%3C/text%3E%3C/svg%3E">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
-:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--green:#238636;--green-h:#2ea043;--red:#da3633;--red-h:#f85149;--blue:#1f6feb;--blue-h:#388bfd;--purple:#8957e5;--purple-h:#a371f7;--accent:#58a6ff;--input-bg:#21262d}
+:root{
+  --bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#c9d1d9;
+  --muted:#8b949e;--green:#238636;--green-h:#2ea043;--red:#da3633;
+  --red-h:#f85149;--blue:#1f6feb;--blue-h:#388bfd;--purple:#8957e5;
+  --purple-h:#a371f7;--accent:#58a6ff;--input-bg:#21262d;
+  --yellow:#d29922;--orange:#e3b341;
+}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;padding:20px;line-height:1.5}
 .container{max-width:1150px;margin:0 auto}
@@ -14,19 +21,17 @@ header{display:flex;justify-content:space-between;align-items:center;margin-bott
 .logo-title{font-size:1.5em;font-weight:bold;color:var(--accent);display:flex;align-items:center;gap:8px}
 .meta-grid{display:flex;flex-wrap:wrap;gap:14px;font-size:0.85em;color:var(--muted)}
 .meta-item b{color:var(--text)}
-
-/* Nav Tabs */
-nav{display:flex;gap:6px;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap}
-.nav-tab{padding:10px 18px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-size:0.95em;font-weight:bold;cursor:pointer;display:flex;align-items:center;gap:8px;transition:all .2s}
+.edit-name{color:var(--accent);cursor:pointer;font-size:0.9em;margin-left:4px}
+nav{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px;flex-wrap:wrap}
+.nav-tab{padding:10px 16px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-size:0.9em;font-weight:bold;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .2s}
 .nav-tab:hover{color:var(--text)}
 .nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-
 .tab-pane{display:none}
 .tab-pane.active{display:block}
 
-/* Panels & Cards */
+/* Panels */
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:20px}
-.panel-title{font-size:1.05em;margin-bottom:16px;color:var(--accent);font-weight:bold;display:flex;justify-content:space-between;align-items:center}
+.panel-title{font-size:1.05em;margin-bottom:16px;color:var(--accent);font-weight:bold;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:20px}
 .stat-box{background:var(--input-bg);border:1px solid var(--border);border-radius:6px;padding:14px}
 .stat-lbl{font-size:0.75em;color:var(--muted);text-transform:uppercase;margin-bottom:4px}
@@ -34,7 +39,7 @@ nav{display:flex;gap:6px;border-bottom:1px solid var(--border);margin-bottom:20p
 
 /* Tables */
 table{width:100%;border-collapse:collapse}
-th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border)}
 th{color:var(--muted);font-weight:600;font-size:0.8em;text-transform:uppercase}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:rgba(255,255,255,0.02)}
@@ -43,11 +48,12 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.78em;font-weight:bold}
 .badge.online{background:rgba(63,185,80,0.15);color:#3fb950;border:1px solid #238636}
 .badge.offline{background:rgba(248,81,73,0.15);color:#f85149;border:1px solid #da3633}
+.badge.warn{background:rgba(210,153,34,0.15);color:#d29922;border:1px solid #d29922}
 
 /* Forms */
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px}
 .form-group{display:flex;flex-direction:column;gap:6px}
-.form-group label{font-size:0.85em;color:var(--text);font-weight:600}
+.form-group label{font-size:0.85em;color:var(--text);font-weight:600;display:flex;align-items:center;gap:4px}
 .form-group .hint{font-size:0.75em;color:var(--muted)}
 .form-input{width:100%;padding:9px 12px;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.9em;font-family:inherit}
 .form-input:focus{outline:none;border-color:var(--accent)}
@@ -60,11 +66,88 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 .btn-purple{background:var(--purple);color:#fff}.btn-purple:hover{background:var(--purple-h)}
 .btn-danger{background:var(--red);color:#fff}.btn-danger:hover{background:var(--red-h)}
 .btn-secondary{background:var(--input-bg);color:var(--text);border:1px solid var(--border)}.btn-secondary:hover{background:#30363d}
+.btn-large{padding:12px 24px;font-size:1em}
 
 /* Toast */
-.toast{position:fixed;bottom:24px;right:24px;background:#1f242c;border:1px solid var(--border);color:#fff;padding:12px 20px;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,0.5);opacity:0;transition:opacity .3s;z-index:999;pointer-events:none}
+.toast{position:fixed;bottom:24px;right:24px;background:#1f242c;border:1px solid var(--border);color:#fff;padding:12px 20px;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,0.5);opacity:0;transition:opacity .3s;z-index:999;pointer-events:none;max-width:380px}
 .toast.show{opacity:1}
 .empty{color:var(--muted);text-align:center;padding:24px}
+
+/* Tooltip */
+.tooltip-wrap{position:relative;display:inline-flex;align-items:center}
+.tooltip-icon{color:var(--muted);cursor:help;margin-left:4px;font-size:0.85em;user-select:none}
+.tooltip-popup{display:none;position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1f2937;border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:6px;font-size:0.78em;z-index:100;max-width:260px;white-space:normal;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,.4)}
+.tooltip-wrap:hover .tooltip-popup{display:block}
+
+/* Callout banner */
+.callout{border-radius:8px;padding:16px 20px;margin-bottom:16px;display:flex;gap:14px;align-items:flex-start}
+.callout-info{background:rgba(31,111,235,0.12);border:1px solid rgba(31,111,235,0.3)}
+.callout-success{background:rgba(35,134,54,0.12);border:1px solid rgba(35,134,54,0.3)}
+.callout-warn{background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.3)}
+.callout-icon{font-size:1.4em;flex-shrink:0}
+.callout-text{flex:1}
+.callout-title{font-weight:bold;margin-bottom:4px}
+.callout-desc{font-size:0.85em;color:var(--muted)}
+
+/* Wizard */
+.wizard-steps{display:flex;align-items:center;margin-bottom:28px;gap:0}
+.wizard-step{display:flex;align-items:center;gap:8px;flex:1}
+.wizard-step-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:0.85em;flex-shrink:0;transition:all .3s}
+.wizard-step-num.done{background:var(--green);color:#fff}
+.wizard-step-num.active{background:var(--accent);color:#000}
+.wizard-step-num.pending{background:var(--input-bg);color:var(--muted);border:1px solid var(--border)}
+.wizard-step-label{font-size:0.82em;color:var(--muted);white-space:nowrap}
+.wizard-step-label.active{color:var(--text);font-weight:bold}
+.wizard-connector{flex:1;height:2px;background:var(--border);margin:0 6px;min-width:12px}
+.wizard-connector.done{background:var(--green)}
+.channel-cards{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.channel-card{border:2px solid var(--border);border-radius:10px;padding:20px;cursor:pointer;transition:all .2s;text-align:center}
+.channel-card:hover,.channel-card.selected{border-color:var(--accent);background:rgba(88,166,255,0.06)}
+.channel-card h3{margin-bottom:8px;font-size:1.1em}
+.channel-card p{color:var(--muted);font-size:0.85em}
+.channel-card .tag{display:inline-block;background:rgba(35,134,54,0.2);color:#3fb950;border-radius:20px;padding:2px 10px;font-size:0.75em;margin-top:8px}
+.success-screen{text-align:center;padding:30px 20px}
+.success-screen .check{font-size:4em;margin-bottom:16px;animation:popIn .4s ease}
+@keyframes popIn{0%{transform:scale(0.5);opacity:0}80%{transform:scale(1.2)}100%{transform:scale(1);opacity:1}}
+
+/* Diagnostics */
+.diag-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.diag-item{background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;gap:12px;align-items:flex-start}
+.diag-icon{font-size:1.3em;flex-shrink:0;margin-top:2px}
+.diag-info{flex:1}
+.diag-title{font-weight:bold;font-size:0.9em;margin-bottom:2px}
+.diag-detail{font-size:0.8em;color:var(--muted)}
+.diag-extra{font-size:0.78em;color:var(--accent);margin-top:2px;word-break:break-all}
+
+/* AWG Presets */
+.preset-tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.preset-btn{padding:8px 18px;border:2px solid var(--border);border-radius:20px;background:var(--input-bg);color:var(--muted);font-weight:600;font-size:0.85em;cursor:pointer;transition:all .2s}
+.preset-btn:hover{border-color:var(--accent);color:var(--text)}
+.preset-btn.active{border-color:var(--accent);color:var(--accent);background:rgba(88,166,255,0.08)}
+
+/* Platform tabs */
+.platform-tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.platform-tab-btn{padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg);color:var(--muted);cursor:font-size:0.83em;transition:all .2s}
+.platform-tab-btn:hover,.platform-tab-btn.active{background:var(--blue);color:#fff;border-color:var(--blue)}
+.platform-pane{display:none}
+.platform-pane.active{display:block}
+
+/* Events */
+.event-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);align-items:flex-start}
+.event-item:last-child{border-bottom:none}
+.event-icon{font-size:1.1em;flex-shrink:0;margin-top:1px}
+.event-body{flex:1}
+.event-msg{font-size:0.9em}
+.event-detail{font-size:0.78em;color:var(--muted)}
+.event-time{font-size:0.75em;color:var(--muted);white-space:nowrap}
+
+/* Collapsible sections */
+.section-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:0;user-select:none}
+.section-header:hover{color:var(--accent)}
+.section-body{padding-top:16px}
+.section-body.collapsed{display:none}
+.section-arrow{transition:transform .2s;font-size:0.8em;color:var(--muted)}
+.section-arrow.open{transform:rotate(90deg)}
 </style>
 </head>
 <body>
@@ -72,7 +155,7 @@ tr:hover td{background:rgba(255,255,255,0.02)}
   <header>
     <div class="logo-title">🛸 NatBypass <span style="font-size:0.6em;color:var(--muted);font-weight:normal;">P2P Network</span></div>
     <div class="meta-grid">
-      <div class="meta-item">Device: <b id="hDeviceID">—</b></div>
+      <div class="meta-item">Устройство: <b id="hDeviceID">—</b> <span class="edit-name" onclick="promptRename()" title="Переименовать">✏️</span></div>
       <div class="meta-item">IP: <b id="hPublicIP">—</b></div>
       <div class="meta-item">STUN: <b id="hStun">—</b></div>
       <div class="meta-item">Канал: <b id="hChannel">—</b></div>
@@ -81,19 +164,218 @@ tr:hover td{background:rgba(255,255,255,0.02)}
   </header>
 
   <nav>
-    <button class="nav-tab active" onclick="showTab('tab-peers')">👥 Устройства в сети</button>
-    <button class="nav-tab" onclick="showTab('tab-settings')">⚙ Настройки Telegram & Сети</button>
-    <button class="nav-tab" onclick="showTab('tab-awg')">🛡️ AmneziaWG 2.0 (DPI Bypass)</button>
-    <button class="nav-tab" onclick="showTab('tab-wireguard')">🔒 WireGuard Mesh</button>
-    <button class="nav-tab" onclick="showTab('tab-channels')">📡 Сигнальные каналы</button>
+    <button class="nav-tab active" onclick="showTab('tab-wizard',this)">🚀 Быстрый старт</button>
+    <button class="nav-tab" onclick="showTab('tab-peers',this)">👥 Устройства</button>
+    <button class="nav-tab" onclick="showTab('tab-settings',this)">⚙ Настройки</button>
+    <button class="nav-tab" onclick="showTab('tab-awg',this)">🛡️ AmneziaWG 2.0</button>
+    <button class="nav-tab" onclick="showTab('tab-wireguard',this)">🔒 WireGuard</button>
+    <button class="nav-tab" onclick="showTab('tab-events',this)">📋 События</button>
+    <button class="nav-tab" onclick="showTab('tab-channels',this)">📡 Каналы</button>
   </nav>
 
-  <!-- TAB 1: PEERS -->
-  <div id="tab-peers" class="tab-pane active">
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- TAB 1: WIZARD — БЫСТРЫЙ СТАРТ                         -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <div id="tab-wizard" class="tab-pane active">
+
+    <!-- Шаги мастера -->
+    <div class="wizard-steps" id="wizSteps">
+      <div class="wizard-step">
+        <div class="wizard-step-num active" id="ws1">1</div>
+        <span class="wizard-step-label active" id="wl1">Канал связи</span>
+      </div>
+      <div class="wizard-connector" id="wc1"></div>
+      <div class="wizard-step">
+        <div class="wizard-step-num pending" id="ws2">2</div>
+        <span class="wizard-step-label" id="wl2">Настройка</span>
+      </div>
+      <div class="wizard-connector" id="wc2"></div>
+      <div class="wizard-step">
+        <div class="wizard-step-num pending" id="ws3">3</div>
+        <span class="wizard-step-label" id="wl3">Имя устройства</span>
+      </div>
+      <div class="wizard-connector" id="wc3"></div>
+      <div class="wizard-step">
+        <div class="wizard-step-num pending" id="ws4">✓</div>
+        <span class="wizard-step-label" id="wl4">Готово!</span>
+      </div>
+    </div>
+
+    <!-- Шаг 1: Выбор канала -->
+    <div id="wizPane1">
+      <div class="panel">
+        <div class="panel-title">Как устройства будут «видеть» друг друга?</div>
+        <p style="color:var(--muted);margin-bottom:20px;font-size:0.9em;">
+          Сигнальный канал — это мессенджер или брокер, через который устройства обмениваются адресами.
+          После обмена они соединяются напрямую (P2P), не через сервер.
+        </p>
+        <div class="channel-cards">
+          <div class="channel-card" onclick="wizChoose('telegram')" id="cc-telegram">
+            <div style="font-size:2em;margin-bottom:8px;">💬</div>
+            <h3>Telegram Bot</h3>
+            <p>Самый надёжный способ. Нужен бесплатный бот в Telegram.</p>
+            <div class="tag">✓ Рекомендуется</div>
+          </div>
+          <div class="channel-card" onclick="wizChoose('mqtt')" id="cc-mqtt">
+            <div style="font-size:2em;margin-bottom:8px;">⚡</div>
+            <h3>MQTT Брокер</h3>
+            <p>Работает без Telegram. Используем бесплатный публичный брокер.</p>
+          </div>
+        </div>
+        <p style="text-align:center;">
+          <a href="#" onclick="wizSkip(); return false;" style="color:var(--muted);font-size:0.85em;">
+            Пропустить — использовать публичный канал автоматически
+          </a>
+        </p>
+      </div>
+    </div>
+
+    <!-- Шаг 2a: Настройка Telegram -->
+    <div id="wizPane2tg" style="display:none;">
+      <div class="panel">
+        <div class="panel-title">💬 Настройка Telegram Bot</div>
+        <div style="background:var(--input-bg);border-radius:8px;padding:16px;margin-bottom:20px;font-size:0.9em;">
+          <div style="font-weight:bold;margin-bottom:10px;">📋 Инструкция (1 минута):</div>
+          <ol style="padding-left:20px;line-height:2em;color:var(--muted);">
+            <li>Откройте Telegram → найдите <b style="color:var(--text);">@BotFather</b></li>
+            <li>Отправьте <code style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;">/newbot</code> и следуйте инструкции</li>
+            <li>Скопируйте <b style="color:var(--accent);">токен бота</b> (вида <code>7123456789:AAF...</code>)</li>
+            <li>Найдите <b style="color:var(--text);">@userinfobot</b> и узнайте ваш <b style="color:var(--accent);">chat_id</b></li>
+          </ol>
+        </div>
+        <div class="form-grid">
+          <div class="form-group" style="grid-column:span 2;">
+            <label>Токен бота:</label>
+            <div class="input-with-btn">
+              <input type="password" id="wizTgToken" class="form-input" placeholder="7123456789:AAFlkjhsdf987...">
+              <button class="btn btn-secondary" onclick="togglePass('wizTgToken')">👁</button>
+              <button class="btn btn-blue" onclick="wizTestTelegram()">🧪 Проверить</button>
+            </div>
+            <span class="hint" id="wizTgStatus"></span>
+          </div>
+          <div class="form-group">
+            <label>Chat ID:</label>
+            <input type="text" id="wizTgChat" class="form-input" placeholder="123456789">
+            <span class="hint">Узнайте через @userinfobot или @RawDataBot</span>
+          </div>
+          <div class="form-group">
+            <label>SOCKS5 прокси (если Telegram заблокирован):</label>
+            <input type="text" id="wizTgProxy" class="form-input" placeholder="socks5://127.0.0.1:1080">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-large" onclick="wizSaveTelegram()">✓ Сохранить и продолжить</button>
+          <button class="btn btn-secondary" onclick="setWizStep(1)">← Назад</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Шаг 2b: Настройка MQTT -->
+    <div id="wizPane2mqtt" style="display:none;">
+      <div class="panel">
+        <div class="panel-title">⚡ Настройка MQTT Брокера</div>
+        <div class="callout callout-info">
+          <div class="callout-icon">ℹ️</div>
+          <div class="callout-text">
+            <div class="callout-title">Публичный брокер готов к использованию</div>
+            <div class="callout-desc">Мы уже заполнили надёжный публичный брокер. Сделайте топик уникальным — это ваш «пароль» от чужих устройств.</div>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group" style="grid-column:span 2;">
+            <label>MQTT Брокер:
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">ℹ️</span>
+                <span class="tooltip-popup">Адрес MQTT-сервера для обмена данными. По умолчанию используется публичный бесплатный брокер.</span>
+              </span>
+            </label>
+            <div class="input-with-btn">
+              <input type="text" id="wizMqttBroker" class="form-input" value="tcp://mqtt.eclipseprojects.io:1883">
+              <button class="btn btn-blue" onclick="wizTestMQTT()">🧪 Проверить</button>
+            </div>
+          </div>
+          <div class="form-group" style="grid-column:span 2;">
+            <label>Топик (уникальный для вашей сети):
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">ℹ️</span>
+                <span class="tooltip-popup">Топик — это «комната» для ваших устройств. Используйте уникальную строку, как пароль. Все устройства должны использовать одинаковый топик.</span>
+              </span>
+            </label>
+            <input type="text" id="wizMqttTopic" class="form-input" value="natbypass/mynet/peers">
+            <span class="hint">Измените «mynet» на что-то уникальное (напр. вашу фамилию или случайные слова)</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-large" onclick="wizSaveMQTT()">✓ Сохранить и продолжить</button>
+          <button class="btn btn-secondary" onclick="setWizStep(1)">← Назад</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Шаг 3: Имя устройства -->
+    <div id="wizPane3" style="display:none;">
+      <div class="panel">
+        <div class="panel-title">✏️ Дайте имя этому устройству</div>
+        <p style="color:var(--muted);margin-bottom:20px;font-size:0.9em;">
+          Понятное имя поможет отличить устройства в списке (вместо технических кодов).
+        </p>
+        <div class="form-group" style="max-width:400px;margin-bottom:20px;">
+          <label>Имя устройства:</label>
+          <input type="text" id="wizDevName" class="form-input" placeholder="Например: ПК-Дома, Ноутбук, Роутер-Кинетик">
+          <span class="hint">Это имя будут видеть другие устройства в вашей сети</span>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-large" onclick="wizFinish()">🎉 Готово!</button>
+          <button class="btn btn-secondary" onclick="setWizStep(2)">← Назад</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Шаг 4: Успех -->
+    <div id="wizPane4" style="display:none;">
+      <div class="panel">
+        <div class="success-screen">
+          <div class="check">✅</div>
+          <h2 style="margin-bottom:8px;color:var(--text);">Всё настроено!</h2>
+          <p style="color:var(--muted);margin-bottom:24px;">Ваша сеть NatBypass работает. Теперь установите NatBypass на второе устройство.</p>
+
+          <div style="display:inline-block;background:var(--input-bg);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:24px;">
+            <div style="font-weight:bold;margin-bottom:12px;color:var(--text);">📱 Сканируйте QR-код на втором устройстве</div>
+            <div id="wizQrDiv" style="display:inline-block;background:#fff;padding:10px;border-radius:8px;"></div>
+            <div style="font-size:0.78em;color:var(--muted);margin-top:8px;">или скачайте с GitHub</div>
+          </div>
+
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:20px;">
+            <a href="https://github.com/jamixm4-crypto/natbypass/releases/latest" target="_blank" class="btn btn-primary">📥 Скачать NatBypass</a>
+            <button class="btn btn-blue" onclick="showTab('tab-peers',document.querySelectorAll('.nav-tab')[1])">👥 К устройствам →</button>
+          </div>
+
+          <div style="background:var(--input-bg);border-radius:8px;padding:16px;text-align:left;max-width:500px;margin:0 auto;">
+            <div style="font-weight:bold;margin-bottom:8px;">🔑 Ваши данные для второго устройства:</div>
+            <div id="wizSummary" style="font-size:0.85em;color:var(--muted);line-height:1.8;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Диагностика на экране успеха -->
+      <div class="panel">
+        <div class="panel-title">🩺 Проверка подключения <button class="btn btn-secondary" onclick="runDiagnose()">🔄 Запустить</button></div>
+        <div id="diagGrid" class="diag-grid">
+          <div class="empty">Нажмите «Запустить» для проверки соединения</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- TAB 2: PEERS — УСТРОЙСТВА В СЕТИ                      -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <div id="tab-peers" class="tab-pane">
     <div class="stats-grid">
       <div class="stat-box">
         <div class="stat-lbl">Статус сети</div>
-        <div class="stat-val" style="color:#3fb950;">🟢 ОНЛАЙН</div>
+        <div class="stat-val" id="statNetStatus" style="color:#3fb950;">🟢 ОНЛАЙН</div>
       </div>
       <div class="stat-box">
         <div class="stat-lbl">Устройств в сети</div>
@@ -101,7 +383,7 @@ tr:hover td{background:rgba(255,255,255,0.02)}
       </div>
       <div class="stat-box">
         <div class="stat-lbl">Активный канал</div>
-        <div class="stat-val" id="statCurChannel">telegram</div>
+        <div class="stat-val" id="statCurChannel">—</div>
       </div>
       <div class="stat-box">
         <div class="stat-lbl">Публичный сокет</div>
@@ -109,17 +391,32 @@ tr:hover td{background:rgba(255,255,255,0.02)}
       </div>
     </div>
 
+    <!-- Баннер при 0 пирах -->
+    <div id="emptyPeersBanner" style="display:none;">
+      <div class="callout callout-info">
+        <div class="callout-icon">📡</div>
+        <div class="callout-text">
+          <div class="callout-title">Ожидаем другие устройства...</div>
+          <div class="callout-desc">
+            Установите NatBypass на второе устройство (ПК, роутер, телефон) с теми же настройками Telegram/MQTT.
+            Устройства появятся здесь автоматически через 1–2 минуты.
+          </div>
+        </div>
+        <button class="btn btn-blue" onclick="showTab('tab-wizard',document.querySelectorAll('.nav-tab')[0])">🚀 Мастер →</button>
+      </div>
+    </div>
+
     <div class="panel">
       <div class="panel-title">
         <span>Обнаруженные P2P узлы</span>
-        <button class="btn btn-secondary" onclick="loadPeers()">🔄 Обновить список</button>
+        <button class="btn btn-secondary" onclick="loadPeers()">🔄 Обновить</button>
       </div>
       <table>
         <thead><tr>
-          <th>Устройство</th><th>Публичный IP</th><th>STUN сокет</th>
-          <th>WireGuard Key</th><th>Порт</th><th>Статус</th><th>Был в сети</th>
+          <th>Устройство</th><th>IP-адрес</th><th>STUN-сокет</th>
+          <th>WireGuard ключ</th><th>Порт</th><th>Статус</th><th>Был в сети</th>
         </tr></thead>
-        <tbody id="peersTable"><tr><td class="empty" colspan="7">Поиск устройств в сети...</td></tr></tbody>
+        <tbody id="peersTable"><tr><td class="empty" colspan="7">Поиск устройств...</td></tr></tbody>
       </table>
     </div>
 
@@ -127,296 +424,757 @@ tr:hover td{background:rgba(255,255,255,0.02)}
       <div class="panel-title">Быстрые действия</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn btn-primary" onclick="refreshIP()">⚡ Обновить внешний IP</button>
-        <button class="btn btn-purple" onclick="downloadAWG()">🛡️ Скачать AmneziaWG 2.0</button>
-        <button class="btn btn-blue" onclick="downloadWG()">📥 Скачать WireGuard wg-mesh.conf</button>
-        <button class="btn btn-danger" onclick="restartDaemon()">⚠️ Перезапустить сервис</button>
+        <button class="btn btn-purple" onclick="downloadAWG()">🛡️ Скачать AmneziaWG конфиг</button>
+        <button class="btn btn-blue" onclick="downloadWG()">📥 Скачать WireGuard конфиг</button>
+        <button class="btn btn-secondary" onclick="runDiagnose(); showTab('tab-wizard',document.querySelectorAll('.nav-tab')[0])">🩺 Диагностика</button>
+        <button class="btn btn-danger" onclick="restartDaemon()">⚠️ Перезапустить</button>
       </div>
     </div>
   </div>
 
-  <!-- TAB 2: SETTINGS -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- TAB 3: SETTINGS — НАСТРОЙКИ                           -->
+  <!-- ═══════════════════════════════════════════════════════ -->
   <div id="tab-settings" class="tab-pane">
+
+    <!-- Telegram -->
     <div class="panel">
-      <div class="panel-title">💬 Настройка Telegram Bot API</div>
-      <div class="form-grid">
-        <div class="form-group" style="grid-column: span 2;">
-          <label>Telegram Bot Token:</label>
-          <div class="input-with-btn">
-            <input type="password" id="cfgTgToken" class="form-input" placeholder="7123456789:AAFlkjhsdf987..." />
-            <button class="btn btn-secondary" onclick="togglePass('cfgTgToken')">👁</button>
-            <button class="btn btn-blue" onclick="testTelegram()">🧪 Проверить Telegram</button>
-          </div>
-          <span class="hint">Токен бота, полученный у @BotFather в Telegram.</span>
-        </div>
-
-        <div class="form-group">
-          <label>Chat ID / ID Канала:</label>
-          <input type="text" id="cfgTgChatID" class="form-input" placeholder="-1001234567890" />
-          <span class="hint">ID приватной группы или канала (обычно начинается с -100).</span>
-        </div>
-
-        <div class="form-group">
-          <label>SOCKS5 / HTTP Прокси (опционально):</label>
-          <input type="text" id="cfgTgProxy" class="form-input" placeholder="socks5://127.0.0.1:1080" />
-          <span class="hint">Используется при блокировках доступа к Telegram API.</span>
-        </div>
+      <div class="section-header" onclick="toggleSection('secTg','arrowTg')">
+        <span>💬 Telegram Bot <span id="tgStatusBadge" style="margin-left:8px;"></span></span>
+        <span class="section-arrow open" id="arrowTg">▶</span>
       </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-title">⚡ Настройка MQTT Брокера</div>
-      <div class="form-grid">
-        <div class="form-group" style="grid-column: span 2;">
-          <label>MQTT Broker URL:</label>
-          <div class="input-with-btn">
-            <input type="text" id="cfgMqttBroker" class="form-input" value="tcp://mqtt.eclipseprojects.io:1883" />
-            <button class="btn btn-blue" onclick="testMQTT()">🧪 Проверить MQTT</button>
+      <div class="section-body" id="secTg">
+        <div class="form-grid" style="margin-top:16px;">
+          <div class="form-group" style="grid-column:span 2;">
+            <label>Токен бота:
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">ℹ️</span>
+                <span class="tooltip-popup">Получите у @BotFather. Выглядит как 7123456789:AAF...</span>
+              </span>
+            </label>
+            <div class="input-with-btn">
+              <input type="password" id="cfgTgToken" class="form-input" placeholder="7123456789:AAFlkjhsdf987...">
+              <button class="btn btn-secondary" onclick="togglePass('cfgTgToken')">👁</button>
+              <button class="btn btn-blue" onclick="testTelegram()">🧪 Проверить</button>
+            </div>
+            <span class="hint">Токен бота от @BotFather в Telegram</span>
           </div>
-        </div>
-
-        <div class="form-group">
-          <label>MQTT Topic:</label>
-          <input type="text" id="cfgMqttTopic" class="form-input" value="natbypass/mynet/peers" />
-        </div>
-
-        <div class="form-group">
-          <label>Логин / Пароль (опционально):</label>
-          <div class="input-with-btn">
-            <input type="text" id="cfgMqttUser" class="form-input" placeholder="User" style="width:50%" />
-            <input type="password" id="cfgMqttPass" class="form-input" placeholder="Pass" style="width:50%" />
+          <div class="form-group">
+            <label>Chat ID:</label>
+            <input type="text" id="cfgTgChatID" class="form-input" placeholder="-1001234567890 или 123456789">
+            <span class="hint">Узнайте через @userinfobot или @RawDataBot</span>
+          </div>
+          <div class="form-group">
+            <label>SOCKS5 / HTTP прокси:
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">ℹ️</span>
+                <span class="tooltip-popup">Используйте если Telegram заблокирован в вашем регионе.</span>
+              </span>
+            </label>
+            <input type="text" id="cfgTgProxy" class="form-input" placeholder="socks5://127.0.0.1:1080">
           </div>
         </div>
       </div>
     </div>
 
+    <!-- MQTT -->
     <div class="panel">
-      <div class="panel-title">🔒 Параметры WireGuard, AWG 2.0 & Сети</div>
-      <div class="form-grid">
-        <div class="form-group">
-          <label>WireGuard / AWG Port:</label>
-          <input type="number" id="cfgWgPort" class="form-input" value="51820" />
-        </div>
-        <div class="form-group">
-          <label>MTU:</label>
-          <input type="number" id="cfgWgMTU" class="form-input" value="1420" />
-        </div>
-        <div class="form-group">
-          <label>UPnP автоматический проброс портов:</label>
-          <label style="font-weight:normal;display:flex;align-items:center;gap:8px;margin-top:6px;">
-            <input type="checkbox" id="cfgUpnp" checked /> Включить UPnP/NAT-PMP
-          </label>
-        </div>
-        <div class="form-group">
-          <label>Web UI Порт:</label>
-          <input type="number" id="cfgWebPort" class="form-input" value="8080" />
+      <div class="section-header" onclick="toggleSection('secMqtt','arrowMqtt')">
+        <span>⚡ MQTT Брокер</span>
+        <span class="section-arrow open" id="arrowMqtt">▶</span>
+      </div>
+      <div class="section-body" id="secMqtt">
+        <div class="form-grid" style="margin-top:16px;">
+          <div class="form-group" style="grid-column:span 2;">
+            <label>Broker URL:
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">ℹ️</span>
+                <span class="tooltip-popup">Адрес MQTT сервера. Формат: tcp://host:1883 или ssl://host:8883</span>
+              </span>
+            </label>
+            <div class="input-with-btn">
+              <input type="text" id="cfgMqttBroker" class="form-input" value="tcp://mqtt.eclipseprojects.io:1883">
+              <button class="btn btn-blue" onclick="testMQTT()">🧪 Проверить</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Топик:
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">ℹ️</span>
+                <span class="tooltip-popup">Уникальная строка для вашей сети — аналог пароля. Все устройства должны использовать один топик.</span>
+              </span>
+            </label>
+            <input type="text" id="cfgMqttTopic" class="form-input" value="natbypass/mynet/peers">
+          </div>
+          <div class="form-group">
+            <label>Логин / Пароль (опционально):</label>
+            <div class="input-with-btn">
+              <input type="text" id="cfgMqttUser" class="form-input" placeholder="Логин" style="width:50%">
+              <input type="password" id="cfgMqttPass" class="form-input" placeholder="Пароль" style="width:50%">
+            </div>
+          </div>
         </div>
       </div>
+    </div>
 
-      <div style="margin-top:16px;">
-        <button class="btn btn-primary" style="padding:10px 24px;font-size:1em;" onclick="saveConfig()">💾 Сохранить и применить настройки</button>
+    <!-- Сеть и WireGuard -->
+    <div class="panel">
+      <div class="section-header" onclick="toggleSection('secNet','arrowNet')">
+        <span>🌐 Сеть и WireGuard</span>
+        <span class="section-arrow open" id="arrowNet">▶</span>
       </div>
+      <div class="section-body" id="secNet">
+        <div class="form-grid" style="margin-top:16px;">
+          <div class="form-group">
+            <label>WireGuard / AWG Порт:</label>
+            <input type="number" id="cfgWgPort" class="form-input" value="51820">
+          </div>
+          <div class="form-group">
+            <label>MTU:
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">ℹ️</span>
+                <span class="tooltip-popup">Максимальный размер пакета. Уменьшите до 1280 при проблемах со связью.</span>
+              </span>
+            </label>
+            <input type="number" id="cfgWgMTU" class="form-input" value="1420">
+          </div>
+          <div class="form-group">
+            <label>Web UI порт:</label>
+            <input type="number" id="cfgWebPort" class="form-input" value="8080">
+          </div>
+          <div class="form-group">
+            <label>Интервал публикации (сек):
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">ℹ️</span>
+                <span class="tooltip-popup">Как часто устройство сообщает другим свой адрес. 60 сек — оптимально.</span>
+              </span>
+            </label>
+            <input type="number" id="cfgPublishInterval" class="form-input" value="60">
+          </div>
+          <div class="form-group">
+            <label>UPnP автоматический проброс портов:
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">ℹ️</span>
+                <span class="tooltip-popup">Автоматически открывает порт на роутере. Отключите если роутер не поддерживает UPnP.</span>
+              </span>
+            </label>
+            <label style="font-weight:normal;display:flex;align-items:center;gap:8px;margin-top:6px;">
+              <input type="checkbox" id="cfgUpnp" checked> Включить UPnP/NAT-PMP
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:4px;">
+      <button class="btn btn-primary btn-large" onclick="saveConfig()">💾 Сохранить и применить настройки</button>
     </div>
   </div>
 
-  <!-- TAB 3: AMNEZIAWG 2.0 (DPI BYPASS) -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- TAB 4: AMNEZIAWG 2.0                                  -->
+  <!-- ═══════════════════════════════════════════════════════ -->
   <div id="tab-awg" class="tab-pane">
     <div class="panel">
-      <div class="panel-title">
-        <span>🛡️ AmneziaWG 2.0 (AWG) Обфускация протокола для обхода блокировок DPI</span>
-        <button class="btn btn-purple" onclick="generateRandomAWG()">🎲 Случайные параметры AWG</button>
-      </div>
-      <p style="color:var(--muted);margin-bottom:16px;font-size:0.9em;">
-        AmneziaWG 2.0 модифицирует заголовки пакетов (H1–H4) и добавляет случайный мусорный трафик (Jc, S1, S2), делая WireGuard туннель невидимым для систем глубокого анализа трафика (DPI провайдеров).
+      <div class="panel-title">🛡️ AmneziaWG 2.0 — Обход DPI</div>
+      <p style="color:var(--muted);margin-bottom:20px;font-size:0.9em;">
+        AmneziaWG модифицирует заголовки пакетов WireGuard, делая трафик невидимым для систем
+        глубокого анализа (DPI) у провайдеров. Выберите уровень защиты:
       </p>
 
-      <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
-        <div class="form-group">
-          <label>Jc (Мусор):</label>
-          <input type="number" id="awgJc" class="form-input" value="4" />
-        </div>
-        <div class="form-group">
-          <label>Jmin (Мин байт):</label>
-          <input type="number" id="awgJmin" class="form-input" value="40" />
-        </div>
-        <div class="form-group">
-          <label>Jmax (Макс байт):</label>
-          <input type="number" id="awgJmax" class="form-input" value="70" />
-        </div>
-        <div class="form-group">
-          <label>S1 (Init junk):</label>
-          <input type="number" id="awgS1" class="form-input" value="48" />
-        </div>
-        <div class="form-group">
-          <label>S2 (Resp junk):</label>
-          <input type="number" id="awgS2" class="form-input" value="32" />
+      <div class="preset-tabs">
+        <button class="preset-btn" onclick="setAWGPreset('standard',this)" id="presetStd">🟢 Стандартный WG</button>
+        <button class="preset-btn active" onclick="setAWGPreset('dpi',this)" id="presetDpi">🟡 Обход DPI</button>
+        <button class="preset-btn" onclick="setAWGPreset('stealth',this)" id="presetStealth">🔴 Максимальная скрытность</button>
+      </div>
+
+      <div id="awgPresetDesc" style="color:var(--muted);font-size:0.85em;margin-bottom:16px;">
+        Рекомендованные параметры для обхода большинства DPI-систем.
+      </div>
+
+      <!-- Расширенные параметры (сворачиваемые) -->
+      <div class="section-header" onclick="toggleSection('awgParams','awgParamsArrow')" style="margin-bottom:0;">
+        <span style="font-size:0.9em;color:var(--muted);">⚙️ Расширенные параметры AWG</span>
+        <span class="section-arrow" id="awgParamsArrow">▶</span>
+      </div>
+      <div class="section-body collapsed" id="awgParams">
+        <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-top:16px;">
+          <div class="form-group"><label>Jc (Мусор):</label><input type="number" id="awgJc" class="form-input" value="4"><span class="hint">Кол-во пакетов мусора</span></div>
+          <div class="form-group"><label>Jmin:</label><input type="number" id="awgJmin" class="form-input" value="40"><span class="hint">Мин. байт мусора</span></div>
+          <div class="form-group"><label>Jmax:</label><input type="number" id="awgJmax" class="form-input" value="70"><span class="hint">Макс. байт мусора</span></div>
+          <div class="form-group"><label>S1:</label><input type="number" id="awgS1" class="form-input" value="48"><span class="hint">Init junk байты</span></div>
+          <div class="form-group"><label>S2:</label><input type="number" id="awgS2" class="form-input" value="32"><span class="hint">Resp junk байты</span></div>
+          <div class="form-group"><label>H1 (Init Magic):</label><input type="number" id="awgH1" class="form-input" value="1428571428"></div>
+          <div class="form-group"><label>H2 (Resp Magic):</label><input type="number" id="awgH2" class="form-input" value="2147483647"></div>
+          <div class="form-group"><label>H3 (Cookie):</label><input type="number" id="awgH3" class="form-input" value="857142857"></div>
+          <div class="form-group"><label>H4 (Data):</label><input type="number" id="awgH4" class="form-input" value="1122334455"></div>
         </div>
       </div>
 
-      <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));margin-top:10px;">
-        <div class="form-group">
-          <label>H1 (Init Magic):</label>
-          <input type="number" id="awgH1" class="form-input" value="1428571428" />
-        </div>
-        <div class="form-group">
-          <label>H2 (Resp Magic):</label>
-          <input type="number" id="awgH2" class="form-input" value="2147483647" />
-        </div>
-        <div class="form-group">
-          <label>H3 (Cookie Magic):</label>
-          <input type="number" id="awgH3" class="form-input" value="857142857" />
-        </div>
-        <div class="form-group">
-          <label>H4 (Data Magic):</label>
-          <input type="number" id="awgH4" class="form-input" value="1122334455" />
-        </div>
-      </div>
-
+      <!-- Конфиг -->
       <div style="margin-top:16px;">
-        <textarea id="awgConfText" class="form-input" style="height:280px;font-family:monospace;font-size:0.85em;white-space:pre;" readonly>Загрузка AWG конфигурации...</textarea>
+        <div style="font-weight:bold;margin-bottom:8px;color:var(--text);">Конфигурация для импорта:</div>
+        <textarea id="awgConfText" class="form-input" style="height:200px;font-family:monospace;font-size:0.82em;" readonly>Загрузка...</textarea>
       </div>
-
-      <div style="margin-top:12px;display:flex;gap:10px;">
-        <button class="btn btn-purple" onclick="downloadAWG()">📥 Скачать amneziawg-mesh.conf</button>
-        <button class="btn btn-blue" onclick="copyAWGText()">📋 Скопировать AWG конфиг</button>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-purple" onclick="downloadAWG()">📥 Скачать .conf</button>
+        <button class="btn btn-blue" onclick="copyAWGText()">📋 Копировать</button>
         <button class="btn btn-secondary" onclick="loadAWGText()">🔄 Обновить</button>
       </div>
     </div>
+
+    <!-- Инструкции по платформам -->
+    <div class="panel">
+      <div class="panel-title">📖 Как импортировать конфиг</div>
+      <div class="platform-tabs" id="awgPlatformTabs">
+        <button class="platform-tab-btn active" onclick="showPlatform('awg','win',this)">🪟 Windows</button>
+        <button class="platform-tab-btn" onclick="showPlatform('awg','android',this)">🤖 Android</button>
+        <button class="platform-tab-btn" onclick="showPlatform('awg','keenetic',this)">🌐 Keenetic</button>
+        <button class="platform-tab-btn" onclick="showPlatform('awg','openwrt',this)">📡 OpenWrt</button>
+      </div>
+      <div id="awg-win" class="platform-pane active">
+        <div class="callout callout-info" style="margin-bottom:12px;">
+          <div class="callout-icon">🪟</div>
+          <div class="callout-text">
+            <div class="callout-title">Windows — AmneziaWG клиент</div>
+            <div class="callout-desc">
+              1. Скачайте <a href="https://github.com/amnezia-vpn/amneziawg-windows-client/releases" target="_blank" style="color:var(--accent);">AmneziaWG для Windows</a><br>
+              2. Нажмите «Добавить туннель» → «Импорт из файла»<br>
+              3. Выберите скачанный файл <code>amneziawg-mesh.conf</code>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="awg-android" class="platform-pane">
+        <div class="callout callout-info">
+          <div class="callout-icon">🤖</div>
+          <div class="callout-text">
+            <div class="callout-title">Android — AmneziaWG из Google Play</div>
+            <div class="callout-desc">
+              1. Установите <a href="https://play.google.com/store/apps/details?id=org.amnezia.awg" target="_blank" style="color:var(--accent);">AmneziaWG</a> из Google Play или APK с GitHub<br>
+              2. В приложении нажмите «+» → «Импорт из файла или архива»<br>
+              3. Выберите <code>amneziawg-mesh.conf</code> из Загрузок
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="awg-keenetic" class="platform-pane">
+        <div class="callout callout-info">
+          <div class="callout-icon">🌐</div>
+          <div class="callout-text">
+            <div class="callout-title">Keenetic — через веб-интерфейс</div>
+            <div class="callout-desc">
+              1. Войдите в веб-интерфейс роутера (my.keenetic.net)<br>
+              2. Перейдите: <b>Компоненты</b> → добавьте WireGuard VPN<br>
+              3. <b>Интернет</b> → <b>Другие подключения</b> → <b>Добавить подключение WireGuard</b><br>
+              4. Вставьте содержимое конфига вручную или импортируйте файл
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="awg-openwrt" class="platform-pane">
+        <div class="callout callout-info">
+          <div class="callout-icon">📡</div>
+          <div class="callout-text">
+            <div class="callout-title">OpenWrt — через SSH</div>
+            <div class="callout-desc">
+              Скопируйте конфиг на роутер и запустите:
+              <pre style="background:var(--bg);padding:10px;border-radius:6px;margin-top:8px;font-size:0.85em;">opkg install wireguard-tools kmod-wireguard
+# Скопируйте conf файл на /tmp/wg.conf
+wg-quick up /tmp/wg.conf</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <!-- TAB 4: WIREGUARD -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- TAB 5: WIREGUARD                                       -->
+  <!-- ═══════════════════════════════════════════════════════ -->
   <div id="tab-wireguard" class="tab-pane">
     <div class="panel">
       <div class="panel-title">
-        <span>Стандартный wg-mesh.conf (Официальный WireGuard)</span>
-        <button class="btn btn-primary" onclick="loadWGText()">⚡ Обновить конфиг</button>
+        <span>🔒 Стандартный WireGuard конфиг</span>
+        <button class="btn btn-primary" onclick="loadWGText()">⚡ Обновить</button>
       </div>
-      <textarea id="wgConfText" class="form-input" style="height:320px;font-family:monospace;font-size:0.85em;white-space:pre;" readonly>Загрузка...</textarea>
-      <div style="margin-top:12px;display:flex;gap:10px;">
-        <button class="btn btn-blue" onclick="copyWGText()">📋 Скопировать в буфер</button>
-        <button class="btn btn-secondary" onclick="downloadWG()">📥 Скачать файл .conf</button>
+      <textarea id="wgConfText" class="form-input" style="height:300px;font-family:monospace;font-size:0.82em;" readonly>Загрузка...</textarea>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-blue" onclick="copyWGText()">📋 Скопировать</button>
+        <button class="btn btn-secondary" onclick="downloadWG()">📥 Скачать файл</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">📖 Как использовать WireGuard</div>
+      <div class="platform-tabs" id="wgPlatformTabs">
+        <button class="platform-tab-btn active" onclick="showPlatform('wg','win',this)">🪟 Windows</button>
+        <button class="platform-tab-btn" onclick="showPlatform('wg','linux',this)">🐧 Linux</button>
+        <button class="platform-tab-btn" onclick="showPlatform('wg','android',this)">🤖 Android</button>
+        <button class="platform-tab-btn" onclick="showPlatform('wg','keenetic',this)">🌐 Keenetic</button>
+        <button class="platform-tab-btn" onclick="showPlatform('wg','openwrt',this)">📡 OpenWrt</button>
+      </div>
+      <div id="wg-win" class="platform-pane active">
+        <div class="callout callout-info">
+          <div class="callout-icon">🪟</div>
+          <div class="callout-text">
+            <div class="callout-title">Windows — официальный WireGuard</div>
+            <div class="callout-desc">
+              1. Скачайте <a href="https://www.wireguard.com/install/" target="_blank" style="color:var(--accent);">WireGuard для Windows</a><br>
+              2. Нажмите «Добавить туннель» → «Импорт туннелей из файла»<br>
+              3. Выберите скачанный <code>wg-mesh.conf</code>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="wg-linux" class="platform-pane">
+        <div class="callout callout-info">
+          <div class="callout-icon">🐧</div>
+          <div class="callout-text">
+            <div class="callout-title">Linux — через wg-quick</div>
+            <div class="callout-desc">
+              <pre style="background:var(--bg);padding:10px;border-radius:6px;margin-top:8px;font-size:0.85em;">sudo apt install wireguard  # или: yum/pacman/opkg
+sudo cp wg-mesh.conf /etc/wireguard/wg0.conf
+sudo wg-quick up wg0
+# Автозапуск:
+sudo systemctl enable wg-quick@wg0</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="wg-android" class="platform-pane">
+        <div class="callout callout-info">
+          <div class="callout-icon">🤖</div>
+          <div class="callout-text">
+            <div class="callout-title">Android — WireGuard из Google Play</div>
+            <div class="callout-desc">
+              1. Установите <a href="https://play.google.com/store/apps/details?id=com.wireguard.android" target="_blank" style="color:var(--accent);">WireGuard</a> из Google Play<br>
+              2. Нажмите «+» → «Импорт из файла или архива»<br>
+              3. Выберите <code>wg-mesh.conf</code>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="wg-keenetic" class="platform-pane">
+        <div class="callout callout-info">
+          <div class="callout-icon">🌐</div>
+          <div class="callout-text">
+            <div class="callout-title">Keenetic — WireGuard VPN</div>
+            <div class="callout-desc">
+              Откройте my.keenetic.net → Компоненты → Добавьте WireGuard VPN →<br>
+              Интернет → Другие подключения → Создать подключение WireGuard → вставьте конфиг.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="wg-openwrt" class="platform-pane">
+        <div class="callout callout-info">
+          <div class="callout-icon">📡</div>
+          <div class="callout-text">
+            <div class="callout-title">OpenWrt — через SSH</div>
+            <div class="callout-desc">
+              <pre style="background:var(--bg);padding:10px;border-radius:6px;margin-top:8px;font-size:0.85em;">opkg update
+opkg install kmod-wireguard wireguard-tools luci-app-wireguard
+# Настройте через LuCI или wg-quick</pre>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- TAB 5: CHANNELS -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- TAB 6: EVENTS — ЖУРНАЛ СОБЫТИЙ                        -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <div id="tab-events" class="tab-pane">
+    <div class="panel">
+      <div class="panel-title">
+        <span>📋 Журнал событий</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="evtFilter" class="form-input" style="width:auto;padding:6px 10px;">
+            <option value="all">Все события</option>
+            <option value="peer">Устройства</option>
+            <option value="channel">Каналы</option>
+            <option value="info">Информация</option>
+            <option value="warn">Предупреждения</option>
+          </select>
+          <button class="btn btn-secondary" onclick="loadEvents()">🔄</button>
+        </div>
+      </div>
+      <div id="eventsList"><div class="empty">Нет событий. Журнал заполняется по мере работы NatBypass.</div></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- TAB 7: CHANNELS — СИГНАЛЬНЫЕ КАНАЛЫ                   -->
+  <!-- ═══════════════════════════════════════════════════════ -->
   <div id="tab-channels" class="tab-pane">
     <div class="panel">
-      <div class="panel-title">Состояние цепочки Fallback Manager</div>
+      <div class="panel-title">📡 Состояние сигнальных каналов</div>
       <div id="channelsGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;"></div>
     </div>
   </div>
+
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-function showTab(id){
+// ═══════════════════════════════════════════════
+// ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+// ═══════════════════════════════════════════════
+var wizStep = 1;
+var wizChannel = '';
+var currentTab = 'tab-wizard';
+var awgActivePreset = 'dpi';
+
+var awgPresets = {
+  standard: { jc:0, jmin:0, jmax:0, s1:0, s2:0, h1:1, h2:2, h3:3, h4:4,
+    desc:'Стандартный WireGuard без обфускации. Используйте если DPI-блокировок нет.' },
+  dpi: { jc:4, jmin:40, jmax:70, s1:48, s2:32, h1:1428571428, h2:2147483647, h3:857142857, h4:1122334455,
+    desc:'Рекомендованные параметры для обхода большинства DPI-систем.' },
+  stealth: null // загружается с сервера
+};
+
+var eventTypeIcons = {
+  peer_online: '🟢', peer_offline: '🔴',
+  channel_switch: '⚡', ip_change: '🌐',
+  info: 'ℹ️', warn: '⚠️', error: '❌'
+};
+
+// ═══════════════════════════════════════════════
+// НАВИГАЦИЯ
+// ═══════════════════════════════════════════════
+function showTab(id, btn) {
   document.querySelectorAll('.tab-pane').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(el=>el.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  event.target.classList.add('active');
+  if(btn) btn.classList.add('active');
+  currentTab = id;
   if(id==='tab-settings') loadConfig();
   if(id==='tab-wireguard') loadWGText();
   if(id==='tab-awg') loadAWGText();
+  if(id==='tab-events') loadEvents();
+  if(id==='tab-channels') loadChannels();
 }
 
-function showToast(msg, duration){
+function toggleSection(bodyId, arrowId) {
+  var body = document.getElementById(bodyId);
+  var arrow = document.getElementById(arrowId);
+  if(!body) return;
+  var collapsed = body.classList.contains('collapsed');
+  body.classList.toggle('collapsed');
+  if(arrow) arrow.classList.toggle('open', collapsed);
+}
+
+function showPlatform(ns, platform, btn) {
+  var tabs = document.getElementById(ns+'PlatformTabs');
+  if(!tabs) return;
+  tabs.querySelectorAll('.platform-tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  // hide all panes
+  ['win','linux','android','keenetic','openwrt','ios'].forEach(p=>{
+    var el = document.getElementById(ns+'-'+p);
+    if(el) el.classList.remove('active');
+  });
+  var pane = document.getElementById(ns+'-'+platform);
+  if(pane) pane.classList.add('active');
+}
+
+// ═══════════════════════════════════════════════
+// TOAST И УТИЛИТЫ
+// ═══════════════════════════════════════════════
+function showToast(msg, duration) {
   var t = document.getElementById('toast');
   t.innerText = msg;
   t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), duration||3000);
 }
 
-function togglePass(id){
+function togglePass(id) {
   var el = document.getElementById(id);
   el.type = el.type === 'password' ? 'text' : 'password';
 }
 
-function api(method, url, body, cb){
+function api(method, url, body, cb) {
   var x = new XMLHttpRequest();
   x.open(method, url, true);
   if(body) x.setRequestHeader('Content-Type', 'application/json');
-  x.onreadystatechange = function(){
-    if(x.readyState === 4){
-      try{
-        var res = JSON.parse(x.responseText);
-        cb(res);
-      }catch(e){
-        cb({ok: false, error: 'Ошибка ответа сервера'});
-      }
+  x.onreadystatechange = function() {
+    if(x.readyState === 4) {
+      try { cb(JSON.parse(x.responseText)); }
+      catch(e) { cb({ok:false, error:'Ошибка ответа'}); }
     }
   };
   x.send(body ? JSON.stringify(body) : null);
 }
 
-function loadStatus(){
-  api('GET', '/api/status', null, function(res){
-    if(res.ok && res.data){
+function promptRename() {
+  var name = document.getElementById('hDeviceID').innerText;
+  var newName = prompt('Введите новое имя устройства:', name === '—' ? '' : name);
+  if(newName && newName.trim()) {
+    api('POST', '/api/device/rename', {name: newName.trim()}, function(res) {
+      if(res.ok) { showToast('✓ Устройство переименовано: ' + res.data.name); loadStatus(); }
+      else showToast('❌ Ошибка: ' + res.error);
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════
+// МАСТЕР НАСТРОЙКИ (WIZARD)
+// ═══════════════════════════════════════════════
+function setWizStep(step) {
+  wizStep = step;
+  // Скрываем все панели
+  ['wizPane1','wizPane2tg','wizPane2mqtt','wizPane3','wizPane4'].forEach(id=>{
+    var el = document.getElementById(id);
+    if(el) el.style.display='none';
+  });
+
+  // Обновляем индикатор шагов
+  for(var i=1; i<=4; i++) {
+    var num = document.getElementById('ws'+i);
+    var lbl = document.getElementById('wl'+i);
+    var con = document.getElementById('wc'+i);
+    if(!num) continue;
+    if(i < step) {
+      num.className='wizard-step-num done'; num.innerText='✓';
+    } else if(i === step) {
+      num.className='wizard-step-num active'; num.innerText= i < 4 ? i : '✓';
+    } else {
+      num.className='wizard-step-num pending'; num.innerText= i;
+    }
+    if(lbl) lbl.className='wizard-step-label'+(i===step?' active':'');
+    if(con) con.className='wizard-connector'+(i<step?' done':'');
+  }
+
+  // Показываем нужную панель
+  if(step===1) document.getElementById('wizPane1').style.display='';
+  else if(step===2) {
+    if(wizChannel==='telegram') document.getElementById('wizPane2tg').style.display='';
+    else document.getElementById('wizPane2mqtt').style.display='';
+  }
+  else if(step===3) {
+    document.getElementById('wizPane3').style.display='';
+    // Pre-fill device name from current device_id
+    var dn = document.getElementById('wizDevName');
+    var current = document.getElementById('hDeviceID').innerText;
+    if(dn && dn.value === '' && current !== '—') dn.value = current;
+  }
+  else if(step===4) {
+    document.getElementById('wizPane4').style.display='';
+    generateWizQR();
+    updateWizSummary();
+  }
+}
+
+function wizChoose(ch) {
+  wizChannel = ch;
+  document.querySelectorAll('.channel-card').forEach(c=>c.classList.remove('selected'));
+  var el = document.getElementById('cc-'+ch);
+  if(el) el.classList.add('selected');
+  setTimeout(()=>setWizStep(2), 200);
+}
+
+function wizSkip() {
+  // Пропустить — использовать публичный MQTT
+  showToast('ℹ️ Используется публичный MQTT канал');
+  setWizStep(3);
+}
+
+function wizTestTelegram() {
+  var token = document.getElementById('wizTgToken').value.trim();
+  var chat = document.getElementById('wizTgChat').value.trim();
+  var proxy = document.getElementById('wizTgProxy').value.trim();
+  if(!token) { showToast('Укажите токен бота'); return; }
+  var st = document.getElementById('wizTgStatus');
+  st.innerText = '⏳ Проверка...';
+  st.style.color = 'var(--muted)';
+  api('POST','/api/test/telegram',{token:token,chat_id:chat,proxy:proxy},function(res){
+    if(res.ok && res.data) {
+      st.innerText = '✓ Бот ' + res.data.bot_username + ' подключён!';
+      st.style.color = '#3fb950';
+    } else {
+      st.innerText = '❌ ' + (res.error||'Ошибка подключения');
+      st.style.color = 'var(--red)';
+    }
+  });
+}
+
+function wizTestMQTT() {
+  var broker = document.getElementById('wizMqttBroker').value.trim();
+  showToast('⏳ Проверка MQTT брокера...');
+  api('POST','/api/test/mqtt',{broker_url:broker},function(res){
+    if(res.ok) showToast('✓ MQTT брокер доступен!');
+    else showToast('❌ ' + res.error, 5000);
+  });
+}
+
+function wizSaveTelegram() {
+  var token = document.getElementById('wizTgToken').value.trim();
+  var chat = document.getElementById('wizTgChat').value.trim();
+  var proxy = document.getElementById('wizTgProxy').value.trim();
+  if(!token || !chat) {
+    showToast('Укажите токен и Chat ID');
+    return;
+  }
+  var payload = buildConfigPayload({
+    tgToken: token, tgChat: chat, tgProxy: proxy,
+    mqttBroker:'', mqttTopic:''
+  });
+  api('POST','/api/config',payload,function(res){
+    if(res.ok) { showToast('✓ Telegram настроен!'); setWizStep(3); }
+    else showToast('❌ ' + res.error, 4000);
+  });
+}
+
+function wizSaveMQTT() {
+  var broker = document.getElementById('wizMqttBroker').value.trim();
+  var topic = document.getElementById('wizMqttTopic').value.trim();
+  if(!broker || !topic) { showToast('Заполните все поля'); return; }
+  var payload = buildConfigPayload({
+    tgToken:'', tgChat:'', tgProxy:'',
+    mqttBroker: broker, mqttTopic: topic
+  });
+  api('POST','/api/config',payload,function(res){
+    if(res.ok) { showToast('✓ MQTT настроен!'); setWizStep(3); }
+    else showToast('❌ ' + res.error, 4000);
+  });
+}
+
+function wizFinish() {
+  var name = document.getElementById('wizDevName').value.trim();
+  if(!name) { showToast('Укажите имя устройства'); return; }
+  api('POST','/api/setup/complete',{device_name: name},function(res){
+    if(res.ok) {
+      showToast('🎉 Настройка завершена!');
+      loadStatus();
+      setWizStep(4);
+    } else {
+      showToast('❌ ' + res.error);
+    }
+  });
+}
+
+function generateWizQR() {
+  api('GET','/api/qr/invite',null,function(res){
+    if(res.ok && res.data) {
+      var qrDiv = document.getElementById('wizQrDiv');
+      qrDiv.innerHTML = '';
+      try {
+        new QRCode(qrDiv, {
+          text: res.data.invite_url || 'https://github.com/jamixm4-crypto/natbypass',
+          width: 180, height: 180,
+          colorDark: '#000000', colorLight: '#ffffff'
+        });
+      } catch(e) {
+        qrDiv.innerHTML = '<a href="'+res.data.invite_url+'" style="color:var(--accent);">'+res.data.invite_url+'</a>';
+      }
+    }
+  });
+}
+
+function updateWizSummary() {
+  api('GET','/api/setup/status',null,function(res){
+    if(res.ok && res.data) {
       var d = res.data;
-      document.getElementById('hDeviceID').innerText = d.device_id || '—';
+      var el = document.getElementById('wizSummary');
+      el.innerHTML =
+        '<b>Устройство:</b> ' + (d.device_name||'—') + '<br>' +
+        '<b>Настроен канал:</b> ' + (d.configured_properly ? '✅ Да' : '⚠️ Используется публичный') + '<br>' +
+        '<b>Устройств в сети:</b> ' + d.peers_count;
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════
+// СТАТУС И ДАННЫЕ
+// ═══════════════════════════════════════════════
+function loadStatus() {
+  api('GET','/api/status',null,function(res){
+    if(res.ok && res.data) {
+      var d = res.data;
+      document.getElementById('hDeviceID').innerText = d.device_name || d.device_id || '—';
       document.getElementById('hPublicIP').innerText = d.public_ip || '—';
       document.getElementById('hStun').innerText = d.stun_addr || '—';
       document.getElementById('hChannel').innerText = d.current_channel || '—';
       document.getElementById('hUptime').innerText = d.uptime || '—';
       document.getElementById('statPeersCount').innerText = d.peers_count || 0;
       document.getElementById('statCurChannel').innerText = d.current_channel || '—';
-      document.getElementById('statPublicSocket').innerText = (d.public_ip && d.stun_addr) ? d.stun_addr : '—';
+      var sock = d.stun_addr || d.public_ip || '—';
+      document.getElementById('statPublicSocket').innerText = sock;
     }
   });
 }
 
-function loadPeers(){
-  api('GET', '/api/peers', null, function(res){
+function loadPeers() {
+  api('GET','/api/peers',null,function(res){
     var tbody = document.getElementById('peersTable');
-    if(!res.ok || !res.data || res.data.length === 0){
-      tbody.innerHTML = '<tr><td colspan="7" class="empty">Устройства пока не обнаружены</td></tr>';
+    var banner = document.getElementById('emptyPeersBanner');
+    if(!res.ok || !res.data || res.data.length === 0) {
+      tbody.innerHTML = '<tr><td class="empty" colspan="7">📡 Устройства не обнаружены — ожидание...</td></tr>';
+      if(banner) banner.style.display='';
       return;
     }
+    if(banner) banner.style.display='none';
     tbody.innerHTML = res.data.map(function(p){
-      var onl = p.online ? '<span class="badge online">🟢 Онлайн</span>' : '<span class="badge offline">🔴 Офлайн</span>';
+      var onl = p.online ?
+        '<span class="badge online">🟢 Онлайн</span>' :
+        '<span class="badge offline">🔴 Офлайн</span>';
       var seen = p.last_seen ? new Date(p.last_seen).toLocaleTimeString() : '—';
-      var key = p.wg_pub_key ? p.wg_pub_key.substring(0, 16) + '...' : '—';
-      return '<tr><td><b>' + p.device_id + '</b></td><td>' + p.public_ip + '</td><td>' + (p.stun_addr||'—') + '</td><td><code>' + key + '</code></td><td>' + (p.wg_port||'—') + '</td><td>' + onl + '</td><td>' + seen + '</td></tr>';
+      var key = p.wg_pub_key ? p.wg_pub_key.substring(0,16)+'...' : '—';
+      return '<tr><td><b>'+p.device_id+'</b></td><td>'+p.public_ip+'</td><td>'+(p.stun_addr||'—')+'</td><td><code>'+key+'</code></td><td>'+(p.wg_port||'—')+'</td><td>'+onl+'</td><td>'+seen+'</td></tr>';
     }).join('');
   });
 }
 
-function loadChannels(){
-  api('GET', '/api/channel/status', null, function(res){
+function loadChannels() {
+  api('GET','/api/channel/status',null,function(res){
     var el = document.getElementById('channelsGrid');
-    if(!res.ok || !res.data || res.data.length === 0){
-      el.innerHTML = '<p class="empty">Каналы не настроены</p>';
+    if(!res.ok || !res.data || res.data.length===0) {
+      el.innerHTML = '<div class="callout callout-warn"><div class="callout-icon">⚠️</div><div class="callout-text"><div class="callout-title">Каналы не настроены</div><div class="callout-desc">Настройте Telegram или MQTT в разделе Настройки.</div></div></div>';
       return;
     }
     el.innerHTML = res.data.map(function(c){
-      var st = c.available ? '<span class="badge online">🟢 Доступен</span>' : '<span class="badge offline">🔴 Недоступен</span>';
-      return '<div class="stat-box"><div class="stat-lbl">' + c.name.toUpperCase() + '</div><div style="margin:8px 0;">' + st + '</div><div style="font-size:0.75em;color:var(--muted);">' + (c.last_error || 'Ошибок нет') + '</div></div>';
+      var st = c.available ?
+        '<span class="badge online">🟢 Доступен</span>' :
+        '<span class="badge offline">🔴 Недоступен</span>';
+      return '<div class="stat-box"><div class="stat-lbl">'+c.name.toUpperCase()+'</div><div style="margin:8px 0;">'+st+'</div><div style="font-size:0.75em;color:var(--muted);">'+(c.last_error||'Ошибок нет')+'</div></div>';
     }).join('');
   });
 }
 
-function loadConfig(){
-  api('GET', '/api/config', null, function(res){
-    if(res.ok && res.data){
+function loadConfig() {
+  api('GET','/api/config',null,function(res){
+    if(res.ok && res.data) {
       var c = res.data;
-      if(c.web_ui) document.getElementById('cfgWebPort').value = c.web_ui.port || 8080;
-      if(c.network) document.getElementById('cfgUpnp').checked = c.network.upnp_enabled !== false;
-      if(c.wireguard){
-        document.getElementById('cfgWgPort').value = c.wireguard.listen_port || 51820;
-        document.getElementById('cfgWgMTU').value = c.wireguard.mtu || 1420;
+      if(c.web_ui) document.getElementById('cfgWebPort').value = c.web_ui.port||8080;
+      if(c.network) {
+        document.getElementById('cfgUpnp').checked = c.network.upnp_enabled !== false;
       }
-      if(c.signaling && c.signaling.channels){
+      if(c.wireguard) {
+        document.getElementById('cfgWgPort').value = c.wireguard.listen_port||51820;
+        document.getElementById('cfgWgMTU').value = c.wireguard.mtu||1420;
+      }
+      if(c.app) {
+        document.getElementById('cfgPublishInterval').value = c.app.publish_interval||60;
+      }
+      if(c.signaling && c.signaling.channels) {
         c.signaling.channels.forEach(function(ch){
-          if(ch.type === 'telegram' && ch.params){
-            document.getElementById('cfgTgToken').value = ch.params.token || '';
-            document.getElementById('cfgTgChatID').value = ch.params.chat_id || '';
-            document.getElementById('cfgTgProxy').value = ch.params.proxy || '';
+          if(ch.type==='telegram' && ch.params) {
+            document.getElementById('cfgTgToken').value = ch.params.token||'';
+            document.getElementById('cfgTgChatID').value = ch.params.chat_id||'';
+            document.getElementById('cfgTgProxy').value = ch.params.proxy||'';
+            var badge = document.getElementById('tgStatusBadge');
+            if(badge && ch.params.token && ch.params.token !== 'YOUR_BOT_TOKEN_HERE') {
+              badge.innerHTML = '<span class="badge online">✓ Настроен</span>';
+            }
           }
-          if(ch.type === 'mqtt' && ch.params){
-            document.getElementById('cfgMqttBroker').value = ch.params.broker_url || '';
-            document.getElementById('cfgMqttTopic').value = ch.params.topic || '';
-            document.getElementById('cfgMqttUser').value = ch.params.username || '';
-            document.getElementById('cfgMqttPass').value = ch.params.password || '';
+          if(ch.type==='mqtt' && ch.params) {
+            document.getElementById('cfgMqttBroker').value = ch.params.broker_url||'';
+            document.getElementById('cfgMqttTopic').value = ch.params.topic||'';
+            document.getElementById('cfgMqttUser').value = ch.params.username||'';
+            document.getElementById('cfgMqttPass').value = ch.params.password||'';
           }
         });
       }
@@ -424,194 +1182,284 @@ function loadConfig(){
   });
 }
 
-function saveConfig(){
-  var tgToken = document.getElementById('cfgTgToken').value.trim();
-  var tgChat = document.getElementById('cfgTgChatID').value.trim();
-  var tgProxy = document.getElementById('cfgTgProxy').value.trim();
-  var mqttBroker = document.getElementById('cfgMqttBroker').value.trim();
-  var mqttTopic = document.getElementById('cfgMqttTopic').value.trim();
-  var mqttUser = document.getElementById('cfgMqttUser').value.trim();
-  var mqttPass = document.getElementById('cfgMqttPass').value.trim();
-  var webPort = parseInt(document.getElementById('cfgWebPort').value) || 8080;
-  var upnp = document.getElementById('cfgUpnp').checked;
-  var wgPort = parseInt(document.getElementById('cfgWgPort').value) || 51820;
-  var wgMTU = parseInt(document.getElementById('cfgWgMTU').value) || 1420;
+function buildConfigPayload(extra) {
+  var tgToken = (extra && extra.tgToken !== undefined) ? extra.tgToken : document.getElementById('cfgTgToken').value.trim();
+  var tgChat = (extra && extra.tgChat !== undefined) ? extra.tgChat : document.getElementById('cfgTgChatID').value.trim();
+  var tgProxy = (extra && extra.tgProxy !== undefined) ? extra.tgProxy : (document.getElementById('cfgTgProxy')?document.getElementById('cfgTgProxy').value.trim():'');
+  var mqttBroker = (extra && extra.mqttBroker !== undefined) ? extra.mqttBroker : document.getElementById('cfgMqttBroker').value.trim();
+  var mqttTopic = (extra && extra.mqttTopic !== undefined) ? extra.mqttTopic : document.getElementById('cfgMqttTopic').value.trim();
+  var mqttUser = document.getElementById('cfgMqttUser') ? document.getElementById('cfgMqttUser').value.trim() : '';
+  var mqttPass = document.getElementById('cfgMqttPass') ? document.getElementById('cfgMqttPass').value.trim() : '';
+  var webPort = parseInt(document.getElementById('cfgWebPort') ? document.getElementById('cfgWebPort').value : '8080')||8080;
+  var upnp = document.getElementById('cfgUpnp') ? document.getElementById('cfgUpnp').checked : true;
+  var wgPort = parseInt(document.getElementById('cfgWgPort') ? document.getElementById('cfgWgPort').value : '51820')||51820;
+  var wgMTU = parseInt(document.getElementById('cfgWgMTU') ? document.getElementById('cfgWgMTU').value : '1420')||1420;
+  var pubInterval = parseInt(document.getElementById('cfgPublishInterval') ? document.getElementById('cfgPublishInterval').value : '60')||60;
 
   var channels = [];
-  if(tgToken && tgChat){
-    channels.push({
-      type: 'telegram',
-      priority: 1,
-      enabled: true,
-      params: { token: tgToken, chat_id: tgChat, proxy: tgProxy }
-    });
+  if(tgToken && tgChat) {
+    channels.push({type:'telegram',priority:1,enabled:true,params:{token:tgToken,chat_id:tgChat,proxy:tgProxy}});
   }
-  if(mqttBroker && mqttTopic){
-    channels.push({
-      type: 'mqtt',
-      priority: 2,
-      enabled: true,
-      params: { broker_url: mqttBroker, topic: mqttTopic, username: mqttUser, password: mqttPass }
-    });
+  if(mqttBroker && mqttTopic) {
+    channels.push({type:'mqtt',priority:2,enabled:true,params:{broker_url:mqttBroker,topic:mqttTopic,username:mqttUser,password:mqttPass}});
   }
 
-  var payload = {
-    app: { name: "NatBypass", log_level: "info", publish_interval: 60 },
-    web_ui: { enabled: true, port: webPort, username: "admin", password: "" },
-    network: {
-      upnp_enabled: upnp,
-      stun_servers: ["stun.l.google.com:19302", "stun1.l.google.com:19302", "stun.cloudflare.com:3478"],
-      ip_apis: ["https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"]
+  return {
+    app:{name:"NatBypass",log_level:"info",publish_interval:pubInterval},
+    web_ui:{enabled:true,port:webPort,username:"admin",password:""},
+    network:{
+      upnp_enabled:upnp,
+      stun_servers:["stun.l.google.com:19302","stun1.l.google.com:19302","stun.cloudflare.com:3478"],
+      ip_apis:["https://api.ipify.org","https://ifconfig.me/ip","https://icanhazip.com"]
     },
-    signaling: { channels: channels },
-    wireguard: {
-      enabled: true,
-      interface: "wg0",
-      listen_port: wgPort,
-      mtu: wgMTU,
-      awg: {
-        enabled: true,
-        jc: parseInt(document.getElementById('awgJc').value)||4,
-        jmin: parseInt(document.getElementById('awgJmin').value)||40,
-        jmax: parseInt(document.getElementById('awgJmax').value)||70,
-        s1: parseInt(document.getElementById('awgS1').value)||48,
-        s2: parseInt(document.getElementById('awgS2').value)||32,
-        h1: parseInt(document.getElementById('awgH1').value)||1428571428,
-        h2: parseInt(document.getElementById('awgH2').value)||2147483647,
-        h3: parseInt(document.getElementById('awgH3').value)||857142857,
-        h4: parseInt(document.getElementById('awgH4').value)||1122334455
+    signaling:{channels:channels},
+    wireguard:{
+      enabled:true,interface:"wg0",listen_port:wgPort,mtu:wgMTU,
+      awg:{
+        enabled:true,
+        jc:parseInt(document.getElementById('awgJc')?document.getElementById('awgJc').value:4)||4,
+        jmin:parseInt(document.getElementById('awgJmin')?document.getElementById('awgJmin').value:40)||40,
+        jmax:parseInt(document.getElementById('awgJmax')?document.getElementById('awgJmax').value:70)||70,
+        s1:parseInt(document.getElementById('awgS1')?document.getElementById('awgS1').value:48)||48,
+        s2:parseInt(document.getElementById('awgS2')?document.getElementById('awgS2').value:32)||32,
+        h1:parseInt(document.getElementById('awgH1')?document.getElementById('awgH1').value:1428571428)||1428571428,
+        h2:parseInt(document.getElementById('awgH2')?document.getElementById('awgH2').value:2147483647)||2147483647,
+        h3:parseInt(document.getElementById('awgH3')?document.getElementById('awgH3').value:857142857)||857142857,
+        h4:parseInt(document.getElementById('awgH4')?document.getElementById('awgH4').value:1122334455)||1122334455
       }
     }
   };
+}
 
-  api('POST', '/api/config', payload, function(res){
-    if(res.ok){
-      showToast('✓ Настройки успешно сохранены и применены!');
-    } else {
-      showToast('❌ Ошибка сохранения: ' + res.error);
-    }
+function saveConfig() {
+  var payload = buildConfigPayload(null);
+  api('POST','/api/config',payload,function(res){
+    if(res.ok) showToast('✓ Настройки сохранены!');
+    else showToast('❌ Ошибка: ' + res.error);
   });
 }
 
-function testTelegram(){
+function testTelegram() {
   var token = document.getElementById('cfgTgToken').value.trim();
   var chat = document.getElementById('cfgTgChatID').value.trim();
   var proxy = document.getElementById('cfgTgProxy').value.trim();
-  if(!token){
-    showToast('Укажите токен бота');
+  if(!token) { showToast('Укажите токен бота'); return; }
+  showToast('⏳ Проверяем Telegram...');
+  api('POST','/api/test/telegram',{token:token,chat_id:chat,proxy:proxy},function(res){
+    if(res.ok && res.data) showToast('✓ Бот '+res.data.bot_username+' подключён!', 4000);
+    else showToast('❌ ' + (res.error||'Ошибка'), 5000);
+  });
+}
+
+function testMQTT() {
+  var broker = document.getElementById('cfgMqttBroker').value.trim();
+  showToast('⏳ Проверяем MQTT брокер...');
+  api('POST','/api/test/mqtt',{broker_url:broker},function(res){
+    if(res.ok) showToast('✓ MQTT брокер доступен!');
+    else showToast('❌ ' + res.error, 5000);
+  });
+}
+
+// ═══════════════════════════════════════════════
+// AWG ПРЕСЕТЫ
+// ═══════════════════════════════════════════════
+function setAWGPreset(name, btn) {
+  awgActivePreset = name;
+  document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  var desc = document.getElementById('awgPresetDesc');
+
+  if(name === 'stealth') {
+    if(desc) desc.innerText = '⏳ Генерация случайных параметров...';
+    api('GET','/api/awg/random-params',null,function(res){
+      if(res.ok && res.data) {
+        fillAWGParams(res.data);
+        if(desc) desc.innerText = '🔴 Случайные криптостойкие параметры — максимальная скрытность от DPI.';
+        loadAWGText();
+        showToast('✓ Сгенерированы случайные AWG параметры');
+      }
+    });
     return;
   }
-  showToast('Проверка подключения к Telegram...');
-  api('POST', '/api/test/telegram', { token: token, chat_id: chat, proxy: proxy }, function(res){
-    if(res.ok && res.data){
-      showToast('✓ Успех! Бот: ' + res.data.bot_username + ' (' + res.data.bot_name + ')', 4000);
-    } else {
-      showToast('❌ Ошибка Telegram: ' + (res.error || 'Не удалось связаться с API'), 5000);
-    }
+
+  var preset = awgPresets[name];
+  if(preset) {
+    fillAWGParams(preset);
+    if(desc) desc.innerText = preset.desc;
+    loadAWGText();
+  }
+}
+
+function fillAWGParams(p) {
+  var fields = ['jc','jmin','jmax','s1','s2','h1','h2','h3','h4'];
+  fields.forEach(function(f){
+    var el = document.getElementById('awg'+f.charAt(0).toUpperCase()+f.slice(1));
+    if(el && p[f] !== undefined) el.value = p[f];
   });
 }
 
-function testMQTT(){
-  var broker = document.getElementById('cfgMqttBroker').value.trim();
-  showToast('Проверка подключения к MQTT...');
-  api('POST', '/api/test/mqtt', { broker_url: broker }, function(res){
-    if(res.ok){
-      showToast('✓ ' + res.data.status);
-    } else {
-      showToast('❌ ' + res.error, 5000);
-    }
-  });
-}
-
-function generateRandomAWG(){
-  showToast('Генерация криптостойких AWG 2.0 параметров...');
-  api('GET', '/api/awg/random-params', null, function(res){
-    if(res.ok && res.data){
-      var d = res.data;
-      document.getElementById('awgJc').value = d.jc;
-      document.getElementById('awgJmin').value = d.jmin;
-      document.getElementById('awgJmax').value = d.jmax;
-      document.getElementById('awgS1').value = d.s1;
-      document.getElementById('awgS2').value = d.s2;
-      document.getElementById('awgH1').value = d.h1;
-      document.getElementById('awgH2').value = d.h2;
-      document.getElementById('awgH3').value = d.h3;
-      document.getElementById('awgH4').value = d.h4;
-      showToast('✓ Сгенерирован новый набор AWG 2.0 параметров');
-      loadAWGText();
-    }
-  });
-}
-
-function loadAWGText(){
+function loadAWGText() {
   var x = new XMLHttpRequest();
-  x.open('GET', '/api/awg/config', true);
+  x.open('GET','/api/awg/config',true);
   x.onreadystatechange = function(){
-    if(x.readyState === 4 && x.status === 200){
-      document.getElementById('awgConfText').value = x.responseText;
+    if(x.readyState===4 && x.status===200) {
+      var el = document.getElementById('awgConfText');
+      if(el) el.value = x.responseText;
     }
   };
   x.send();
 }
 
-function copyAWGText(){
+function copyAWGText() {
   var el = document.getElementById('awgConfText');
-  el.select();
-  document.execCommand('copy');
-  showToast('✓ AmneziaWG конфигурация скопирована в буфер!');
+  if(el) { el.select(); document.execCommand('copy'); }
+  showToast('✓ AWG конфиг скопирован!');
 }
 
-function downloadAWG(){
-  window.location.href = '/api/awg/config';
-}
+function downloadAWG() { window.location.href='/api/awg/config'; }
 
-function loadWGText(){
+function loadWGText() {
   var x = new XMLHttpRequest();
-  x.open('GET', '/api/wg/config', true);
+  x.open('GET','/api/wg/config',true);
   x.onreadystatechange = function(){
-    if(x.readyState === 4 && x.status === 200){
-      document.getElementById('wgConfText').value = x.responseText;
+    if(x.readyState===4 && x.status===200) {
+      var el = document.getElementById('wgConfText');
+      if(el) el.value = x.responseText;
     }
   };
   x.send();
 }
 
-function copyWGText(){
+function copyWGText() {
   var el = document.getElementById('wgConfText');
-  el.select();
-  document.execCommand('copy');
-  showToast('✓ WireGuard конфигурация скопирована в буфер!');
+  if(el) { el.select(); document.execCommand('copy'); }
+  showToast('✓ WireGuard конфиг скопирован!');
 }
 
-function refreshIP(){
-  api('POST', '/api/refresh-ip', null, function(res){
+function downloadWG() { window.location.href='/api/wg/config'; }
+
+// ═══════════════════════════════════════════════
+// ДИАГНОСТИКА
+// ═══════════════════════════════════════════════
+function runDiagnose() {
+  var grid = document.getElementById('diagGrid');
+  if(!grid) return;
+  grid.innerHTML = '<div class="empty">⏳ Выполняем проверку...</div>';
+  api('GET','/api/diagnose',null,function(res){
+    if(!res.ok || !res.data) {
+      grid.innerHTML = '<div class="empty">❌ Ошибка диагностики</div>';
+      return;
+    }
+    var d = res.data;
+    var items = [
+      {key:'internet', label:'Интернет'},
+      {key:'public_ip', label:'Публичный IP'},
+      {key:'stun', label:'STUN Адрес'},
+      {key:'nat_type', label:'Тип NAT'},
+      {key:'channel', label:'Сигнальный канал'},
+      {key:'peers', label:'Устройства в сети'}
+    ];
+    grid.innerHTML = items.map(function(item){
+      var check = d[item.key];
+      if(!check) return '';
+      var icon = check.ok ? '✅' : '⚠️';
+      return '<div class="diag-item">' +
+        '<div class="diag-icon">'+icon+'</div>' +
+        '<div class="diag-info">' +
+          '<div class="diag-title">'+item.label+'</div>' +
+          '<div class="diag-detail">'+check.detail+'</div>' +
+          (check.extra ? '<div class="diag-extra">'+check.extra+'</div>' : '') +
+        '</div></div>';
+    }).join('');
+  });
+}
+
+// ═══════════════════════════════════════════════
+// ЖУРНАЛ СОБЫТИЙ
+// ═══════════════════════════════════════════════
+function loadEvents() {
+  var filter = document.getElementById('evtFilter').value;
+  var url = '/api/events?limit=100';
+  api('GET',url,null,function(res){
+    var el = document.getElementById('eventsList');
+    if(!res.ok || !res.data || res.data.length===0) {
+      el.innerHTML = '<div class="empty">Нет событий. Журнал заполняется по мере работы NatBypass.</div>';
+      return;
+    }
+    var events = res.data;
+    if(filter !== 'all') {
+      events = events.filter(function(e){ return e.type && e.type.indexOf(filter)>=0; });
+    }
+    if(events.length===0) {
+      el.innerHTML = '<div class="empty">Нет событий выбранного типа.</div>';
+      return;
+    }
+    el.innerHTML = events.map(function(e){
+      var icon = eventTypeIcons[e.type] || 'ℹ️';
+      var time = new Date(e.time).toLocaleTimeString();
+      return '<div class="event-item">' +
+        '<div class="event-icon">'+icon+'</div>' +
+        '<div class="event-body">' +
+          '<div class="event-msg">'+e.message+'</div>' +
+          (e.detail ? '<div class="event-detail">'+e.detail+'</div>' : '') +
+        '</div>' +
+        '<div class="event-time">'+time+'</div>' +
+      '</div>';
+    }).join('');
+  });
+}
+
+// ═══════════════════════════════════════════════
+// IP И СИСТЕМНЫЕ ДЕЙСТВИЯ
+// ═══════════════════════════════════════════════
+function refreshIP() {
+  api('POST','/api/refresh-ip',null,function(res){
     showToast(res.data ? res.data.message : 'Запрос отправлен');
     setTimeout(loadStatus, 1500);
   });
 }
 
-function downloadWG(){
-  window.location.href = '/api/wg/config';
-}
-
-function restartDaemon(){
-  if(confirm('Перезапустить сервис NatBypass?')){
-    api('POST', '/api/restart', null, function(){
-      showToast('Сервис перезапускается...');
+function restartDaemon() {
+  if(confirm('Перезапустить сервис NatBypass?')) {
+    api('POST','/api/restart',null,function(){
+      showToast('🔄 Сервис перезапускается...');
     });
   }
+}
+
+// ═══════════════════════════════════════════════
+// ПЕРВОНАЧАЛЬНАЯ ЗАГРУЗКА
+// ═══════════════════════════════════════════════
+function init() {
+  loadStatus();
+  loadPeers();
+  loadChannels();
+  loadAWGText();
+
+  // Проверяем нужно ли показывать мастер
+  api('GET','/api/setup/status',null,function(res){
+    if(res.ok && res.data) {
+      var d = res.data;
+      if(d.setup_done || d.configured_properly) {
+        // Уже настроено — показываем шаг 4 (или оставляем на шаге 1 для повторной настройки)
+        if(d.device_name) {
+          var el = document.getElementById('wizDevName');
+          if(el) el.value = d.device_name;
+        }
+      }
+    }
+  });
 }
 
 // Периодическое обновление
 setInterval(function(){
   loadStatus();
-  loadPeers();
-  loadChannels();
-}, 4000);
+  if(currentTab === 'tab-peers') loadPeers();
+  if(currentTab === 'tab-channels') loadChannels();
+  if(currentTab === 'tab-events') loadEvents();
+}, 5000);
 
-loadStatus();
-loadPeers();
-loadChannels();
+init();
 </script>
 </body>
 </html>
