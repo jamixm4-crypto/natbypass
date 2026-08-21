@@ -57,7 +57,21 @@ type WGPeerConfig struct {
 	AllowedIP []string `mapstructure:"allowed_ips"`
 }
 
-// WireGuardConfig — настройки WireGuard
+// AWGConfig — параметры обфускации AmneziaWG 2.0
+type AWGConfig struct {
+	Enabled bool   `mapstructure:"enabled" json:"enabled"`
+	Jc      int    `mapstructure:"jc" json:"jc"`
+	Jmin    int    `mapstructure:"jmin" json:"jmin"`
+	Jmax    int    `mapstructure:"jmax" json:"jmax"`
+	S1      int    `mapstructure:"s1" json:"s1"`
+	S2      int    `mapstructure:"s2" json:"s2"`
+	H1      uint32 `mapstructure:"h1" json:"h1"`
+	H2      uint32 `mapstructure:"h2" json:"h2"`
+	H3      uint32 `mapstructure:"h3" json:"h3"`
+	H4      uint32 `mapstructure:"h4" json:"h4"`
+}
+
+// WireGuardConfig — настройки WireGuard и AmneziaWG 2.0
 type WireGuardConfig struct {
 	Enabled        bool           `mapstructure:"enabled"`
 	Interface      string         `mapstructure:"interface"`
@@ -66,6 +80,7 @@ type WireGuardConfig struct {
 	Address        string         `mapstructure:"address"`
 	DNS            string         `mapstructure:"dns"`
 	MTU            int            `mapstructure:"mtu"`
+	AWG            AWGConfig      `mapstructure:"awg"`
 	Peers          []WGPeerConfig `mapstructure:"peers"`
 }
 

@@ -24,10 +24,12 @@
   * 🌍 **Cloudflare DNS:** Передача состояния через DNS TXT записи и DNS-over-HTTPS (DoH).
 * **Отказоустойчивый Fallback Manager:** Автоматическое переключение сигнальных каналов с экспоненциальной задержкой (Exponential Backoff) и Circuit Breaker при сбоях.
 * **End-to-End шифрование (E2EE):** Полное шифрование всех пакетов сигнализации алгоритмом **NaCl/Box** (Curve25519 + XSalsa20-Poly1305).
-* **Автоматический WireGuard Full-Mesh:** Генерация совместимых конфигураций WireGuard (`wg0.conf`) на чистом Go (без CGO) для прямого туннелирования.
+* **Автоматический WireGuard & AmneziaWG 2.0 Mesh:**
+  * 🔒 Стандартный WireGuard (`wg0.conf`) на чистом Go (0 CGO).
+  * 🛡️ **AmneziaWG 2.0 (AWG):** Полная поддержка обфускации протокола для гарантированного обхода блокировок DPI / ТСПУ (`Jc`, `Jmin`, `Jmax`, `S1`, `S2`, кастомные magic-заголовки `H1`–`H4`).
 * **Графические интерфейсы (GUI):**
   * 🪟 **Desktop GUI (Wails / Win32):** Нативное десктопное окно со статусом сети, таблицей пиров, логами и системным треем.
-  * 🌐 **Встроенный Web UI:** Легковесный веб-интерфейс (`http://localhost:8080`) с автоперебором портов при конфликтах.
+  * 🌐 **Встроенный Web UI:** Легковесный веб-интерфейс (`http://localhost:8080`) с интерактивной настройкой Telegram, MQTT, AWG 2.0 и автоперебором портов.
   * 🔨 **Нативный Сборщик (Builder GUI):** Автономное Win32-приложение для сборки бинарников под все платформы в один клик.
 * **Системные службы:** Управление службой Windows (`sc.exe` / `golang.org/x/sys/windows/svc`) и демонизация на Linux (`systemd`, OpenWrt `procd`, Entware).
 * **Поддержка роутеров и мобильных ОС:** 100% статическая сборка без libc для Keenetic, OpenWrt, Mikrotik, Raspberry Pi, Android и iOS.
@@ -41,6 +43,7 @@
 | Платформа | Документация | Особенности |
 |---|---|---|
 | 🪟 **Windows** | [**Инструкция для Windows (docs/WINDOWS.md)**](docs/WINDOWS.md) | Desktop GUI, System Tray, служба Windows Service, WireGuard клиент |
+| 🛡️ **AmneziaWG 2.0** | [**Обход блокировок DPI (docs/AMNEZIA_WG.md)**](docs/AMNEZIA_WG.md) | Обфускация трафика `H1-H4`, `Jc`, `S1/S2` против ТСПУ / РКН |
 | 🐧 **Linux** | [**Инструкция для Linux (docs/LINUX.md)**](docs/LINUX.md) | Автоматический Systemd сервис, headless демон, автозапуск |
 | 🌐 **Keenetic** | [**Инструкция для Keenetic (docs/ROUTERS_KEENETIC.md)**](docs/ROUTERS_KEENETIC.md) | Установка через Entware/OPKG, автозапуск `init.d`, модели MIPS/ARM64 |
 | 📡 **OpenWrt** | [**Инструкция для OpenWrt (docs/ROUTERS_OPENWRT.md)**](docs/ROUTERS_OPENWRT.md) | Служба `procd`, интеграция в систему, минимальное потребление RAM |

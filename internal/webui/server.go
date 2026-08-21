@@ -102,9 +102,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/channel/switch", s.handleChannelSwitch)
 	mux.HandleFunc("/api/channel/status", s.handleChannelStatus)
 	mux.HandleFunc("/api/config", s.handleConfig)
-	mux.HandleFunc("/api/test/telegram", s.handleTestTelegram)
-	mux.HandleFunc("/api/test/mqtt", s.handleTestMQTT)
 	mux.HandleFunc("/api/wg/config", s.handleWgConfig)
+	mux.HandleFunc("/api/awg/config", s.handleAWGConfig)
+	mux.HandleFunc("/api/awg/random-params", s.handleAWGRandomParams)
 	mux.HandleFunc("/api/restart", s.handleRestart)
 
 	handler := s.corsMiddleware(s.authMiddleware(mux))
@@ -548,4 +548,79 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 			proc.Signal(syscall.SIGTERM)
 		}
 	}()
+}
+
+// handleAWGRandomParams — GET /api/awg/random-params — генерация криптостойких параметров AWG 2.0
+func (s *Server) handleAWGRandomParams(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	params := wireguard.GenerateRandomAWGParams()
+	s.jsonResponse(w, http.StatusOK, params, "")
+}
+
+// handleAWGConfig — GET /api/awg/config — генерация AmneziaWG 2.0 конфига с обфускацией
+func (s *Server) handleAWGConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	kp, err := wireguard.GenerateKeyPair()
+	if err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка генерации ключей: "+err.Error())
+		return
+	}
+
+	var wgPeers []wireguard.WGPeer
+	for i, p := range s.registry.List() {
+		if p.WGPubKey != "" {
+			wgPeers = append(wgPeers, wireguard.WGPeer{
+				PublicKey:  p.WGPubKey,
+				Endpoint:   fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort),
+				AllowedIPs: []string{fmt.Sprintf("10.200.0.%d/32", i+2)},
+			})
+		}
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	awgParams := wireguard.DefaultAWGParams()
+	if cfg != nil && cfg.WireGuard.AWG.Enabled {
+		awgParams = wireguard.AWGParams{
+			Enabled: true,
+			Jc:      cfg.WireGuard.AWG.Jc,
+			Jmin:    cfg.WireGuard.AWG.Jmin,
+			Jmax:    cfg.WireGuard.AWG.Jmax,
+			S1:      cfg.WireGuard.AWG.S1,
+			S2:      cfg.WireGuard.AWG.S2,
+			H1:      cfg.WireGuard.AWG.H1,
+			H2:      cfg.WireGuard.AWG.H2,
+			H3:      cfg.WireGuard.AWG.H3,
+			H4:      cfg.WireGuard.AWG.H4,
+		}
+	}
+
+	awgCfg := &wireguard.AWGConfig{
+		WGConfig: wireguard.WGConfig{
+			InterfaceName: "awg0",
+			PrivateKey:    kp.PrivateKey,
+			Address:       "10.200.0.1/24",
+			ListenPort:    51820,
+			MTU:           1420,
+			Peers:         wgPeers,
+		},
+		AWGParams: awgParams,
+	}
+
+	content, err := wireguard.GenerateAWGConfig(awgCfg)
+	if err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="amneziawg-mesh.conf"`)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(content))
 }
