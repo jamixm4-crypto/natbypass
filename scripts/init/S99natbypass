@@ -1,0 +1,15 @@
+﻿#!/bin/sh
+# ============================================================
+# NatBypass — init-скрипт для Keenetic (Entware)
+# Путь установки: /opt/etc/init.d/S99natbypass
+# chmod +x /opt/etc/init.d/S99natbypass
+# ============================================================
+
+ENABLED=yes
+PROCS=natbypass
+ARGS="start --config /opt/etc/natbypass/config.yaml"
+PREARGS=""
+DESC="NatBypass"
+PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+. /opt/etc/init.d/rc.func

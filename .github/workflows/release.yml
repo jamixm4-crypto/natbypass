@@ -1,0 +1,57 @@
+name: Release / Publish Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Build All Architectures
+        run: |
+          mkdir -p release
+          TAG_NAME="${{ github.ref_name }}"
+          LDFLAGS="-s -w -X github.com/natbypass/natbypass/cmd/natbypass.Version=${TAG_NAME} -X github.com/natbypass/natbypass/cmd/natbypass.Commit=${{ github.sha }} -X github.com/natbypass/natbypass/cmd/natbypass.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Windows
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-windows-amd64.exe ./cmd/natbypass-cli
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS} -H=windowsgui" -o release/natbypass-builder-${TAG_NAME}-windows-amd64.exe ./cmd/builder
+
+          # Linux
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-linux-amd64 ./cmd/natbypass-cli
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-linux-arm64 ./cmd/natbypass-cli
+
+          # Routers (MIPS / MIPSLE)
+          CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-router-mips ./cmd/natbypass-cli
+          CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-router-mipsle ./cmd/natbypass-cli
+
+          # Android
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-android-arm64 ./cmd/natbypass-cli
+
+          # Copy default config template
+          cp config.yaml.example release/config.yaml.example
+
+          ls -lh release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

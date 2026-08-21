@@ -1,0 +1,86 @@
+name: CI / Build & Test
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run Tests
+        run: go test -v -timeout 120s ./...
+
+  build-matrix:
+    name: Cross-Compile Matrix
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: windows
+            arch: amd64
+            ext: .exe
+            gomips: ""
+          - os: linux
+            arch: amd64
+            ext: ""
+            gomips: ""
+          - os: linux
+            arch: arm64
+            ext: ""
+            gomips: ""
+          - os: linux
+            arch: mips
+            ext: ""
+            gomips: softfloat
+          - os: linux
+            arch: mipsle
+            ext: ""
+            gomips: softfloat
+          - os: android
+            arch: arm64
+            ext: ""
+            gomips: ""
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Build Binary
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          GOMIPS: ${{ matrix.gomips }}
+        run: |
+          mkdir -p bin
+          OUT_NAME="natbypass-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          go build -trimpath -ldflags="-s -w -X github.com/natbypass/natbypass/cmd/natbypass.Version=${{ github.ref_name }}" -o "bin/$OUT_NAME" ./cmd/natbypass-cli
+          ls -lh bin/
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: natbypass-${{ matrix.os }}-${{ matrix.arch }}
+          path: bin/*

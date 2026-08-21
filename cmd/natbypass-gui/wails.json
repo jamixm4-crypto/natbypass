@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "NatBypass",
+  "outputfilename": "natbypass-gui",
+  "frontend:dir": "frontend/dist",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "NatBypass Team",
+    "email": "dev@natbypass.internal"
+  },
+  "info": {
+    "companyName": "NatBypass",
+    "productName": "NatBypass",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2026",
+    "comments": "Cross-platform P2P NAT Traversal Tool"
+  }
+}

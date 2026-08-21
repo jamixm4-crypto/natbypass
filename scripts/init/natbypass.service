@@ -1,0 +1,32 @@
+﻿[Unit]
+Description=NatBypass — обход NAT и P2P-доступ между устройствами
+Documentation=https://github.com/natbypass/natbypass
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+WorkingDirectory=/etc/natbypass
+ExecStart=/usr/local/bin/natbypass start --config /etc/natbypass/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=natbypass
+# Ограничения безопасности
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/etc/natbypass /var/run /var/log
+PrivateTmp=true
+# Сетевые возможности (для UPnP и WireGuard)
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+# Ограничение памяти (важно для слабых устройств)
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target

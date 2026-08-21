@@ -1,0 +1,43 @@
+# Binaries and build outputs
+dist/
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.aar
+*.apk
+
+# Toolchain and local cache in soft/
+soft/
+
+# Configuration with private credentials
+config.yaml
+
+# Runtime logs and PID
+*.log
+*.pid
+natbypass.log
+
+# Cryptographic private keys
+*.key
+private.key
+
+# Operating System files
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.fleet/
+
+# Node / Wails frontend build files
+node_modules/
+cmd/natbypass-gui/build/bin/
+cmd/natbypass-gui/frontend/node_modules/
