@@ -133,6 +133,7 @@ func newStartCmd() *cobra.Command {
 			if err != nil {
 				if os.IsNotExist(err) {
 					cfg = buildDefaultConfig()
+					ensureConfigFileExists(configFile)
 				} else {
 					return fmt.Errorf("ошибка загрузки конфига: %w", err)
 				}
@@ -158,6 +159,7 @@ func newGuiCmd() *cobra.Command {
 			cfg, err := config.Load(configFile)
 			if err != nil {
 				cfg = buildDefaultConfig()
+				ensureConfigFileExists(configFile)
 			}
 			applyBuiltinDefaults(cfg)
 
@@ -276,10 +278,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	channels, err := buildSignalingChannels(cfg)
 	if err != nil {
-		return fmt.Errorf("ошибка инициализации каналов: %w", err)
+		log.Warn().Err(err).Msg("Ошибка парсинга каналов, используется публичный резервный канал")
 	}
 	if len(channels) == 0 {
-		return fmt.Errorf("нет активных сигнальных каналов в конфиге")
+		log.Warn().Msg("⚠️ Сигнальные каналы не настроены в конфиге. Включен резервный публичный MQTT брокер (topic: natbypass/public/peers). Вы можете настроить личный Telegram-бот в Web UI (http://localhost:8080) или файле config.yaml")
+		channels = append(channels, signaling.NewMQTTChannel("tcp://mqtt.eclipseprojects.io:1883", "natbypass/public/peers", deviceID, "", ""))
 	}
 	sigMgr := signaling.NewFallbackManager(channels)
 	log.Info().Int("channels", len(channels)).Str("current", sigMgr.CurrentChannel()).Msg("Сигнальные каналы инициализированы")
@@ -945,4 +948,60 @@ func ifEmpty(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+func ensureConfigFileExists(path string) {
+	if path == "" {
+		path = "config.yaml"
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		sample := `# ============================================================
+# NatBypass — Конфигурационный файл
+# ============================================================
+
+app:
+  name: "NatBypass"
+  version: "1.0.0"
+  log_level: "info"
+  publish_interval: 60
+
+web_ui:
+  enabled: true
+  port: 8080
+  username: "admin"
+  password: ""
+
+network:
+  upnp_enabled: true
+  stun_servers:
+    - "stun.l.google.com:19302"
+    - "stun1.l.google.com:19302"
+    - "stun.cloudflare.com:3478"
+  ip_apis:
+    - "https://api.ipify.org"
+    - "https://ifconfig.me/ip"
+    - "https://icanhazip.com"
+
+signaling:
+  channels:
+    - type: "telegram"
+      priority: 1
+      enabled: false
+      params:
+        token: ""      # Вставьте токен от @BotFather (например: 7123456789:AAF...)
+        chat_id: ""    # ID приватной группы/канала (например: -1001234567890)
+    - type: "mqtt"
+      priority: 2
+      enabled: true
+      params:
+        broker_url: "tcp://mqtt.eclipseprojects.io:1883"
+        topic: "natbypass/public/peers"
+
+wireguard:
+  enabled: false
+  interface: "wg0"
+  listen_port: 51820
+`
+		_ = os.WriteFile(path, []byte(sample), 0644)
+	}
 }
