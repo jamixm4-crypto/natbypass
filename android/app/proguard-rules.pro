@@ -1,0 +1,5 @@
+﻿-keep class org.natbypass.app.** { *; }
+-keep class mobile.** { *; }
+-keep class go.** { *; }
+-dontwarn go.**
+-dontwarn mobile.**

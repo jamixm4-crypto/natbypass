@@ -1,0 +1,15 @@
+﻿<resources>
+    <color name="bg_dark">#0D1117</color>
+    <color name="panel_dark">#161B22</color>
+    <color name="card_bg">#21262D</color>
+    <color name="border_dark">#30363D</color>
+    <color name="text_primary">#C9D1D9</color>
+    <color name="text_muted">#8B949E</color>
+    <color name="accent_blue">#58A6FF</color>
+    <color name="green_online">#238636</color>
+    <color name="green_bright">#3FB950</color>
+    <color name="red_offline">#DA3633</color>
+    <color name="red_bright">#F85149</color>
+    <color name="purple_awg">#8957E5</color>
+    <color name="white">#FFFFFF</color>
+</resources>

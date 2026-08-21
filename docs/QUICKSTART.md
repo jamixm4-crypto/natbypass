@@ -1,4 +1,4 @@
-﻿# 🚀 Быстрый старт NatBypass — 5 минут до первого P2P соединения
+# 🚀 Быстрый старт NatBypass — 5 минут до первого P2P соединения
 
 NatBypass позволяет двум устройствам за разными NAT/CGNAT (включая двойной NAT у мобильных операторов и домашних провайдеров) соединяться напрямую в защищенную P2P сеть.
 
@@ -15,7 +15,7 @@ NatBypass позволяет двум устройствам за разными
 | **Keenetic (MIPSLE)** | `natbypass-v1.0.0-linux-mipsle.tar.gz` | Keenetic Extra, City, Air, Giga |
 | **Keenetic / RPi (ARM64)** | `natbypass-v1.0.0-linux-arm64.tar.gz` | Keenetic Ultra, Titan, Raspberry Pi |
 | **OpenWrt (MIPS)** | `natbypass-v1.0.0-linux-mips.tar.gz` | Роутеры TP-Link, Xiaomi |
-| **Android** | `natbypass-v1.0.0-android-arm64.tar.gz` | Для Termux / CLI |
+| **Android** | `NatBypass.apk` | Единое приложение «Всё-в-одном» со встроенным VPN и QR-сканером |
 
 ---
 

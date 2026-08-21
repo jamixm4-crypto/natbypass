@@ -1,0 +1,23 @@
+﻿<resources>
+    <string name="app_name">NatBypass</string>
+    <string name="vpn_status_disconnected">ОТКЛЮЧЕНО</string>
+    <string name="vpn_status_connecting">ПОДКЛЮЧЕНИЕ…</string>
+    <string name="vpn_status_connected">ПОДКЛЮЧЕНО</string>
+    <string name="vpn_btn_connect">ВКЛЮЧИТЬ VPN</string>
+    <string name="vpn_btn_disconnect">ОТКЛЮЧИТЬ</string>
+
+    <string name="title_peers">Устройства в сети</string>
+    <string name="title_settings">Настройки</string>
+    <string name="title_diagnostics">Диагностика</string>
+    <string name="title_qr_scanner">Сканировать QR с экрана ПК</string>
+    <string name="qr_hint">Наведите камеру на QR-код в веб-панели ПК</string>
+
+    <string name="preset_standard">Стандартный WG</string>
+    <string name="preset_dpi">Обход DPI (AWG 2.0)</string>
+    <string name="preset_stealth">Макс. скрытность</string>
+
+    <string name="notif_channel_name">Служба NatBypass VPN</string>
+    <string name="notif_channel_desc">Показывает статус подключения к защищенной P2P mesh-сети</string>
+    <string name="notif_title_connected">NatBypass: Защищенный туннель активен</string>
+    <string name="notif_title_disconnected">NatBypass: Отключено</string>
+</resources>
