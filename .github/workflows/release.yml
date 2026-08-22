@@ -4,28 +4,27 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build & Publish Release
+  build-and-release:
+    name: Build & Upload All Platform Binaries
     runs-on: windows-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
           cache: true
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
 
       - name: Build All Release Binaries
         shell: pwsh
@@ -33,18 +32,21 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           $tag = "${{ github.ref_name }}"
+          if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
+              $tag = "v1.1.0"
+          }
+          Write-Host "Building release for tag: $tag"
           New-Item -ItemType Directory -Force -Path release | Out-Null
 
-          Write-Host "==> 1. Building Windows Standalone Desktop App with Modern UI (NatBypass.exe)..."
+          Write-Host "==> 1. Building Windows Standalone Desktop App (NatBypass.exe)..."
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
-          $res1 = & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass 2>&1
-          Write-Host "Desktop App Build output: $res1"
-          Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass-$tag.exe" -Force -ErrorAction SilentlyContinue
+          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
+          Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass-$tag.exe" -Force
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
-          $res2 = & go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder 2>&1
-          Write-Host "Builder Build output: $res2"
+          & go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
+          Copy-Item "release\NatBypass-Builder-$tag.exe" "release\NatBypass-Builder.exe" -Force
 
           Write-Host "==> 3. Building Linux x64..."
           $env:GOOS = "linux"
@@ -64,26 +66,26 @@ jobs:
           $env:GOARCH = "mipsle"
           & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mipsle" ./cmd/natbypass
 
-          Write-Host "==> 7. Building Android CLI..."
-          $env:GOMIPS = ""
+          Write-Host "==> 7. Building Android ARM64 CLI..."
+          $env:GOOS = "android"
           $env:GOARCH = "arm64"
           & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-android-arm64" ./cmd/natbypass
 
           Write-Host "==> 8. Copying config..."
-          Copy-Item config.yaml.example release\config.yaml.example -Force -ErrorAction SilentlyContinue
+          Copy-Item config.yaml.example release\config.yaml.example -Force
 
           Write-Host "==> 9. Packaging Toolkit with source..."
           New-Item -ItemType Directory -Force -Path toolkit\natbypass-builder | Out-Null
-          Copy-Item "release\NatBypass-Builder-$tag.exe" toolkit\natbypass-builder\NatBypass-Builder.exe -Force -ErrorAction SilentlyContinue
-          Copy-Item config.yaml.example toolkit\natbypass-builder\config.yaml.example -Force -ErrorAction SilentlyContinue
-          Copy-Item README.md toolkit\natbypass-builder\README.md -Force -ErrorAction SilentlyContinue
-          Copy-Item go.mod toolkit\natbypass-builder\go.mod -Force -ErrorAction SilentlyContinue
-          Copy-Item go.sum toolkit\natbypass-builder\go.sum -Force -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force cmd toolkit\natbypass-builder\ -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force internal toolkit\natbypass-builder\ -ErrorAction SilentlyContinue
+          Copy-Item "release\NatBypass-Builder-$tag.exe" toolkit\natbypass-builder\NatBypass-Builder.exe -Force
+          Copy-Item config.yaml.example toolkit\natbypass-builder\config.yaml.example -Force
+          Copy-Item README.md toolkit\natbypass-builder\README.md -Force
+          Copy-Item go.mod toolkit\natbypass-builder\go.mod -Force
+          Copy-Item go.sum toolkit\natbypass-builder\go.sum -Force
+          Copy-Item -Recurse -Force cmd toolkit\natbypass-builder\
+          Copy-Item -Recurse -Force internal toolkit\natbypass-builder\
           
           python -c "import shutil; shutil.make_archive('release/NatBypass-Builder-Toolkit-$tag-windows', 'zip', 'toolkit')"
-          Remove-Item -Recurse -Force toolkit -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force toolkit
 
           Write-Host "==> All Files in release/:"
           Get-ChildItem -Path release -File | Select-Object Name, Length | Format-Table -AutoSize
@@ -94,13 +96,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ github.ref_name }}"
-          gh release delete $tag --yes 2>$null
-          gh release create $tag --title "NatBypass $tag" --notes "Релиз $tag. Скачайте NatBypass-$tag-windows-amd64.exe (нативное Win32 GUI приложение) для Windows."
+          if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
+              $tag = "v1.1.0"
+          }
+          
+          # Create release if not exists
+          $rel = gh release view $tag 2>$null
+          if (!$rel) {
+              gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client."
+          }
           
           $files = Get-ChildItem -Path release -File
           foreach ($f in $files) {
               Write-Host "==> Uploading $($f.Name) ($([math]::Round($f.Length / 1MB, 2)) MB)..."
-              $uLog = & gh release upload $tag $f.FullName --clobber 2>&1
-              Write-Host "Upload result: $uLog"
+              gh release upload $tag $f.FullName --clobber
           }
-          Write-Host "==> All release files uploaded!"
+          Write-Host "==> All release files successfully uploaded!"
