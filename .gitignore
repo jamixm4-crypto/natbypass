@@ -42,3 +42,10 @@ desktop.ini
 node_modules/
 cmd/natbypass-gui/build/bin/
 cmd/natbypass-gui/frontend/node_modules/
+
+# AI Agent & Customization metadata
+.agents/
+.gemini/
+.system_generated/
+.antigravity/
+.agy/
