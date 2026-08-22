@@ -38,13 +38,24 @@ jobs:
 
       - name: Configure Android NDK & Licenses
         run: |
-          yes | sdkmanager --licenses || true
-          if [ -d "$ANDROID_SDK_ROOT/ndk" ] && [ "$(ls -A $ANDROID_SDK_ROOT/ndk)" ]; then
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -f "$SDKM" ]; then
+            yes | "$SDKM" --licenses || true
+          else
+            yes | sdkmanager --licenses || true
+          fi
+          
+          if [ -d "$ANDROID_HOME/ndk" ] && [ "$(ls -A $ANDROID_HOME/ndk)" ]; then
+            NDK_PATH=$(ls -d $ANDROID_HOME/ndk/* | sort -V | tail -n 1)
+          elif [ -d "$ANDROID_SDK_ROOT/ndk" ] && [ "$(ls -A $ANDROID_SDK_ROOT/ndk)" ]; then
             NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
           else
-            echo "Installing NDK via sdkmanager..."
-            yes | sdkmanager --install "ndk;26.1.10909125" "platforms;android-34" "build-tools;34.0.0"
-            NDK_PATH="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
+            if [ -f "$SDKM" ]; then
+              yes | "$SDKM" --install "ndk;26.1.10909125" "platforms;android-34" "build-tools;34.0.0"
+            else
+              yes | sdkmanager --install "ndk;26.1.10909125" "platforms;android-34" "build-tools;34.0.0"
+            fi
+            NDK_PATH="$ANDROID_HOME/ndk/26.1.10909125"
           fi
           echo "Selected NDK path: $NDK_PATH"
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
@@ -76,7 +87,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --no-daemon || (./gradlew assembleDebug --stacktrace --info && exit 1)
+          ./gradlew assembleDebug --stacktrace --no-daemon
           
           mkdir -p ../release_apk
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-v1.1.0.apk \;
