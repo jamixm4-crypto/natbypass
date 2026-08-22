@@ -58,7 +58,7 @@ jobs:
           cp "release/NatBypass-Builder-${TAG_NAME}.exe" toolkit/natbypass-builder/NatBypass-Builder.exe
           cp config.yaml.example toolkit/natbypass-builder/config.yaml.example
           cp README.md toolkit/natbypass-builder/README.md
-          (cd toolkit && zip -r "../release/NatBypass-Builder-Toolkit-${TAG_NAME}-windows.zip" natbypass-builder)
+          python3 -c "import shutil; shutil.make_archive('release/NatBypass-Builder-Toolkit-${TAG_NAME}-windows', 'zip', 'toolkit')"
           rm -rf toolkit
 
           ls -lh release/
