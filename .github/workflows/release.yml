@@ -27,32 +27,34 @@ jobs:
           set -e
           mkdir -p release
           TAG="${GITHUB_REF_NAME}"
-          export CGO_ENABLED=0
 
-          echo "==> 1. Building Pure Native Win32 Desktop App..."
-          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass.exe" ./cmd/natbypass-gui
+          echo "==> Windows: Native Desktop App (Win32 GUI)..."
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass.exe" ./cmd/natbypass-gui
           cp "release/NatBypass.exe" "release/NatBypass-${TAG}.exe"
           cp "release/NatBypass.exe" "release/natbypass-${TAG}-windows-amd64.exe"
 
-          echo "==> 2. Building Windows CLI Daemon..."
-          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-cli-${TAG}-windows-amd64.exe" ./cmd/natbypass-cli
+          echo "==> Windows: Router Builder GUI..."
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass-Builder-${TAG}.exe" ./cmd/builder
 
-          echo "==> 3. Building Router Builder GUI..."
-          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass-Builder-${TAG}.exe" ./cmd/builder
+          echo "==> Linux x64..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-linux-amd64" ./cmd/natbypass
 
-          echo "==> 4. Building Linux Binaries..."
-          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-linux-amd64" ./cmd/natbypass-cli
-          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-linux-arm64" ./cmd/natbypass-cli
+          echo "==> Linux ARM64..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-linux-arm64" ./cmd/natbypass
 
-          echo "==> 5. Building Router MIPS Binaries..."
-          GOOS=linux GOARCH=mips GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-router-mips" ./cmd/natbypass-cli
-          GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-router-mipsle" ./cmd/natbypass-cli
+          echo "==> Router MIPS (Big Endian)..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-router-mips" ./cmd/natbypass
 
-          echo "==> 6. Building Android CLI..."
-          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-android-arm64" ./cmd/natbypass-cli
+          echo "==> Router MIPSLE (Keenetic)..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-router-mipsle" ./cmd/natbypass
 
-          echo "==> 7. Packaging Toolkit..."
+          echo "==> Android ARM64..."
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-android-arm64" ./cmd/natbypass
+
+          echo "==> Config template..."
           cp config.yaml.example release/config.yaml.example
+
+          echo "==> NatBypass-Builder-Toolkit.zip..."
           mkdir -p toolkit/natbypass-builder
           cp "release/NatBypass-Builder-${TAG}.exe" toolkit/natbypass-builder/NatBypass-Builder.exe
           cp config.yaml.example toolkit/natbypass-builder/config.yaml.example
@@ -60,7 +62,7 @@ jobs:
           python3 -c "import shutil; shutil.make_archive('release/NatBypass-Builder-Toolkit-${TAG}-windows', 'zip', 'toolkit')"
           rm -rf toolkit
 
-          echo "==> All Built Files:"
+          echo "==> All release files:"
           ls -lh release/
 
       - name: Publish Release via GitHub CLI
@@ -68,5 +70,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          gh release view "${TAG}" || gh release create "${TAG}" --title "Release ${TAG} - Pure Native Win32 Desktop App" --notes "Release ${TAG}"
+          gh release view "${TAG}" || gh release create "${TAG}" \
+            --title "NatBypass ${TAG}" \
+            --notes "Релиз ${TAG}. Скачайте NatBypass-${TAG}.exe для Windows."
           gh release upload "${TAG}" release/* --clobber

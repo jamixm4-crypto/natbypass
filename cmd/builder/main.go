@@ -419,6 +419,7 @@ func getGoExe() (string, string) {
 	root := getProjectRoot()
 	candidates := []string{
 		filepath.Join(root, "soft", "go", "bin", "go.exe"),
+		filepath.Join(root, "go", "bin", "go.exe"),
 		`C:\Program Files\Go\bin\go.exe`,
 		`C:\Go\bin\go.exe`,
 	}
@@ -434,7 +435,40 @@ func getGoExe() (string, string) {
 		}
 		return p, ""
 	}
+	// Не найден - пробуем скачать портабельный Go 1.22
+	goDir := filepath.Join(root, "soft", "go")
+	goExe := filepath.Join(goDir, "bin", "go.exe")
+	if downloadGo(goDir) == nil {
+		if _, err := os.Stat(goExe); err == nil {
+			return goExe, goDir
+		}
+	}
 	return "go", ""
+}
+
+func downloadGo(destDir string) error {
+	appendLog("\r\n>> Go не найден. Скачиваю portable Go 1.22.5 (~67 МБ)...\r\n")
+	url := "https://go.dev/dl/go1.22.5.windows-amd64.zip"
+	zipPath := filepath.Join(os.TempDir(), "go1.22.5.windows-amd64.zip")
+
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+		fmt.Sprintf(`(New-Object System.Net.WebClient).DownloadFile('%s', '%s')`, url, zipPath))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		appendLog(fmt.Sprintf(">> Ошибка скачивания: %s\r\n%s\r\n", err, string(out)))
+		return err
+	}
+
+	appendLog(">> Распаковываю Go...\r\n")
+	os.MkdirAll(filepath.Dir(destDir), 0755)
+	cmd = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+		fmt.Sprintf(`Expand-Archive -Path '%s' -DestinationPath '%s' -Force`, zipPath, filepath.Dir(destDir)))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		appendLog(fmt.Sprintf(">> Ошибка распаковки: %s\r\n%s\r\n", err, string(out)))
+		return err
+	}
+	os.Remove(zipPath)
+	appendLog(">> Go установлен в папку soft/go\r\n")
+	return nil
 }
 
 func startBuild(mode string) {
