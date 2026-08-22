@@ -55,15 +55,15 @@ jobs:
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          $(go env GOPATH)/bin/gomobile init
 
       - name: Build Go Mobile AAR
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
           export CGO_ENABLED=1
           mkdir -p android/app/libs
-          gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi=24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || \
-          gomobile bind -v -target=android/arm64 -androidapi=24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || true
-          ls -lh android/app/libs/ || true
+          gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi=24 -o android/app/libs/natbypass.aar ./mobile
+          ls -lh android/app/libs/
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
