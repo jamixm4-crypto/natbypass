@@ -86,8 +86,10 @@ jobs:
       - name: Build Android APK
         run: |
           cd android
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --info --no-daemon
+          ./gradlew assembleDebug --stacktrace --no-daemon
           
           mkdir -p ../release_apk
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-v1.1.0.apk \;
