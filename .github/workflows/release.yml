@@ -25,8 +25,7 @@ jobs:
       - name: Build All Architectures
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path release | Out-Null
+          New-Item -ItemType Directory -Force -Path "release" | Out-Null
           $TAG_NAME = "${{ github.ref_name }}"
           $LDFLAGS = "-s -w"
 
@@ -75,10 +74,10 @@ jobs:
           Copy-Item "config.yaml.example" "toolkit/natbypass-builder/config.yaml.example" -Force
           Copy-Item "README.md" "toolkit/natbypass-builder/README.md" -Force
           Compress-Archive -Path "toolkit/natbypass-builder/*" -DestinationPath "release/NatBypass-Builder-Toolkit-$TAG_NAME-windows.zip" -Force
-          Remove-Item -Recurse -Force toolkit
+          Remove-Item -Recurse -Force "toolkit"
 
           Write-Host "All generated release files:"
-          Get-ChildItem release | Select-Object Name, Length
+          Get-ChildItem "release" | Select-Object Name, Length
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
