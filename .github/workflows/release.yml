@@ -27,6 +27,7 @@ jobs:
         env:
           CGO_ENABLED: '0'
         run: |
+          $ErrorActionPreference = "Continue"
           $tag = "${{ github.ref_name }}"
           New-Item -ItemType Directory -Force -Path release | Out-Null
 
@@ -35,6 +36,7 @@ jobs:
           $env:GOARCH = "amd64"
           go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass-$tag.exe" ./cmd/natbypass-gui
           Copy-Item "release/NatBypass-$tag.exe" "release/natbypass-$tag-windows-amd64.exe" -Force
+          Copy-Item "release/NatBypass-$tag.exe" "release/NatBypass.exe" -Force
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
           go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass-Builder-$tag.exe" ./cmd/builder
@@ -72,13 +74,14 @@ jobs:
           Copy-Item README.md toolkit/natbypass-builder/README.md -Force
           Copy-Item go.mod toolkit/natbypass-builder/go.mod -Force
           Copy-Item go.sum toolkit/natbypass-builder/go.sum -Force
-          Copy-Item -Recurse -Force cmd toolkit/natbypass-builder/
-          Copy-Item -Recurse -Force internal toolkit/natbypass-builder/
+          Copy-Item -Recurse -Force cmd toolkit/natbypass-builder/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force internal toolkit/natbypass-builder/ -ErrorAction SilentlyContinue
           
-          Compress-Archive -Path toolkit/natbypass-builder -DestinationPath "release/NatBypass-Builder-Toolkit-$tag-windows.zip" -Force
-          Remove-Item -Recurse -Force toolkit
+          Compress-Archive -Path toolkit/natbypass-builder/* -DestinationPath "release/NatBypass-Builder-Toolkit-$tag-windows.zip" -Force
+          Remove-Item -Recurse -Force toolkit -ErrorAction SilentlyContinue
 
-          Get-ChildItem release | Select-Object Name, Length | Format-Table -AutoSize
+          Write-Host "==> All Built Files in release/:"
+          Get-ChildItem -Path release -File | Select-Object Name, Length | Format-Table -AutoSize
 
       - name: Publish Release via GitHub CLI
         shell: pwsh
@@ -87,5 +90,11 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           gh release delete $tag --yes 2>$null
-          $allFiles = (Get-ChildItem -Path release -File).FullName
-          gh release create $tag $allFiles --title "NatBypass $tag" --notes "Релиз $tag. Скачайте NatBypass-$tag.exe (нативное Win32 GUI приложение) для Windows."
+          gh release create $tag --title "NatBypass $tag" --notes "Релиз $tag. Скачайте NatBypass-$tag.exe (нативное Win32 GUI приложение) для Windows."
+          
+          $files = Get-ChildItem -Path release -File
+          foreach ($f in $files) {
+              Write-Host "==> Uploading $($f.Name) ($([math]::Round($f.Length / 1MB, 2)) MB)..."
+              gh release upload $tag $f.FullName --clobber
+          }
+          Write-Host "==> All release files uploaded successfully!"
