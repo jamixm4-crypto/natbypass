@@ -45,7 +45,7 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-router-mipsle ./cmd/natbypass-cli
 
           # Android
-          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-android-arm64 ./cmd/natbypass-cli
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-android-arm64 ./cmd/natbypass-cli
 
           # Copy default config template
           cp config.yaml.example release/config.yaml.example
@@ -61,6 +61,8 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           files: release/*
           draft: false
