@@ -89,5 +89,8 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           gh release delete $tag --yes 2>$null
-          $files = (Get-ChildItem release/*).FullName
-          gh release create $tag $files --title "NatBypass $tag" --notes "Релиз $tag. Скачайте NatBypass-$tag.exe (нативное Win32 GUI приложение) для Windows."
+          gh release create $tag --title "NatBypass $tag" --notes "Релиз $tag. Скачайте NatBypass-$tag.exe (нативное Win32 GUI приложение) для Windows."
+          foreach ($f in (Get-ChildItem release/*)) {
+              Write-Host "Uploading $($f.Name)..."
+              gh release upload $tag $f.FullName --clobber
+          }
