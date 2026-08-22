@@ -26,47 +26,47 @@ jobs:
         run: |
           set -e
           mkdir -p release
-          TAG_NAME="${{ github.ref_name }}"
+          TAG="${GITHUB_REF_NAME}"
+          export CGO_ENABLED=0
 
-          # 1. Windows Native GUI (Win32 Desktop App) -> Primary release binaries
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass.exe" ./cmd/natbypass-gui
-          cp "release/NatBypass.exe" "release/NatBypass-${TAG_NAME}.exe"
-          cp "release/NatBypass.exe" "release/natbypass-${TAG_NAME}-windows-amd64.exe"
+          echo "==> 1. Building Pure Native Win32 Desktop App..."
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass.exe" ./cmd/natbypass-gui
+          cp "release/NatBypass.exe" "release/NatBypass-${TAG}.exe"
+          cp "release/NatBypass.exe" "release/natbypass-${TAG}-windows-amd64.exe"
 
-          # 2. Windows CLI Daemon (Headless / Server)
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-cli-${TAG_NAME}-windows-amd64.exe" ./cmd/natbypass-cli
+          echo "==> 2. Building Windows CLI Daemon..."
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-cli-${TAG}-windows-amd64.exe" ./cmd/natbypass-cli
 
-          # 3. Windows Builder GUI
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass-Builder-${TAG_NAME}.exe" ./cmd/builder
+          echo "==> 3. Building Router Builder GUI..."
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass-Builder-${TAG}.exe" ./cmd/builder
 
-          # 4. Linux Binaries
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG_NAME}-linux-amd64" ./cmd/natbypass-cli
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG_NAME}-linux-arm64" ./cmd/natbypass-cli
+          echo "==> 4. Building Linux Binaries..."
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-linux-amd64" ./cmd/natbypass-cli
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-linux-arm64" ./cmd/natbypass-cli
 
-          # 5. Routers (MIPS / MIPSLE)
-          CGO_ENABLED=0 GOOS=linux GOARCH=mips GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG_NAME}-router-mips" ./cmd/natbypass-cli
-          CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG_NAME}-router-mipsle" ./cmd/natbypass-cli
+          echo "==> 5. Building Router MIPS Binaries..."
+          GOOS=linux GOARCH=mips GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-router-mips" ./cmd/natbypass-cli
+          GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-router-mipsle" ./cmd/natbypass-cli
 
-          # 6. Android
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG_NAME}-android-arm64" ./cmd/natbypass-cli
+          echo "==> 6. Building Android CLI..."
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-android-arm64" ./cmd/natbypass-cli
 
-          # 7. Copy config template
+          echo "==> 7. Packaging Toolkit..."
           cp config.yaml.example release/config.yaml.example
-
-          # 8. Build pre-packaged NatBypass-Builder-Toolkit.zip
           mkdir -p toolkit/natbypass-builder
-          cp "release/NatBypass-Builder-${TAG_NAME}.exe" toolkit/natbypass-builder/NatBypass-Builder.exe
+          cp "release/NatBypass-Builder-${TAG}.exe" toolkit/natbypass-builder/NatBypass-Builder.exe
           cp config.yaml.example toolkit/natbypass-builder/config.yaml.example
           cp README.md toolkit/natbypass-builder/README.md
-          python3 -c "import shutil; shutil.make_archive('release/NatBypass-Builder-Toolkit-${TAG_NAME}-windows', 'zip', 'toolkit')"
+          python3 -c "import shutil; shutil.make_archive('release/NatBypass-Builder-Toolkit-${TAG}-windows', 'zip', 'toolkit')"
           rm -rf toolkit
 
+          echo "==> All Built Files:"
           ls -lh release/
 
       - name: Publish Release via GitHub CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME="${{ github.ref_name }}"
-          gh release view "$TAG_NAME" || gh release create "$TAG_NAME" --title "Release $TAG_NAME - Pure Native Win32 Desktop App" --notes "Release $TAG_NAME"
-          gh release upload "$TAG_NAME" release/* --clobber
+          TAG="${GITHUB_REF_NAME}"
+          gh release view "${TAG}" || gh release create "${TAG}" --title "Release ${TAG} - Pure Native Win32 Desktop App" --notes "Release ${TAG}"
+          gh release upload "${TAG}" release/* --clobber
