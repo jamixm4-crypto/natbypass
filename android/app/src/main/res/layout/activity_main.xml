@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -30,7 +30,7 @@
             android:layout_height="40dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/title_qr_scanner"
-            android:src="@drawable/ic_qr_code"
+            app:srcCompat="@drawable/ic_qr_code"
             app:tint="@color/accent_blue" />
 
         <ImageButton
@@ -39,7 +39,7 @@
             android:layout_height="40dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/title_diagnostics"
-            android:src="@drawable/ic_diagnostics"
+            app:srcCompat="@drawable/ic_diagnostics"
             app:tint="@color/text_muted" />
 
         <ImageButton
@@ -48,7 +48,7 @@
             android:layout_height="40dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/title_settings"
-            android:src="@drawable/ic_settings"
+            app:srcCompat="@drawable/ic_settings"
             app:tint="@color/text_muted" />
     </LinearLayout>
 

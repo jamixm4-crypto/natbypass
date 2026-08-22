@@ -87,7 +87,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          ./gradlew assembleDebug --stacktrace --info --no-daemon
           
           mkdir -p ../release_apk
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-v1.1.0.apk \;
