@@ -30,7 +30,7 @@ jobs:
 
           # Windows Binaries
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-windows-amd64.exe ./cmd/natbypass-cli
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS} -H=windowsgui" -o release/NatBypass-${TAG_NAME}.exe ./cmd/natbypass-cli
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS} -H=windowsgui" -o release/NatBypass-${TAG_NAME}.exe ./cmd/natbypass-gui
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS} -H=windowsgui" -o release/NatBypass-Builder-${TAG_NAME}.exe ./cmd/builder
 
           # Linux Binaries
