@@ -1,56 +1,40 @@
 <div align="center">
 
-# 🛸 NatBypass
+# 🛸 NatBypass v1.1.0
 
-**Кроссплатформенное приложение для обхода NAT (включая двойной NAT / CGNAT) и организации прямого зашифрованного P2P Mesh-доступа между всеми вашими устройствами.**
+**Современное кроссплатформенное приложение для обхода NAT / CGNAT и организации прямого зашифрованного P2P Mesh-доступа между устройствами с поддержкой AmneziaWG 2.0 (DPI Bypass), Exit Node маршрутизации и Windows DPAPI шифрования.**
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
+[![Release](https://img.shields.io/badge/Release-v1.1.0-8b5cf6?style=flat&logo=github)](https://github.com/jamixm4-crypto/natbypass/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20MIPS%20%7C%20ARM64%20%7C%20Android-brightgreen)](#-поддерживаемые-платформы)
+[![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20Keenetic%20%7C%20OpenWrt%20%7C%20Android-brightgreen)](#-поддерживаемые-платформы)
 [![Zero CGO](https://img.shields.io/badge/CGO-Zero%20(Pure%20Go)-blue)](https://golang.org)
-[![Security](https://img.shields.io/badge/Crypto-NaCl%20%2F%20X25519-red)](internal/crypto)
+[![Security](https://img.shields.io/badge/Crypto-Windows%20DPAPI%20%2F%20NaCl%20X25519-red)](internal/config)
 
 </div>
 
 ---
 
-## 🌟 Ключевые возможности
+## ✨ Что нового в версии 1.1.0
 
-* **Обход сложного NAT и CGNAT (RFC 5389 STUN):** Автоматическое определение внешних сокетов `IP:Port` через независимые STUN-серверы и UPnP/NAT-PMP.
-* **Мультиканальная сеть сигнализации (Signaling Mesh):**
-  * 💬 **Telegram Bot API:** Обмен через защищенные сообщения в приватном канале (работает через SOCKS5/HTTP прокси).
-  * ⚡ **MQTT Broker:** Легковесный publish/subscribe с гарантией QoS 1 и автопереподключением.
-  * 🔗 **HTTP Webhook:** Защищенные POST-запросы с HMAC-SHA256 подписью.
-  * 🌍 **Cloudflare DNS:** Передача состояния через DNS TXT записи и DNS-over-HTTPS (DoH).
-* **Отказоустойчивый Fallback Manager:** Автоматическое переключение сигнальных каналов с экспоненциальной задержкой (Exponential Backoff) и Circuit Breaker при сбоях.
-* **End-to-End шифрование (E2EE):** Полное шифрование всех пакетов сигнализации алгоритмом **NaCl/Box** (Curve25519 + XSalsa20-Poly1305).
-* **Автоматический WireGuard & AmneziaWG 2.0 Mesh:**
-  * 🔒 Стандартный WireGuard (`wg0.conf`) на чистом Go (0 CGO).
-  * 🛡️ **AmneziaWG 2.0 (AWG):** Полная поддержка обфускации протокола для гарантированного обхода блокировок DPI / ТСПУ (`Jc`, `Jmin`, `Jmax`, `S1`, `S2`, кастомные magic-заголовки `H1`–`H4`).
-* **Графические интерфейсы (GUI):**
-  * 🪟 **Desktop GUI (Wails / Win32):** Нативное десктопное окно со статусом сети, таблицей пиров, логами и системным треем.
-  * 🌐 **Встроенный Web UI:** Легковесный веб-интерфейс (`http://localhost:8080`) с интерактивной настройкой Telegram, MQTT, AWG 2.0 и автоперебором портов.
-  * 🔨 **Нативный Сборщик (Builder GUI):** Автономное Win32-приложение для сборки бинарников под все платформы в один клик.
-* **Системные службы:** Управление службой Windows (`sc.exe` / `golang.org/x/sys/windows/svc`) и демонизация на Linux (`systemd`, OpenWrt `procd`, Entware).
-* **Поддержка роутеров и мобильных ОС:** 100% статическая сборка без libc для Keenetic, OpenWrt, Mikrotik, Raspberry Pi, Android и iOS.
+* 🎨 **Новый Glassmorphism Dark UI (`#0a0e1a`):** Премиальный темный интерфейс с аппаратным ускорением, неоновыми индикаторами, живыми сетевыми метриками (0% фейковых данных).
+* 👥 **Адресная книга и никнеймы:** Возможность задавать удобные имена и закладки для каждого узла вашей Mesh-сети.
+* 🌐 **Маршрутизация Exit Node (Интернет-шлюз):** Раздача своего интернета через Wintun/WireGuard NAT в 1 клик или маршрутизация всего внешнего трафика (`0.0.0.0/1`, `128.0.0.0/1`) через удаленный домашний ПК/сервер.
+* 🏠 **Site-to-Site LAN Subnets:** Анонсирование локальных подсетей (например, `192.168.1.0/24`) для прямого доступа к роутерам, принтерам и NAS внутри Mesh-сети.
+* 🛡️ **AmneziaWG 2.0 Пресеты:** 1-клик переключение режимов обфускации против блокировок ТСПУ/DPI (*Стандартный WireGuard*, *Обход DPI*, *Stealth*) с настройкой `Jc`, `Jmin`, `Jmax`, `S1`, `S2`, `H1`–`H4` и генерацией `.conf`.
+* 🩺 **Мультисерверная диагностика связности:** Комплексный тест интернета (через пул независимых DNS/HTTPS серверов), внешнего IP, STUN UDP-сокетов, NAT-типа (Full Cone / Symmetric / CGNAT) и быстрой кнопкой копирования отчета.
+* 🔒 **Windows DPAPI Безопасность:** Автоматическое аппаратное шифрование конфигураций и токенов Telegram/MQTT через Windows Data Protection API (`# NATBYPASS_ENCRYPTED_CONFIG:v1`).
 
 ---
 
-## 📚 Подробные инструкции по настройке клиентов
+## 🌟 Ключевые возможности
 
-Подробные пошаговые руководства с примерами конфигураций для каждой платформы:
-
-| Платформа / Тема | Документация | Особенности |
-|---|---|---|
-| ⚡ **Быстрый старт** | [**Пошаговый гайд за 5 минут (docs/QUICKSTART.md)**](docs/QUICKSTART.md) | Для новичков: от скачивания до первого P2P соединения |
-| 🪟 **Windows** | [**Инструкция для Windows (docs/WINDOWS.md)**](docs/WINDOWS.md) | Desktop GUI, System Tray, служба Windows Service, WireGuard клиент |
-| 🛡️ **AmneziaWG 2.0** | [**Обход блокировок DPI (docs/AMNEZIA_WG.md)**](docs/AMNEZIA_WG.md) | Обфускация трафика `H1-H4`, `Jc`, `S1/S2` против ТСПУ / РКН |
-| 🐧 **Linux** | [**Инструкция для Linux (docs/LINUX.md)**](docs/LINUX.md) | Автоматический Systemd сервис, headless демон, автозапуск |
-| 🌐 **Keenetic** | [**Инструкция для Keenetic (docs/ROUTERS_KEENETIC.md)**](docs/ROUTERS_KEENETIC.md) | Установка через Entware/OPKG, автозапуск `init.d`, модели MIPS/ARM64 |
-| 📡 **OpenWrt** | [**Инструкция для OpenWrt (docs/ROUTERS_OPENWRT.md)**](docs/ROUTERS_OPENWRT.md) | Служба `procd`, интеграция в систему, минимальное потребление RAM |
-| 📱 **Android** | [**Инструкция для Android (docs/ANDROID.md)**](docs/ANDROID.md) | Запуск через Termux, QR-код сканирование, AmneziaWG Android App |
-| 💬 **Сигнализация** | [**Настройка Telegram / MQTT / DNS (docs/SIGNALING_SETUP.md)**](docs/SIGNALING_SETUP.md) | Пошаговое создание бота, настройка брокеров и топиков |
-| 🔒 **WireGuard** | [**Принцип работы Mesh-сети (docs/WIREGUARD_MESH.md)**](docs/WIREGUARD_MESH.md) | UDP Hole Punching, адресация подсети `10.200.0.0/24` |
+* **Прямой P2P UDP Hole Punching (RFC 5389 STUN):** Автоматическое пробитие NAT сокет-в-сокет с минимальной задержкой.
+* **Мультиканальная сеть сигнализации (Dual-Channel Parallel Relay):**
+  * ⚡ **MQTT Mesh Relay:** Сверхбыстрый постоянный обмен маяками и туннельными пакетами с автопереподключением.
+  * 💬 **Telegram Bot API:** Резервный канал связи через защищенные сообщения в личном боте (поддержка SOCKS5 прокси).
+* **End-to-End шифрование туннеля (E2EE):** Алгоритмы **ChaCha20-Poly1305** и **NaCl/Box** (Curve25519) обеспечивают абсолютную криптостойкость.
+* **100% Pure Go (Zero CGO):** Исполняемые файлы компилируются статически без сторонних C-зависимостей и запускаются на любых роутерах и ОС.
 
 ---
 
@@ -59,121 +43,77 @@
 ```
                 ┌─────────────────────────────────────────────────────────┐
                 │          Мультиканальная сеть сигнализации             │
-                │  [Telegram Bot] ── [MQTT Broker] ── [DoH DNS] ── [HTTP] │
+                │        [MQTT Mesh Relay] ── [Telegram Bot API]          │
                 └───────────▲─────────────────────────────────▲───────────┘
-                            │ (End-to-End Encrypted Payload)  │
+                            │ (End-to-End Encrypted Beacons)  │
                             │                                 │
            ┌────────────────┴───────────────┐     ┌───────────┴────────────────┐
-           │     Устройство A (Клиент)      │     │    Устройство B (Сервер)   │
-           │  • RFC 5389 STUN Discovery    │     │  • RFC 5389 STUN Discovery │
-           │  • NaCl/Box KeyPair            │     │  • NaCl/Box KeyPair        │
-           │  • Peer Registry Monitor       │     │  • Peer Registry Monitor   │
-           │  • Embedded Web UI (Port 8080) │     │  • Embedded Web UI         │
+           │     Устройство A (Клиент)      │     │   Устройство B (Exit Node) │
+           │  • STUN Discovery (RFC 5389)   │     │  • STUN Discovery (RFC 5389)│
+           │  • Glassmorphism UI (Port 8080)│     │  • Windows IP Forwarding   │
+           │  • Wintun Virtual Adapter      │     │  • Wintun NAT Gateway      │
+           │  • Local Virtual IP: 10.200.0.1│     │  • Remote VIP: 10.200.0.2  │
            └────────────────┬───────────────┘     └───────────┬────────────────┘
                             │                                 │
-                            └─────── Direct WireGuard P2P ────┘
-                                     (Tunnel: 10.200.0.0/24)
+                            └─────── Direct Socket-to-Socket ─┘
+                                  (UDP P2P Tunnel / AWG 2.0)
 ```
 
 ---
 
-## 💻 Поддерживаемые платформы и бинарники
+## 🧭 Разделы приложения (Web UI & Desktop)
 
-| Платформа | Архитектура | Целевые устройства | Готовый файл |
+| Вкладка | Назначение |
+|---|---|
+| 📊 **Обзор (Dashboard)** | Живые метрики сети, статус прямого P2P сокета, Uptime, быстрая таблица пиров |
+| 👥 **Устройства (Devices)** | Адресная книга, назначение никнеймов (`⭐ Имя`), копирование IP (`📋 IP`), пинг |
+| 🌐 **Шлюз & Сети (Routing)** | Режим Exit Node (раздача интернета), выбор удаленного шлюза, Site-to-Site LAN |
+| 🛡️ **AmneziaWG 2.0** | Пресеты обхода DPI, тонкая настройка мусорных пакетов (`Jc`, `S1/S2`), экспорт `.conf` |
+| ⏱️ **Журнал (Timeline)** | Потоковый лог событий в реальном времени с кнопкой копирования `📋` и очистки `🧹` |
+| 🩺 **Диагностика** | Комплексный тест связности (Интернет, IP, STUN, NAT-тип) с кнопкой копирования отчета |
+| ⚙️ **Настройки** | Настройка Telegram-бота, MQTT брокера, DPAPI шифрование и переключатели логов |
+
+---
+
+## 💻 Поддерживаемые платформы
+
+| Платформа | Архитектура | Целевые устройства | Готовый бинарник |
 |---|---|---|---|
-| **Windows** | `amd64` | Windows 10/11, Server (GUI + Tray + Service) | `natbypass-windows-amd64.exe` / `NatBypass.exe` |
-| **Linux** | `amd64` | Ubuntu, Debian, CentOS, Arch | `natbypass-linux-amd64` |
-| **Linux ARM64** | `arm64` | Keenetic Ultra/Giga/Peak, Raspberry Pi 3/4/5 | `natbypass-linux-arm64` |
-| **Linux MIPS** | `mips` *(Big Endian)* | Роутеры OpenWrt, Mikrotik MIPSBE | `natbypass-linux-mips` |
-| **Linux MIPSLE** | `mipsle` *(Little Endian)* | Keenetic Start/City/Air, Xiaomi 3G/4A | `natbypass-linux-mipsle` |
-| **Android** | `arm64` | Смартфоны (Termux / ADB / AAR / APK) | `natbypass-android-arm64` |
-| **macOS / iOS** | `arm64` | Apple Silicon Mac, iPhone (Framework) | `natbypass-darwin-arm64` |
+| **Windows** | `amd64` | Windows 10/11, Server (Glassmorphism GUI + Service) | `NatBypass-v1.1.0.exe` |
+| **Windows CLI** | `amd64` | Консольный режим / службы Windows | `natbypass-v1.1.0-windows-amd64.exe` |
+| **Linux** | `amd64` | Ubuntu, Debian, CentOS, Arch | `natbypass-v1.1.0-linux-amd64` |
+| **Linux ARM64** | `arm64` | Keenetic Ultra/Giga/Peak, Raspberry Pi 3/4/5 | `natbypass-v1.1.0-linux-arm64` |
+| **Routers MIPS** | `mips` *(Big Endian)* | Роутеры OpenWrt, Mikrotik MIPSBE | `natbypass-v1.1.0-router-mips` |
+| **Routers MIPSLE**| `mipsle` *(Little Endian)*| Keenetic Start/City/Air, Xiaomi 3G/4A | `natbypass-v1.1.0-router-mipsle` |
+| **Android** | `arm64` | Смартфоны (Termux / ADB / AAR / APK) | `natbypass-v1.1.0-android-arm64` |
 
 ---
 
-## 🚀 Быстрый старт за 3 шага
+## 🚀 Быстрый старт
 
-### 1. Подготовка конфигурации (`config.yaml`)
-Скопируйте `config.yaml.example` в `config.yaml` и укажите данные вашего Telegram-бота (или MQTT):
-```yaml
-app:
-  log_level: "info"
-  publish_interval: 60
+### 🪟 Windows (Самый простой способ)
+1. Скачайте [**`NatBypass-v1.1.0.exe`**](https://github.com/jamixm4-crypto/natbypass/releases/latest);
+2. Запустите файл — откроется окно приложения с Glassmorphism-интерфейсом;
+3. В разделе **«Настройки»** укажите токен Telegram-бота или уникальный топик MQTT;
+4. Нажмите **«💾 Сохранить настройки»** — всё готово! Запустите программу на втором ПК/роутере с теми же настройками.
 
-web_ui:
-  enabled: true
-  port: 8080
-
-signaling:
-  channels:
-    - type: "telegram"
-      priority: 1
-      enabled: true
-      params:
-        token: "7123456789:AAFlkjhsdf..."
-        chat_id: "-1001234567890"
-    - type: "mqtt"
-      priority: 2
-      enabled: true
-      params:
-        broker_url: "tcp://mqtt.eclipseprojects.io:1883"
-        topic: "natbypass/secret-mesh/peers"
-```
-
-### 2. Запуск
-* **На Windows:** Дважды кликните по **`NatBypass.exe`** (программа появится в трее и откроет окно панели управления).
-* **На Linux / Роутере:** Выполните `./natbypass start --config config.yaml`.
-
-### 3. Проверка подключения
-Откройте браузер по адресу **`http://localhost:8080`** — вы увидите список всех обнаруженных узлов сети, их реальные внешние сокеты и сможете в один клик сгенерировать WireGuard-конфиг для защищенного P2P соединения!
-
----
-
-## 🔨 Сборка собственных пакетов (Builder)
-
-Для встраивания параметров Telegram/MQTT и компиляции под ваши устройства предусмотрено 2 удобных способа:
-
-### Вариант А: Через графический сборщик (NatBypass Builder GUI)
-1. Скачайте архив **`NatBypass-Builder-Toolkit-windows.zip`** со страницы [Releases](../../releases) (либо скачайте исходники через `git clone https://github.com/jamixm4-crypto/natbypass.git`).
-2. Распакуйте архив и запустите **`NatBypass-Builder.exe`**.
-3. Заполните токены Telegram / MQTT, выберите целевые платформы галочками и нажмите **«🔨 Начать сборку»**.
-4. Сборщик автоматически скомпилирует готовые бинарники в папку `dist\`.
-
-> [!NOTE]
-> Графический сборщик `NatBypass-Builder.exe` компилирует код локально на вашей машине, поэтому для его работы необходимы файлы исходного кода проекта (`cmd/`, `internal/`, `go.mod`), которые уже включены в архив **`NatBypass-Builder-Toolkit-windows.zip`**.
-
-### Вариант Б: Через Makefile (Консоль / Linux / CI)
+### 🐧 Linux / Роутеры
 ```bash
-make all            # Сборка под все платформы
-make windows-amd64  # Сборка под Windows (.exe)
-make linux-cli      # Сборка под Linux x64
-make router-mipsle  # Сборка под Keenetic (MIPSLE)
-make router-arm64   # Сборка под ARM64
-make android-arm64  # Сборка под Android
-make android-apk    # Сборка APK пакета
+# Скачивание и запуск
+chmod +x natbypass-v1.1.0-linux-amd64
+./natbypass-v1.1.0-linux-amd64 start --config config.yaml
 ```
 
 ---
 
-## 📜 Команды CLI
+## 📚 Документация по компонентам
 
-```text
-NatBypass — P2P NAT Traversal Tool
-
-Использование:
-  natbypass [команда] [флаги]
-
-Доступные команды:
-  start          Запуск фонового демона (основной рабочий цикл)
-  status         Текущее состояние сети, пиров и внешний IP
-  stop           Корректная остановка демона по PID
-  keygen         Генерация пары ключей шифрования NaCl/Box (X25519)
-  wg keygen      Генерация ключей WireGuard
-  wg config      Генерация конфигурационного файла wg0.conf
-  service        Управление системной службой Windows (install|uninstall|start|stop)
-  install        Установка сервиса на Linux (systemd|procd|entware)
-  version        Показать версию и дату сборки
-```
+* [**🚀 Быстрый старт за 5 минут (docs/QUICKSTART.md)**](docs/QUICKSTART.md) — Пошаговое руководство для начинающих.
+* [**🛡️ Настройка AmneziaWG 2.0 (docs/AMNEZIA_WG.md)**](docs/AMNEZIA_WG.md) — Обход блокировок ТСПУ и РКН.
+* [**🌐 Настройка роутеров Keenetic (docs/ROUTERS_KEENETIC.md)**](docs/ROUTERS_KEENETIC.md) — Установка на Keenetic OS через Entware.
+* [**📡 Настройка роутеров OpenWrt (docs/ROUTERS_OPENWRT.md)**](docs/ROUTERS_OPENWRT.md) — Установка на OpenWrt с интеграцией в `procd`.
+* [**📱 Руководство для Android (docs/ANDROID.md)**](docs/ANDROID.md) — Подключение смартфонов к Mesh-сети.
+* [**💬 Настройка сигнальных каналов (docs/SIGNALING_SETUP.md)**](docs/SIGNALING_SETUP.md) — Создание Telegram-бота и настройка MQTT.
 
 ---
 
