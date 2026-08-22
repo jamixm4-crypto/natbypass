@@ -5,6 +5,7 @@ package tray
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"syscall"
