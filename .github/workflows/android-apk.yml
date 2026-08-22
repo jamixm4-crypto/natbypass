@@ -62,25 +62,6 @@ jobs:
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> $GITHUB_ENV
           echo "NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
 
-      - name: Install gomobile
-        run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          gomobile init
-
-      - name: Build Go Mobile AAR
-        run: |
-          export PATH=$PATH:$(go env GOPATH)/bin
-          export CGO_ENABLED=1
-          mkdir -p android/app/libs
-          
-          gomobile bind -v -target=android -androidapi 24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || \
-          gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi 24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || true
-          
-          rm -f android/app/libs/*-sources.jar
-          ls -la android/app/libs/
-
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
