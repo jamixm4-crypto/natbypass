@@ -1,7 +1,7 @@
-﻿<resources>
+<resources>
     <string name="app_name">NatBypass</string>
     <string name="vpn_status_disconnected">ОТКЛЮЧЕНО</string>
-    <string name="vpn_status_connecting">ПОДКЛЮЧЕНИЕ…</string>
+    <string name="vpn_status_connecting">ПОДКЛЮЧЕНИЕ...</string>
     <string name="vpn_status_connected">ПОДКЛЮЧЕНО</string>
     <string name="vpn_btn_connect">ВКЛЮЧИТЬ VPN</string>
     <string name="vpn_btn_disconnect">ОТКЛЮЧИТЬ</string>
