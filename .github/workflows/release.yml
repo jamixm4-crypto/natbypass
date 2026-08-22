@@ -11,10 +11,7 @@ permissions:
 jobs:
   release:
     name: Build & Publish Release
-    runs-on: ubuntu-latest
-    env:
-      CGO_ENABLED: '0'
-      TAG: ${{ github.ref_name }}
+    runs-on: windows-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -25,62 +22,70 @@ jobs:
           go-version: '1.22'
           cache: true
 
-      - name: Create release directory
-        run: mkdir -p release
-
-      - name: 1. Build Windows Native Desktop App (Win32 GUI)
+      - name: Build All Release Binaries
+        shell: pwsh
         env:
-          GOOS: windows
-          GOARCH: amd64
+          CGO_ENABLED: '0'
         run: |
+          $tag = "${{ github.ref_name }}"
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+
+          Write-Host "==> 1. Building Windows GUI (NatBypass.exe)..."
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
           go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass.exe" ./cmd/natbypass-gui
-          cp "release/NatBypass.exe" "release/NatBypass-${TAG}.exe"
-          cp "release/NatBypass.exe" "release/natbypass-${TAG}-windows-amd64.exe"
-          ls -lh release/
+          Copy-Item "release/NatBypass.exe" "release/NatBypass-$tag.exe"
+          Copy-Item "release/NatBypass.exe" "release/natbypass-$tag-windows-amd64.exe"
 
-      - name: 2. Build Windows Router Builder GUI
-        env:
-          GOOS: windows
-          GOARCH: amd64
-        run: |
-          go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass-Builder-${TAG}.exe" ./cmd/builder
-          ls -lh release/
+          Write-Host "==> 2. Building Windows Router Builder GUI..."
+          go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release/NatBypass-Builder-$tag.exe" ./cmd/builder
 
-      - name: 3. Build Linux Binaries
-        run: |
-          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-linux-amd64" ./cmd/natbypass
-          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-linux-arm64" ./cmd/natbypass
-          ls -lh release/
+          Write-Host "==> 3. Building Linux x64..."
+          $env:GOOS = "linux"
+          $env:GOARCH = "amd64"
+          go build -trimpath -ldflags="-s -w" -o "release/natbypass-$tag-linux-amd64" ./cmd/natbypass
 
-      - name: 4. Build Router MIPS / MIPSLE Binaries
-        run: |
-          GOOS=linux GOARCH=mips GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-router-mips" ./cmd/natbypass
-          GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-router-mipsle" ./cmd/natbypass
-          ls -lh release/
+          Write-Host "==> 4. Building Linux ARM64..."
+          $env:GOARCH = "arm64"
+          go build -trimpath -ldflags="-s -w" -o "release/natbypass-$tag-linux-arm64" ./cmd/natbypass
 
-      - name: 5. Build Android CLI
-        run: |
-          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "release/natbypass-${TAG}-android-arm64" ./cmd/natbypass
-          ls -lh release/
+          Write-Host "==> 5. Building Router MIPS..."
+          $env:GOARCH = "mips"
+          $env:GOMIPS = "softfloat"
+          go build -trimpath -ldflags="-s -w" -o "release/natbypass-$tag-router-mips" ./cmd/natbypass
 
-      - name: 6. Package Toolkit and Config
-        run: |
-          cp config.yaml.example release/config.yaml.example
-          mkdir -p toolkit/natbypass-builder
-          cp "release/NatBypass-Builder-${TAG}.exe" toolkit/natbypass-builder/NatBypass-Builder.exe
-          cp config.yaml.example toolkit/natbypass-builder/config.yaml.example
-          cp README.md toolkit/natbypass-builder/README.md
-          cp go.mod toolkit/natbypass-builder/go.mod
-          cp go.sum toolkit/natbypass-builder/go.sum
-          cp -r cmd toolkit/natbypass-builder/
-          cp -r internal toolkit/natbypass-builder/
-          python3 -c "import shutil; shutil.make_archive('release/NatBypass-Builder-Toolkit-${TAG}-windows', 'zip', 'toolkit')"
-          rm -rf toolkit
-          ls -lh release/
+          Write-Host "==> 6. Building Router MIPSLE..."
+          $env:GOARCH = "mipsle"
+          go build -trimpath -ldflags="-s -w" -o "release/natbypass-$tag-router-mipsle" ./cmd/natbypass
 
-      - name: 7. Publish Release via GitHub CLI
+          Write-Host "==> 7. Building Android CLI..."
+          $env:GOMIPS = ""
+          $env:GOARCH = "arm64"
+          go build -trimpath -ldflags="-s -w" -o "release/natbypass-$tag-android-arm64" ./cmd/natbypass
+
+          Write-Host "==> 8. Copying config..."
+          Copy-Item config.yaml.example release/config.yaml.example
+
+          Write-Host "==> 9. Packaging Toolkit with source..."
+          New-Item -ItemType Directory -Force -Path toolkit/natbypass-builder | Out-Null
+          Copy-Item "release/NatBypass-Builder-$tag.exe" toolkit/natbypass-builder/NatBypass-Builder.exe
+          Copy-Item config.yaml.example toolkit/natbypass-builder/config.yaml.example
+          Copy-Item README.md toolkit/natbypass-builder/README.md
+          Copy-Item go.mod toolkit/natbypass-builder/go.mod
+          Copy-Item go.sum toolkit/natbypass-builder/go.sum
+          Copy-Item -Recurse cmd toolkit/natbypass-builder/cmd
+          Copy-Item -Recurse internal toolkit/natbypass-builder/internal
+          Compress-Archive -Path "toolkit/*" -DestinationPath "release/NatBypass-Builder-Toolkit-$tag-windows.zip" -Force
+          Remove-Item -Recurse -Force toolkit
+
+          Get-ChildItem release | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Publish Release via GitHub CLI
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete "${TAG}" --yes || true
-          gh release create "${TAG}" release/* --title "NatBypass ${TAG}" --notes "Релиз ${TAG}. Скачайте NatBypass-${TAG}.exe (чистое Win32 GUI приложение) для Windows."
+          $tag = "${{ github.ref_name }}"
+          gh release delete $tag --yes 2>$null
+          $files = (Get-ChildItem release/*).FullName
+          gh release create $tag $files --title "NatBypass $tag" --notes "Релиз $tag. Скачайте NatBypass-$tag.exe (нативное Win32 GUI приложение) для Windows."
