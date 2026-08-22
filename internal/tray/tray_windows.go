@@ -337,6 +337,23 @@ func (t *TrayApp) openWebUI() {
 		}
 	}
 	url := fmt.Sprintf("http://localhost:%d", port)
+
+	// Launch as a sleek standalone application window (no URL bar, no tabs)
+	appCandidates := []string{
+		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
+	}
+	for _, p := range appCandidates {
+		if _, err := os.Stat(p); err == nil {
+			cmd := exec.Command(p, fmt.Sprintf("--app=%s", url), "--window-size=1120,780")
+			if err := cmd.Start(); err == nil {
+				return
+			}
+		}
+	}
+
 	exec.Command("cmd", "/c", "start", url).Start()
 }
 
