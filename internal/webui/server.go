@@ -161,7 +161,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/peer/bookmark", s.handlePeerBookmark)
 	mux.HandleFunc("/api/awg/params", s.handleAWGParams)
 	mux.HandleFunc("/api/routing/exit-node", s.handleRoutingExitNode)
-	mux.HandleFunc("/api/routing/subnets", s.handleRoutingSubnets)
+	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/api/settings/save", s.handleSettingsSave)
 
 	handler := s.corsMiddleware(s.authMiddleware(mux))
@@ -1228,4 +1228,12 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	s.AddEvent("info", "Конфигурация зашифрована DPAPI и сохранена", fmt.Sprintf("device=%s", req.DeviceName))
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true}, "")
+}
+
+// handleFavicon — GET /favicon.ico — отдаёт кастомный значок NatBypass для браузера и оконного фрейма
+func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	svgIcon := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#g)"/><circle cx="16" cy="16" r="9" fill="none" stroke="#ffffff" stroke-width="2.5"/><path d="M16 7a13 13 0 0 0 0 18 13 13 0 0 0 0-18" fill="none" stroke="#ffffff" stroke-width="2"/><path d="M7 16h18" fill="none" stroke="#ffffff" stroke-width="2"/></svg>`
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write([]byte(svgIcon))
 }

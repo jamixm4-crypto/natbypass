@@ -90,6 +90,44 @@ var (
 	procDestroyWindow         = moduser32.NewProc("DestroyWindow")
 	procMessageBoxW           = moduser32.NewProc("MessageBoxW")
 	procGetTextExtentPoint32W = modgdi32.NewProc("GetTextExtentPoint32W")
+	procCreatePopupMenu       = moduser32.NewProc("CreatePopupMenu")
+	procAppendMenuW           = moduser32.NewProc("AppendMenuW")
+	procTrackPopupMenu        = moduser32.NewProc("TrackPopupMenu")
+	procGetCursorPos          = moduser32.NewProc("GetCursorPos")
+	procLoadImageW            = moduser32.NewProc("LoadImageW")
+
+	modshell32            = syscall.NewLazyDLL("shell32.dll")
+	procShell_NotifyIconW = modshell32.NewProc("Shell_NotifyIconW")
+)
+
+type NOTIFYICONDATAW struct {
+	CbSize           uint32
+	HWnd             uintptr
+	UID              uint32
+	UFlags           uint32
+	UCallbackMessage uint32
+	HIcon            uintptr
+	SzTip            [128]uint16
+	DwState          uint32
+	DwStateMask      uint32
+	SzInfo           [256]uint16
+	UVersion         uint32
+	SzInfoTitle      [64]uint16
+	DwInfoFlags      uint32
+	GuidItem         [16]byte
+	HBalloonIcon     uintptr
+}
+
+const (
+	NIM_ADD    = 0x00000000
+	NIM_MODIFY = 0x00000001
+	NIM_DELETE = 0x00000002
+
+	NIF_MESSAGE = 0x00000001
+	NIF_ICON    = 0x00000002
+	NIF_TIP     = 0x00000004
+
+	WM_TRAYICON = 0x0400 + 100
 )
 
 const (
@@ -745,6 +783,9 @@ func main() {
 	darkMode := int32(1)
 	procDwmSetWindowAttribute.Call(hMainWnd, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
+	// Инициализация иконки в системном трее Windows
+	initTrayIcon(hMainWnd, hAppIcon)
+
 	// Построение элементов интерфейса
 	writeDebug("Начало построения UI buildModernUI()...")
 	// Запуск сетевого ядра напрямую из параметров cfg
@@ -880,13 +921,70 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		handleCommand(id)
 		return 0
 
+	case WM_TRAYICON:
+		if lParam == 0x0205 /* WM_RBUTTONUP */ {
+			var pt struct{ X, Y int32 }
+			procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+			hMenu, _, _ := procCreatePopupMenu.Call()
+
+			titleStr, _ := syscall.UTF16PtrFromString("🌐 Открыть NatBypass")
+			syncStr, _ := syscall.UTF16PtrFromString("⚡ Обновить сокеты P2P")
+			exitStr, _ := syscall.UTF16PtrFromString("🚪 Выход")
+
+			procAppendMenuW.Call(hMenu, 0, 1001, uintptr(unsafe.Pointer(titleStr)))
+			procAppendMenuW.Call(hMenu, 0, 1002, uintptr(unsafe.Pointer(syncStr)))
+			procAppendMenuW.Call(hMenu, 0x00000800 /* MF_SEPARATOR */, 0, 0)
+			procAppendMenuW.Call(hMenu, 0, 1003, uintptr(unsafe.Pointer(exitStr)))
+
+			procSetForegroundWindow.Call(hwnd)
+			cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */|0x0002 /* TPM_RIGHTBUTTON */, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
+
+			if cmd == 1001 {
+				launchModernAppWindow("http://127.0.0.1:8080")
+			} else if cmd == 1002 {
+				triggerPublish()
+			} else if cmd == 1003 {
+				removeTrayIcon(hwnd)
+				exitApp()
+			}
+			return 0
+		} else if lParam == 0x0203 /* WM_LBUTTONDBLCLK */ || lParam == 0x0202 /* WM_LBUTTONUP */ {
+			launchModernAppWindow("http://127.0.0.1:8080")
+			return 0
+		}
+		return 0
+
 	case WM_DESTROY:
+		removeTrayIcon(hwnd)
 		exitApp()
 		return 0
 	}
 
 	ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
 	return ret
+}
+
+func initTrayIcon(hwnd uintptr, hIcon uintptr) {
+	var nid NOTIFYICONDATAW
+	nid.CbSize = uint32(unsafe.Sizeof(nid))
+	nid.HWnd = hwnd
+	nid.UID = 1001
+	nid.UFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+	nid.UCallbackMessage = WM_TRAYICON
+	nid.HIcon = hIcon
+
+	tip := syscall.StringToUTF16("NatBypass Mesh & AWG 2.0")
+	copy(nid.SzTip[:], tip)
+
+	procShell_NotifyIconW.Call(NIM_ADD, uintptr(unsafe.Pointer(&nid)))
+}
+
+func removeTrayIcon(hwnd uintptr) {
+	var nid NOTIFYICONDATAW
+	nid.CbSize = uint32(unsafe.Sizeof(nid))
+	nid.HWnd = hwnd
+	nid.UID = 1001
+	procShell_NotifyIconW.Call(NIM_DELETE, uintptr(unsafe.Pointer(&nid)))
 }
 
 // exitApp — гарантированное мгновенное завершение процесса без зависаний
@@ -897,7 +995,8 @@ func exitApp() {
 
 	writeDebug("🛑 Завершение работы приложения...")
 
-	// 1. Мгновенно скрываем окно от пользователя
+	// 1. Мгновенно скрываем окно от пользователя и убираем иконку из трея
+	removeTrayIcon(hMainWnd)
 	procKillTimer.Call(hMainWnd, ID_TIMER_POLL)
 	procShowWindow.Call(hMainWnd, SW_HIDE)
 
