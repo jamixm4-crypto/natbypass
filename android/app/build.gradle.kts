@@ -64,5 +64,5 @@ dependencies {
     implementation("com.google.mlkit:barcode-scanning:17.2.0")
 
     // Embedded Go Mobile AAR library
-    implementation(fileTree("libs") { include("*.aar", "*.jar") })
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
 }
