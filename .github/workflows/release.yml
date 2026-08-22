@@ -40,6 +40,7 @@ jobs:
           $env:GOARCH = "amd64"
           $res1 = & go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass-gui 2>&1
           Write-Host "GUI Build output: $res1"
+          Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass-$tag.exe" -Force -ErrorAction SilentlyContinue
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
           $res2 = & go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder 2>&1
