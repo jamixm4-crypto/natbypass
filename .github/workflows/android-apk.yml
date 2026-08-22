@@ -78,6 +78,7 @@ jobs:
           gomobile bind -v -target=android -androidapi 24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || \
           gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi 24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || true
           
+          rm -f android/app/libs/*-sources.jar
           ls -la android/app/libs/
 
       - name: Setup Gradle

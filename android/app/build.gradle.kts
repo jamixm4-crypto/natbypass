@@ -63,6 +63,6 @@ dependencies {
     implementation("androidx.camera:camera-view:1.3.2")
     implementation("com.google.mlkit:barcode-scanning:17.2.0")
 
-    // Embedded Go Mobile AAR library
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+    // Embedded Go Mobile AAR library (only .aar, excluding any -sources.jar)
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 }
