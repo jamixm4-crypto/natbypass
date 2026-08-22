@@ -35,14 +35,15 @@ jobs:
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           
-          # Windows Modern GUI
-          go build -trimpath -ldflags="$LDFLAGS -H=windowsgui" -o "release/NatBypass-$TAG_NAME-gui-windows-amd64.exe" ./cmd/natbypass-gui
-          Copy-Item "release/NatBypass-$TAG_NAME-gui-windows-amd64.exe" "release/NatBypass-$TAG_NAME.exe" -Force
-          Copy-Item "release/NatBypass-$TAG_NAME-gui-windows-amd64.exe" "release/NatBypass.exe" -Force
+          # Windows Native GUI (Win32 Desktop App) -> Primary release binaries
+          go build -trimpath -ldflags="$LDFLAGS -H=windowsgui" -o "release/NatBypass.exe" ./cmd/natbypass-gui
+          Copy-Item "release/NatBypass.exe" "release/NatBypass-$TAG_NAME.exe" -Force
+          Copy-Item "release/NatBypass.exe" "release/NatBypass-$TAG_NAME-windows-amd64.exe" -Force
+          Copy-Item "release/NatBypass.exe" "release/natbypass-$TAG_NAME-windows-amd64.exe" -Force
 
-          # Windows CLI
-          go build -trimpath -ldflags="$LDFLAGS" -o "release/natbypass-$TAG_NAME-cli-windows-amd64.exe" ./cmd/natbypass-cli
-          Copy-Item "release/natbypass-$TAG_NAME-cli-windows-amd64.exe" "release/natbypass-$TAG_NAME-windows-amd64.exe" -Force
+          # Windows CLI Daemon (Headless / Server)
+          go build -trimpath -ldflags="$LDFLAGS" -o "release/natbypass-cli-$TAG_NAME-windows-amd64.exe" ./cmd/natbypass-cli
+          Copy-Item "release/natbypass-cli-$TAG_NAME-windows-amd64.exe" "release/natbypass-$TAG_NAME-cli-windows-amd64.exe" -Force
 
           # Windows Builder GUI
           go build -trimpath -ldflags="$LDFLAGS -H=windowsgui" -o "release/NatBypass-Builder-$TAG_NAME.exe" ./cmd/builder
