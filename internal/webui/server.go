@@ -350,6 +350,10 @@ func (s *Server) handleChannelSwitch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if s.state != nil {
+		s.state.CurrentChannel = req.Name
+	}
+	s.AddEvent("info", fmt.Sprintf("Сигнальный канал переключен на: %s", req.Name), "")
 	slog.Info("Переключён сигнальный канал", "channel", req.Name)
 	s.jsonResponse(w, http.StatusOK, map[string]string{"channel": req.Name}, "")
 }
@@ -971,7 +975,9 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	channelName := "parallel"
-	if s.sigMgr != nil {
+	if s.state != nil && s.state.CurrentChannel != "" {
+		channelName = s.state.CurrentChannel
+	} else if s.sigMgr != nil {
 		channelName = s.sigMgr.CurrentChannel()
 	}
 
