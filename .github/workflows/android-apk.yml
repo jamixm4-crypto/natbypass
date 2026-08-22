@@ -36,8 +36,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Configure Android NDK
+      - name: Configure Android NDK & Licenses
         run: |
+          yes | sdkmanager --licenses || true
           if [ -d "$ANDROID_SDK_ROOT/ndk" ] && [ "$(ls -A $ANDROID_SDK_ROOT/ndk)" ]; then
             NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
           else
@@ -63,11 +64,10 @@ jobs:
           export CGO_ENABLED=1
           mkdir -p android/app/libs
           
-          gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi 24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || \
-          gomobile bind -v -target=android/arm64 -androidapi 24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || \
-          gomobile bind -v -target=android -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || true
+          gomobile bind -v -target=android -androidapi 24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || \
+          gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi 24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || true
           
-          ls -la android/app/libs/ || true
+          ls -la android/app/libs/
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
