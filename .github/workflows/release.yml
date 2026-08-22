@@ -27,43 +27,42 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "release" | Out-Null
           $TAG_NAME = "${{ github.ref_name }}"
-          $LDFLAGS = "-s -w"
 
           # 1. Windows Native GUI (Win32 Desktop App) -> Primary release binaries
           $env:CGO_ENABLED = "0"
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
-          go build -trimpath -ldflags="$LDFLAGS -H=windowsgui" -o "release/NatBypass.exe" ./cmd/natbypass-gui
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o "release/NatBypass.exe" ./cmd/natbypass-gui
           Copy-Item "release/NatBypass.exe" "release/NatBypass-$TAG_NAME.exe" -Force
           Copy-Item "release/NatBypass.exe" "release/natbypass-$TAG_NAME-windows-amd64.exe" -Force
 
           # 2. Windows CLI Daemon (Headless / Server)
-          go build -trimpath -ldflags="$LDFLAGS" -o "release/natbypass-cli-$TAG_NAME-windows-amd64.exe" ./cmd/natbypass-cli
+          go build -trimpath -ldflags "-s -w" -o "release/natbypass-cli-$TAG_NAME-windows-amd64.exe" ./cmd/natbypass-cli
 
           # 3. Windows Builder GUI
-          go build -trimpath -ldflags="$LDFLAGS -H=windowsgui" -o "release/NatBypass-Builder-$TAG_NAME.exe" ./cmd/builder
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o "release/NatBypass-Builder-$TAG_NAME.exe" ./cmd/builder
 
           # 4. Linux Binaries
           $env:GOOS = "linux"
           $env:GOARCH = "amd64"
-          go build -trimpath -ldflags="$LDFLAGS" -o "release/natbypass-$TAG_NAME-linux-amd64" ./cmd/natbypass-cli
+          go build -trimpath -ldflags "-s -w" -o "release/natbypass-$TAG_NAME-linux-amd64" ./cmd/natbypass-cli
 
           $env:GOARCH = "arm64"
-          go build -trimpath -ldflags="$LDFLAGS" -o "release/natbypass-$TAG_NAME-linux-arm64" ./cmd/natbypass-cli
+          go build -trimpath -ldflags "-s -w" -o "release/natbypass-$TAG_NAME-linux-arm64" ./cmd/natbypass-cli
 
           # 5. Routers (MIPS / MIPSLE)
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"
-          go build -trimpath -ldflags="$LDFLAGS" -o "release/natbypass-$TAG_NAME-router-mips" ./cmd/natbypass-cli
+          go build -trimpath -ldflags "-s -w" -o "release/natbypass-$TAG_NAME-router-mips" ./cmd/natbypass-cli
 
           $env:GOARCH = "mipsle"
           $env:GOMIPS = "softfloat"
-          go build -trimpath -ldflags="$LDFLAGS" -o "release/natbypass-$TAG_NAME-router-mipsle" ./cmd/natbypass-cli
+          go build -trimpath -ldflags "-s -w" -o "release/natbypass-$TAG_NAME-router-mipsle" ./cmd/natbypass-cli
 
           # 6. Android
           $env:GOOS = "linux"
           $env:GOARCH = "arm64"
-          go build -trimpath -ldflags="$LDFLAGS" -o "release/natbypass-$TAG_NAME-android-arm64" ./cmd/natbypass-cli
+          go build -trimpath -ldflags "-s -w" -o "release/natbypass-$TAG_NAME-android-arm64" ./cmd/natbypass-cli
 
           # 7. Copy config template
           Copy-Item "config.yaml.example" "release/config.yaml.example" -Force
