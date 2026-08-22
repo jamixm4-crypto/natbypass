@@ -6,7 +6,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -260,42 +259,4 @@ func (d *Device) Close() error {
 	return nil
 }
 
-// GetDestIP извлекает Destination IPv4 адрес из заголовка пакета
-func GetDestIP(packet []byte) net.IP {
-	if len(packet) < 20 {
-		return nil
-	}
-	version := packet[0] >> 4
-	if version != 4 {
-		return nil
-	}
-	return net.IPv4(packet[16], packet[17], packet[18], packet[19])
-}
-
-// GetSrcIP извлекает Source IPv4 адрес из заголовка пакета
-func GetSrcIP(packet []byte) net.IP {
-	if len(packet) < 20 {
-		return nil
-	}
-	version := packet[0] >> 4
-	if version != 4 {
-		return nil
-	}
-	return net.IPv4(packet[12], packet[13], packet[14], packet[15])
-}
-
-// CalculateChecksum вычисляет 16-битную интернет-контрольную сумму (RFC 1071)
-func CalculateChecksum(data []byte) uint16 {
-	var sum uint32
-	for i := 0; i < len(data)-1; i += 2 {
-		sum += uint32(data[i])<<8 | uint32(data[i+1])
-	}
-	if len(data)%2 == 1 {
-		sum += uint32(data[len(data)-1]) << 8
-	}
-	for sum > 0xffff {
-		sum = (sum >> 16) + (sum & 0xffff)
-	}
-	return ^uint16(sum)
-}
 
