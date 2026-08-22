@@ -50,6 +50,23 @@ func (r *Registry) ClearAll() {
 	r.peers = make(map[string]*Peer)
 }
 
+// Delete removes a peer immediately by deviceID (e.g. when peer sends goodbye/leave).
+func (r *Registry) Delete(deviceID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.peers, deviceID)
+}
+
+// MarkDeviceOffline marks a specific device offline immediately.
+func (r *Registry) MarkDeviceOffline(deviceID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, ok := r.peers[deviceID]; ok {
+		p.Online = false
+		p.DirectP2P = false
+	}
+}
+
 // Upsert adds or updates a peer in the registry while preserving active connection state.
 func (r *Registry) Upsert(p *Peer) {
 	r.mu.Lock()

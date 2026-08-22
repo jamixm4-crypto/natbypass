@@ -1019,12 +1019,31 @@ func exitApp() {
 		_ = debugLogFile.Close()
 	}
 
-	// 3. Быстрая остановка сокетов и моментальный выход
+	// 3. Отправляем маяк выхода другим узлам сети
+	broadcastGoodbye()
+
+	// 4. Быстрая остановка сокетов и моментальный выход
 	go func() {
 		stopEngine()
 	}()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(120 * time.Millisecond)
 	os.Exit(0)
+}
+
+func broadcastGoodbye() {
+	goodbyePayload := &signaling.Payload{
+		DeviceID:  myDevID,
+		Offline:   true,
+		Leave:     true,
+		Timestamp: time.Now(),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	for _, ch := range sigChannels {
+		if ch != nil {
+			_ = ch.Send(ctx, goodbyePayload)
+		}
+	}
 }
 
 func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
@@ -2444,6 +2463,23 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}()
 
+	// Фоновый монитор неактивных узлов (каждые 3 секунды помечаем stale пиры и удаляем оффлайн)
+	go func() {
+		monitorTicker := time.NewTicker(3 * time.Second)
+		defer monitorTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-monitorTicker.C:
+				if registry != nil {
+					registry.MarkOffline(12 * time.Second)
+					registry.Cleanup(25 * time.Second)
+				}
+			}
+		}
+	}()
+
 	// Фоновый локальный широковещательный поиск пиров в LAN
 	startLANBroadcastDiscovery(ctx)
 
@@ -2820,6 +2856,19 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					return
 				}
 				if p == nil || p.DeviceID == "" || p.DeviceID == myDevID {
+					continue
+				}
+
+				if p.Offline || p.Leave {
+					nameInfo := p.DeviceID
+					if p.Nickname != "" {
+						nameInfo = fmt.Sprintf("%s (%s)", p.Nickname, p.DeviceID)
+					}
+					writeDebug(fmt.Sprintf("Узел %s отключился от сети (Leave beacon)", nameInfo))
+					addLog(fmt.Sprintf("🔴 Узел %s отключился от сети", nameInfo))
+					if registry != nil {
+						registry.Delete(p.DeviceID)
+					}
 					continue
 				}
 

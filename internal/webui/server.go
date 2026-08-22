@@ -281,14 +281,23 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Write(content)
 }
 
-// handlePeers — GET /api/peers — список устройств
 func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
-	peers := s.registry.List()
-	s.jsonResponse(w, http.StatusOK, peers, "")
+	var activePeers []*peer.Peer
+	if s.registry != nil {
+		for _, p := range s.registry.List() {
+			if p.Online && time.Since(p.LastSeen) < 25*time.Second {
+				activePeers = append(activePeers, p)
+			}
+		}
+	}
+	if activePeers == nil {
+		activePeers = []*peer.Peer{}
+	}
+	s.jsonResponse(w, http.StatusOK, activePeers, "")
 }
 
 // handleStatus — GET /api/status — статус приложения
@@ -943,14 +952,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		peersList = s.registry.List()
 	}
 
-	totalPeers := len(peersList)
+	totalPeers := 0
 	p2pActive := 0
 	exitNodesCount := 0
 	totalLatency := int64(0)
 	latencySamples := 0
 
 	for _, p := range peersList {
-		if p.Online {
+		if p.Online && time.Since(p.LastSeen) < 25*time.Second {
+			totalPeers++
 			if p.DirectP2P {
 				p2pActive++
 			}

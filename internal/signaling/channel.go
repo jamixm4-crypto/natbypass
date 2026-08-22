@@ -113,6 +113,8 @@ type Payload struct {
 	IsExitNode       bool       `json:"is_exit_node,omitempty"`
 	AdvertisedRoutes []string   `json:"advertised_routes,omitempty"`
 	ExitRevoked      bool       `json:"exit_revoked,omitempty"`
+	Offline          bool       `json:"offline,omitempty"`
+	Leave            bool       `json:"leave,omitempty"`
 	AWG              *AWGParams `json:"awg,omitempty"`
 }
 
@@ -131,6 +133,8 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		UpperIsExitNode       bool       `json:"IsExitNode"`
 		UpperAdvertisedRoutes []string   `json:"AdvertisedRoutes"`
 		UpperExitRevoked      bool       `json:"ExitRevoked"`
+		UpperOffline          bool       `json:"Offline"`
+		UpperLeave            bool       `json:"Leave"`
 		UpperAWG              *AWGParams `json:"AWG"`
 		CamelAWG              *AWGParams `json:"awg"`
 		*Alias
@@ -180,6 +184,12 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 	}
 	if !p.ExitRevoked && aux.UpperExitRevoked {
 		p.ExitRevoked = aux.UpperExitRevoked
+	}
+	if !p.Offline && aux.UpperOffline {
+		p.Offline = aux.UpperOffline
+	}
+	if !p.Leave && aux.UpperLeave {
+		p.Leave = aux.UpperLeave
 	}
 	if p.AWG == nil {
 		if aux.UpperAWG != nil {
