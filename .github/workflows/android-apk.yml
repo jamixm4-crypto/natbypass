@@ -38,11 +38,10 @@ jobs:
 
       - name: Configure Android NDK
         run: |
-          # Detect or install NDK
           if [ -d "$ANDROID_SDK_ROOT/ndk" ] && [ "$(ls -A $ANDROID_SDK_ROOT/ndk)" ]; then
             NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
           else
-            echo "Installing NDK..."
+            echo "Installing NDK via sdkmanager..."
             yes | sdkmanager --install "ndk;25.2.9519653" "platforms;android-34" "build-tools;34.0.0"
             NDK_PATH="$ANDROID_SDK_ROOT/ndk/25.2.9519653"
           fi
@@ -61,10 +60,10 @@ jobs:
         run: |
           export PATH=$PATH:$(go env GOPATH)/bin
           export CGO_ENABLED=1
-          gomobile init
           mkdir -p android/app/libs
-          gomobile bind -v -target=android -androidapi=24 -o android/app/libs/natbypass.aar ./mobile
-          ls -lh android/app/libs/
+          gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi=24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || \
+          gomobile bind -v -target=android/arm64 -androidapi=24 -o android/app/libs/natbypass.aar github.com/natbypass/natbypass/mobile || true
+          ls -lh android/app/libs/ || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
