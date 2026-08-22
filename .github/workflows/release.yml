@@ -22,11 +22,14 @@ jobs:
           go-version: '1.22'
           cache: true
 
+      - name: Install zip tool
+        run: sudo apt-get update && sudo apt-get install -y zip
+
       - name: Build All Architectures
         run: |
           mkdir -p release
           TAG_NAME="${{ github.ref_name }}"
-          LDFLAGS="-s -w -X github.com/natbypass/natbypass/cmd/natbypass.Version=${TAG_NAME} -X github.com/natbypass/natbypass/cmd/natbypass.Commit=${{ github.sha }} -X github.com/natbypass/natbypass/cmd/natbypass.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-s -w"
 
           # Windows Binaries
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${LDFLAGS}" -o release/natbypass-${TAG_NAME}-windows-amd64.exe ./cmd/natbypass-cli
