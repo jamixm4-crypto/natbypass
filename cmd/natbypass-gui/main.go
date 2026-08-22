@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -174,8 +173,9 @@ const (
 
 	SC_CLOSE = 0xF060
 
-	SW_HIDE = 0
-	SW_SHOW = 5
+	SW_HIDE    = 0
+	SW_SHOW    = 5
+	SW_RESTORE = 9
 
 	DT_CENTER     = 0x00000001
 	DT_VCENTER    = 0x00000004
@@ -786,32 +786,22 @@ func main() {
 	// Инициализация иконки в системном трее Windows
 	initTrayIcon(hMainWnd, hAppIcon)
 
-	// Построение элементов интерфейса
+	// Построение элементов нативного интерфейса Windows (Pure Win32 GDI Controls)
 	writeDebug("Начало построения UI buildModernUI()...")
+	buildModernUI(hInstance)
+
+	// Показываем нативное главное окно Win32
+	procShowWindow.Call(hMainWnd, SW_SHOW)
+	procUpdateWindow.Call(hMainWnd)
+	procSetForegroundWindow.Call(hMainWnd)
+	procSetTimer.Call(hMainWnd, ID_TIMER_POLL, 1000, 0)
+
 	// Запуск сетевого ядра напрямую из параметров cfg
 	writeDebug("Запуск сетевого ядра NatBypass Mesh...")
 	go startEngineFromConfig(cfg)
 
-	// Ожидание активного запуска веб-сервера
-	webPort := 8080
-	if cfg != nil && cfg.WebUI.Port > 0 {
-		webPort = cfg.WebUI.Port
-	}
-	for i := 0; i < 50; i++ {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", webPort), 100*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			writeDebug(fmt.Sprintf("✅ Web UI сервер готов на порту %d!", webPort))
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	writeDebug(fmt.Sprintf("Запуск главного окна Glassmorphism UI на порту :%d", webPort))
-	launchModernAppWindow(fmt.Sprintf("http://127.0.0.1:%d", webPort))
-
-	// Цикл сообщений Windows держит процесс и HTTP сервер активными
-	writeDebug("Сетевое ядро и Web UI активны, вход в цикл событий...")
+	// Цикл сообщений Windows (UI thread)
+	writeDebug("Сетевое ядро и нативный Win32 GUI активны, вход в цикл событий...")
 	var msg MSG
 	for {
 		ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
@@ -940,7 +930,9 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 			cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */|0x0002 /* TPM_RIGHTBUTTON */, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
 
 			if cmd == 1001 {
-				launchModernAppWindow("http://127.0.0.1:8080")
+				procShowWindow.Call(hMainWnd, SW_RESTORE)
+				procShowWindow.Call(hMainWnd, SW_SHOW)
+				procSetForegroundWindow.Call(hMainWnd)
 			} else if cmd == 1002 {
 				triggerPublish()
 			} else if cmd == 1003 {
@@ -949,7 +941,9 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 			}
 			return 0
 		} else if lParam == 0x0203 /* WM_LBUTTONDBLCLK */ || lParam == 0x0202 /* WM_LBUTTONUP */ {
-			launchModernAppWindow("http://127.0.0.1:8080")
+			procShowWindow.Call(hMainWnd, SW_RESTORE)
+			procShowWindow.Call(hMainWnd, SW_SHOW)
+			procSetForegroundWindow.Call(hMainWnd)
 			return 0
 		}
 		return 0
@@ -4237,41 +4231,3 @@ func LOWORD(l uintptr) uint16 {
 	return uint16(l & 0xFFFF)
 }
 
-func launchModernAppWindow(url string) {
-	edgePaths := []string{
-		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
-		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
-		os.ExpandEnv(`%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe`),
-		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
-		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
-	}
-
-	userDataDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "NatBypass", "AppProfile")
-	_ = os.MkdirAll(userDataDir, 0755)
-
-	for _, p := range edgePaths {
-		if _, err := os.Stat(p); err == nil {
-			cmd := exec.Command(p,
-				fmt.Sprintf("--app=%s", url),
-				"--window-size=1380,820",
-				fmt.Sprintf("--user-data-dir=%s", userDataDir),
-				"--disable-features=Translate,OptimizationHints,MediaRouter",
-			)
-			cmd.SysProcAttr = &syscall.SysProcAttr{
-				HideWindow: false,
-			}
-			writeDebug("Запущено главное окно Modern UI: " + p)
-			if err := cmd.Start(); err == nil {
-				go func() {
-					_ = cmd.Wait()
-					writeDebug("Окно интерфейса закрыто пользователем -> выход из программы")
-					exitApp()
-				}()
-				return
-			}
-		}
-	}
-
-	// Fallback к стандартному браузеру
-	_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-}
