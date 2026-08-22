@@ -35,10 +35,10 @@ jobs:
           $tag = "${{ github.ref_name }}"
           New-Item -ItemType Directory -Force -Path release | Out-Null
 
-          Write-Host "==> 1. Building Windows Desktop App with Modern UI (NatBypass.exe)..."
+          Write-Host "==> 1. Building Windows Standalone Desktop App (NatBypass.exe)..."
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
-          $res1 = & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass 2>&1
+          $res1 = & go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass-gui 2>&1
           Write-Host "Desktop App Build output: $res1"
           Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass-$tag.exe" -Force -ErrorAction SilentlyContinue
 
