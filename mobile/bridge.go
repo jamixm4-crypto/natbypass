@@ -117,6 +117,20 @@ func StartEngine(configYAML string, tunFd int) string {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				var awgParams *signaling.AWGParams
+				if cfg.WireGuard.AWG.Enabled {
+					awgParams = &signaling.AWGParams{
+						Jc:   cfg.WireGuard.AWG.Jc,
+						Jmin: cfg.WireGuard.AWG.Jmin,
+						Jmax: cfg.WireGuard.AWG.Jmax,
+						S1:   cfg.WireGuard.AWG.S1,
+						S2:   cfg.WireGuard.AWG.S2,
+						H1:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H1),
+						H2:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H2),
+						H3:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H3),
+						H4:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H4),
+					}
+				}
 				payload := &signaling.Payload{
 					DeviceID:  devID,
 					PublicKey: crypto.KeyToHex(pubKey),
@@ -125,6 +139,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					WGPubKey:  wgKey.PublicKey,
 					WGPort:    cfg.WireGuard.ListenPort,
 					Timestamp: time.Now(),
+					AWG:       awgParams,
 				}
 				_ = globalSigMgr.Send(ctx, payload)
 			}
@@ -155,6 +170,7 @@ func StartEngine(configYAML string, tunFd int) string {
 						WGPort:    p.WGPort,
 						LastSeen:  time.Now(),
 						Online:    true,
+						AWG:       p.AWG,
 					})
 				}
 			}

@@ -10,19 +10,31 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/proxy"
 )
 
 type TelegramChannel struct {
-	token  string
-	chatID string
-	client *http.Client
+	token   string
+	chatID  string
+	client  *http.Client
+	seenMu  sync.Mutex
+	seenIDs map[int]bool
 }
 
 func NewTelegramChannel(token, chatID, httpProxy string) *TelegramChannel {
-	client := &http.Client{Timeout: 60 * time.Second}
+	token = strings.TrimSpace(token)
+	token = strings.Trim(token, "\"' \r\n\t")
+	chatID = strings.TrimSpace(chatID)
+	chatID = strings.Trim(chatID, "\"' \r\n\t")
+
+	tr := &http.Transport{
+		MaxIdleConns:    10,
+		IdleConnTimeout: 30 * time.Second,
+	}
 
 	if httpProxy != "" {
 		proxyURL, err := url.Parse(httpProxy)
@@ -30,24 +42,26 @@ func NewTelegramChannel(token, chatID, httpProxy string) *TelegramChannel {
 			if proxyURL.Scheme == "socks5" {
 				dialer, err := proxy.FromURL(proxyURL, proxy.Direct)
 				if err == nil {
-					client.Transport = &http.Transport{
-						DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-							return dialer.Dial(network, addr)
-						},
+					tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+						return dialer.Dial(network, addr)
 					}
 				}
 			} else {
-				client.Transport = &http.Transport{
-					Proxy: http.ProxyURL(proxyURL),
-				}
+				tr.Proxy = http.ProxyURL(proxyURL)
 			}
 		}
 	}
 
+	client := &http.Client{
+		Timeout:   15 * time.Second,
+		Transport: tr,
+	}
+
 	return &TelegramChannel{
-		token:  token,
-		chatID: chatID,
-		client: client,
+		token:   token,
+		chatID:  chatID,
+		client:  client,
+		seenIDs: make(map[int]bool),
 	}
 }
 
@@ -56,11 +70,15 @@ func (t *TelegramChannel) Name() string {
 }
 
 func (t *TelegramChannel) Send(ctx context.Context, payload *Payload) error {
+	if t.token == "" || t.chatID == "" {
+		return fmt.Errorf("telegram token or chat_id is empty")
+	}
+
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	msg := base64.StdEncoding.EncodeToString(data)
+	msg := "/peer " + base64.StdEncoding.EncodeToString(data)
 
 	reqBody, _ := json.Marshal(map[string]string{
 		"chat_id": t.chatID,
@@ -78,41 +96,67 @@ func (t *TelegramChannel) Send(ctx context.Context, payload *Payload) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("telegram API error: %s", string(body))
+		return fmt.Errorf("telegram API error (%d): %s", resp.StatusCode, string(body))
 	}
 	return nil
 }
 
 func (t *TelegramChannel) Receive(ctx context.Context) (<-chan *Payload, error) {
-	out := make(chan *Payload)
+	out := make(chan *Payload, 128)
+
+	if t.token == "" {
+		return out, nil
+	}
 
 	go func() {
-		offset := 0
+		defer close(out)
+		lastOffset := 0
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30", t.token, offset)
+				var apiURL string
+				if lastOffset == 0 {
+					apiURL = fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=-20&limit=50&timeout=5", t.token)
+				} else {
+					apiURL = fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&limit=50&timeout=5", t.token, lastOffset)
+				}
 				req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 				if err != nil {
-					time.Sleep(5 * time.Second)
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(2 * time.Second):
+					}
 					continue
 				}
 
 				resp, err := t.client.Do(req)
 				if err != nil {
-					time.Sleep(5 * time.Second)
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(2 * time.Second):
+					}
 					continue
 				}
 
 				body, err := io.ReadAll(resp.Body)
 				resp.Body.Close()
-				if err != nil {
+				if err != nil || resp.StatusCode != http.StatusOK {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(3 * time.Second):
+					}
 					continue
 				}
 
@@ -120,26 +164,72 @@ func (t *TelegramChannel) Receive(ctx context.Context) (<-chan *Payload, error) 
 					Ok     bool `json:"ok"`
 					Result []struct {
 						UpdateID int `json:"update_id"`
-						Message  struct {
+						Message  *struct {
 							Text string `json:"text"`
 						} `json:"message"`
+						ChannelPost *struct {
+							Text string `json:"text"`
+						} `json:"channel_post"`
+						EditedMessage *struct {
+							Text string `json:"text"`
+						} `json:"edited_message"`
 					} `json:"result"`
 				}
 
 				if err := json.Unmarshal(body, &result); err == nil && result.Ok {
 					for _, update := range result.Result {
-						offset = update.UpdateID + 1
-						
-						data, err := base64.StdEncoding.DecodeString(update.Message.Text)
-						if err != nil {
+						if update.UpdateID >= lastOffset {
+							lastOffset = update.UpdateID + 1
+						}
+						t.seenMu.Lock()
+						if t.seenIDs[update.UpdateID] {
+							t.seenMu.Unlock()
 							continue
 						}
+						t.seenIDs[update.UpdateID] = true
+						if len(t.seenIDs) > 1000 {
+							t.seenIDs = make(map[int]bool)
+							t.seenIDs[update.UpdateID] = true
+						}
+						t.seenMu.Unlock()
 
-						var p Payload
-						if err := json.Unmarshal(data, &p); err == nil {
-							out <- &p
+						var rawText string
+						if update.Message != nil && update.Message.Text != "" {
+							rawText = update.Message.Text
+						} else if update.ChannelPost != nil && update.ChannelPost.Text != "" {
+							rawText = update.ChannelPost.Text
+						} else if update.EditedMessage != nil && update.EditedMessage.Text != "" {
+							rawText = update.EditedMessage.Text
+						}
+
+						if rawText != "" {
+							rawText = strings.TrimPrefix(rawText, "/peer ")
+							rawText = strings.TrimPrefix(rawText, "/peer")
+							rawText = strings.TrimPrefix(rawText, "/nb ")
+							rawText = strings.TrimPrefix(rawText, "/nb")
+							rawText = strings.TrimSpace(rawText)
+
+							data, err := base64.StdEncoding.DecodeString(rawText)
+							if err != nil {
+								data = []byte(rawText)
+							}
+
+							var p Payload
+							if err := json.Unmarshal(data, &p); err == nil && p.DeviceID != "" {
+								select {
+								case out <- &p:
+								case <-ctx.Done():
+									return
+								}
+							}
 						}
 					}
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(2 * time.Second):
 				}
 			}
 		}
@@ -149,18 +239,22 @@ func (t *TelegramChannel) Receive(ctx context.Context) (<-chan *Payload, error) 
 }
 
 func (t *TelegramChannel) IsAvailable(ctx context.Context) bool {
+	if t.token == "" {
+		return false
+	}
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", t.token)
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return false
 	}
-
 	resp, err := t.client.Do(req)
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
-
+	defer func() {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 	return resp.StatusCode == http.StatusOK
 }
 

@@ -5,19 +5,29 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/natbypass/natbypass/internal/signaling"
 )
 
 // Peer represents a discovered device in the network.
 type Peer struct {
-	DeviceID   string        `json:"device_id"`
-	PublicKey  string        `json:"public_key"`
-	PublicIP   string        `json:"public_ip"`
-	STUNAddr   string        `json:"stun_addr"`
-	WGPubKey   string        `json:"wg_pub_key"`
-	WGPort     int           `json:"wg_port"`
-	LastSeen   time.Time     `json:"last_seen"`
-	Online     bool          `json:"online"`
-	Latency    time.Duration `json:"latency"`
+	DeviceID         string               `json:"device_id"`
+	Nickname         string               `json:"nickname,omitempty"`
+	VirtualIP        string               `json:"virtual_ip"`
+	PublicKey        string               `json:"public_key"`
+	PublicIP         string               `json:"public_ip"`
+	LocalAddr        string               `json:"local_addr"`
+	STUNAddr         string               `json:"stun_addr"`
+	WGPubKey         string               `json:"wg_pub_key"`
+	WGPort           int                  `json:"wg_port"`
+	ActiveEndpoint   string               `json:"active_endpoint"`
+	LastSeen         time.Time            `json:"last_seen"`
+	Online           bool                 `json:"online"`
+	DirectP2P        bool                 `json:"direct_p2p"`
+	Latency          time.Duration        `json:"latency"`
+	IsExitNode       bool                 `json:"is_exit_node"`
+	AdvertisedRoutes []string             `json:"advertised_routes"`
+	AWG              *signaling.AWGParams `json:"awg,omitempty"`
 }
 
 // Registry manages discovered peers in a thread-safe manner.
@@ -33,10 +43,35 @@ func NewRegistry() *Registry {
 	}
 }
 
-// Upsert adds or updates a peer in the registry.
+// ClearAll removes all peers from the registry (used when changing signaling topics).
+func (r *Registry) ClearAll() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.peers = make(map[string]*Peer)
+}
+
+// Upsert adds or updates a peer in the registry while preserving active connection state.
 func (r *Registry) Upsert(p *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if existing, ok := r.peers[p.DeviceID]; ok {
+		if existing.DirectP2P {
+			p.DirectP2P = true
+		}
+		if existing.ActiveEndpoint != "" && p.ActiveEndpoint == "" {
+			p.ActiveEndpoint = existing.ActiveEndpoint
+		}
+		if existing.Latency > 0 && p.Latency == 0 {
+			p.Latency = existing.Latency
+		}
+		if p.Nickname == "" && existing.Nickname != "" {
+			p.Nickname = existing.Nickname
+		}
+		if p.AWG == nil && existing.AWG != nil {
+			p.AWG = existing.AWG
+		}
+	}
 
 	p.Online = true
 	p.LastSeen = time.Now()

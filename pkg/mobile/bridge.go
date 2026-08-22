@@ -229,6 +229,7 @@ func (m *MobileEngine) runLoop(pubKey, privKey [32]byte) {
 						WGPort:    p.WGPort,
 						LastSeen:  p.Timestamp,
 						Online:    true,
+						AWG:       p.AWG,
 					})
 				}
 			}

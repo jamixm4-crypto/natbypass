@@ -366,6 +366,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				return
 			case <-ticker.C:
 				ip, _ := ipDisc.GetPublicIPCached(engineCtx, publishInterval/2)
+				var awgParams *signaling.AWGParams
+				if cfg.WireGuard.AWG.Enabled {
+					awgParams = &signaling.AWGParams{
+						Jc:   cfg.WireGuard.AWG.Jc,
+						Jmin: cfg.WireGuard.AWG.Jmin,
+						Jmax: cfg.WireGuard.AWG.Jmax,
+						S1:   cfg.WireGuard.AWG.S1,
+						S2:   cfg.WireGuard.AWG.S2,
+						H1:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H1),
+						H2:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H2),
+						H3:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H3),
+						H4:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H4),
+					}
+				}
 				payload := &signaling.Payload{
 					DeviceID:  deviceID,
 					PublicKey: crypto.KeyToHex(pubKey),
@@ -374,6 +388,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					WGPubKey:  wgPubKey,
 					WGPort:    wgPort,
 					Timestamp: time.Now(),
+					AWG:       awgParams,
 				}
 				encrypted, encErr := signaling.EncryptPayload(payload, pubKey, privKey)
 				if encErr != nil {
@@ -414,6 +429,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						WGPort:    p.WGPort,
 						LastSeen:  p.Timestamp,
 						Online:    true,
+						AWG:       p.AWG,
 					})
 				}
 			}
@@ -695,7 +711,7 @@ func newKonamiCmd() *cobra.Command {
 		Use:   "konami",
 		Short: "🎮 God Mode",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(`
+			fmt.Print(`
   ↑ ↑ ↓ ↓ ← → ← → B A  —  КОД ВВЕДЁН!
   ╔════════════════════════════════════╗
   ║       РЕЖИМ БОГА АКТИВИРОВАН       ║

@@ -64,7 +64,7 @@ func (w *WebhookChannel) Send(ctx context.Context, payload *Payload) error {
 }
 
 func (w *WebhookChannel) Receive(ctx context.Context) (<-chan *Payload, error) {
-	out := make(chan *Payload)
+	out := make(chan *Payload, 128)
 
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -89,7 +89,12 @@ func (w *WebhookChannel) Receive(ctx context.Context) (<-chan *Payload, error) {
 					body, _ := io.ReadAll(resp.Body)
 					var p Payload
 					if err := json.Unmarshal(body, &p); err == nil {
-						out <- &p
+						select {
+						case out <- &p:
+						case <-ctx.Done():
+							resp.Body.Close()
+							return
+						}
 					}
 				}
 				resp.Body.Close()

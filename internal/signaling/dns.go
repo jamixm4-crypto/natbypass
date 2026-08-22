@@ -69,7 +69,7 @@ func (d *DNSChannel) Send(ctx context.Context, payload *Payload) error {
 }
 
 func (d *DNSChannel) Receive(ctx context.Context) (<-chan *Payload, error) {
-	out := make(chan *Payload)
+	out := make(chan *Payload, 128)
 
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
@@ -114,7 +114,12 @@ func (d *DNSChannel) Receive(ctx context.Context) (<-chan *Payload, error) {
 
 							var p Payload
 							if err := json.Unmarshal(decoded, &p); err == nil {
-								out <- &p
+								select {
+								case out <- &p:
+								case <-ctx.Done():
+									resp.Body.Close()
+									return
+								}
 							}
 						}
 					}

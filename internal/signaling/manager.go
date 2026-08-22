@@ -112,7 +112,7 @@ func (m *FallbackManager) sendWithRetry(ctx context.Context, ch SignalingChannel
 }
 
 func (m *FallbackManager) Receive(ctx context.Context) (<-chan *Payload, error) {
-	out := make(chan *Payload)
+	out := make(chan *Payload, 128)
 
 	for _, ch := range m.channels {
 		in, err := ch.Receive(ctx)
@@ -130,7 +130,11 @@ func (m *FallbackManager) Receive(ctx context.Context) (<-chan *Payload, error) 
 						log.Warn().Str("channel", name).Msg("Receiver channel closed")
 						return
 					}
-					out <- p
+					select {
+					case out <- p:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}(in, ch.Name())

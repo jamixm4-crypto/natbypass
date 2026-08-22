@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -99,4 +100,105 @@ func (d *Discoverer) GetPublicIPCached(ctx context.Context, maxAge time.Duration
 	d.mu.Unlock()
 
 	return ip, nil
+}
+
+// GetLocalSubnets iterates interface addresses, finds active IPv4 addresses on
+// non-loopback and non-Wintun interfaces, calculates each network address (e.g. 192.168.1.0/24),
+// and returns a unique list of local subnets.
+func GetLocalSubnets() []string {
+	var subnets []string
+	seen := make(map[string]bool)
+
+	// Check interfaces to filter by flags (Up, non-loopback) and name (non-Wintun/virtual)
+	ifaces, err := net.Interfaces()
+	if err == nil && len(ifaces) > 0 {
+		for _, iface := range ifaces {
+			// Skip inactive interfaces and loopback interfaces
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+
+			name := strings.ToLower(iface.Name)
+			// Skip Wintun, WireGuard, TUN/TAP, or NatBypass virtual adapters
+			if strings.Contains(name, "wintun") ||
+				strings.Contains(name, "natbypass") ||
+				strings.Contains(name, "wireguard") ||
+				strings.Contains(name, "wg0") ||
+				strings.Contains(name, "tap") ||
+				strings.Contains(name, "tun") ||
+				strings.Contains(name, "loopback") {
+				continue
+			}
+
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+
+			for _, addr := range addrs {
+				subnet := extractIPv4Subnet(addr)
+				if subnet != "" && !seen[subnet] {
+					seen[subnet] = true
+					subnets = append(subnets, subnet)
+				}
+			}
+		}
+		if len(subnets) > 0 {
+			return subnets
+		}
+	}
+
+	// Fallback to net.InterfaceAddrs() directly
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return subnets
+	}
+
+	for _, addr := range addrs {
+		subnet := extractIPv4Subnet(addr)
+		if subnet != "" && !seen[subnet] {
+			seen[subnet] = true
+			subnets = append(subnets, subnet)
+		}
+	}
+
+	return subnets
+}
+
+// extractIPv4Subnet parses an address and calculates the network CIDR (e.g. "192.168.1.0/24").
+func extractIPv4Subnet(addr net.Addr) string {
+	ipNet, ok := addr.(*net.IPNet)
+	if !ok {
+		var err error
+		_, ipNet, err = net.ParseCIDR(addr.String())
+		if err != nil {
+			return ""
+		}
+	}
+
+	ip4 := ipNet.IP.To4()
+	if ip4 == nil || ip4.IsLoopback() || ip4.IsUnspecified() || ip4.IsLinkLocalUnicast() {
+		return ""
+	}
+
+	// Filter out typical virtual mesh 10.200.x.x addresses
+	if strings.HasPrefix(ip4.String(), "10.200.") {
+		return ""
+	}
+
+	mask := ipNet.Mask
+	if len(mask) == 16 {
+		mask = mask[12:16]
+	}
+	if len(mask) != 4 {
+		return ""
+	}
+
+	networkIP := ip4.Mask(mask)
+	ones, _ := ipNet.Mask.Size()
+	if ones <= 0 || ones > 32 {
+		return ""
+	}
+
+	return fmt.Sprintf("%s/%d", networkIP.String(), ones)
 }

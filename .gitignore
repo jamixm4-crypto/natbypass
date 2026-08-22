@@ -20,9 +20,10 @@ config.yaml
 *.pid
 natbypass.log
 
-# Cryptographic private keys
+# Cryptographic private keys and configs
 *.key
 private.key
+*.conf
 
 # Operating System files
 Thumbs.db
