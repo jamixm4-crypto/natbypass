@@ -965,6 +965,9 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 }
 
 func initTrayIcon(hwnd uintptr, hIcon uintptr) {
+	if hIcon == 0 {
+		hIcon, _, _ = procLoadIconW.Call(0, 32512)
+	}
 	var nid NOTIFYICONDATAW
 	nid.CbSize = uint32(unsafe.Sizeof(nid))
 	nid.HWnd = hwnd
@@ -976,7 +979,13 @@ func initTrayIcon(hwnd uintptr, hIcon uintptr) {
 	tip := syscall.StringToUTF16("NatBypass Mesh & AWG 2.0")
 	copy(nid.SzTip[:], tip)
 
-	procShell_NotifyIconW.Call(NIM_ADD, uintptr(unsafe.Pointer(&nid)))
+	ret, _, _ := procShell_NotifyIconW.Call(NIM_ADD, uintptr(unsafe.Pointer(&nid)))
+	if ret == 0 {
+		go func() {
+			time.Sleep(800 * time.Millisecond)
+			procShell_NotifyIconW.Call(NIM_ADD, uintptr(unsafe.Pointer(&nid)))
+		}()
+	}
 }
 
 func removeTrayIcon(hwnd uintptr) {
@@ -1000,12 +1009,7 @@ func exitApp() {
 	procKillTimer.Call(hMainWnd, ID_TIMER_POLL)
 	procShowWindow.Call(hMainWnd, SW_HIDE)
 
-	// 2. Асинхронно останавливаем сетевые сокеты и брокеры
-	go func() {
-		stopEngine()
-	}()
-
-	// 3. Закрываем дескриптор единого мьютекса
+	// 2. Закрываем дескриптор единого мьютекса
 	if singleMutex != 0 {
 		procCloseHandle.Call(singleMutex)
 	}
@@ -1015,10 +1019,12 @@ func exitApp() {
 		_ = debugLogFile.Close()
 	}
 
-	// 4. Гарантированный безусловный выход из процесса через 350мс
-	time.AfterFunc(350*time.Millisecond, func() {
-		os.Exit(0)
-	})
+	// 3. Быстрая остановка сокетов и моментальный выход
+	go func() {
+		stopEngine()
+	}()
+	time.Sleep(100 * time.Millisecond)
+	os.Exit(0)
 }
 
 func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
@@ -4205,9 +4211,15 @@ func launchModernAppWindow(url string) {
 			cmd.SysProcAttr = &syscall.SysProcAttr{
 				HideWindow: false,
 			}
-			writeDebug("Запущено единственное главное окно Modern Glassmorphism UI: " + p)
-			_ = cmd.Start()
-			return
+			writeDebug("Запущено главное окно Modern UI: " + p)
+			if err := cmd.Start(); err == nil {
+				go func() {
+					_ = cmd.Wait()
+					writeDebug("Окно интерфейса закрыто пользователем -> выход из программы")
+					exitApp()
+				}()
+				return
+			}
 		}
 	}
 
