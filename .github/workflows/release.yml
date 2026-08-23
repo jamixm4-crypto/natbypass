@@ -36,7 +36,7 @@ jobs:
           $tag = "${{ github.ref_name }}"
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $latestTag = (git describe --tags --abbrev=0 2>$null)
-              if (!$latestTag) { $latestTag = "v1.1.4" }
+              if (!$latestTag) { $latestTag = "v1.1.5" }
               $tag = $latestTag
           }
           Write-Host "Building release for tag: $tag"
@@ -103,7 +103,7 @@ jobs:
           $tag = "${{ github.ref_name }}"
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $latestTag = (git describe --tags --abbrev=0 2>$null)
-              if (!$latestTag) { $latestTag = "v1.1.4" }
+              if (!$latestTag) { $latestTag = "v1.1.5" }
               $tag = $latestTag
           }
           
@@ -114,15 +114,19 @@ jobs:
           }
           
           # Delete outdated / stale / test assets
-          $existingAssets = gh release view $tag --json assets --jq '.assets[].name' 2>$null
-          if ($existingAssets) {
-              foreach ($ea in ($existingAssets -split "`n")) {
-                  $ea = $ea.Trim()
-                  if ($ea -and ($ea -match "^test-" -or ($ea -match "v1\.1\.0" -and $tag -ne "v1.1.0"))) {
-                      Write-Host "==> Deleting stale asset: $ea"
-                      gh release delete-asset $tag $ea -y 2>$null
+          try {
+              $relJson = gh release view $tag --json assets | ConvertFrom-Json
+              if ($relJson -and $relJson.assets) {
+                  foreach ($a in $relJson.assets) {
+                      $name = $a.name
+                      if ($name -match "^test-" -or ($name -match "v1\.1\.0" -and $tag -ne "v1.1.0")) {
+                          Write-Host "==> Deleting stale asset: $name"
+                          gh release delete-asset $tag $name -y
+                      }
                   }
               }
+          } catch {
+              Write-Host "Asset cleanup notice: $_"
           }
 
           $files = Get-ChildItem -Path release -File
