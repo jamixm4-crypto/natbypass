@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -689,7 +689,8 @@
       </div>
 
       <!-- Profile Capsule -->
-      <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; padding: 7px 16px; border-radius: 20px; font-weight: 700; font-size: 0.84rem; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);" title="Показать QR-код для Android / WireGuard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg><span>📱 QR для Android</span></button>`n      <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство">
+      <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; padding: 7px 16px; border-radius: 20px; font-weight: 700; font-size: 0.84rem; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);" title="Показать QR-код для Android / WireGuard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg><span>📱 QR для Android</span></button>
+      <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство">
         <div class="user-avatar" id="userAvatar">N</div>
         <span id="userNameLabel" style="font-size:0.85rem; font-weight:700;">Мой компьютер</span>
         <div class="online-dot"></div>
@@ -936,7 +937,8 @@
 
         <div style="display:flex; gap: 12px;">
           <button onclick="copyAwgConf()" class="btn btn-neon">📋 Скопировать конфиг</button>
-          <a href="/api/awg/config" download="natbypass.conf" class="btn btn-glass">💾 Скачать natbypass.conf</a>`n          <button onclick="openQRModal('awg')" class="btn btn-glass" style="color:#c084fc; border-color:rgba(168,85,247,0.4);">📱 Показать QR для телефона</button>
+          <a href="/api/awg/config" download="natbypass.conf" class="btn btn-glass">💾 Скачать natbypass.conf</a>
+          <button onclick="openQRModal('awg')" class="btn btn-glass" style="color:#c084fc; border-color:rgba(168,85,247,0.4);">📱 Показать QR для телефона</button>
         </div>
       </div>
     </div>
