@@ -164,7 +164,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="Быстрый выбор сервера:"
-                android:textColor="@color/text_secondary"
+                android:textColor="@color/text_muted"
                 android:textSize="12sp" />
 
             <Spinner
@@ -172,7 +172,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="44dp"
                 android:layout_marginTop="4dp"
-                android:background="@drawable/bg_spinner" />
+                android:background="@drawable/bg_card" />
 
             <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="match_parent"
