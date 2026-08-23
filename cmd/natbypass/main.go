@@ -33,7 +33,7 @@ import (
 
 // Заполняется при сборке через -ldflags -X
 var (
-	Version   = "1.1.6"
+	Version   = "1.1.7"
 	Commit    = "release"
 	BuildDate = "unknown"
 

@@ -362,7 +362,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.1.6"
+		ver = "1.1.7"
 	}
 
 	status := map[string]interface{}{
