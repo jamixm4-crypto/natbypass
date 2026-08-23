@@ -81,6 +81,7 @@ func NewServer(port int, user, password string, registry *peer.Registry, sigMgr 
 		user:       user,
 		password:   password,
 		configPath: "config.yaml",
+		version:    "1.1.4",
 		registry:   registry,
 		sigMgr:     sigMgr,
 		state: &AppState{
@@ -359,7 +360,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		currentChannel = s.sigMgr.CurrentChannel()
 	}
 
+	ver := s.version
+	if ver == "" {
+		ver = "1.1.4"
+	}
+
 	status := map[string]interface{}{
+		"version":         ver,
 		"device_id":       s.state.DeviceID,
 		"device_name":     s.deviceName,
 		"virtual_ip":      s.state.VirtualIP,
@@ -1075,7 +1082,13 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		throughputStr = fmt.Sprintf("%d KB/s", throughputKB)
 	}
 
+	ver := s.version
+	if ver == "" {
+		ver = "1.1.4"
+	}
+
 	data := map[string]interface{}{
+		"version":           ver,
 		"active_sessions":   totalPeers,
 		"total_peers":       totalPeers,
 		"p2p_active":        p2pActive,
