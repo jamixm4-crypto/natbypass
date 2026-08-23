@@ -41,7 +41,7 @@ jobs:
           Write-Host "==> 1. Building Windows Standalone Desktop App (NatBypass.exe)..."
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
-          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass-gui
+          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
           Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass-$tag.exe" -Force
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
