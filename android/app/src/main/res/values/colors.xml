@@ -7,6 +7,7 @@
     <color name="border_subtle">#1AFFFFFF</color>
     
     <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#94A3B8</color>
     <color name="text_muted">#94A3B8</color>
     <color name="text_dim">#64748B</color>
     
