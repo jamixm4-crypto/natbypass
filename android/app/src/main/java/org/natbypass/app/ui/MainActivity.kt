@@ -162,18 +162,25 @@ class MainActivity : AppCompatActivity() {
                 val obj = jsonArray.getJSONObject(i)
                 val id = if (obj.has("device_id")) obj.getString("device_id") else obj.optString("DeviceID", "Устройство $i")
                 val nick = if (obj.has("nickname")) obj.getString("nickname") else obj.optString("Nickname", "")
-                val displayName = if (nick.isNotEmpty()) "$nick ($id)" else id
-                val vip = if (obj.has("virtual_ip")) obj.getString("virtual_ip") else obj.optString("VirtualIP", "")
-                val pubIp = if (obj.has("public_ip")) obj.getString("public_ip") else obj.optString("PublicIP", "—")
-                val ipDisplay = if (vip.isNotEmpty()) vip else pubIp
-                val stun = if (obj.has("stun_addr")) obj.getString("stun_addr") else obj.optString("STUNAddr", "")
-                val isOnline = if (obj.has("online")) obj.getBoolean("online") else obj.optBoolean("Online", true)
+                var plat = if (obj.has("platform")) obj.getString("platform") else obj.optString("Platform", "")
+                if (plat.isEmpty()) {
+                    val lower = id.lowercase()
+                    plat = when {
+                        lower.contains("cloud") || lower.contains("linux") || lower.contains("debian") -> "🐧 Linux"
+                        lower.contains("keenetic") || lower.contains("jcloud") || lower.contains("router") -> "🌐 Keenetic"
+                        lower.contains("android") -> "🤖 Android"
+                        else -> "🪟 Windows"
+                    }
+                }
+                val flag = if (obj.has("country_flag")) obj.getString("country_flag") else obj.optString("CountryFlag", "🌐")
+                val nameWithPlatform = "$displayName [$plat]"
+                val stunWithFlag = if (stun.isNotEmpty()) "$flag $stun" else "$flag $pubIp"
 
                 peersList.add(
                     PeerItem(
-                        name = displayName,
+                        name = nameWithPlatform,
                         ip = ipDisplay,
-                        stun = stun,
+                        stun = stunWithFlag,
                         online = isOnline
                     )
                 )

@@ -1504,11 +1504,34 @@
         const exitBadge = p.is_exit_node ? `<span class="badge badge-purple">🌐 Exit Node</span>` : `—`;
         const vIP = p.virtual_ip || ('10.200.0.' + (idx + 2));
 
+        let plat = p.platform || p.os || '';
+        if (!plat) {
+          const lowerId = p.device_id.toLowerCase();
+          if (lowerId.includes('cloud') || lowerId.includes('linux') || lowerId.includes('debian')) {
+            plat = '🐧 Linux';
+          } else if (lowerId.includes('keenetic') || lowerId.includes('jcloud') || lowerId.includes('router')) {
+            plat = '🌐 Keenetic';
+          } else if (lowerId.includes('android')) {
+            plat = '🤖 Android';
+          } else {
+            plat = '🪟 Windows';
+          }
+        }
+        const platBadge = `<span class="badge badge-purple" style="font-size:0.68rem; padding:2px 6px; font-weight:600; margin-left:4px;">${plat}</span>`;
+        const flag = p.country_flag || '🌐';
+        const addrStr = p.stun_addr || p.public_ip || '—';
+        const ipDisplayWithFlag = `<span title="Геолокация IP" style="margin-right:3px;">${flag}</span><span>${addrStr}</span>`;
+
         qHtml += `
           <tr class="peer-row">
-            <td style="font-weight:700;">${name}</td>
-            <td class="mono" style="color:#38bdf8;">${vIP}</td>
-            <td class="mono" style="color:var(--text-muted);">${p.stun_addr || p.public_ip}</td>
+            <td>
+              <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px; font-weight:700;">
+                <span>${name}</span>
+                ${platBadge}
+              </div>
+            </td>
+            <td class="mono" style="color:#38bdf8; font-weight:700;">${vIP}</td>
+            <td class="mono" style="color:var(--text-muted);">${ipDisplayWithFlag}</td>
             <td>${p2pBadge}</td>
             <td class="mono" style="color:#34d399;">${latStr}</td>
             <td style="white-space:nowrap;">
@@ -1520,9 +1543,15 @@
 
         fHtml += `
           <tr class="peer-row">
-            <td style="font-weight:700;">${name} <br><small class="mono" style="color:var(--text-dim); font-weight:400;">${p.device_id}</small></td>
-            <td class="mono" style="color:#38bdf8;">${vIP}</td>
-            <td class="mono" style="color:var(--text-muted);">${p.stun_addr || p.public_ip}</td>
+            <td>
+              <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px; font-weight:700;">
+                <span>${name}</span>
+                ${platBadge}
+              </div>
+              <small class="mono" style="color:var(--text-dim); font-weight:400;">${p.device_id}</small>
+            </td>
+            <td class="mono" style="color:#38bdf8; font-weight:700;">${vIP}</td>
+            <td class="mono" style="color:var(--text-muted);">${ipDisplayWithFlag}</td>
             <td>${p2pBadge}</td>
             <td class="mono" style="color:#34d399;">${latStr}</td>
             <td>${exitBadge}</td>

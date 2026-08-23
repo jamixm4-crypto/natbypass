@@ -28,6 +28,10 @@ type Peer struct {
 	IsExitNode       bool                 `json:"is_exit_node"`
 	AdvertisedRoutes []string             `json:"advertised_routes"`
 	AWG              *signaling.AWGParams `json:"awg,omitempty"`
+	OS               string               `json:"os,omitempty"`
+	Platform         string               `json:"platform,omitempty"`
+	Country          string               `json:"country,omitempty"`
+	CountryFlag      string               `json:"country_flag,omitempty"`
 }
 
 // Registry manages discovered peers in a thread-safe manner.

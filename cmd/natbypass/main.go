@@ -519,6 +519,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						nick = dName
 					}
 				}
+				rawOS, platformName, osEmoji := network.DetectPlatform()
+				flag := network.LookupCountryFlag(engineCtx, ip.String())
 				payload := &signaling.Payload{
 					DeviceID:         deviceID,
 					Nickname:         nick,
@@ -533,6 +535,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 					Timestamp:        time.Now(),
 					AWG:              awgParams,
+					OS:               rawOS,
+					Platform:         osEmoji + " " + platformName,
+					CountryFlag:      flag,
 				}
 				_ = sigMgr.Send(engineCtx, payload)
 
@@ -585,6 +590,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						peerVIP = fmt.Sprintf("10.200.0.%d", pNum)
 					}
 
+					osName := p.OS
+					plat := p.Platform
+					if plat == "" {
+						if osName != "" {
+							plat = osName
+						} else {
+							plat = "💻 Устройство"
+						}
+					}
+					pFlag := p.CountryFlag
+					if pFlag == "" && p.PublicIP != "" {
+						pFlag = network.LookupCountryFlag(engineCtx, p.PublicIP)
+					}
+
 					registry.Upsert(&peer.Peer{
 						DeviceID:         p.DeviceID,
 						Nickname:         p.Nickname,
@@ -599,6 +618,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						LastSeen:         time.Now(),
 						Online:           true,
 						AWG:              p.AWG,
+						OS:               osName,
+						Platform:         plat,
+						CountryFlag:      pFlag,
 					})
 
 					log.Info().Str("peer", p.DeviceID).Str("vip", peerVIP).Str("stun", p.STUNAddr).Msg("📥 [P2P Signal] Обнаружен пир в сигнальной сети")

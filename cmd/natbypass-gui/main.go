@@ -2940,6 +2940,20 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					}(alertMsg)
 				}
 
+				osName := p.OS
+				plat := p.Platform
+				if plat == "" {
+					if osName != "" {
+						plat = osName
+					} else {
+						plat = "💻 Windows"
+					}
+				}
+				pFlag := p.CountryFlag
+				if pFlag == "" && p.PublicIP != "" {
+					pFlag = network.LookupCountryFlag(ctx, p.PublicIP)
+				}
+
 				registry.Upsert(&peer.Peer{
 					DeviceID:         p.DeviceID,
 					Nickname:         nick,
@@ -2955,6 +2969,9 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					IsExitNode:       p.IsExitNode,
 					AdvertisedRoutes: p.AdvertisedRoutes,
 					AWG:              p.AWG,
+					OS:               osName,
+					Platform:         plat,
+					CountryFlag:      pFlag,
 				})
 
 				nameInfo := p.DeviceID
@@ -3174,6 +3191,9 @@ func publishCurrentState(ctx context.Context) {
 		IsExitNode:       allowExitNode,
 		AdvertisedRoutes: advSubnets,
 		AWG:              awgParams,
+		OS:               "windows",
+		Platform:         "🪟 Windows",
+		CountryFlag:      network.LookupCountryFlag(ctx, ipStr),
 	}
 
 	if uiServer != nil {
@@ -3512,8 +3532,21 @@ func updateData() {
 						extraInfo = " " + strings.Join(extraTags, " ")
 					}
 
-					line1 := fmt.Sprintf("  %s %s (ID: %s)", icon, nameDisplay, p.DeviceID)
-					line2 := fmt.Sprintf("     └─ 🌐 VIP: %s | %s | %s%s", vip, statusDisplay, addrDisplay, extraInfo)
+					platBadge := p.Platform
+					if platBadge == "" {
+						if p.OS != "" {
+							platBadge = p.OS
+						} else {
+							platBadge = "💻 Устройство"
+						}
+					}
+					flag := p.CountryFlag
+					if flag == "" {
+						flag = "🌐"
+					}
+
+					line1 := fmt.Sprintf("  %s %s [%s] (ID: %s)", icon, nameDisplay, platBadge, p.DeviceID)
+					line2 := fmt.Sprintf("     └─ 🌐 VIP: %s | %s | %s %s%s", vip, statusDisplay, flag, addrDisplay, extraInfo)
 
 					addListBoxItem(hListPeers, line1)
 					addListBoxItem(hListPeers, line2)

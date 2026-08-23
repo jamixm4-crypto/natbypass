@@ -116,6 +116,9 @@ type Payload struct {
 	Offline          bool       `json:"offline,omitempty"`
 	Leave            bool       `json:"leave,omitempty"`
 	AWG              *AWGParams `json:"awg,omitempty"`
+	OS               string     `json:"os,omitempty"`
+	Platform         string     `json:"platform,omitempty"`
+	CountryFlag      string     `json:"country_flag,omitempty"`
 }
 
 func (p *Payload) UnmarshalJSON(data []byte) error {
@@ -137,6 +140,9 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		UpperLeave            bool       `json:"Leave"`
 		UpperAWG              *AWGParams `json:"AWG"`
 		CamelAWG              *AWGParams `json:"awg"`
+		UpperOS               string     `json:"OS"`
+		UpperPlatform         string     `json:"Platform"`
+		UpperCountryFlag      string     `json:"CountryFlag"`
 		*Alias
 	}{
 		Alias: (*Alias)(p),
@@ -197,6 +203,15 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		} else if aux.CamelAWG != nil {
 			p.AWG = aux.CamelAWG
 		}
+	}
+	if p.OS == "" && aux.UpperOS != "" {
+		p.OS = aux.UpperOS
+	}
+	if p.Platform == "" && aux.UpperPlatform != "" {
+		p.Platform = aux.UpperPlatform
+	}
+	if p.CountryFlag == "" && aux.UpperCountryFlag != "" {
+		p.CountryFlag = aux.UpperCountryFlag
 	}
 	return nil
 }
