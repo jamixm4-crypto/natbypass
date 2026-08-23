@@ -6,20 +6,25 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
 
-// restartService перезапускает сервис на Windows через отложенный cmd.exe
+// restartService перезапускает сервис на Windows с поддержкой путей со скобками (1), пробелами и спецсимволами
 func restartService(execPath string) {
-	// Отложенный запуск через 1.5 сек с помощью cmd.exe в полностью отвязанной группе процессов
-	// Запускаем с аргументом gui для гарантированного старта Web UI сервера
-	cmd := exec.Command("cmd.exe", "/c", fmt.Sprintf("ping 127.0.0.1 -n 3 >nul & start \"\" \"%s\" gui", execPath))
+	// Используем PowerShell Start-Process с задержкой 1.5 сек в полностью отвязанной группе процессов.
+	// Это гарантирует, что текущий процесс успеет освободить порт 8080 и мьютекс,
+	// а пути вида "NatBypass (1).exe" гарантированно корректно запустятся без синтаксических ошибок cmd.exe!
+	escapedPath := strings.ReplaceAll(execPath, "'", "''")
+	psScript := fmt.Sprintf(`Start-Sleep -Milliseconds 1500; Start-Process -FilePath '%s' -ArgumentList 'gui'`, escapedPath)
+
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: 0x08000000 | 0x00000200, // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
 	}
 	_ = cmd.Start()
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	os.Exit(0)
 }

@@ -39,7 +39,22 @@ func acquireSingleInstanceMutex(port int) bool {
 	}
 
 	singleInstanceMutex = hMutex
+	cleanupStaleBackups()
 	return true
+}
+
+// cleanupStaleBackups удаляет старые резервные копии .old.* после успешного обновления
+func cleanupStaleBackups() {
+	execPath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(execPath)
+	base := filepath.Base(execPath)
+	matches, _ := filepath.Glob(filepath.Join(dir, base+".old.*"))
+	for _, m := range matches {
+		_ = os.Remove(m)
+	}
 }
 
 func releaseSingleInstanceMutex() {
