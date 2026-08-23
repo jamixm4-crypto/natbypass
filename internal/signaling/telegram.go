@@ -216,6 +216,7 @@ func (t *TelegramChannel) Receive(ctx context.Context) (<-chan *Payload, error) 
 
 							var p Payload
 							if err := json.Unmarshal(data, &p); err == nil && p.DeviceID != "" {
+								p.Channel = "telegram"
 								select {
 								case out <- &p:
 								case <-ctx.Done():

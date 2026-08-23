@@ -32,6 +32,12 @@ type Peer struct {
 	Platform         string               `json:"platform,omitempty"`
 	Country          string               `json:"country,omitempty"`
 	CountryFlag      string               `json:"country_flag,omitempty"`
+	Channel          string               `json:"channel,omitempty"`
+	HasMQTT          bool                 `json:"has_mqtt"`
+	HasTelegram      bool                 `json:"has_telegram"`
+	PingMs           int64                `json:"ping_ms"`
+	LastMQTTSeen     time.Time            `json:"last_mqtt_seen,omitempty"`
+	LastTelegramSeen time.Time            `json:"last_telegram_seen,omitempty"`
 }
 
 // Registry manages discovered peers in a thread-safe manner.
@@ -76,6 +82,17 @@ func (r *Registry) Upsert(p *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	now := time.Now()
+
+	// Обновляем метки каналов
+	if p.Channel == "mqtt" {
+		p.HasMQTT = true
+		p.LastMQTTSeen = now
+	} else if p.Channel == "telegram" {
+		p.HasTelegram = true
+		p.LastTelegramSeen = now
+	}
+
 	if existing, ok := r.peers[p.DeviceID]; ok {
 		if existing.DirectP2P {
 			p.DirectP2P = true
@@ -85,6 +102,7 @@ func (r *Registry) Upsert(p *Peer) {
 		}
 		if existing.Latency > 0 && p.Latency == 0 {
 			p.Latency = existing.Latency
+			p.PingMs = existing.PingMs
 		}
 		if p.Nickname == "" && existing.Nickname != "" {
 			p.Nickname = existing.Nickname
@@ -92,10 +110,36 @@ func (r *Registry) Upsert(p *Peer) {
 		if p.AWG == nil && existing.AWG != nil {
 			p.AWG = existing.AWG
 		}
+
+		// Сохраняем доступность каналов
+		if existing.HasMQTT && now.Sub(existing.LastMQTTSeen) < 60*time.Second {
+			p.HasMQTT = true
+			if p.LastMQTTSeen.IsZero() {
+				p.LastMQTTSeen = existing.LastMQTTSeen
+			}
+		}
+		if existing.HasTelegram && now.Sub(existing.LastTelegramSeen) < 60*time.Second {
+			p.HasTelegram = true
+			if p.LastTelegramSeen.IsZero() {
+				p.LastTelegramSeen = existing.LastTelegramSeen
+			}
+		}
+
+		if p.HasMQTT && p.HasTelegram {
+			p.Channel = "parallel"
+		} else if p.HasTelegram && !p.HasMQTT {
+			p.Channel = "telegram"
+		} else if p.HasMQTT && !p.HasTelegram {
+			p.Channel = "mqtt"
+		}
+	}
+
+	if p.Latency > 0 {
+		p.PingMs = p.Latency.Milliseconds()
 	}
 
 	p.Online = true
-	p.LastSeen = time.Now()
+	p.LastSeen = now
 
 	r.peers[p.DeviceID] = p
 }

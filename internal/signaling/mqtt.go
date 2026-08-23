@@ -84,6 +84,7 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 	var p Payload
 	if err := json.Unmarshal(msg.Payload(), &p); err == nil && p.DeviceID != "" {
+		p.Channel = "mqtt"
 		m.outMu.RLock()
 		defer m.outMu.RUnlock()
 		for _, out := range m.outChans {

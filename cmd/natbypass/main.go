@@ -251,6 +251,7 @@ func newServiceCmd() *cobra.Command {
 
 // ── update ─────────────────────────────────────────────────────
 func newUpdateCmd() *cobra.Command {
+	var force bool
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Проверить и установить обновление NatBypass с GitHub",
@@ -260,11 +261,16 @@ func newUpdateCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ошибка проверки обновлений: %w", err)
 			}
-			if !info.HasUpdate {
-				fmt.Printf("✅ У вас установлена самая актуальная версия (%s)\n", Version)
+			if !info.HasUpdate && !force {
+				fmt.Printf("✅ У вас установлена актуальная версия (%s, релиз: %s)\n", Version, info.PublishedAt)
+				fmt.Println("💡 Используйте 'natbypass update --force' для принудительной переустановки свежего билда.")
 				return nil
 			}
-			fmt.Printf("🚀 Найдена новая версия: %s (опубликована: %s)\n", info.LatestVersion, info.PublishedAt)
+			if info.HasUpdate {
+				fmt.Printf("🚀 Найдена новая версия: %s (опубликована: %s)\n", info.LatestVersion, info.PublishedAt)
+			} else {
+				fmt.Printf("🔄 Принудительное обновление до последнего билда релиза (%s, опубликован: %s)\n", info.LatestVersion, info.PublishedAt)
+			}
 			fmt.Printf("📦 Файл для вашей системы: %s (%d KB)\n", info.AssetName, info.AssetSize/1024)
 			if info.ReleaseNotes != "" {
 				fmt.Printf("\n📝 Описание изменений:\n%s\n\n", info.ReleaseNotes)
@@ -278,6 +284,7 @@ func newUpdateCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "принудительно переустановить последний билд, даже если версии совпадают")
 	return cmd
 }
 
@@ -464,7 +471,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	// Фоновый цикл периодического пробития NAT и поддержания сокетов живыми (KeepAlive)
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -728,6 +735,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						OS:               osName,
 						Platform:         plat,
 						CountryFlag:      pFlag,
+						Channel:          p.Channel,
 					})
 
 					log.Info().Str("peer", p.DeviceID).Str("vip", peerVIP).Str("stun", p.STUNAddr).Msg("📥 [P2P Signal] Обнаружен пир в сигнальной сети")

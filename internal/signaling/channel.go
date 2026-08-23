@@ -119,6 +119,7 @@ type Payload struct {
 	OS               string     `json:"os,omitempty"`
 	Platform         string     `json:"platform,omitempty"`
 	CountryFlag      string     `json:"country_flag,omitempty"`
+	Channel          string     `json:"channel,omitempty"`
 }
 
 func (p *Payload) UnmarshalJSON(data []byte) error {

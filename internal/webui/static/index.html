@@ -791,12 +791,13 @@
           <table>
             <thead>
               <tr>
-                <th style="width: 25%;">Устройство</th>
-                <th style="width: 18%;">Virtual IP</th>
-                <th style="width: 25%;">STUN Endpoint</th>
-                <th style="width: 14%;">Статус связи</th>
-                <th style="width: 10%;">Задержка</th>
-                <th style="width: 8%;">Действия</th>
+                <th style="width: 22%;">Устройство</th>
+                <th style="width: 14%;">Virtual IP</th>
+                <th style="width: 22%;">STUN & IP</th>
+                <th style="width: 15%;">Канал связи</th>
+                <th style="width: 12%;">Связь</th>
+                <th style="width: 8%;">Пинг</th>
+                <th style="width: 7%;">Действия</th>
               </tr>
             </thead>
             <tbody id="quickPeersBody"></tbody>
@@ -822,7 +823,8 @@
               <tr>
                 <th>Имя / Device ID</th>
                 <th>Виртуальный IP</th>
-                <th>Публичный & STUN</th>
+                <th>STUN & Публичный</th>
+                <th>Канал связи</th>
                 <th>Direct P2P</th>
                 <th>RTT Пинг</th>
                 <th>Шлюз</th>
@@ -1450,21 +1452,37 @@
           lblAsset.innerText = d.asset_name ? `${d.asset_name} (${Math.round((d.asset_size || 0)/1024/1024*10)/10} MB)` : 'Готов к сборке';
 
           const topLabel = document.getElementById('topUpdateLabel');
+          btnApply.style.display = 'inline-flex';
+
+          let pubStr = '';
+          if (d.published_at) {
+            try {
+              pubStr = ' • ' + new Date(d.published_at).toLocaleString();
+            } catch(e) {}
+          }
+
           if (d.has_update) {
             lblLatest.className = 'badge badge-success mono';
-            lblLatest.innerText += ' (Доступно!)';
+            lblLatest.innerText = (d.latest_version || '—') + ' (Новая версия!)' + pubStr;
+            btnApply.innerText = '⚡ Скачать и обновить (' + (d.latest_version || '') + ')';
+            btnApply.style.background = 'linear-gradient(135deg, #a855f7, #6366f1)';
             if (topLabel) topLabel.innerText = 'Доступно ' + d.latest_version;
-            btnApply.style.display = 'inline-flex';
-
             if (d.release_notes) {
               notesBox.style.display = 'block';
               txtNotes.innerText = d.release_notes;
             }
           } else {
             lblLatest.className = 'badge badge-purple mono';
-            lblLatest.innerText += ' (Актуально)';
+            lblLatest.innerText = (d.latest_version || d.current_version || 'v1.0.0') + ' (Билд актуален)' + pubStr;
+            btnApply.innerText = '🔄 Принудительно обновить (свежий билд)';
+            btnApply.style.background = 'linear-gradient(135deg, #10b981, #06b6d4)';
             if (topLabel) topLabel.innerText = 'v' + (d.current_version || '1.0.0').replace(/^v/, '');
-            notesBox.style.display = 'none';
+            if (d.release_notes) {
+              notesBox.style.display = 'block';
+              txtNotes.innerText = d.release_notes;
+            } else {
+              notesBox.style.display = 'none';
+            }
           }
         } else {
           lblLatest.innerText = 'Ошибка проверки';
@@ -1785,11 +1803,33 @@
       peers.forEach((p, idx) => {
         const name = p.nickname ? `⭐ ${p.nickname}` : p.device_id;
         const p2pBadge = p.direct_p2p 
-          ? `<span class="badge badge-success">⚡ Direct P2P</span>` 
-          : `<span class="badge badge-cyan">🌐 Relay</span>`;
-        const latVal = p.latency ? Math.round(p.latency / 1000000) : 12;
-        const latStr = `${latVal} ms`;
-        const exitBadge = p.is_exit_node ? `<span class="badge badge-purple">🌐 Exit Node</span>` : `—`;
+          ? `<span class="badge badge-success" style="font-size:0.72rem;">⚡ Direct P2P</span>` 
+          : `<span class="badge badge-cyan" style="font-size:0.72rem;">🌐 Relay</span>`;
+        
+        // Реальный пинг
+        const latMs = p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0);
+        let latDisplay = `<span style="color:var(--text-dim);">—</span>`;
+        if (latMs > 0) {
+          let dot = '🟢';
+          let col = '#4ade80';
+          if (latMs > 150) { dot = '🔴'; col = '#f87171'; }
+          else if (latMs >= 50) { dot = '🟡'; col = '#fbbf24'; }
+          latDisplay = `<span style="color:${col}; font-weight:700;" class="mono">${dot} ${latMs} ms</span>`;
+        }
+
+        // Канал доступности устройства
+        let chanBadge = '';
+        if (p.has_mqtt && p.has_telegram) {
+          chanBadge = `<span class="badge" style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.45); color:#c084fc; font-size:0.72rem; padding:2px 7px;" title="Доступен одновременно через MQTT и Telegram">⚡+💬 MQTT+TG</span>`;
+        } else if (p.has_telegram || p.channel === 'telegram') {
+          chanBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:2px 7px;" title="Доступен через Telegram">💬 Telegram</span>`;
+        } else if (p.has_mqtt || p.channel === 'mqtt') {
+          chanBadge = `<span class="badge badge-purple" style="font-size:0.72rem; padding:2px 7px;" title="Доступен через MQTT">⚡ MQTT</span>`;
+        } else {
+          chanBadge = `<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-dim); font-size:0.72rem; padding:2px 7px;">📡 Сигнал</span>`;
+        }
+
+        const exitBadge = p.is_exit_node ? `<span class="badge badge-purple" style="font-size:0.72rem;">🌐 Exit Node</span>` : `—`;
         const vIP = p.virtual_ip || ('10.200.0.' + (idx + 2));
 
         let plat = p.platform || p.os || '';
@@ -1808,7 +1848,7 @@
         const platBadge = `<span class="badge badge-purple" style="font-size:0.68rem; padding:2px 6px; font-weight:600; margin-left:4px;">${plat}</span>`;
         const flag = p.country_flag || '🌐';
         const addrStr = p.stun_addr || p.public_ip || '—';
-        const ipDisplayWithFlag = `<span title="Геолокация IP" style="margin-right:3px;">${flag}</span><span>${addrStr}</span>`;
+        const ipDisplayWithFlag = `<span title="Геолокация IP" style="margin-right:3px;">${flag}</span><span style="font-size:0.8rem;">${addrStr}</span>`;
 
         qHtml += `
           <tr class="peer-row">
@@ -1820,11 +1860,12 @@
             </td>
             <td class="mono" style="color:#38bdf8; font-weight:700;">${vIP}</td>
             <td class="mono" style="color:var(--text-muted);">${ipDisplayWithFlag}</td>
+            <td>${chanBadge}</td>
             <td>${p2pBadge}</td>
-            <td class="mono" style="color:#34d399;">${latStr}</td>
+            <td>${latDisplay}</td>
             <td style="white-space:nowrap;">
-              <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⚡ Ping</button>
-              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⭐ Имя</button>
+              <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:3px 7px; font-size:0.72rem;" title="Послать прямой UDP пинг">⚡</button>
+              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:3px 7px; font-size:0.72rem;" title="Задать имя">⭐</button>
             </td>
           </tr>
         `;
@@ -1840,8 +1881,9 @@
             </td>
             <td class="mono" style="color:#38bdf8; font-weight:700;">${vIP}</td>
             <td class="mono" style="color:var(--text-muted);">${ipDisplayWithFlag}</td>
+            <td>${chanBadge}</td>
             <td>${p2pBadge}</td>
-            <td class="mono" style="color:#34d399;">${latStr}</td>
+            <td>${latDisplay}</td>
             <td>${exitBadge}</td>
             <td style="white-space:nowrap;">
               <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⚡ Ping</button>
