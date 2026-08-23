@@ -74,7 +74,7 @@ P2P Mesh VPN с автоматическим обходом NAT/CGNAT. Соед�
 Выполните на сервере или роутере (автоматически определит архитектуру `x86_64`, `ARM64`, `MIPS`, `MIPSLE` и настроит автозапуск службы):
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh | sh
 ```
 или через `wget`:
 ```bash
@@ -82,6 +82,19 @@ wget -qO- https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/instal
 ```
 
 После завершения перейдите в веб-панель: `http://<IP_РОУТЕРА>:8080`.
+
+#### 🗑️ Удаление с Linux / Keenetic / OpenWrt
+
+В одну команду:
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh
+```
+*(для полного удаления вместе с конфигами и ключами добавьте флаг `--purge`: `curl -fsSL .../uninstall.sh | sh -s -- --purge`)*
+
+Вручную:
+- **Keenetic Entware**: `/opt/etc/init.d/S99natbypass stop && rm -f /opt/etc/init.d/S99natbypass /opt/bin/natbypass && rm -rf /opt/etc/natbypass`
+- **OpenWrt**: `/etc/init.d/natbypass stop && /etc/init.d/natbypass disable && rm -f /etc/init.d/natbypass /usr/bin/natbypass && rm -rf /etc/natbypass`
+- **Linux (systemd)**: `systemctl disable --now natbypass && rm -f /etc/systemd/system/natbypass.service /usr/local/bin/natbypass && rm -rf /etc/natbypass`
 
 ### Android
 
