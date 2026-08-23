@@ -142,24 +142,36 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 
-	// Исключаем файлы сборщика роутеров, исходники и тулкиты
+	// 1. Исключаем нерелевантные файлы (исходники, тулкиты, тестовые сборки)
 	var filtered []GitHubAsset
 	for _, a := range assets {
 		nl := strings.ToLower(a.Name)
-		if strings.Contains(nl, "builder") || strings.Contains(nl, "toolkit") || strings.HasSuffix(nl, ".zip") || strings.HasSuffix(nl, ".tar.gz") {
+		if strings.Contains(nl, "builder") || strings.Contains(nl, "toolkit") || strings.HasPrefix(nl, "test-") || strings.HasSuffix(nl, ".zip") || strings.HasSuffix(nl, ".tar.gz") || strings.HasSuffix(nl, ".example") {
 			continue
 		}
+		if osName == "windows" {
+			// На Windows подходят ТОЛЬКО файлы с расширением .exe
+			if !strings.HasSuffix(nl, ".exe") {
+				continue
+			}
+		} else if osName == "linux" {
+			// На Linux исключаем файлы .exe и .apk
+			if strings.HasSuffix(nl, ".exe") || strings.HasSuffix(nl, ".apk") {
+				continue
+			}
+		} else if osName == "android" {
+			if !strings.HasSuffix(nl, ".apk") && !strings.Contains(nl, "android") {
+				continue
+			}
+		}
 		filtered = append(filtered, a)
-	}
-	if len(filtered) == 0 {
-		filtered = assets
 	}
 
 	var candidates []string
 	if osName == "windows" {
 		candidates = []string{
+			"-windows-amd64.exe",
 			"natbypass-v",
-			"natbypass-windows-amd64.exe",
 			"natbypass.exe",
 			"windows-amd64.exe",
 			"windows.exe",
@@ -167,16 +179,16 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 		}
 	} else if osName == "linux" {
 		if arch == "arm64" {
-			candidates = []string{"linux-arm64", "arm64"}
+			candidates = []string{"-linux-arm64", "linux-arm64", "arm64"}
 		} else if arch == "mipsle" {
-			candidates = []string{"router-mipsle", "linux-mipsle", "mipsle", "mipsel"}
+			candidates = []string{"-router-mipsle", "-linux-mipsle", "mipsle", "mipsel"}
 		} else if arch == "mips" {
-			candidates = []string{"router-mips", "linux-mips", "mips"}
+			candidates = []string{"-router-mips", "-linux-mips", "mips"}
 		} else {
-			candidates = []string{"linux-amd64", "amd64", "linux-x86_64"}
+			candidates = []string{"-linux-amd64", "linux-amd64", "amd64"}
 		}
 	} else if osName == "android" {
-		candidates = []string{".apk", "android-arm64", "android"}
+		candidates = []string{".apk", "android-arm64"}
 	}
 
 	for _, cand := range candidates {
@@ -192,7 +204,7 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 		}
 	}
 
-	// Fallback на первый подходящий ассет
+	// Fallback на первый подходящий отфильтрованный ассет
 	if len(filtered) > 0 {
 		return filtered[0].BrowserDownloadURL, filtered[0].Name, filtered[0].Size
 	}
@@ -276,6 +288,33 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 		}
 	}
 	out.Close()
+
+	// Валидация целостности и сигнатуры исполняемого файла
+	fi, statErr := os.Stat(tmpPath)
+	if statErr != nil || fi.Size() < 500*1024 {
+		_ = os.Remove(tmpPath)
+		setStatus(false, 0, "", "Скачанный файл поврежден или неполон", false)
+		return fmt.Errorf("downloaded file is incomplete")
+	}
+
+	headerBuf := make([]byte, 4)
+	if fCheck, err := os.Open(tmpPath); err == nil {
+		_, _ = io.ReadFull(fCheck, headerBuf)
+		fCheck.Close()
+		if runtime.GOOS == "windows" {
+			if headerBuf[0] != 'M' || headerBuf[1] != 'Z' {
+				_ = os.Remove(tmpPath)
+				setStatus(false, 0, "", "Ошибка: скачанный файл не является исполняемым файлом Windows (MZ PE)", false)
+				return fmt.Errorf("downloaded asset is not a valid Windows executable")
+			}
+		} else if runtime.GOOS == "linux" {
+			if headerBuf[0] != 0x7F || headerBuf[1] != 'E' || headerBuf[2] != 'L' || headerBuf[3] != 'F' {
+				_ = os.Remove(tmpPath)
+				setStatus(false, 0, "", "Ошибка: скачанный файл не является ELF файлом Linux", false)
+				return fmt.Errorf("downloaded asset is not a valid Linux ELF executable")
+			}
+		}
+	}
 
 	_ = os.Chmod(tmpPath, 0755)
 	setStatus(true, 85, "Применение обновления и замена исполняемого файла...", "", false)
