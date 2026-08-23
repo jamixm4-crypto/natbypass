@@ -1,25 +1,25 @@
-﻿### [🌐 Главная](Home)
+﻿### [[Home|🌐 Главная страница]]
 
 ---
 ### 🚀 Старт
-* [Быстрый старт](Quick-Start)
-* [Архитектура](Architecture)
+* [[Quick-Start|🚀 Быстрый старт]]
+* [[Architecture|🏗️ Архитектура]]
 
 ---
 ### 💻 Платформы
-* [Windows](Windows-Guide)
-* [Android](Android-Setup)
-* [Linux & Серверы](Linux-and-Server)
-* [Keenetic Роутеры](Keenetic-Routers)
-* [OpenWrt Роутеры](OpenWrt-Routers)
+* [[Windows-Guide|🪟 Windows]]
+* [[Android-Setup|📱 Android]]
+* [[Linux-and-Server|🐧 Linux & Серверы]]
+* [[Keenetic-Routers|🌐 Keenetic Роутеры]]
+* [[OpenWrt-Routers|📡 OpenWrt Роутеры]]
 
 ---
 ### 🛡️ Протоколы
-* [AmneziaWG 2.0 (DPI)](AmneziaWG-DPI-Bypass)
-* [Telegram & MQTT Сигнализация](Signaling-Telegram-MQTT)
-* [Xray VLESS + Reality](Xray-Reality-Relay)
+* [[AmneziaWG-DPI-Bypass|🛡️ AmneziaWG 2.0 (DPI)]]
+* [[Signaling-Telegram-MQTT|💬 Telegram & MQTT]]
+* [[Xray-Reality-Relay|🛡️ Xray VLESS Reality]]
 
 ---
 ### 🔧 Поддержка
-* [Диагностика & Ошибки](Troubleshooting-and-Diagnostics)
-* [Релизы на GitHub](https://github.com/jamixm4-crypto/natbypass/releases)
+* [[Troubleshooting-and-Diagnostics|🔧 Диагностика]]
+* [📦 Релизы на GitHub](https://github.com/jamixm4-crypto/natbypass/releases)
