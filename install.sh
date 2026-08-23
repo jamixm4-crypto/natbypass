@@ -204,8 +204,8 @@ signaling:
       priority: 1
       enabled: true
       params:
-        broker_url: "tcp://broker.hivemq.com:1883"
-        topic: "natbypass/public/peers"
+        broker_url: "tcp://broker.emqx.io:1883"
+        topic: "natbypass/mynet/peers"
     - type: "telegram"
       priority: 2
       enabled: false

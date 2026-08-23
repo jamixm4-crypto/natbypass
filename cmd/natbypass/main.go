@@ -283,8 +283,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		log.Warn().Err(err).Msg("Ошибка парсинга каналов, используется публичный резервный канал")
 	}
 	if len(channels) == 0 {
-		log.Warn().Msg("⚠️ Сигнальные каналы не настроены в конфиге. Включен резервный публичный MQTT брокер (topic: natbypass/public/peers). Вы можете настроить личный Telegram-бот в Web UI (http://localhost:8080) или файле config.yaml")
-		channels = append(channels, signaling.NewMQTTChannel("tcp://broker.emqx.io:1883", "natbypass/public/peers", deviceID, "", ""))
+		log.Warn().Msg("⚠️ Сигнальные каналы не настроены в конфиге. Включен резервный MQTT брокер (topic: natbypass/mynet/peers). Вы можете настроить личный Telegram-бот в Web UI (http://localhost:8080) или файле config.yaml")
+		channels = append(channels, signaling.NewMQTTChannel("tcp://broker.emqx.io:1883", "natbypass/mynet/peers", deviceID, "", ""))
 	}
 	sigMgr := signaling.NewFallbackManager(channels)
 	log.Info().Int("channels", len(channels)).Str("current", sigMgr.CurrentChannel()).Msg("Сигнальные каналы инициализированы")
@@ -534,10 +534,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					Timestamp:        time.Now(),
 					AWG:              awgParams,
 				}
-				encrypted, encErr := signaling.EncryptPayload(payload, pubKey, privKey)
-				if encErr == nil {
-					sigMgr.Send(engineCtx, encrypted)
-				}
+				_ = sigMgr.Send(engineCtx, payload)
 
 				// LAN Broadcast Ping
 				if bcastAddr, bErr := net.ResolveUDPAddr("udp4", "255.255.255.255:51821"); bErr == nil {
@@ -1198,8 +1195,8 @@ signaling:
       priority: 2
       enabled: true
       params:
-        broker_url: "tcp://mqtt.eclipseprojects.io:1883"
-        topic: "natbypass/public/peers"
+        broker_url: "tcp://broker.emqx.io:1883"
+        topic: "natbypass/mynet/peers"
 
 wireguard:
   enabled: false
