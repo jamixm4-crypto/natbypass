@@ -83,6 +83,13 @@ wget -qO- https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/instal
 
 После завершения перейдите в веб-панель: `http://<IP_РОУТЕРА>:8080`.
 
+#### 🔄 Обновление в 1 команду (без потери настроек)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/update.sh | sh
+```
+*(скрипт автоматически скачивает свежий бинарник под архитектуру вашего процессора, перезапускает службу и оставляет все конфиги, ключи и токены 100% нетронутыми)*
+
 #### 🗑️ Удаление с Linux / Keenetic / OpenWrt
 
 В одну команду:
