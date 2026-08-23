@@ -47,8 +47,8 @@ func acquireSingleInstanceMutex(port int) bool {
 			if hMutex != 0 {
 				_ = windows.CloseHandle(hMutex)
 			}
-			// Экземпляр уже запущен — активируем окно приложения и выходим
-			openAppWindow(port)
+			// Экземпляр уже запущен — активируем существующее окно и мгновенно выходим (НИКАКИХ вторых окон!)
+			activateExistingWindow()
 			return false
 		}
 	}
@@ -59,6 +59,19 @@ func acquireSingleInstanceMutex(port int) bool {
 	singleInstanceMutex = hMutex
 	cleanupStaleBackups()
 	return true
+}
+
+func activateExistingWindow() {
+	procFindWindowW := moduser32Instance.NewProc("FindWindowW")
+	procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
+	procShowWindow := moduser32Instance.NewProc("ShowWindow")
+
+	titlePtr, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Network")
+	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
+	if hwnd != 0 {
+		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
+		procSetForegroundWindow.Call(hwnd)
+	}
 }
 
 // cleanupStaleBackups удаляет старые резервные копии .old.* после успешного обновления
@@ -89,7 +102,7 @@ func openAppWindow(port int) {
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 
-	// 1. Попытка запустить нативное окно WebView2 напрямую в процессе NatBypass.exe
+	// 1. Запуск нативного окна WebView2 напрямую в процессе NatBypass.exe
 	// Это дает 100% фирменную иконку на панели задач и в заголовке окна без значка Edge!
 	go func() {
 		defer func() {
@@ -97,6 +110,9 @@ func openAppWindow(port int) {
 				openBrowserFallback(url)
 			}
 		}()
+
+		// Небольшая задержка 150мс для гарантии готовности HTTP порта
+		time.Sleep(150 * time.Millisecond)
 
 		w := webview2.NewWithOptions(webview2.WebViewOptions{
 			Debug:     false,
@@ -109,7 +125,11 @@ func openAppWindow(port int) {
 			},
 		})
 		if w != nil {
-			defer w.Destroy()
+			defer func() {
+				w.Destroy()
+				os.Exit(0)
+			}()
+
 			hwnd := uintptr(w.Window())
 
 			// 1. Включаем нативный Immersive Dark Mode для рамки и заголовка окна
@@ -142,6 +162,8 @@ func openAppWindow(port int) {
 				});
 			`)
 
+			// 4. ЖЕСТКО задаем минимальный размер окна (HintMin = 2) и начальный размер
+			w.SetSize(1100, 750, webview2.HintMin)
 			w.SetSize(1280, 860, webview2.HintNone)
 			w.Navigate(url)
 			w.Run()
