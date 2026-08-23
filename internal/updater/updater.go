@@ -258,8 +258,7 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 
 	// Атомарная замена исполняемого файла
 	if runtime.GOOS == "windows" {
-		oldPath := execPath + ".old"
-		_ = os.Remove(oldPath)
+		oldPath := fmt.Sprintf("%s.old.%d", execPath, time.Now().UnixNano())
 		if err := os.Rename(execPath, oldPath); err != nil {
 			setStatus(false, 0, "", "Не удалось переименовать старый файл Windows: "+err.Error(), false)
 			return err

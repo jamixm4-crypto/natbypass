@@ -1603,7 +1603,7 @@
             }
             showToast('🎉 NatBypass успешно обновлен и запущен!');
             setTimeout(() => {
-              window.location.reload();
+              window.location.href = window.location.origin + '/?v=' + Date.now();
             }, 800);
           }
         } catch (e) {
