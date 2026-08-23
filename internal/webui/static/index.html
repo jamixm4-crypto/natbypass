@@ -1703,40 +1703,55 @@
       }
     }
 
-    // Dynamic SVG Wave Renderers
+    // Smooth Cardinal Spline (Cubic Bézier) path builder
+    function createSmoothSpline(points) {
+      if (!points || points.length < 2) return '';
+      let d = `M${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i === 0 ? 0 : i - 1];
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const p3 = points[i + 2 >= points.length ? points.length - 1 : i + 2];
+
+        const cp1x = p1.x + (p2.x - p0.x) / 5.5;
+        const cp1y = p1.y + (p2.y - p0.y) / 5.5;
+        const cp2x = p2.x - (p3.x - p1.x) / 5.5;
+        const cp2y = p2.y - (p3.y - p1.y) / 5.5;
+
+        d += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+      }
+      return d;
+    }
+
+    // Dynamic SVG Wave Renderers with Smooth Interpolation
     function updateLatencyChart(avgLat) {
       if (avgLat > 0) {
         latencyHistory.push(avgLat);
       } else {
-        const last = latencyHistory[latencyHistory.length - 1] || 10;
-        const variation = (Math.random() * 4) - 2;
-        latencyHistory.push(Math.max(4, Math.round(last + variation)));
+        if (latencyHistory.length === 0) {
+          latencyHistory = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        } else {
+          latencyHistory.push(0);
+        }
       }
-      if (latencyHistory.length > 15) latencyHistory.shift();
+      if (latencyHistory.length > 18) latencyHistory.shift();
 
-      const maxLat = Math.max(...latencyHistory, 50);
+      const maxLat = Math.max(...latencyHistory, 40);
       const points = latencyHistory.map((val, idx) => {
         const x = (idx / (latencyHistory.length - 1)) * 380;
-        const normalized = val / maxLat;
-        const y = 110 - (normalized * 90);
+        const normalized = val > 0 ? (val / maxLat) : 0.05;
+        const y = 110 - (normalized * 85);
         return {x, y};
       });
 
-      let pathD = `M${points[0].x},${points[0].y}`;
-      for (let i = 0; i < points.length - 1; i++) {
-        const mx = (points[i].x + points[i + 1].x) / 2;
-        const my = (points[i].y + points[i + 1].y) / 2;
-        pathD += ` Q${points[i].x},${points[i].y} ${mx},${my}`;
-      }
-      pathD += ` L${points[points.length - 1].x},${points[points.length - 1].y}`;
-
+      const pathD = createSmoothSpline(points);
       const lineElem = document.getElementById('pathLatencyLine');
       const areaElem = document.getElementById('pathLatencyArea');
-      if (lineElem) lineElem.setAttribute('d', pathD);
-      if (areaElem) areaElem.setAttribute('d', pathD + ' L380,120 L0,120 Z');
+      if (lineElem && pathD) lineElem.setAttribute('d', pathD);
+      if (areaElem && pathD) areaElem.setAttribute('d', pathD + ' L380,120 L0,120 Z');
     }
 
-    let throughputHistory = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let throughputHistory = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
     function updateThroughputWave(p2pActive, throughputKB, throughputStr) {
       const lblThroughput = document.getElementById('statThroughput');
@@ -1750,31 +1765,24 @@
         return;
       }
 
-      const val = throughputKB > 0 ? throughputKB : 16;
+      const val = throughputKB > 0 ? throughputKB : 12;
       throughputHistory.push(val);
-      if (throughputHistory.length > 12) throughputHistory.shift();
+      if (throughputHistory.length > 16) throughputHistory.shift();
 
       if (lblThroughput) {
         lblThroughput.innerText = throughputStr || (val + ' KB/s');
       }
 
-      const maxVal = Math.max(...throughputHistory, 40);
+      const maxVal = Math.max(...throughputHistory, 30);
       const points = throughputHistory.map((v, i) => {
         const x = (i / (throughputHistory.length - 1)) * 300;
-        const y = 55 - ((v / maxVal) * 40);
+        const y = 58 - ((v / maxVal) * 42);
         return {x, y};
       });
 
-      let pathD = `M${points[0].x},${points[0].y}`;
-      for (let i = 0; i < points.length - 1; i++) {
-        const mx = (points[i].x + points[i + 1].x) / 2;
-        const my = (points[i].y + points[i + 1].y) / 2;
-        pathD += ` Q${points[i].x},${points[i].y} ${mx},${my}`;
-      }
-      pathD += ` L${points[points.length - 1].x},${points[points.length - 1].y}`;
-
-      if (lineElem) lineElem.setAttribute('d', pathD);
-      if (areaElem) areaElem.setAttribute('d', pathD + ' L300,70 L0,70 Z');
+      const pathD = createSmoothSpline(points);
+      if (lineElem && pathD) lineElem.setAttribute('d', pathD);
+      if (areaElem && pathD) areaElem.setAttribute('d', pathD + ' L300,70 L0,70 Z');
     }
 
     // Live Dashboard Fetch

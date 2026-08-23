@@ -208,7 +208,7 @@ func (p *UDPPuncher) readLoop() {
 
 		data := string(buf[:n])
 
-		// 2. Входящий PING от пира -> отвечаем PONG и сразу подтверждаем прямой P2P сокет
+		// 2. Входящий PING от пира -> отвечаем PONG и подтверждаем сокет без сброса задержки
 		if strings.HasPrefix(data, "NATBYPASS:PING:") {
 			parts := strings.Split(data, ":")
 			if len(parts) >= 4 {
@@ -216,11 +216,6 @@ func (p *UDPPuncher) readLoop() {
 				sentTs := parts[3]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
-
-				// Также немедленно подтверждаем прямой P2P сокет на принимающей стороне
-				if p.onPingResult != nil {
-					p.onPingResult(senderID, 0, remoteAddr.String())
-				}
 			}
 			continue
 		}

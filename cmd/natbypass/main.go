@@ -33,7 +33,7 @@ import (
 
 // Заполняется при сборке через -ldflags -X
 var (
-	Version   = "1.2.3"
+	Version   = "1.2.4"
 	Commit    = "release"
 	BuildDate = "unknown"
 
@@ -401,7 +401,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		log.Info().Str("peer", remoteDevID).Dur("rtt", rtt).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг")
 		if p, ok := registry.Get(remoteDevID); ok {
 			p.DirectP2P = true
-			p.Latency = rtt
+			if rtt > 0 && rtt < 10*time.Second {
+				if p.Latency > 0 {
+					// 75% предыдущее значение + 25% новое -> плавное и реалистичное сглаживание джиттера
+					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
+				} else {
+					p.Latency = rtt
+				}
+				p.PingMs = p.Latency.Milliseconds()
+			}
 			p.Online = true
 			p.ActiveEndpoint = fromAddr
 			p.LastSeen = time.Now()
