@@ -1566,26 +1566,58 @@
             }
             if (d.completed) {
               clearInterval(updatePollTimer);
-              progBar.style.width = '100%';
-              progPct.innerText = '100%';
-              progStatus.innerText = '✓ Обновление успешно установлено! Перезапуск...';
-              progStatus.style.color = '#10b981';
-              showToast('🎉 Обновление завершено! Перезагрузка страницы...');
-              setTimeout(() => {
-                window.location.reload();
-              }, 3000);
+              waitForServiceRestart();
             }
           }
         } catch (e) {
-          // Если сервер временно недоступен во время рестарта — пробуем подключиться через 3 сек
-          progStatus.innerText = 'Перезапуск сервиса...';
-          setTimeout(() => {
-            fetch('/api/status').then(r => {
-              if (r.ok) window.location.reload();
-            }).catch(() => {});
-          }, 2000);
+          // Сервер временно выключился для применения бинарника
         }
       }, 800);
+    }
+
+    function waitForServiceRestart() {
+      const progStatus = document.getElementById('updateProgressStatus');
+      const progBar = document.getElementById('updateProgressBar');
+      const progPct = document.getElementById('updateProgressPct');
+
+      if (progBar) progBar.style.width = '100%';
+      if (progPct) progPct.innerText = '100%';
+
+      let attempts = 0;
+      const maxAttempts = 30; // до 30 секунд ожидания
+      
+      const checkInterval = setInterval(async () => {
+        attempts++;
+        if (progStatus) {
+          progStatus.innerText = `🔄 Перезапуск NatBypass... Ожидание готовности службы (${attempts}с)...`;
+          progStatus.style.color = '#38bdf8';
+        }
+
+        try {
+          const res = await fetch('/api/status?_t=' + Date.now(), { cache: 'no-store' });
+          if (res.ok) {
+            clearInterval(checkInterval);
+            if (progStatus) {
+              progStatus.innerText = '✓ Сервер готов! Обновление страницы...';
+              progStatus.style.color = '#10b981';
+            }
+            showToast('🎉 NatBypass успешно обновлен и запущен!');
+            setTimeout(() => {
+              window.location.reload();
+            }, 800);
+          }
+        } catch (e) {
+          // Сервер еще поднимается
+        }
+
+        if (attempts >= maxAttempts) {
+          clearInterval(checkInterval);
+          if (progStatus) {
+            progStatus.innerHTML = `⚠️ Сервер перезапускается дольше обычного. <button onclick="window.location.reload()" class="btn btn-glass" style="margin-left:8px; padding:3px 8px;">🔄 Обновить вручную</button>`;
+            progStatus.style.color = '#fbbf24';
+          }
+        }
+      }, 1000);
     }
 
     function updateChannelUI(mode) {

@@ -1,4 +1,4 @@
-﻿package updater
+package updater
 
 import (
 	"context"
@@ -291,36 +291,4 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 
 	setStatus(true, 100, "Обновление завершено! Страница обновится автоматически.", "", true)
 	return nil
-}
-
-// restartService перезапускает сервис в зависимости от платформы
-func restartService(execPath string) {
-	if runtime.GOOS == "windows" {
-		// Запуск нового экземпляра Windows GUI/Daemon
-		cmd := exec.Command(execPath)
-		_ = cmd.Start()
-		time.Sleep(300 * time.Millisecond)
-		os.Exit(0)
-		return
-	}
-
-	// Linux / Keenetic Entware / OpenWrt
-	if _, err := os.Stat("/opt/etc/init.d/S99natbypass"); err == nil {
-		_ = exec.Command("/opt/etc/init.d/S99natbypass", "restart").Run()
-		return
-	}
-	if _, err := os.Stat("/etc/init.d/natbypass"); err == nil {
-		_ = exec.Command("/etc/init.d/natbypass", "restart").Run()
-		return
-	}
-	if _, err := exec.LookPath("systemctl"); err == nil {
-		_ = exec.Command("systemctl", "restart", "natbypass").Run()
-		return
-	}
-
-	// Direct spawn fallback
-	cmd := exec.Command(execPath, "start")
-	_ = cmd.Start()
-	time.Sleep(300 * time.Millisecond)
-	os.Exit(0)
 }
