@@ -9,11 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 	"unsafe"
 
+	"github.com/jchv/go-webview2"
 	"golang.org/x/sys/windows"
 )
 
@@ -81,13 +81,45 @@ func releaseSingleInstanceMutex() {
 	}
 }
 
-// openAppWindow открывает интерфейс NatBypass в виде нативного окна через Edge / Chrome / Браузер
+// openAppWindow открывает интерфейс NatBypass в виде нативного окна с правильным размером и родной иконкой
 func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 
+	// 1. Попытка запустить нативное окно WebView2 напрямую в процессе NatBypass.exe
+	// Это дает 100% фирменную иконку на панели задач и в заголовке окна без значка Edge!
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				openBrowserFallback(url)
+			}
+		}()
+
+		w := webview2.NewWithOptions(webview2.WebViewOptions{
+			Debug:     false,
+			AutoFocus: true,
+			WindowOptions: webview2.WindowOptions{
+				Title:  "NatBypass — P2P Mesh Network",
+				Width:  1280,
+				Height: 860,
+				Center: true,
+			},
+		})
+		if w != nil {
+			defer w.Destroy()
+			w.SetSize(1280, 860, webview2.HintNone)
+			w.Navigate(url)
+			w.Run()
+			return
+		}
+
+		openBrowserFallback(url)
+	}()
+}
+
+func openBrowserFallback(url string) {
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData == "" {
 		localAppData = os.TempDir()
@@ -100,14 +132,6 @@ func openAppWindow(port int) {
 	if execPath != "" {
 		execPath, _ = filepath.Abs(execPath)
 	}
-
-	appData := os.Getenv("APPDATA")
-	if appData == "" {
-		appData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
-	}
-	programsDir := filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs")
-	_ = os.MkdirAll(programsDir, 0755)
-	shortcutPath := filepath.Join(programsDir, "NatBypass.lnk")
 
 	appCandidates := []string{
 		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
@@ -126,33 +150,12 @@ func openAppWindow(port int) {
 	}
 
 	if browserExe != "" {
-		// Создаем / обновляем .lnk ярлык с иконкой нашего .exe файла
-		if execPath != "" {
-			iconTarget := execPath
-			psScript := fmt.Sprintf(
-				`$wsh = New-Object -ComObject WScript.Shell; $s = $wsh.CreateShortcut('%s'); $s.TargetPath = '%s'; $s.Arguments = '--app=%s --user-data-dir="%s" --app-id=NatBypassMeshApp'; $s.IconLocation = '%s,0'; $s.Description = 'NatBypass Mesh Network'; $s.Save()`,
-				shortcutPath, browserExe, url, profileDir, iconTarget,
-			)
-			psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-			psCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-			_ = psCmd.Run()
-
-			// Запускаем через ярлык с помощью PowerShell Start-Process для корректной привязки иконки
-			launchCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", fmt.Sprintf(`Start-Process -FilePath '%s'`, strings.ReplaceAll(shortcutPath, "'", "''")))
-			launchCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-			if err := launchCmd.Start(); err == nil {
-				applyWindowIcon(execPath)
-				return
-			}
-		}
-
-		// Прямой запуск как fallback
 		cmd := exec.Command(browserExe,
 			fmt.Sprintf("--app=%s", url),
 			fmt.Sprintf("--user-data-dir=%s", profileDir),
 			"--app-id=NatBypassMeshApp",
 			"--new-window",
-			"--window-size=1180,820",
+			"--window-size=1280,860",
 		)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		if err := cmd.Start(); err == nil {
