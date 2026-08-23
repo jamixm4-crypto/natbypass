@@ -1028,14 +1028,14 @@ func exitApp() {
 		_ = debugLogFile.Close()
 	}
 
-	// 3. Отправляем маяк выхода другим узлам сети
+	// 3. Отправляем прощальный маяк выхода другим узлам сети
 	broadcastGoodbye()
 
 	// 4. Быстрая остановка сокетов и моментальный выход
 	go func() {
 		stopEngine()
 	}()
-	time.Sleep(120 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	os.Exit(0)
 }
 
@@ -1046,7 +1046,7 @@ func broadcastGoodbye() {
 		Leave:     true,
 		Timestamp: time.Now(),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 	for _, ch := range sigChannels {
 		if ch != nil {

@@ -152,8 +152,11 @@ func (r *Registry) Cleanup(maxAge time.Duration) {
 	}
 }
 
-// StartMonitor runs a background goroutine to periodically mark stale peers offline.
+// StartMonitor runs a background goroutine to periodically mark stale peers offline and cleanup.
 func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
+	if interval <= 0 || interval > 15*time.Second {
+		interval = 10 * time.Second
+	}
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -163,7 +166,8 @@ func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				r.MarkOffline(interval * 2) // Default heuristic for maxAge
+				r.MarkOffline(25 * time.Second)
+				r.Cleanup(90 * time.Second)
 			}
 		}
 	}()

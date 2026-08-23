@@ -427,6 +427,34 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}()
 	}
 
+	// Фоновый цикл периодического пробития NAT и поддержания сокетов живыми (KeepAlive)
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-engineCtx.Done():
+				return
+			case <-ticker.C:
+				if puncher != nil && registry != nil {
+					for _, p := range registry.List() {
+						if p.Online && p.DeviceID != deviceID {
+							if p.ActiveEndpoint != "" {
+								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+							}
+							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							}
+							if p.LocalAddr != "" {
+								_ = puncher.SendHolePunchProbe(p.LocalAddr)
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
+
 	// 🏠 LAN Broadcast Discovery (локальный поиск за <0.1с)
 	go func() {
 		lAddr, _ := net.ResolveUDPAddr("udp4", ":51821")
@@ -607,6 +635,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 					}
 					if p.DeviceID == "" || p.DeviceID == deviceID {
+						continue
+					}
+
+					if p.Offline || p.Leave {
+						log.Info().Str("peer", p.DeviceID).Msg("🔴 Узел отключился от сети (Leave beacon)")
+						registry.Delete(p.DeviceID)
+						if uiServer != nil {
+							uiServer.AddEvent("peer_offline", "Узел "+p.DeviceID+" отключился", "")
+						}
 						continue
 					}
 
