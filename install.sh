@@ -7,7 +7,15 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.1.0"
+    DEFAULT_TAG="v1.2.4"
+
+    # Try to resolve latest tag from GitHub API
+    LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+    if [ -n "$LATEST_TAG" ]; then
+        TAG="${LATEST_TAG}"
+    else
+        TAG="${DEFAULT_TAG}"
+    fi
 
     # Color Helpers
     print_purple() { printf "\033[0;35m%s\033[0m\n" "$1"; }
@@ -136,23 +144,35 @@ main() {
     killall natbypass 2>/dev/null || true
 
     # 5. Download Release Binary
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${DEFAULT_TAG}/natbypass-${DEFAULT_TAG}-${BIN_SUFFIX}"
-    FALLBACK_URL="https://github.com/${REPO}/releases/latest/download/natbypass-${DEFAULT_TAG}-${BIN_SUFFIX}"
+    URLS="
+https://github.com/${REPO}/releases/download/${TAG}/natbypass-${TAG}-${BIN_SUFFIX}
+https://github.com/${REPO}/releases/download/${TAG}/natbypass-${BIN_SUFFIX}
+https://github.com/${REPO}/releases/latest/download/natbypass-${TAG}-${BIN_SUFFIX}
+https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
+"
 
-    echo ">> Загрузка бинарного файла ${BIN_SUFFIX}..."
+    echo ">> Загрузка бинарного файла ${BIN_SUFFIX} (${TAG})..."
     DOWNLOADED=0
 
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "${DOWNLOAD_URL}" -o "${TARGET_BIN}" 2>/dev/null && DOWNLOADED=1 || \
-        curl -fsSL "${FALLBACK_URL}" -o "${TARGET_BIN}" 2>/dev/null && DOWNLOADED=1 || true
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q "${DOWNLOAD_URL}" -O "${TARGET_BIN}" 2>/dev/null && DOWNLOADED=1 || \
-        wget -q "${FALLBACK_URL}" -O "${TARGET_BIN}" 2>/dev/null && DOWNLOADED=1 || true
-    fi
+    for u in $URLS; do
+        [ -z "$u" ] && continue
+        if command -v curl >/dev/null 2>&1; then
+            if curl -fsSL "$u" -o "${TARGET_BIN}" 2>/dev/null && [ -s "${TARGET_BIN}" ]; then
+                DOWNLOADED=1
+                break
+            fi
+        elif command -v wget >/dev/null 2>&1; then
+            if wget -q "$u" -O "${TARGET_BIN}" 2>/dev/null && [ -s "${TARGET_BIN}" ]; then
+                DOWNLOADED=1
+                break
+            fi
+        fi
+    done
 
     if [ "$DOWNLOADED" -eq 0 ] || [ ! -s "${TARGET_BIN}" ]; then
         print_red "[!] Ошибка загрузки бинарного файла."
-        print_yellow "URL: ${DOWNLOAD_URL}"
+        print_yellow "Проверены URL:"
+        for u in $URLS; do [ -n "$u" ] && echo " - $u"; done
         exit 1
     fi
 
