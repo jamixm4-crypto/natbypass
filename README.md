@@ -69,19 +69,24 @@ P2P Mesh VPN с автоматическим обходом NAT/CGNAT. Соед�
 3. В разделе **«Настройки»** введите токен Telegram-бота или адрес MQTT-брокера
 4. Нажмите **«💾 Сохранить»** и запустите программу на втором устройстве с теми же параметрами
 
-### Linux / Роутеры
+### Linux / Keenetic / OpenWrt / Raspberry Pi (Установка в 1 команду)
+
+Выполните на сервере или роутере (автоматически определит архитектуру `x86_64`, `ARM64`, `MIPS`, `MIPSLE` и настроит автозапуск службы):
 
 ```bash
-chmod +x natbypass-v1.1.0-linux-amd64
-./natbypass-v1.1.0-linux-amd64 start --config config.yaml
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh)"
 ```
-
-### Android (Termux)
-
+или через `wget`:
 ```bash
-pkg install golang
-./natbypass-v1.1.0-android-arm64 start --config config.yaml
+wget -qO- https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh | sh
 ```
+
+После завершения перейдите в веб-панель: `http://<IP_РОУТЕРА>:8080`.
+
+### Android
+
+1. Скачайте [`NatBypass-v1.1.0.apk`](https://github.com/jamixm4-crypto/natbypass/releases/latest) из раздела Releases
+2. Запустите приложение, отсканируйте QR-код с экрана ПК для моментального сопряжения!
 
 ---
 
