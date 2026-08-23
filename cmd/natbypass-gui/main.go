@@ -67,6 +67,7 @@ var (
 	procLoadCursorW           = moduser32.NewProc("LoadCursorW")
 	procSetCursor             = moduser32.NewProc("SetCursor")
 	procGetModuleHandleW      = modkernel32.NewProc("GetModuleHandleW")
+	procRtlMoveMemory         = modkernel32.NewProc("RtlMoveMemory")
 	procCreateFontW           = modgdi32.NewProc("CreateFontW")
 	procCreateSolidBrush      = modgdi32.NewProc("CreateSolidBrush")
 	procSetBkMode             = modgdi32.NewProc("SetBkMode")
@@ -882,8 +883,9 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		return 0
 
 	case WM_DRAWITEM:
-		pDIS := (*DRAWITEMSTRUCT)(unsafe.Pointer(lParam))
-		drawCustomButton(pDIS)
+		var dis DRAWITEMSTRUCT
+		procRtlMoveMemory.Call(uintptr(unsafe.Pointer(&dis)), lParam, unsafe.Sizeof(dis))
+		drawCustomButton(&dis)
 		return 1
 
 	case WM_SYSCOMMAND:
@@ -1829,8 +1831,9 @@ func bookmarkDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
 		return 0
 	case WM_DRAWITEM:
-		pDIS := (*DRAWITEMSTRUCT)(unsafe.Pointer(lParam))
-		drawCustomButton(pDIS)
+		var dis DRAWITEMSTRUCT
+		procRtlMoveMemory.Call(uintptr(unsafe.Pointer(&dis)), lParam, unsafe.Sizeof(dis))
+		drawCustomButton(&dis)
 		return 1
 	case WM_CTLCOLORSTATIC:
 		hdc := wParam

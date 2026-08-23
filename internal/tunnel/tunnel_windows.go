@@ -22,6 +22,8 @@ import (
 var embeddedWintunDLL []byte
 
 var (
+	modkernel32                    = windows.NewLazySystemDLL("kernel32.dll")
+	procRtlMoveMemory              = modkernel32.NewProc("RtlMoveMemory")
 	wintunDLL                      *windows.LazyDLL
 	procWintunCreateAdapter        *windows.LazyProc
 	procWintunOpenAdapter          *windows.LazyProc
@@ -179,7 +181,7 @@ func (d *Device) ReadPacket() ([]byte, error) {
 		ptr, _, _ := procWintunReceivePacket.Call(d.hSession, uintptr(unsafe.Pointer(&size)))
 		if ptr != 0 && size > 0 {
 			packet := make([]byte, size)
-			copy(packet, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), size))
+			procRtlMoveMemory.Call(uintptr(unsafe.Pointer(&packet[0])), ptr, uintptr(size))
 			procWintunReleaseReceivePacket.Call(d.hSession, ptr)
 			return packet, nil
 		}
@@ -214,8 +216,7 @@ func (d *Device) WritePacket(packet []byte) error {
 		return fmt.Errorf("wintun: переполнение буфера отправки")
 	}
 
-	destSlice := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), len(packet))
-	copy(destSlice, packet)
+	procRtlMoveMemory.Call(ptr, uintptr(unsafe.Pointer(&packet[0])), uintptr(len(packet)))
 	procWintunSendPacket.Call(d.hSession, ptr)
 	return nil
 }
