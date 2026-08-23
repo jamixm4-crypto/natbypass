@@ -29,6 +29,7 @@ import (
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/tunnel"
+	"github.com/natbypass/natbypass/internal/updater"
 	"github.com/natbypass/natbypass/internal/webui"
 	"github.com/natbypass/natbypass/internal/wireguard"
 )
@@ -476,6 +477,7 @@ const (
 	ID_BTN_MQ_HIVE         = 4052
 	ID_BTN_MQ_MOSQ         = 4053
 	ID_BTN_MQ_ECL          = 4054
+	ID_BTN_CHECK_UPDATE    = 4055
 )
 
 func initDebugLog() {
@@ -1327,6 +1329,24 @@ func handleCommand(id uint16) {
 	case ID_BTN_SAVE_CFG:
 		saveConfig()
 
+	case ID_BTN_CHECK_UPDATE:
+		addLog("🔍 Проверка обновлений на GitHub Releases...")
+		go func() {
+			info, err := updater.CheckUpdate(context.Background(), Version)
+			if err != nil {
+				addLog("❌ Ошибка проверки обновлений: " + err.Error())
+				return
+			}
+			if !info.HasUpdate {
+				addLog(fmt.Sprintf("✅ У вас установлена самая свежая версия (%s)", Version))
+				return
+			}
+			addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Запуск скачивания и обновления...", info.LatestVersion))
+			if err := updater.ApplyUpdate(context.Background(), info.AssetURL); err != nil {
+				addLog("❌ Ошибка применения обновления: " + err.Error())
+			}
+		}()
+
 	case ID_BTN_MODE_PARALLEL:
 		setSigModeUI("parallel")
 		addLog("🎯 Выбран режим: 🔄 Параллельно (MQTT + Telegram)")
@@ -2082,13 +2102,14 @@ func buildModernUI(hInstance uintptr) {
 	hBtnToggleDiag = createOwnerDrawButton(hInstance, diagText, cx+380, 510, 388, 34, ID_BTN_TOGGLE_DIAG, diagType)
 
 	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx+140, 554, 480, 42, ID_BTN_SAVE_CFG, "primary")
+	hBtnCheckUpdate := createOwnerDrawButton(hInstance, "🚀 Проверить и обновить NatBypass с GitHub", cx+140, 604, 480, 38, ID_BTN_CHECK_UPDATE, "green")
 
 	tabPages[2] = []uintptr{
 		lblSetTitle, lblNick, hEditMyNick, lblNickHint, lblMode, hBtnModeParallel, hBtnModeMQTT, hBtnModeTG,
 		lblMqHead, lblMqBr, hEditMqttBr, hBtnTestMqtt, lblMqPresets, hBtnMqEMQX, hBtnMqHive, hBtnMqMosq, hBtnMqEcl, lblMqTp, hEditMqttTp, lblMqTopicHint,
 		lblTgHead, lblTgToken, hEditTgToken, hBtnTestTg, lblTgChat, hEditTgChat, lblTgHint,
 		lblExitHead, hBtnAllowExit, hBtnAddLocalSubnet, lblAdvSubnets, hEditAdvSubnets,
-		lblSysHead, hBtnToggleLogs, hBtnToggleDiag, hBtnSaveCfg,
+		lblSysHead, hBtnToggleLogs, hBtnToggleDiag, hBtnSaveCfg, hBtnCheckUpdate,
 	}
 	writeDebug("buildModernUI: страница 2 создана")
 
@@ -2121,10 +2142,18 @@ func buildModernUI(hInstance uintptr) {
 
 	splashControls = []uintptr{hSplashTitle, hSplashSub, hSplashStep1, hSplashStep2, hSplashStep3, hSplashStep4, hSplashBar}
 
+	// Скрываем сплэш-контролы по умолчанию
+	for _, h := range splashControls {
+		procShowWindow.Call(h, uintptr(SW_HIDE))
+	}
+
 	fillConfigFields()
 	renderAWGTextFromUI()
 	applyDiagnosticsVisibility()
 	writeDebug("buildModernUI: fillConfigFields и renderAWGText завершены")
+
+	// Переключаем на активную страницу 0 (Обзор) и скрываем остальные
+	selectTab(0)
 }
 
 func showSplashScreen() {
