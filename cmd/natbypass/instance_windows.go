@@ -21,6 +21,7 @@ var (
 	singleInstanceMutex windows.Handle
 	moduser32Instance   = windows.NewLazySystemDLL("user32.dll")
 	modshell32Instance  = windows.NewLazySystemDLL("shell32.dll")
+	moddwmapiInstance   = windows.NewLazySystemDLL("dwmapi.dll")
 )
 
 func init() {
@@ -109,6 +110,38 @@ func openAppWindow(port int) {
 		})
 		if w != nil {
 			defer w.Destroy()
+			hwnd := uintptr(w.Window())
+
+			// 1. Включаем нативный Immersive Dark Mode для рамки и заголовка окна
+			procDwmSetWindowAttribute := moddwmapiInstance.NewProc("DwmSetWindowAttribute")
+			if procDwmSetWindowAttribute.Find() == nil {
+				darkMode := int32(1)
+				_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, uintptr(unsafe.Pointer(&darkMode)), 4)
+				_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 19 /* DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 */, uintptr(unsafe.Pointer(&darkMode)), 4)
+			}
+
+			// 2. Устанавливаем нативную иконку из PE ресурсов бинарника
+			execPath, _ := os.Executable()
+			if execPath != "" {
+				execPathPtr, _ := windows.UTF16PtrFromString(execPath)
+				hIcon, _, _ := modshell32Instance.NewProc("ExtractIconW").Call(0, uintptr(unsafe.Pointer(execPathPtr)), 0)
+				if hIcon != 0 {
+					procSendMessageW := moduser32Instance.NewProc("SendMessageW")
+					_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, hIcon)
+					_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, hIcon)
+				}
+			}
+
+			// 3. Отключаем контекстное меню браузера и горячие клавиши перезагрузки страницы
+			w.Init(`
+				window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+				window.addEventListener('keydown', function(e) {
+					if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R' || e.key === 'f' || e.key === 'F' || e.key === 'u' || e.key === 'U' || e.key === 'p' || e.key === 'P'))) {
+						e.preventDefault();
+					}
+				});
+			`)
+
 			w.SetSize(1280, 860, webview2.HintNone)
 			w.Navigate(url)
 			w.Run()
