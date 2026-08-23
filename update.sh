@@ -117,6 +117,15 @@ main() {
     fi
     print_green "✓ Исполняемый файл успешно обновлен."
 
+    # Синхронизация топика и брокера со стандартными значениями Windows
+    for cfg in /opt/etc/natbypass/config.yaml /etc/natbypass/config.yaml; do
+        if [ -f "$cfg" ]; then
+            sed -i 's|natbypass/public/peers|natbypass/mynet/peers|g' "$cfg" 2>/dev/null || true
+            sed -i 's|broker.hivemq.com|broker.emqx.io|g' "$cfg" 2>/dev/null || true
+            sed -i 's|mqtt.eclipseprojects.io|broker.emqx.io|g' "$cfg" 2>/dev/null || true
+        fi
+    done
+
     # 5. Restart Service Gracefully
     echo ">> Перезапуск службы NatBypass..."
     if [ -f /opt/etc/init.d/S99natbypass ]; then
