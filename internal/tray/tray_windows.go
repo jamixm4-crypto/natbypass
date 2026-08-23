@@ -353,8 +353,22 @@ func (t *TrayApp) openWebUI() {
 	if localAppData == "" {
 		localAppData = os.TempDir()
 	}
-	profileDir := filepath.Join(localAppData, "NatBypass", "app_profile")
+	appDir := filepath.Join(localAppData, "NatBypass")
+	profileDir := filepath.Join(appDir, "app_profile")
 	_ = os.MkdirAll(profileDir, 0755)
+
+	execPath, _ := os.Executable()
+	if execPath != "" {
+		execPath, _ = filepath.Abs(execPath)
+	}
+
+	appData := os.Getenv("APPDATA")
+	if appData == "" {
+		appData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
+	}
+	programsDir := filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs")
+	_ = os.MkdirAll(programsDir, 0755)
+	shortcutPath := filepath.Join(programsDir, "NatBypass.lnk")
 
 	// Launch as a sleek standalone application window (no URL bar, no tabs)
 	appCandidates := []string{
@@ -364,19 +378,42 @@ func (t *TrayApp) openWebUI() {
 		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
 		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
 	}
+
+	var browserExe string
 	for _, p := range appCandidates {
 		if _, err := os.Stat(p); err == nil {
-			cmd := exec.Command(p,
-				fmt.Sprintf("--app=%s", url),
-				fmt.Sprintf("--user-data-dir=%s", profileDir),
-				fmt.Sprintf("--app-id=%s", "NatBypassMeshApp"),
-				"--new-window",
-				"--window-size=1180,820",
+			browserExe = p
+			break
+		}
+	}
+
+	if browserExe != "" {
+		if execPath != "" {
+			psScript := fmt.Sprintf(
+				`$wsh = New-Object -ComObject WScript.Shell; $s = $wsh.CreateShortcut('%s'); $s.TargetPath = '%s'; $s.Arguments = '--app=%s --user-data-dir="%s" --app-id=NatBypassMeshApp'; $s.IconLocation = '%s,0'; $s.Description = 'NatBypass Mesh Network'; $s.Save()`,
+				shortcutPath, browserExe, url, profileDir, execPath,
 			)
-			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-			if err := cmd.Start(); err == nil {
+			psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+			psCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+			_ = psCmd.Run()
+
+			launchCmd := exec.Command("cmd.exe", "/c", "start", "", shortcutPath)
+			launchCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+			if err := launchCmd.Start(); err == nil {
 				return
 			}
+		}
+
+		cmd := exec.Command(browserExe,
+			fmt.Sprintf("--app=%s", url),
+			fmt.Sprintf("--user-data-dir=%s", profileDir),
+			"--app-id=NatBypassMeshApp",
+			"--new-window",
+			"--window-size=1180,820",
+		)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		if err := cmd.Start(); err == nil {
+			return
 		}
 	}
 
