@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-pipeline
+  cancel-in-progress: false
+
 jobs:
   build-and-release:
     name: Build & Upload All Platform Binaries
@@ -107,14 +111,12 @@ jobs:
               $tag = $latestTag
           }
           
-          # Удаляем старый/загрязненный релиз перед созданием чистого
-          Write-Host "==> Purging old release $tag if exists..."
-          gh release delete $tag -y --cleanup-tag=false 2>$null
-          gh release delete v1.1.0 -y --cleanup-tag=false 2>$null
-
-          # Создаем чистый релиз с нуля
-          Write-Host "==> Creating brand new clean release $tag..."
-          gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --target main
+          # Создаем релиз если еще не существует
+          $rel = gh release view $tag 2>$null
+          if (!$rel) {
+              Write-Host "==> Creating clean release $tag..."
+              gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --target main
+          }
 
           $files = Get-ChildItem -Path release -File
           foreach ($f in $files) {

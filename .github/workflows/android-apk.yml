@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: android-pipeline
+  cancel-in-progress: false
+
 jobs:
   build-android:
     name: Build Android APK
