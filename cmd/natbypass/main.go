@@ -367,6 +367,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	var uiServer *webui.Server
 	if !noWebUI {
 		uiServer = webui.NewServer(port, cfg.WebUI.Username, cfg.WebUI.Password, registry, sigMgr)
+		uiServer.SetConfigPath(configFile)
 		uiServer.SetAppState(deviceID, "Определяется...", "Определяется...", myVirtualIP)
 		uiServer.SetVirtualIP(myVirtualIP)
 		uiServer.SetDeviceName(deviceID)

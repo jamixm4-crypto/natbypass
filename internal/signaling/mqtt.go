@@ -116,6 +116,23 @@ func (m *MQTTChannel) Name() string {
 	return "mqtt"
 }
 
+// UpdateTopic динамически меняет топик без разрыва соединения
+func (m *MQTTChannel) UpdateTopic(newTopic string) {
+	if newTopic == "" || newTopic == m.topic {
+		return
+	}
+	oldTopic := m.topic
+	m.topic = newTopic
+
+	if m.client != nil && m.client.IsConnected() {
+		m.client.Unsubscribe(oldTopic)
+		m.client.Subscribe(newTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+			m.handleIncoming(msg)
+		})
+		log.Info().Str("old_topic", oldTopic).Str("new_topic", newTopic).Msg("MQTT топик динамически обновлен")
+	}
+}
+
 func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 	data, err := json.Marshal(payload)
 	if err != nil {

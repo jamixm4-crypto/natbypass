@@ -302,6 +302,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	var uiServer *webui.Server
 	if !noWebUI && cfg.WebUI.Enabled {
 		uiServer = webui.NewServer(port, cfg.WebUI.Username, cfg.WebUI.Password, registry, sigMgr)
+		uiServer.SetConfigPath(configFile)
 		uiServer.SetAppState(deviceID, "Определяется...", "Определяется...")
 		uiServer.SetDeviceName(deviceID)
 		uiServer.AddEvent("info", "NatBypass запущен", "version="+Version)

@@ -171,3 +171,14 @@ func (m *FallbackManager) Status() []ChannelStatus {
 	}
 	return statuses
 }
+
+// UpdateMQTTTopic динамически обновляет топик во всех активных MQTT каналах
+func (m *FallbackManager) UpdateMQTTTopic(newTopic string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, ch := range m.channels {
+		if mqttCh, ok := ch.(*MQTTChannel); ok {
+			mqttCh.UpdateTopic(newTopic)
+		}
+	}
+}

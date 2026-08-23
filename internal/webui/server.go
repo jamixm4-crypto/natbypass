@@ -1463,24 +1463,53 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Windows Autostart Registry Management
-	if exePath, err := os.Executable(); err == nil {
-		if req.AutoStart {
-			_ = exec.Command("reg", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "NatBypass", "/t", "REG_SZ", "/d", exePath, "/f").Run()
-		} else {
-			_ = exec.Command("reg", "delete", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "NatBypass", "/f").Run()
+	isWindows := runtime.GOOS == "windows"
+	if isWindows {
+		if exePath, err := os.Executable(); err == nil {
+			if req.AutoStart {
+				_ = exec.Command("reg", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "NatBypass", "/t", "REG_SZ", "/d", exePath, "/f").Run()
+			} else {
+				_ = exec.Command("reg", "delete", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "NatBypass", "/f").Run()
+			}
 		}
 	}
 
-	if err := config.Save(cfg, s.configPath, true); err != nil {
-		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения DPAPI: "+err.Error())
+	targetPath := s.configPath
+	if targetPath == "" || targetPath == "config.yaml" {
+		if runtime.GOOS == "linux" {
+			if _, err := os.Stat("/etc/natbypass"); err == nil {
+				targetPath = "/etc/natbypass/config.yaml"
+			} else if _, err := os.Stat("/opt/etc/natbypass"); err == nil {
+				targetPath = "/opt/etc/natbypass/config.yaml"
+			} else {
+				targetPath = "config.yaml"
+			}
+		} else {
+			targetPath = "config.yaml"
+		}
+	}
+
+	if err := config.Save(cfg, targetPath, isWindows); err != nil {
+		slog.Error("Ошибка сохранения конфигурации", "path", targetPath, "err", err)
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения настроек: "+err.Error())
 		return
+	}
+
+	// Динамическое применение нового MQTT топика в работающем демоне
+	if req.MqttTopic != "" && s.sigMgr != nil {
+		s.sigMgr.UpdateMQTTTopic(req.MqttTopic)
 	}
 
 	if s.registry != nil {
 		s.registry.ClearAll()
 	}
-	s.AddEvent("info", "Конфигурация зашифрована DPAPI и сохранена — кэш устройств очищен", fmt.Sprintf("device=%s", req.DeviceName))
-	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "Настройки сохранены! Кэш устройств сброшен."}, "")
+	msg := "Настройки успешно сохранены! Кэш устройств сброшен."
+	if isWindows {
+		s.AddEvent("info", "Конфигурация зашифрована DPAPI и сохранена — кэш устройств очищен", fmt.Sprintf("device=%s", req.DeviceName))
+	} else {
+		s.AddEvent("info", "Конфигурация сохранена — кэш устройств очищен", fmt.Sprintf("device=%s file=%s", req.DeviceName, targetPath))
+	}
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": msg}, "")
 }
 
 // handlePeersClear — POST /api/peers/clear — принудительный сброс кэша устройств

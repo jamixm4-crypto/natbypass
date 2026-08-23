@@ -138,15 +138,6 @@ https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
     fi
     print_green "✓ Исполняемый файл успешно обновлен."
 
-    # Синхронизация топика и брокера со стандартными значениями Windows
-    for cfg in /opt/etc/natbypass/config.yaml /etc/natbypass/config.yaml; do
-        if [ -f "$cfg" ]; then
-            sed -i 's|natbypass/public/peers|natbypass/mynet/peers|g' "$cfg" 2>/dev/null || true
-            sed -i 's|broker.hivemq.com|broker.emqx.io|g' "$cfg" 2>/dev/null || true
-            sed -i 's|mqtt.eclipseprojects.io|broker.emqx.io|g' "$cfg" 2>/dev/null || true
-        fi
-    done
-
     # 5. Restart Service Gracefully
     echo ">> Перезапуск службы NatBypass..."
     if [ -f /opt/etc/init.d/S99natbypass ]; then
@@ -155,14 +146,15 @@ https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
     elif [ -f /etc/init.d/natbypass ]; then
         /etc/init.d/natbypass restart >/dev/null 2>&1 || true
         print_green "✓ Служба OpenWrt перезапущена."
-    elif command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet natbypass 2>/dev/null; then
-        systemctl restart natbypass
+    elif command -v systemctl >/dev/null 2>&1 && [ -f /etc/systemd/system/natbypass.service ]; then
+        systemctl daemon-reload
+        systemctl restart natbypass || systemctl start natbypass
         print_green "✓ Служба systemd перезапущена."
     else
         killall natbypass 2>/dev/null || true
         sleep 1
         nohup "${TARGET_BIN}" start >/dev/null 2>&1 &
-        print_green "✓ Демон NatBypass запущен."
+        print_green "✓ Демон NatBypass перезапущен в фоне."
     fi
 
     echo "--------------------------------------------------------------"
