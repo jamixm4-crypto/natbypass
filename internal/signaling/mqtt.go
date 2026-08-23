@@ -53,17 +53,7 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 		SetOnConnectHandler(func(c mqtt.Client) {
 			log.Info().Str("broker", brokerURL).Str("topic", topic).Msg("MQTT подключен, подписка на топик...")
 			c.Subscribe(topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-				var p Payload
-				if err := json.Unmarshal(msg.Payload(), &p); err == nil && p.DeviceID != "" {
-					ch.outMu.RLock()
-					for _, out := range ch.outChans {
-						select {
-						case out <- &p:
-						default:
-						}
-					}
-					ch.outMu.RUnlock()
-				}
+				ch.handleIncoming(msg)
 			})
 		}).
 		SetConnectionLostHandler(func(c mqtt.Client, err error) {
@@ -80,6 +70,21 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 	}()
 
 	return ch
+}
+
+func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
+	var p Payload
+	if err := json.Unmarshal(msg.Payload(), &p); err == nil && p.DeviceID != "" {
+		m.outMu.RLock()
+		defer m.outMu.RUnlock()
+		for _, out := range m.outChans {
+			cp := p
+			select {
+			case out <- &cp:
+			default:
+			}
+		}
+	}
 }
 
 func (m *MQTTChannel) Name() string {
@@ -115,13 +120,7 @@ func (m *MQTTChannel) Receive(ctx context.Context) (<-chan *Payload, error) {
 
 	if m.client.IsConnected() {
 		m.client.Subscribe(m.topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-			var p Payload
-			if err := json.Unmarshal(msg.Payload(), &p); err == nil && p.DeviceID != "" {
-				select {
-				case out <- &p:
-				default:
-				}
-			}
+			m.handleIncoming(msg)
 		})
 	}
 

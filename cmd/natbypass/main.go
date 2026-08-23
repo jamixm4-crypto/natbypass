@@ -601,10 +601,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						AWG:              p.AWG,
 					})
 
+					log.Info().Str("peer", p.DeviceID).Str("vip", peerVIP).Str("stun", p.STUNAddr).Msg("📥 [P2P Signal] Обнаружен пир в сигнальной сети")
+					if uiServer != nil {
+						uiServer.AddEvent("peer_online", "Обнаружен узел: "+p.DeviceID, "VIP: "+peerVIP)
+					}
+
 					// Немедленный прямой UDP пробив до пира
 					if puncher != nil {
 						if p.STUNAddr != "" {
 							go puncher.SendHolePunchProbe(p.STUNAddr)
+						}
+						if p.LocalAddr != "" {
+							go puncher.SendHolePunchProbe(p.LocalAddr)
 						}
 						if p.PublicIP != "" && p.WGPort > 0 {
 							go puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
