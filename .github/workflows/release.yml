@@ -36,7 +36,7 @@ jobs:
           $tag = "${{ github.ref_name }}"
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $latestTag = (git describe --tags --abbrev=0 2>$null)
-              if (!$latestTag) { $latestTag = "v1.1.5" }
+              if (!$latestTag) { $latestTag = "v1.1.6" }
               $tag = $latestTag
           }
           Write-Host "Building release for tag: $tag"
@@ -103,7 +103,7 @@ jobs:
           $tag = "${{ github.ref_name }}"
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $latestTag = (git describe --tags --abbrev=0 2>$null)
-              if (!$latestTag) { $latestTag = "v1.1.5" }
+              if (!$latestTag) { $latestTag = "v1.1.6" }
               $tag = $latestTag
           }
           
