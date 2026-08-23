@@ -1025,7 +1025,17 @@
       </div>
 
       <div class="glass-card" style="margin-bottom: 16px;">
-        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">📡 Сигнальные каналы (Telegram & MQTT)</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom: 16px;">
+          <div>
+            <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 4px;">📡 Сигнальные каналы (Telegram & MQTT)</h2>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin:0;">Выберите активный режим и настройте параметры серверов</p>
+          </div>
+          <div class="segmented-group" style="display:flex;">
+            <button id="btnSetMqtt" type="button" onclick="switchChannelMode('mqtt')" class="seg-btn">⚡ Только MQTT</button>
+            <button id="btnSetTg" type="button" onclick="switchChannelMode('telegram')" class="seg-btn">💬 Только TG</button>
+            <button id="btnSetParallel" type="button" onclick="switchChannelMode('parallel')" class="seg-btn active">⚡+💬 Параллельно</button>
+          </div>
+        </div>
         
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
           <!-- Telegram -->
@@ -1311,11 +1321,42 @@
       if (tabName === 'settings') loadConfig();
     }
 
-    async function switchChannelMode(mode) {
+    function updateChannelUI(mode) {
       currentChannelMode = mode;
-      document.getElementById('btnSegMqtt').classList.toggle('active', mode === 'mqtt');
-      document.getElementById('btnSegTg').classList.toggle('active', mode === 'telegram');
-      document.getElementById('btnSegParallel').classList.toggle('active', mode === 'parallel');
+      
+      // Topbar buttons
+      const bMqtt = document.getElementById('btnSegMqtt');
+      const bTg = document.getElementById('btnSegTg');
+      const bParallel = document.getElementById('btnSegParallel');
+      if (bMqtt) bMqtt.classList.toggle('active', mode === 'mqtt');
+      if (bTg) bTg.classList.toggle('active', mode === 'telegram');
+      if (bParallel) bParallel.classList.toggle('active', mode === 'parallel');
+
+      // Settings buttons
+      const sMqtt = document.getElementById('btnSetMqtt');
+      const sTg = document.getElementById('btnSetTg');
+      const sParallel = document.getElementById('btnSetParallel');
+      if (sMqtt) sMqtt.classList.toggle('active', mode === 'mqtt');
+      if (sTg) sTg.classList.toggle('active', mode === 'telegram');
+      if (sParallel) sParallel.classList.toggle('active', mode === 'parallel');
+
+      // Channels tab cards
+      const cMqtt = document.getElementById('cardChanMqtt');
+      const cTg = document.getElementById('cardChanTg');
+      const cParallel = document.getElementById('cardChanParallel');
+      if (cMqtt) cMqtt.style.borderColor = mode === 'mqtt' ? 'rgba(168,85,247,0.8)' : 'rgba(255,255,255,0.08)';
+      if (cTg) cTg.style.borderColor = mode === 'telegram' ? 'rgba(168,85,247,0.8)' : 'rgba(255,255,255,0.08)';
+      if (cParallel) cParallel.style.borderColor = mode === 'parallel' ? 'rgba(168,85,247,0.8)' : 'rgba(255,255,255,0.08)';
+
+      const statCh = document.getElementById('statChannelBadge');
+      if (statCh) {
+        const labels = {mqtt: 'Канал: Только MQTT', telegram: 'Канал: Только Telegram', parallel: 'Канал: Параллельно'};
+        statCh.innerText = labels[mode] || ('Канал: ' + mode);
+      }
+    }
+
+    async function switchChannelMode(mode) {
+      updateChannelUI(mode);
 
       try {
         const res = await fetch('/api/channel/switch', {
@@ -1325,10 +1366,10 @@
         });
         const json = await res.json();
         if (json.ok) {
-          showToast('✓ Режим сигнализации: ' + (mode === 'mqtt' ? 'Только MQTT' : (mode === 'telegram' ? 'Только Telegram' : 'Параллельно')));
+          const modeNames = {mqtt: 'Только MQTT', telegram: 'Только Telegram', parallel: '⚡+💬 Параллельно'};
+          showToast('✓ Режим сигнализации: ' + (modeNames[mode] || mode));
         }
       } catch (e) {}
-      refreshData();
     }
 
     function showToast(msg) {
@@ -1464,10 +1505,7 @@
           }
 
           if (d.channel) {
-            currentChannelMode = d.channel;
-            document.getElementById('btnSegMqtt').classList.toggle('active', d.channel === 'mqtt');
-            document.getElementById('btnSegTg').classList.toggle('active', d.channel === 'telegram');
-            document.getElementById('btnSegParallel').classList.toggle('active', d.channel === 'parallel');
+            updateChannelUI(d.channel);
           }
         }
 
@@ -1928,7 +1966,7 @@
                 }
               }
             });
-          }
+          updateChannelUI(currentChannelMode || 'parallel');
         }
       } catch (e) {}
     }
