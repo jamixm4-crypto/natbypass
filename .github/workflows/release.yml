@@ -47,12 +47,9 @@ jobs:
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
-          Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass-windows-amd64.exe" -Force
-          Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass.exe" -Force
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
           & go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
-          Copy-Item "release\NatBypass-Builder-$tag.exe" "release\NatBypass-Builder.exe" -Force
 
           Write-Host "==> 3. Building Linux x64..."
           $env:GOOS = "linux"

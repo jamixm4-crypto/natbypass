@@ -82,7 +82,6 @@ jobs:
             [ -z "$TAG" ] && TAG="v1.1.6"
           fi
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-${TAG}.apk \;
-          find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass.apk \;
           ls -lh ../release_apk/
 
       - name: Upload APK Artifact
