@@ -126,15 +126,67 @@ func CheckUpdate(ctx context.Context, currentVersion string) (*ReleaseInfo, erro
 	return info, nil
 }
 
-// isNewer сравнивает версии вида 1.1.0 vs 1.0.0
+// isNewer сравнивает семантические версии вида 1.1.8 vs 1.1.7, 1.1.10 vs 1.1.9
 func isNewer(latest, current string) bool {
 	if latest == "" || current == "" || current == "dev" || current == "custom" {
 		return false
 	}
+	latest = strings.TrimPrefix(latest, "v")
+	current = strings.TrimPrefix(current, "v")
 	if latest == current {
 		return false
 	}
-	return latest > current
+	return compareVersions(latest, current) > 0
+}
+
+func compareVersions(v1, v2 string) int {
+	parts1 := strings.Split(v1, ".")
+	parts2 := strings.Split(v2, ".")
+	maxLen := len(parts1)
+	if len(parts2) > maxLen {
+		maxLen = len(parts2)
+	}
+	for i := 0; i < maxLen; i++ {
+		var n1, n2 int
+		if i < len(parts1) {
+			var err error
+			n1, err = parseLeadingInt(parts1[i])
+			if err != nil {
+				n1 = 0
+			}
+		}
+		if i < len(parts2) {
+			var err error
+			n2, err = parseLeadingInt(parts2[i])
+			if err != nil {
+				n2 = 0
+			}
+		}
+		if n1 > n2 {
+			return 1
+		}
+		if n1 < n2 {
+			return -1
+		}
+	}
+	return 0
+}
+
+func parseLeadingInt(s string) (int, error) {
+	var numStr string
+	for _, ch := range s {
+		if ch >= '0' && ch <= '9' {
+			numStr += string(ch)
+		} else {
+			break
+		}
+	}
+	if numStr == "" {
+		return 0, fmt.Errorf("no digits")
+	}
+	var res int
+	fmt.Sscanf(numStr, "%d", &res)
+	return res, nil
 }
 
 // pickAsset находит ассет для текущей операционной системы и архитектуры
