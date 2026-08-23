@@ -33,6 +33,11 @@ import (
 	"github.com/natbypass/natbypass/internal/wireguard"
 )
 
+var (
+	Version = "1.0.0"
+	Commit  = "release"
+)
+
 // Win32 API
 var (
 	moduser32   = windows.NewLazySystemDLL("user32.dll")
@@ -2257,6 +2262,7 @@ func startEngineFromConfig(c *config.Config) {
 	}
 	uiServer = webui.NewServer(webPort, c.WebUI.Username, c.WebUI.Password, registry, nil)
 	uiServer.SetDeviceName(myNick)
+	uiServer.SetVersion(Version)
 	uiServer.SetConfigPath(configPath)
 	go func() {
 		if err := uiServer.Start(ctx); err != nil {

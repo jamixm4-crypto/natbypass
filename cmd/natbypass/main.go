@@ -26,6 +26,7 @@ import (
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/tray"
 	"github.com/natbypass/natbypass/internal/tunnel"
+	"github.com/natbypass/natbypass/internal/updater"
 	"github.com/natbypass/natbypass/internal/webui"
 	"github.com/natbypass/natbypass/internal/wireguard"
 )
@@ -111,6 +112,7 @@ func main() {
 		newKeygenCmd(),
 		newWGCmd(),
 		newInstallCmd(),
+		newUpdateCmd(),
 		newAntGravityCmd(),
 		newKonamiCmd(),
 		newVersionCmd(),
@@ -247,6 +249,38 @@ func newServiceCmd() *cobra.Command {
 	return svcCmd
 }
 
+// ── update ─────────────────────────────────────────────────────
+func newUpdateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Проверить и установить обновление NatBypass с GitHub",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Printf("🔍 Проверка обновлений (текущая версия: %s)...\n", Version)
+			info, err := updater.CheckUpdate(context.Background(), Version)
+			if err != nil {
+				return fmt.Errorf("ошибка проверки обновлений: %w", err)
+			}
+			if !info.HasUpdate {
+				fmt.Printf("✅ У вас установлена самая актуальная версия (%s)\n", Version)
+				return nil
+			}
+			fmt.Printf("🚀 Найдена новая версия: %s (опубликована: %s)\n", info.LatestVersion, info.PublishedAt)
+			fmt.Printf("📦 Файл для вашей системы: %s (%d KB)\n", info.AssetName, info.AssetSize/1024)
+			if info.ReleaseNotes != "" {
+				fmt.Printf("\n📝 Описание изменений:\n%s\n\n", info.ReleaseNotes)
+			}
+			fmt.Println(">> Скачивание и применение обновления...")
+			err = updater.ApplyUpdate(context.Background(), info.AssetURL)
+			if err != nil {
+				return fmt.Errorf("ошибка применения обновления: %w", err)
+			}
+			fmt.Println("🎉 Обновление успешно установлено! Служба перезапущена.")
+			return nil
+		},
+	}
+	return cmd
+}
+
 // ── Основной движок ───────────────────────────────────────────
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	setupLogging(cfg.App.LogLevel, cfg.App.LogFile)
@@ -313,6 +347,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		uiServer.SetAppState(deviceID, "Определяется...", "Определяется...", myVirtualIP)
 		uiServer.SetVirtualIP(myVirtualIP)
 		uiServer.SetDeviceName(deviceID)
+		uiServer.SetVersion(Version)
 		uiServer.AddEvent("info", "NatBypass запущен", "version="+Version)
 		go func() {
 			if err := uiServer.Start(engineCtx); err != nil {

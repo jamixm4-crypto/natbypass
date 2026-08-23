@@ -694,6 +694,7 @@
       </div>
 
       <!-- Profile Capsule -->
+      <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.4); color: #4ade80; padding: 7px 15px; border-radius: 20px; font-weight: 700; font-size: 0.84rem; cursor: pointer; display: flex; align-items: center; gap: 7px; transition: all 0.2s; box-shadow: 0 0 15px rgba(34, 197, 94, 0.2);" title="Проверить и установить обновления с GitHub"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg><span id="topUpdateLabel">Обновление</span></button>
       <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; padding: 7px 16px; border-radius: 20px; font-weight: 700; font-size: 0.84rem; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);" title="Показать QR-код для Android / WireGuard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg><span>📱 QR для Android</span></button>
       <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство">
         <div class="user-avatar" id="userAvatar">N</div>
@@ -989,6 +990,23 @@
 
     <!-- TAB 8: SETTINGS (FULL CHECKBOXES & PARAMETERS) -->
     <div id="tab-settings" class="tab-pane">
+      <!-- Auto-Updater Card -->
+      <div class="glass-card" style="margin-bottom: 16px; border-color: rgba(34, 197, 94, 0.3); background: linear-gradient(135deg, rgba(34, 197, 94, 0.04), rgba(14, 20, 32, 0.7));">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 4px; display:flex; align-items:center; gap:8px;">
+              <span style="color:#4ade80;">🚀</span> Автообновление системы (GitHub Releases)
+            </h2>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin:0;">Проверка новых релизов с авто-загрузкой и мгновенным перезапуском</p>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button onclick="openUpdateModal()" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #06b6d4); font-size:0.85rem; padding:8px 16px;">
+              🔄 Проверить и обновить
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="glass-card" style="margin-bottom: 16px;">
         <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">🏷️ Основные параметры & Система</h2>
         
@@ -1191,6 +1209,55 @@
     </div>
   </div>
 
+  <!-- Update Modal -->
+  <div id="updateModal" class="modal-overlay">
+    <div class="modal-box" style="width: 520px; max-width: 95%;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+        <h3 style="font-size: 1.15rem; font-weight: 800; display:flex; align-items:center; gap:8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          Центр обновления NatBypass
+        </h3>
+        <button onclick="closeUpdateModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;">✕</button>
+      </div>
+
+      <div style="background:rgba(14,20,32,0.8); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:16px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <span style="font-size:0.85rem; color:var(--text-dim);">Текущая версия:</span>
+          <span id="lblCurrentVer" class="badge badge-purple mono" style="font-weight:700;">v1.0.0</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <span style="font-size:0.85rem; color:var(--text-dim);">Последний релиз:</span>
+          <span id="lblLatestVer" class="badge badge-cyan mono" style="font-weight:700;">Проверка...</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:0.85rem; color:var(--text-dim);">Файл для вашей ОС:</span>
+          <span id="lblAssetInfo" class="mono" style="font-size:0.8rem; color:var(--text-main); font-weight:600;">Определение...</span>
+        </div>
+      </div>
+
+      <div id="updateNotesBox" style="margin-bottom:16px; display:none;">
+        <label class="form-label" style="font-size:0.82rem; font-weight:700;">📝 Что нового в этом релизе:</label>
+        <div id="txtUpdateNotes" style="max-height:140px; overflow-y:auto; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px; font-size:0.8rem; color:var(--text-muted); line-height:1.5; white-space:pre-wrap;"></div>
+      </div>
+
+      <!-- Progress bar -->
+      <div id="updateProgressBox" style="margin-bottom:16px; display:none;">
+        <div style="display:flex; justify-content:space-between; font-size:0.82rem; font-weight:700; margin-bottom:6px;">
+          <span id="updateProgressStatus" style="color:#4ade80;">Скачивание...</span>
+          <span id="updateProgressPct" class="mono">0%</span>
+        </div>
+        <div style="width:100%; height:8px; background:rgba(255,255,255,0.08); border-radius:4px; overflow:hidden;">
+          <div id="updateProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, #10b981, #06b6d4); transition:width 0.3s ease;"></div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button onclick="checkUpdateManual()" id="btnCheckUpdate" class="btn btn-glass" style="font-size:0.85rem;">🔍 Проверить заново</button>
+        <button onclick="applyUpdateNow()" id="btnApplyUpdate" class="btn btn-neon" style="display:none; font-size:0.85rem; background:linear-gradient(135deg, #10b981, #06b6d4);">⚡ Скачать и обновить</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div id="toast" class="toast">✓ Настройки успешно сохранены</div>
 
@@ -1306,19 +1373,187 @@
     }
 
     function switchTab(tabName) {
+      if (!tabName) return;
       currentTab = tabName;
-      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(el => {
+        el.classList.remove('active');
+        el.style.display = 'none';
+      });
       document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
 
       const target = document.getElementById('tab-' + tabName);
-      if (target) target.classList.add('active');
+      if (target) {
+        target.classList.add('active');
+        target.style.display = 'flex';
+      }
 
       const navBtn = document.getElementById('nav-' + tabName);
       if (navBtn) navBtn.classList.add('active');
 
-      if (tabName === 'awg') loadAWG();
-      if (tabName === 'timeline') refreshEvents();
-      if (tabName === 'settings') loadConfig();
+      try {
+        if (tabName === 'awg' && typeof loadAWG === 'function') loadAWG();
+        if (tabName === 'timeline' && typeof refreshEvents === 'function') refreshEvents();
+        if (tabName === 'settings' && typeof loadConfig === 'function') loadConfig();
+        if (tabName === 'diagnostics' && typeof runDiagnostics === 'function') runDiagnostics();
+      } catch (e) {
+        console.error('switchTab hook error:', e);
+      }
+    }
+
+    // Auto-Updater Modal & Functions
+    let cachedUpdateInfo = null;
+    let updatePollTimer = null;
+
+    function openUpdateModal() {
+      document.getElementById('updateModal').classList.add('active');
+      checkUpdateManual();
+    }
+
+    function closeUpdateModal() {
+      document.getElementById('updateModal').classList.remove('active');
+      if (updatePollTimer) {
+        clearInterval(updatePollTimer);
+        updatePollTimer = null;
+      }
+    }
+
+    async function checkUpdateManual() {
+      const lblLatest = document.getElementById('lblLatestVer');
+      const lblCur = document.getElementById('lblCurrentVer');
+      const lblAsset = document.getElementById('lblAssetInfo');
+      const notesBox = document.getElementById('updateNotesBox');
+      const txtNotes = document.getElementById('txtUpdateNotes');
+      const btnApply = document.getElementById('btnApplyUpdate');
+      const btnCheck = document.getElementById('btnCheckUpdate');
+
+      lblLatest.innerText = 'Проверка...';
+      lblLatest.className = 'badge badge-cyan mono';
+      btnApply.style.display = 'none';
+      btnCheck.disabled = true;
+
+      try {
+        const res = await fetch('/api/update/check');
+        const json = await res.json();
+        if (json.ok && json.data) {
+          const d = json.data;
+          cachedUpdateInfo = d;
+          lblCur.innerText = d.current_version ? ('v' + d.current_version.replace(/^v/, '')) : 'v1.0.0';
+          lblLatest.innerText = d.latest_version ? ('v' + d.latest_version.replace(/^v/, '')) : '—';
+          lblAsset.innerText = d.asset_name ? `${d.asset_name} (${Math.round((d.asset_size || 0)/1024/1024*10)/10} MB)` : 'Готов к сборке';
+
+          const topLabel = document.getElementById('topUpdateLabel');
+          if (d.has_update) {
+            lblLatest.className = 'badge badge-success mono';
+            lblLatest.innerText += ' (Доступно!)';
+            if (topLabel) topLabel.innerText = 'Доступно ' + d.latest_version;
+            btnApply.style.display = 'inline-flex';
+
+            if (d.release_notes) {
+              notesBox.style.display = 'block';
+              txtNotes.innerText = d.release_notes;
+            }
+          } else {
+            lblLatest.className = 'badge badge-purple mono';
+            lblLatest.innerText += ' (Актуально)';
+            if (topLabel) topLabel.innerText = 'v' + (d.current_version || '1.0.0').replace(/^v/, '');
+            notesBox.style.display = 'none';
+          }
+        } else {
+          lblLatest.innerText = 'Ошибка проверки';
+        }
+      } catch (e) {
+        lblLatest.innerText = 'Сервер недоступен';
+      }
+      btnCheck.disabled = false;
+    }
+
+    async function applyUpdateNow() {
+      const btnApply = document.getElementById('btnApplyUpdate');
+      const btnCheck = document.getElementById('btnCheckUpdate');
+      const progBox = document.getElementById('updateProgressBox');
+      const progBar = document.getElementById('updateProgressBar');
+      const progPct = document.getElementById('updateProgressPct');
+      const progStatus = document.getElementById('updateProgressStatus');
+
+      btnApply.style.display = 'none';
+      btnCheck.style.display = 'none';
+      progBox.style.display = 'block';
+      progBar.style.width = '10%';
+      progPct.innerText = '10%';
+      progStatus.innerText = 'Запуск скачивания...';
+
+      try {
+        const assetUrl = cachedUpdateInfo ? cachedUpdateInfo.asset_url : '';
+        const res = await fetch('/api/update/apply', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({asset_url: assetUrl})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('⏳ Скачивание новой версии...');
+          pollUpdateStatus();
+        } else {
+          progStatus.innerText = 'Ошибка: ' + (json.error || 'Не удалось запустить обновление');
+          progStatus.style.color = '#ef4444';
+          btnCheck.style.display = 'inline-flex';
+        }
+      } catch (e) {
+        progStatus.innerText = 'Ошибка соединения: ' + e.message;
+        progStatus.style.color = '#ef4444';
+        btnCheck.style.display = 'inline-flex';
+      }
+    }
+
+    function pollUpdateStatus() {
+      if (updatePollTimer) clearInterval(updatePollTimer);
+      
+      const progBar = document.getElementById('updateProgressBar');
+      const progPct = document.getElementById('updateProgressPct');
+      const progStatus = document.getElementById('updateProgressStatus');
+
+      updatePollTimer = setInterval(async () => {
+        try {
+          const res = await fetch('/api/update/status');
+          const json = await res.json();
+          if (json.ok && json.data) {
+            const d = json.data;
+            if (d.percent > 0) {
+              progBar.style.width = d.percent + '%';
+              progPct.innerText = d.percent + '%';
+            }
+            if (d.status) {
+              progStatus.innerText = d.status;
+            }
+            if (d.error) {
+              progStatus.innerText = 'Ошибка: ' + d.error;
+              progStatus.style.color = '#ef4444';
+              clearInterval(updatePollTimer);
+              document.getElementById('btnCheckUpdate').style.display = 'inline-flex';
+              return;
+            }
+            if (d.completed) {
+              clearInterval(updatePollTimer);
+              progBar.style.width = '100%';
+              progPct.innerText = '100%';
+              progStatus.innerText = '✓ Обновление успешно установлено! Перезапуск...';
+              progStatus.style.color = '#10b981';
+              showToast('🎉 Обновление завершено! Перезагрузка страницы...');
+              setTimeout(() => {
+                window.location.reload();
+              }, 3000);
+            }
+          }
+        } catch (e) {
+          // Если сервер временно недоступен во время рестарта — пробуем подключиться через 3 сек
+          progStatus.innerText = 'Перезапуск сервиса...';
+          setTimeout(() => {
+            fetch('/api/status').then(r => {
+              if (r.ok) window.location.reload();
+            }).catch(() => {});
+          }, 2000);
+        }
+      }, 800);
     }
 
     function updateChannelUI(mode) {
@@ -2064,16 +2299,22 @@
 
     setInterval(refreshData, 2000);
     window.addEventListener('DOMContentLoaded', () => {
+      // Ensure all sidebar nav items have direct click bindings
+      document.querySelectorAll('.nav-item').forEach(item => {
+        const id = item.id;
+        if (id && id.startsWith('nav-')) {
+          const tabName = id.replace('nav-', '');
+          item.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchTab(tabName);
+          });
+        }
+      });
+
       refreshData();
       loadConfig();
-    });
-
-    // Native app mode: disable browser context menus and browser shortcuts
-    window.addEventListener('contextmenu', e => e.preventDefault());
-    window.addEventListener('keydown', e => {
-      if ((e.ctrlKey && ['r', 'u', 's', 'p', 'f', 'g', 'h', 'j'].includes(e.key.toLowerCase())) || e.key === 'F12' || e.key === 'F5' || e.key === 'F11') {
-        e.preventDefault();
-      }
+      // Background update check after 3s
+      setTimeout(checkUpdateManual, 3000);
     });
   </script>
 </body>

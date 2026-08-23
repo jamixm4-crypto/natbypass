@@ -1,0 +1,326 @@
+﻿package updater
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	GithubRepo = "jamixm4-crypto/natbypass"
+	GithubAPI  = "https://api.github.com/repos/" + GithubRepo + "/releases/latest"
+)
+
+type GitHubRelease struct {
+	TagName     string        `json:"tag_name"`
+	Name        string        `json:"name"`
+	Body        string        `json:"body"`
+	PublishedAt string        `json:"published_at"`
+	HTMLURL     string        `json:"html_url"`
+	Assets      []GitHubAsset `json:"assets"`
+}
+
+type GitHubAsset struct {
+	Name               string `json:"name"`
+	Size               int64  `json:"size"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+type ReleaseInfo struct {
+	CurrentVersion string `json:"current_version"`
+	LatestVersion  string `json:"latest_version"`
+	HasUpdate      bool   `json:"has_update"`
+	ReleaseNotes   string `json:"release_notes"`
+	PublishedAt    string `json:"published_at"`
+	AssetURL       string `json:"asset_url"`
+	AssetName      string `json:"asset_name"`
+	AssetSize      int64  `json:"asset_size"`
+	HTMLURL        string `json:"html_url"`
+}
+
+type UpdateStatus struct {
+	InProgress bool   `json:"in_progress"`
+	Percent    int    `json:"percent"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+	Completed  bool   `json:"completed"`
+}
+
+var (
+	currentStatus UpdateStatus
+	statusMu      sync.RWMutex
+)
+
+// GetStatus возвращает текущий прогресс процесса обновления
+func GetStatus() UpdateStatus {
+	statusMu.RLock()
+	defer statusMu.RUnlock()
+	return currentStatus
+}
+
+func setStatus(inProgress bool, percent int, msg string, err string, completed bool) {
+	statusMu.Lock()
+	defer statusMu.Unlock()
+	currentStatus = UpdateStatus{
+		InProgress: inProgress,
+		Percent:    percent,
+		Status:     msg,
+		Error:      err,
+		Completed:  completed,
+	}
+}
+
+// CheckUpdate проверяет наличие новой версии на GitHub Releases
+func CheckUpdate(ctx context.Context, currentVersion string) (*ReleaseInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", GithubAPI, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "NatBypass-Updater/"+currentVersion)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка запроса к GitHub API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API вернул статус: %d", resp.StatusCode)
+	}
+
+	var rel GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, fmt.Errorf("ошибка парсинга релиза: %w", err)
+	}
+
+	latestVer := strings.TrimPrefix(rel.TagName, "v")
+	curVer := strings.TrimPrefix(currentVersion, "v")
+
+	hasUpdate := isNewer(latestVer, curVer)
+
+	// Подбираем подходящий бинарник под текущую ОС и архитектуру
+	assetURL, assetName, assetSize := pickAsset(rel.Assets)
+
+	info := &ReleaseInfo{
+		CurrentVersion: currentVersion,
+		LatestVersion:  rel.TagName,
+		HasUpdate:      hasUpdate,
+		ReleaseNotes:   rel.Body,
+		PublishedAt:    rel.PublishedAt,
+		AssetURL:       assetURL,
+		AssetName:      assetName,
+		AssetSize:      assetSize,
+		HTMLURL:        rel.HTMLURL,
+	}
+
+	return info, nil
+}
+
+// isNewer сравнивает версии вида 1.1.0 vs 1.0.0
+func isNewer(latest, current string) bool {
+	if latest == "" || current == "" || current == "dev" || current == "custom" {
+		return false
+	}
+	if latest == current {
+		return false
+	}
+	return latest > current
+}
+
+// pickAsset находит ассет для текущей операционной системы и архитектуры
+func pickAsset(assets []GitHubAsset) (string, string, int64) {
+	osName := runtime.GOOS
+	arch := runtime.GOARCH
+
+	var candidates []string
+	if osName == "windows" {
+		candidates = []string{"windows-amd64.exe", "windows.exe", ".exe"}
+	} else if osName == "linux" {
+		if arch == "arm64" {
+			candidates = []string{"linux-arm64", "arm64"}
+		} else if arch == "mipsle" {
+			candidates = []string{"linux-mipsle", "router-mipsle", "mipsle", "mipsel"}
+		} else if arch == "mips" {
+			candidates = []string{"linux-mips", "router-mips", "mips"}
+		} else {
+			candidates = []string{"linux-amd64", "amd64", "linux-x86_64"}
+		}
+	} else if osName == "android" {
+		candidates = []string{".apk", "android"}
+	}
+
+	for _, cand := range candidates {
+		for _, a := range assets {
+			nameLower := strings.ToLower(a.Name)
+			if strings.Contains(nameLower, cand) {
+				return a.BrowserDownloadURL, a.Name, a.Size
+			}
+		}
+	}
+
+	// Fallback на первый попавшийся ассет
+	if len(assets) > 0 {
+		return assets[0].BrowserDownloadURL, assets[0].Name, assets[0].Size
+	}
+
+	return "", "", 0
+}
+
+// ApplyUpdate выполняет скачивание, атомарную замену бинарника и перезапуск
+func ApplyUpdate(ctx context.Context, assetURL string) error {
+	if assetURL == "" {
+		return fmt.Errorf("URL для скачивания обновления не задан")
+	}
+
+	setStatus(true, 5, "Инициализация скачивания...", "", false)
+
+	execPath, err := os.Executable()
+	if err != nil {
+		setStatus(false, 0, "", "Не удалось определить путь к текущему исполняемому файлу: "+err.Error(), false)
+		return err
+	}
+	execPath, _ = filepath.EvalSymlinks(execPath)
+
+	tmpPath := execPath + ".new"
+	_ = os.Remove(tmpPath)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", assetURL, nil)
+	if err != nil {
+		setStatus(false, 0, "", "Ошибка запроса: "+err.Error(), false)
+		return err
+	}
+	req.Header.Set("User-Agent", "NatBypass-Updater")
+
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		setStatus(false, 0, "", "Ошибка скачивания: "+err.Error(), false)
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		setStatus(false, 0, "", fmt.Sprintf("Сервер вернул ошибку скачивания: %d", resp.StatusCode), false)
+		return fmt.Errorf("download failed status: %d", resp.StatusCode)
+	}
+
+	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		setStatus(false, 0, "", "Ошибка создания временного файла: "+err.Error(), false)
+		return err
+	}
+
+	totalSize := resp.ContentLength
+	var downloaded int64
+
+	buf := make([]byte, 64*1024)
+	for {
+		n, rErr := resp.Body.Read(buf)
+		if n > 0 {
+			_, wErr := out.Write(buf[:n])
+			if wErr != nil {
+				out.Close()
+				_ = os.Remove(tmpPath)
+				setStatus(false, 0, "", "Ошибка записи файла: "+wErr.Error(), false)
+				return wErr
+			}
+			downloaded += int64(n)
+			pct := 10
+			if totalSize > 0 {
+				pct = 10 + int((float64(downloaded)/float64(totalSize))*70)
+			}
+			setStatus(true, pct, fmt.Sprintf("Скачивание обновления... %d%% (%d / %d KB)", pct, downloaded/1024, totalSize/1024), "", false)
+		}
+		if rErr != nil {
+			if rErr == io.EOF {
+				break
+			}
+			out.Close()
+			_ = os.Remove(tmpPath)
+			setStatus(false, 0, "", "Ошибка при передаче данных: "+rErr.Error(), false)
+			return rErr
+		}
+	}
+	out.Close()
+
+	_ = os.Chmod(tmpPath, 0755)
+	setStatus(true, 85, "Применение обновления и замена исполняемого файла...", "", false)
+
+	// Атомарная замена исполняемого файла
+	if runtime.GOOS == "windows" {
+		oldPath := execPath + ".old"
+		_ = os.Remove(oldPath)
+		if err := os.Rename(execPath, oldPath); err != nil {
+			setStatus(false, 0, "", "Не удалось переименовать старый файл Windows: "+err.Error(), false)
+			return err
+		}
+		if err := os.Rename(tmpPath, execPath); err != nil {
+			_ = os.Rename(oldPath, execPath) // откат
+			setStatus(false, 0, "", "Не удалось установить новый файл Windows: "+err.Error(), false)
+			return err
+		}
+	} else {
+		if err := os.Rename(tmpPath, execPath); err != nil {
+			// Fallback copy
+			input, errRead := os.ReadFile(tmpPath)
+			if errRead == nil {
+				_ = os.WriteFile(execPath, input, 0755)
+			}
+			_ = os.Remove(tmpPath)
+		}
+	}
+
+	setStatus(true, 95, "Перезапуск службы NatBypass...", "", false)
+
+	// Перезапуск службы или процесса в фоновом режиме
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		restartService(execPath)
+	}()
+
+	setStatus(true, 100, "Обновление завершено! Страница обновится автоматически.", "", true)
+	return nil
+}
+
+// restartService перезапускает сервис в зависимости от платформы
+func restartService(execPath string) {
+	if runtime.GOOS == "windows" {
+		// Запуск нового экземпляра Windows GUI/Daemon
+		cmd := exec.Command(execPath)
+		_ = cmd.Start()
+		time.Sleep(300 * time.Millisecond)
+		os.Exit(0)
+		return
+	}
+
+	// Linux / Keenetic Entware / OpenWrt
+	if _, err := os.Stat("/opt/etc/init.d/S99natbypass"); err == nil {
+		_ = exec.Command("/opt/etc/init.d/S99natbypass", "restart").Run()
+		return
+	}
+	if _, err := os.Stat("/etc/init.d/natbypass"); err == nil {
+		_ = exec.Command("/etc/init.d/natbypass", "restart").Run()
+		return
+	}
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		_ = exec.Command("systemctl", "restart", "natbypass").Run()
+		return
+	}
+
+	// Direct spawn fallback
+	cmd := exec.Command(execPath, "start")
+	_ = cmd.Start()
+	time.Sleep(300 * time.Millisecond)
+	os.Exit(0)
+}

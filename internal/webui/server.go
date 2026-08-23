@@ -23,6 +23,7 @@ import (
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/natbypass/natbypass/internal/updater"
 	"github.com/natbypass/natbypass/internal/wireguard"
 	"golang.org/x/net/proxy"
 )
@@ -62,6 +63,7 @@ type Server struct {
 	user       string
 	password   string
 	configPath string
+	version    string
 	registry   *peer.Registry
 	sigMgr     *signaling.FallbackManager
 	state      *AppState
@@ -116,6 +118,11 @@ func (s *Server) SetVirtualIP(vip string) {
 // SetDeviceName задаёт человекочитаемое имя устройства
 func (s *Server) SetDeviceName(name string) {
 	s.deviceName = name
+}
+
+// SetVersion задаёт текущую версию приложения
+func (s *Server) SetVersion(v string) {
+	s.version = v
 }
 
 // GetDeviceName возвращает текущее имя устройства
@@ -184,6 +191,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/manifest.json", s.handleManifest)
 	mux.HandleFunc("/api/settings/save", s.handleSettingsSave)
+	// Автоматическое обновление
+	mux.HandleFunc("/api/update/check", s.handleUpdateCheck)
+	mux.HandleFunc("/api/update/apply", s.handleUpdateApply)
+	mux.HandleFunc("/api/update/status", s.handleUpdateStatus)
 
 	handler := s.corsMiddleware(s.authMiddleware(mux))
 
@@ -1484,4 +1495,69 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(manifest)
+}
+
+// handleUpdateCheck — GET /api/update/check — проверяет наличие новой версии на GitHub
+func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	ver := s.version
+	if ver == "" {
+		ver = "1.0.0"
+	}
+	info, err := updater.CheckUpdate(r.Context(), ver)
+	if err != nil {
+		s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"has_update":      false,
+			"current_version": ver,
+			"error":           err.Error(),
+		}, "")
+		return
+	}
+	s.jsonResponse(w, http.StatusOK, info, "")
+}
+
+// handleUpdateApply — POST /api/update/apply — скачивает и применяет обновление
+func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		AssetURL string `json:"asset_url"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.AssetURL == "" {
+		ver := s.version
+		if ver == "" {
+			ver = "1.0.0"
+		}
+		info, err := updater.CheckUpdate(r.Context(), ver)
+		if err != nil || info == nil || info.AssetURL == "" {
+			s.jsonResponse(w, http.StatusBadRequest, nil, "не удалось найти файл обновления для вашей системы")
+			return
+		}
+		req.AssetURL = info.AssetURL
+	}
+
+	go func() {
+		_ = updater.ApplyUpdate(context.Background(), req.AssetURL)
+	}()
+
+	s.AddEvent("info", "Запущено автоматическое обновление NatBypass", "")
+	s.jsonResponse(w, http.StatusOK, map[string]string{
+		"message": "Обновление запущено в фоновом режиме",
+	}, "")
+}
+
+// handleUpdateStatus — GET /api/update/status — статус процесса обновления
+func (s *Server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	st := updater.GetStatus()
+	s.jsonResponse(w, http.StatusOK, st, "")
 }
