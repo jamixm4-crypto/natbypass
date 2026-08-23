@@ -110,7 +110,7 @@ jobs:
           # Create release if not exists
           $rel = gh release view $tag 2>$null
           if (!$rel) {
-              gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client."
+              gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --target main
           }
           
           # Delete outdated / stale / test assets

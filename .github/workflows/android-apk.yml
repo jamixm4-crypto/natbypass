@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -74,7 +76,12 @@ jobs:
           ./gradlew assembleDebug --stacktrace --no-daemon
           
           mkdir -p ../release_apk
-          find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-v1.1.0.apk \;
+          TAG="${GITHUB_REF_NAME}"
+          if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
+            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.1.6")
+          fi
+          find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-${TAG}.apk \;
+          find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass.apk \;
           ls -lh ../release_apk/
 
       - name: Upload APK Artifact
@@ -89,8 +96,12 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
-            TAG="v1.1.0"
+            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.1.6")
           fi
           # Create release if it doesn't exist yet
-          gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client."
-          gh release upload "${TAG}" release_apk/NatBypass-v1.1.0.apk --clobber || true
+          gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --target main || true
+          for apk in ../release_apk/*.apk; do
+            if [ -f "$apk" ]; then
+              gh release upload "${TAG}" "$apk" --clobber || true
+            fi
+          done
