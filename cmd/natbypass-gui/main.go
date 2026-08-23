@@ -466,6 +466,10 @@ const (
 	ID_BTN_EXIT_NODE_SELECT = 4034
 	ID_BTN_TOGGLE_SUBNET   = 4035
 	ID_BTN_ADD_LOCAL_SUBNET = 4036
+	ID_BTN_MQ_EMQX         = 4051
+	ID_BTN_MQ_HIVE         = 4052
+	ID_BTN_MQ_MOSQ         = 4053
+	ID_BTN_MQ_ECL          = 4054
 )
 
 func initDebugLog() {
@@ -1319,6 +1323,22 @@ func handleCommand(id uint16) {
 		setSigModeUI("tg_only")
 		addLog("🎯 Выбран режим: 💬 Только Telegram")
 
+	case ID_BTN_MQ_EMQX:
+		setControlText(hEditMqttBr, "tcp://broker.emqx.io:1883")
+		addLog("⚡ Выбран брокер: EMQX Public (tcp://broker.emqx.io:1883)")
+
+	case ID_BTN_MQ_HIVE:
+		setControlText(hEditMqttBr, "tcp://broker.hivemq.com:1883")
+		addLog("⚡ Выбран брокер: HiveMQ Public (tcp://broker.hivemq.com:1883)")
+
+	case ID_BTN_MQ_MOSQ:
+		setControlText(hEditMqttBr, "tcp://test.mosquitto.org:1883")
+		addLog("⚡ Выбран брокер: Mosquitto Public (tcp://test.mosquitto.org:1883)")
+
+	case ID_BTN_MQ_ECL:
+		setControlText(hEditMqttBr, "tcp://mqtt.eclipseprojects.io:1883")
+		addLog("⚡ Выбран брокер: Eclipse Foundation (tcp://mqtt.eclipseprojects.io:1883)")
+
 	case ID_BTN_RUN_DIAG:
 		runDiag()
 
@@ -1852,6 +1872,16 @@ func setSigModeUI(mode string) {
 	procInvalidateRect.Call(hBtnModeParallel, 0, 1)
 	procInvalidateRect.Call(hBtnModeMQTT, 0, 1)
 	procInvalidateRect.Call(hBtnModeTG, 0, 1)
+
+	if vpnConnected && engineCtx != nil {
+		go func() {
+			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+			mqBroker := strings.TrimSpace(getControlText(hEditMqttBr))
+			mqTopic := strings.TrimSpace(getControlText(hEditMqttTp))
+			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, mqBroker, mqTopic)
+		}()
+	}
 }
 
 func setActiveAWGPresetButton(activeID uint32) {
@@ -1980,11 +2010,15 @@ func buildModernUI(hInstance uintptr) {
 	hEditMqttBr = createEdit(hInstance, "tcp://broker.emqx.io:1883", cx+210, 166, 380, 28, false, false, hFontNormal)
 	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+600, 164, 160, 32, ID_BTN_TEST_MQTT, "normal")
 
-	lblMqHint := createLabel(hInstance, "💡 Рекомендуемые брокеры: tcp://broker.emqx.io:1883 или tcp://broker.hivemq.com:1883", cx+210, 196, 550, 18, hFontNormal)
+	lblMqPresets := createLabel(hInstance, "Пресеты:", cx+210, 198, 65, 18, hFontNormal)
+	hBtnMqEMQX := createOwnerDrawButton(hInstance, "⚡ EMQX", cx+280, 196, 85, 22, ID_BTN_MQ_EMQX, "normal")
+	hBtnMqHive := createOwnerDrawButton(hInstance, "⚡ HiveMQ", cx+370, 196, 95, 22, ID_BTN_MQ_HIVE, "normal")
+	hBtnMqMosq := createOwnerDrawButton(hInstance, "⚡ Mosquitto", cx+470, 196, 110, 22, ID_BTN_MQ_MOSQ, "normal")
+	hBtnMqEcl := createOwnerDrawButton(hInstance, "⚡ Eclipse", cx+585, 196, 90, 22, ID_BTN_MQ_ECL, "normal")
 
-	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 220, 200, 20, hFontNormal)
-	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 216, 380, 28, false, false, hFontNormal)
-	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: mynet/supersecret/2029", cx+210, 246, 550, 18, hFontNormal)
+	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 224, 200, 20, hFontNormal)
+	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 220, 380, 28, false, false, hFontNormal)
+	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: mynet/supersecret/2029", cx+210, 250, 550, 18, hFontNormal)
 
 	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 270, cw, 22, hFontHeader)
 	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 298, 200, 20, hFontNormal)
@@ -2035,7 +2069,7 @@ func buildModernUI(hInstance uintptr) {
 
 	tabPages[2] = []uintptr{
 		lblSetTitle, lblNick, hEditMyNick, lblNickHint, lblMode, hBtnModeParallel, hBtnModeMQTT, hBtnModeTG,
-		lblMqHead, lblMqBr, hEditMqttBr, hBtnTestMqtt, lblMqHint, lblMqTp, hEditMqttTp, lblMqTopicHint,
+		lblMqHead, lblMqBr, hEditMqttBr, hBtnTestMqtt, lblMqPresets, hBtnMqEMQX, hBtnMqHive, hBtnMqMosq, hBtnMqEcl, lblMqTp, hEditMqttTp, lblMqTopicHint,
 		lblTgHead, lblTgToken, hEditTgToken, hBtnTestTg, lblTgChat, hEditTgChat, lblTgHint,
 		lblExitHead, hBtnAllowExit, hBtnAddLocalSubnet, lblAdvSubnets, hEditAdvSubnets,
 		lblSysHead, hBtnToggleLogs, hBtnToggleDiag, hBtnSaveCfg,

@@ -160,22 +160,26 @@ class MainActivity : AppCompatActivity() {
             peersList.clear()
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
+                val id = if (obj.has("device_id")) obj.getString("device_id") else obj.optString("DeviceID", "Устройство $i")
+                val nick = if (obj.has("nickname")) obj.getString("nickname") else obj.optString("Nickname", "")
+                val displayName = if (nick.isNotEmpty()) "$nick ($id)" else id
+                val vip = if (obj.has("virtual_ip")) obj.getString("virtual_ip") else obj.optString("VirtualIP", "")
+                val pubIp = if (obj.has("public_ip")) obj.getString("public_ip") else obj.optString("PublicIP", "—")
+                val ipDisplay = if (vip.isNotEmpty()) vip else pubIp
+                val stun = if (obj.has("stun_addr")) obj.getString("stun_addr") else obj.optString("STUNAddr", "")
+                val isOnline = if (obj.has("online")) obj.getBoolean("online") else obj.optBoolean("Online", true)
+
                 peersList.add(
                     PeerItem(
-                        name = obj.optString("DeviceID", "Устройство $i"),
-                        ip = obj.optString("PublicIP", "—"),
-                        stun = obj.optString("STUNAddr", ""),
-                        online = obj.optBoolean("Online", true)
+                        name = displayName,
+                        ip = ipDisplay,
+                        stun = stun,
+                        online = isOnline
                     )
                 )
             }
             peersAdapter.notifyDataSetChanged()
         } catch (e: Exception) {
-            // Emulate placeholder peer if not yet connected
-            if (peersList.isEmpty() && NatBypassVpnService.isRunning) {
-                peersList.add(PeerItem("ПК-Дома", "198.51.100.4", "198.51.100.4:51820", true))
-                peersAdapter.notifyDataSetChanged()
-            }
         }
     }
 

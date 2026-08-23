@@ -1046,7 +1046,15 @@
           <!-- MQTT -->
           <div>
             <div class="form-group">
-              <label class="form-label">⚡ MQTT Брокер:</label>
+              <label class="form-label">⚡ Выбор MQTT Брокера (Пресет):</label>
+              <select id="selMqttPreset" class="form-input mono" onchange="onMqttPresetChange(this.value)" style="margin-bottom:8px; cursor:pointer;">
+                <option value="tcp://broker.emqx.io:1883">⚡ EMQX Public (Рекомендуется)</option>
+                <option value="tcp://broker.hivemq.com:1883">⚡ HiveMQ Public</option>
+                <option value="tcp://test.mosquitto.org:1883">⚡ Eclipse Mosquitto</option>
+                <option value="tcp://mqtt.eclipseprojects.io:1883">⚡ Eclipse Foundation</option>
+                <option value="custom">✏️ Свой адрес сервера...</option>
+              </select>
+              <label class="form-label">⚡ Адрес MQTT Брокера:</label>
               <input type="text" id="cfgMqttBroker" class="form-input mono" value="tcp://broker.emqx.io:1883">
             </div>
 
@@ -1868,11 +1876,31 @@
                 document.getElementById('cfgMqttTopic').value = ch.params.topic || '';
                 document.getElementById('cfgMqttUser').value = ch.params.username || '';
                 document.getElementById('cfgMqttPass').value = ch.params.password || '';
+
+                const curBr = ch.params.broker_url || 'tcp://broker.emqx.io:1883';
+                const selPreset = document.getElementById('selMqttPreset');
+                if (selPreset) {
+                  let matched = false;
+                  for (let opt of selPreset.options) {
+                    if (opt.value === curBr) {
+                      selPreset.value = curBr;
+                      matched = true;
+                      break;
+                    }
+                  }
+                  if (!matched) selPreset.value = 'custom';
+                }
               }
             });
           }
         }
       } catch (e) {}
+    }
+
+    function onMqttPresetChange(val) {
+      if (val !== 'custom') {
+        document.getElementById('cfgMqttBroker').value = val;
+      }
     }
 
     async function saveAllSettings() {

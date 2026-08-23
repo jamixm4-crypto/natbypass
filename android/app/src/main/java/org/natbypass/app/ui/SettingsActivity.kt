@@ -34,10 +34,44 @@ class SettingsActivity : AppCompatActivity() {
         binding.etTgChat.setText(prefs.getString("tg_chat", ""))
         binding.etTgProxy.setText(prefs.getString("tg_proxy", ""))
 
-        binding.etMqttBroker.setText(prefs.getString("mqtt_broker", "tcp://broker.emqx.io:1883"))
+        val currentBroker = prefs.getString("mqtt_broker", "tcp://broker.emqx.io:1883") ?: "tcp://broker.emqx.io:1883"
+        binding.etMqttBroker.setText(currentBroker)
         binding.etMqttTopic.setText(prefs.getString("mqtt_topic", "natbypass/mynet/peers"))
         binding.etMqttUser.setText(prefs.getString("mqtt_user", ""))
         binding.etMqttPass.setText(prefs.getString("mqtt_pass", ""))
+
+        val brokerPresets = arrayOf(
+            "⚡ EMQX Public (Рекомендуется)",
+            "⚡ HiveMQ Public",
+            "⚡ Eclipse Mosquitto",
+            "⚡ Eclipse Foundation",
+            "✏️ Свой сервер..."
+        )
+        val brokerUrls = arrayOf(
+            "tcp://broker.emqx.io:1883",
+            "tcp://broker.hivemq.com:1883",
+            "tcp://test.mosquitto.org:1883",
+            "tcp://mqtt.eclipseprojects.io:1883",
+            ""
+        )
+        val spAdapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, brokerPresets)
+        binding.spMqttBrokerPreset.adapter = spAdapter
+
+        val curIdx = brokerUrls.indexOf(currentBroker)
+        if (curIdx >= 0) {
+            binding.spMqttBrokerPreset.setSelection(curIdx)
+        } else {
+            binding.spMqttBrokerPreset.setSelection(4)
+        }
+
+        binding.spMqttBrokerPreset.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (position < 4 && brokerUrls[position].isNotEmpty()) {
+                    binding.etMqttBroker.setText(brokerUrls[position])
+                }
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
 
         binding.etWgPort.setText(prefs.getInt("wg_port", 51820).toString())
         binding.etMTU.setText(prefs.getInt("mtu", 1420).toString())

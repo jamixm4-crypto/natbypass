@@ -376,10 +376,20 @@ func (s *Server) handleChannelSwitch(w http.ResponseWriter, r *http.Request) {
 		s.jsonResponse(w, http.StatusBadRequest, nil, "имя канала не задано")
 		return
 	}
+	if req.Name == "parallel" {
+		if s.state != nil {
+			s.state.CurrentChannel = "parallel"
+		}
+		s.AddEvent("info", "Сигнальный канал: Параллельный (MQTT + Telegram)", "")
+		slog.Info("Переключён сигнальный режим", "channel", "parallel")
+		s.jsonResponse(w, http.StatusOK, map[string]string{"channel": "parallel"}, "")
+		return
+	}
+
 	if s.sigMgr != nil {
 		if err := s.sigMgr.SwitchTo(req.Name); err != nil {
-			s.jsonResponse(w, http.StatusBadRequest, nil, err.Error())
-			return
+			// Если канал не найден, все равно устанавливаем режим
+			slog.Warn("Канал не найден в FallbackManager", "name", req.Name)
 		}
 	}
 	if s.state != nil {

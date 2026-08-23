@@ -17,6 +17,7 @@ import (
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/wireguard"
 	"github.com/rs/zerolog"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -79,8 +80,8 @@ func StartEngine(configYAML string, tunFd int) string {
 	channels, err := buildChannels(cfg, devID)
 	if err != nil || len(channels) == 0 {
 		channels = append(channels, signaling.NewMQTTChannel(
-			"tcp://mqtt.eclipseprojects.io:1883",
-			"natbypass/public/peers",
+			"tcp://broker.emqx.io:1883",
+			"natbypass/mynet/peers",
 			devID, "", "",
 		))
 	}
@@ -107,7 +108,7 @@ func StartEngine(configYAML string, tunFd int) string {
 	// Цикл публикации в сигнальный канал
 	pubInterval := time.Duration(cfg.App.PublishInterval) * time.Second
 	if pubInterval <= 0 {
-		pubInterval = 60 * time.Second
+		pubInterval = 8 * time.Second
 	}
 	go func() {
 		ticker := time.NewTicker(pubInterval)
@@ -316,7 +317,7 @@ func parseConfigFromString(data string) (*config.Config, error) {
 	cfg := &config.Config{}
 	cfg.App.Name = "NatBypass"
 	cfg.App.LogLevel = "info"
-	cfg.App.PublishInterval = 60
+	cfg.App.PublishInterval = 8
 	cfg.Network.StunServers = []string{"stun.l.google.com:19302", "stun1.l.google.com:19302", "stun.cloudflare.com:3478"}
 	cfg.Network.IPApis = []string{"https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"}
 	cfg.Network.IPTimeout = 5
@@ -324,9 +325,11 @@ func parseConfigFromString(data string) (*config.Config, error) {
 	cfg.WireGuard.ListenPort = 51820
 	cfg.WireGuard.MTU = 1420
 
-	// Пробуем JSON unmarshal если передали JSON
-	if strings.HasPrefix(strings.TrimSpace(data), "{") {
-		_ = json.Unmarshal([]byte(data), cfg)
+	trimmed := strings.TrimSpace(data)
+	if strings.HasPrefix(trimmed, "{") {
+		_ = json.Unmarshal([]byte(trimmed), cfg)
+	} else if trimmed != "" {
+		_ = yaml.Unmarshal([]byte(trimmed), cfg)
 	}
 	return cfg, nil
 }
