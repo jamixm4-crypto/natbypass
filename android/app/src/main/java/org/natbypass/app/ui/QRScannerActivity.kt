@@ -82,18 +82,53 @@ class QRScannerActivity : AppCompatActivity() {
     }
 
     private fun handleQRCode(qrText: String) {
-        // Формат: NatBypass|DeviceName|PublicIP|InviteURL
-        if (qrText.startsWith("NatBypass|")) {
-            val parts = qrText.split("|")
-            val peerName = parts.getOrNull(1) ?: "ПК"
-            Toast.makeText(this, "✓ Успешно привязано к устройству: $peerName", Toast.LENGTH_LONG).show()
+        val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
 
-            // Сохраняем в SharedPreferences
-            val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
-            prefs.edit().putString("last_paired_peer", peerName).apply()
-            finish()
-        } else {
-            Toast.makeText(this, "Отсканирован QR: $qrText", Toast.LENGTH_SHORT).show()
+        try {
+            when {
+                qrText.startsWith("NatBypass|") -> {
+                    val parts = qrText.split("|")
+                    val peerName = parts.getOrNull(1) ?: "ПК"
+                    val peerIP = parts.getOrNull(2) ?: ""
+                    prefs.edit()
+                        .putString("last_paired_peer", peerName)
+                        .putString("last_paired_ip", peerIP)
+                        .apply()
+                    Toast.makeText(this, "✓ Успешно привязано к устройству: $peerName ($peerIP)", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+                qrText.startsWith("{") && qrText.endsWith("}") -> {
+                    val json = org.json.JSONObject(qrText)
+                    val devId = json.optString("device_id", "")
+                    val tgToken = json.optString("tg_token", "")
+                    val tgChat = json.optString("tg_chat", "")
+                    val mqttBroker = json.optString("mqtt_broker", "")
+                    val mqttTopic = json.optString("mqtt_topic", "")
+                    
+                    val editor = prefs.edit()
+                    if (devId.isNotEmpty()) editor.putString("last_paired_peer", devId)
+                    if (tgToken.isNotEmpty()) editor.putString("tg_token", tgToken)
+                    if (tgChat.isNotEmpty()) editor.putString("tg_chat", tgChat)
+                    if (mqttBroker.isNotEmpty()) editor.putString("mqtt_broker", mqttBroker)
+                    if (mqttTopic.isNotEmpty()) editor.putString("mqtt_topic", mqttTopic)
+                    editor.apply()
+                    
+                    Toast.makeText(this, "✓ Конфигурация сети импортирована из QR!", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+                qrText.contains("[Interface]") -> {
+                    val confFile = File(filesDir, "imported_wg.conf")
+                    confFile.writeText(qrText)
+                    Toast.makeText(this, "✓ AmneziaWG/WireGuard конфиг импортирован!", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+                else -> {
+                    Toast.makeText(this, "Отсканирован QR: $qrText", Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Ошибка обработки QR: ${e.message}", Toast.LENGTH_SHORT).show()
             finish()
         }
     }
