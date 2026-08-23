@@ -142,35 +142,59 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 
+	// Исключаем файлы сборщика роутеров, исходники и тулкиты
+	var filtered []GitHubAsset
+	for _, a := range assets {
+		nl := strings.ToLower(a.Name)
+		if strings.Contains(nl, "builder") || strings.Contains(nl, "toolkit") || strings.HasSuffix(nl, ".zip") || strings.HasSuffix(nl, ".tar.gz") {
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+	if len(filtered) == 0 {
+		filtered = assets
+	}
+
 	var candidates []string
 	if osName == "windows" {
-		candidates = []string{"windows-amd64.exe", "windows.exe", ".exe"}
+		candidates = []string{
+			"natbypass-v",
+			"natbypass-windows-amd64.exe",
+			"natbypass.exe",
+			"windows-amd64.exe",
+			"windows.exe",
+			".exe",
+		}
 	} else if osName == "linux" {
 		if arch == "arm64" {
 			candidates = []string{"linux-arm64", "arm64"}
 		} else if arch == "mipsle" {
-			candidates = []string{"linux-mipsle", "router-mipsle", "mipsle", "mipsel"}
+			candidates = []string{"router-mipsle", "linux-mipsle", "mipsle", "mipsel"}
 		} else if arch == "mips" {
-			candidates = []string{"linux-mips", "router-mips", "mips"}
+			candidates = []string{"router-mips", "linux-mips", "mips"}
 		} else {
 			candidates = []string{"linux-amd64", "amd64", "linux-x86_64"}
 		}
 	} else if osName == "android" {
-		candidates = []string{".apk", "android"}
+		candidates = []string{".apk", "android-arm64", "android"}
 	}
 
 	for _, cand := range candidates {
-		for _, a := range assets {
+		for _, a := range filtered {
 			nameLower := strings.ToLower(a.Name)
+			// Избегаем cli версии при подборе для GUI
+			if strings.Contains(nameLower, "-cli") && !strings.Contains(cand, "-cli") {
+				continue
+			}
 			if strings.Contains(nameLower, cand) {
 				return a.BrowserDownloadURL, a.Name, a.Size
 			}
 		}
 	}
 
-	// Fallback на первый попавшийся ассет
-	if len(assets) > 0 {
-		return assets[0].BrowserDownloadURL, assets[0].Name, assets[0].Size
+	// Fallback на первый подходящий ассет
+	if len(filtered) > 0 {
+		return filtered[0].BrowserDownloadURL, filtered[0].Name, filtered[0].Size
 	}
 
 	return "", "", 0
