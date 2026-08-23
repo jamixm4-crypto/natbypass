@@ -297,19 +297,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		port = 8080
 	}
 
-	var uiServer *webui.Server
-	if !noWebUI {
-		uiServer = webui.NewServer(port, cfg.WebUI.Username, cfg.WebUI.Password, registry, sigMgr)
-		uiServer.SetAppState(deviceID, "Определяется...", "Определяется...")
-		uiServer.SetDeviceName(deviceID)
-		uiServer.AddEvent("info", "NatBypass запущен", "version="+Version)
-		go func() {
-			if err := uiServer.Start(engineCtx); err != nil {
-				log.Error().Err(err).Msg("Web UI остановлен")
-			}
-		}()
-	}
-
 	// 🚀 Автоматическое создание виртуального сетевого интерфейса (nb0 на Linux / NatBypass на Windows)
 	myVIPNum := 1
 	for _, b := range []byte(deviceID) {
@@ -319,6 +306,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		myVIPNum = 1
 	}
 	myVirtualIP := fmt.Sprintf("10.200.0.%d", myVIPNum)
+
+	var uiServer *webui.Server
+	if !noWebUI {
+		uiServer = webui.NewServer(port, cfg.WebUI.Username, cfg.WebUI.Password, registry, sigMgr)
+		uiServer.SetAppState(deviceID, "Определяется...", "Определяется...", myVirtualIP)
+		uiServer.SetVirtualIP(myVirtualIP)
+		uiServer.SetDeviceName(deviceID)
+		uiServer.AddEvent("info", "NatBypass запущен", "version="+Version)
+		go func() {
+			if err := uiServer.Start(engineCtx); err != nil {
+				log.Error().Err(err).Msg("Web UI остановлен")
+			}
+		}()
+	}
 
 	adapterName := "nb0"
 	if runtime.GOOS == "windows" {
@@ -355,6 +356,31 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		})
 	}
 
+	// 📡 Подписка на релей туннельных пакетов через MQTT для гарантированного P2P
+	for _, ch := range channels {
+		if mqCh, isMq := ch.(*signaling.MQTTChannel); isMq {
+			mqCh.SubscribeTunnelData(deviceID, func(pkt []byte) {
+				if len(pkt) < 20 {
+					return
+				}
+				srcIP := tunnel.GetSrcIP(pkt)
+				destIP := tunnel.GetDestIP(pkt)
+				if srcIP == nil || destIP == nil {
+					return
+				}
+				if srcIP.String() == myVirtualIP {
+					return
+				}
+				if destIP.String() != myVirtualIP && destIP.String() != "10.200.0.1" {
+					return
+				}
+				if tunDev != nil {
+					_ = tunDev.WritePacket(pkt)
+				}
+			})
+		}
+	}
+
 	// Фоновый поток чтения исходящих IP-пакетов из сетевого стека ОС и пересылка пирам
 	if tunDev != nil {
 		go func() {
@@ -375,15 +401,23 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					if !strings.HasPrefix(destStr, "10.200.0.") || destStr == "10.200.0.255" || destStr == myVirtualIP {
 						continue
 					}
-					if registry != nil && puncher != nil {
+					if registry != nil {
 						peers := registry.List()
 						for _, p := range peers {
 							if p.DeviceID != deviceID && (p.VirtualIP == destStr || len(peers) == 1) {
-								if p.ActiveEndpoint != "" {
-									_ = puncher.SendDataPacket(p.ActiveEndpoint, packet)
+								if puncher != nil {
+									if p.ActiveEndpoint != "" {
+										_ = puncher.SendDataPacket(p.ActiveEndpoint, packet)
+									}
+									if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+										_ = puncher.SendDataPacket(p.STUNAddr, packet)
+									}
 								}
-								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-									_ = puncher.SendDataPacket(p.STUNAddr, packet)
+								// Dual-path relay fallback via MQTT
+								for _, ch := range channels {
+									if mqCh, isMq := ch.(*signaling.MQTTChannel); isMq {
+										_ = mqCh.PublishTunnelData(p.DeviceID, packet)
+									}
 								}
 							}
 						}
@@ -457,7 +491,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 
 		if uiServer != nil {
-			uiServer.SetAppState(deviceID, publicIP.String(), stunAddr)
+			uiServer.SetAppState(deviceID, publicIP.String(), stunAddr, myVirtualIP)
+			uiServer.SetVirtualIP(myVirtualIP)
 		}
 		triggerPublish()
 	}()

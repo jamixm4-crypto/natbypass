@@ -676,6 +676,11 @@
 
     <!-- Top Bar -->
     <div class="topbar">
+      <div class="glow-pill" onclick="copyText(document.getElementById('topVipLabel').innerText)" title="Ваш локальный виртуальный IP в P2P сети (нажмите чтобы скопировать)" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; cursor: pointer;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+        <span style="font-weight:700;">Мой VIP: </span><span id="topVipLabel" class="mono" style="font-weight:700; color:#ffffff;">10.200.0.1</span> <span style="font-size:0.75rem; opacity:0.8;">📋</span>
+      </div>
+
       <div class="glow-pill" onclick="openRenameModal()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6Z"></path></svg>
         <span id="topStunLabel">STUN: Определение...</span>
@@ -1431,6 +1436,8 @@
           document.getElementById('statPeersCount').innerText = totalPeers;
           document.getElementById('statP2PCount').innerText = `⚡ ${p2pActive} Direct P2P`;
           document.getElementById('statAvgLatency').innerText = (avgLat > 0 ? avgLat : (totalPeers > 0 ? 12 : 0)) + ' ms';
+          const topVip = document.getElementById('topVipLabel');
+          if (topVip && d.virtual_ip) topVip.innerText = d.virtual_ip;
           document.getElementById('topStunLabel').innerText = 'STUN: ' + (d.stun_addr || 'Определяется...');
           document.getElementById('statChannelBadge').innerText = 'Канал: ' + (d.channel || 'Параллельно');
           document.getElementById('statUptime').innerText = 'Uptime: ' + (d.uptime || '0m');

@@ -54,6 +54,7 @@ var (
 	procShowWindow            = moduser32.NewProc("ShowWindow")
 	procUpdateWindow          = moduser32.NewProc("UpdateWindow")
 	procSetForegroundWindow   = moduser32.NewProc("SetForegroundWindow")
+	procFindWindowW           = moduser32.NewProc("FindWindowW")
 	procSetTimer              = moduser32.NewProc("SetTimer")
 	procKillTimer             = moduser32.NewProc("KillTimer")
 	procLoadIconW             = moduser32.NewProc("LoadIconW")
@@ -644,13 +645,23 @@ func main() {
 
 	initDebugLog()
 
-	// 1. Очистка зависших зомби-процессов предыдущих запусков
-	cleanStaleInstances()
-
-	// 2. Инициализация единого экземпляра (Single Instance Protection)
+	// 1. Инициализация единого экземпляра (Single Instance Protection)
 	mutName, _ := windows.UTF16PtrFromString("Global\\NatBypass_SingleInstance_Mutex_App")
-	hMut, _, _ := procCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(mutName)))
+	hMut, _, _ := procCreateMutexW.Call(0, 1, uintptr(unsafe.Pointer(mutName)))
+	if windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
+		clsName, _ := windows.UTF16PtrFromString("NatBypassWindowClass")
+		hExisting, _, _ := procFindWindowW.Call(uintptr(unsafe.Pointer(clsName)), 0)
+		if hExisting != 0 {
+			procShowWindow.Call(hExisting, 9 /* SW_RESTORE */)
+			procSetForegroundWindow.Call(hExisting)
+		}
+		os.Exit(0)
+		return
+	}
 	singleMutex = hMut
+
+	// 2. Очистка зависших зомби-процессов предыдущих аварийных запусков
+	cleanStaleInstances()
 
 	// Запуск сторожевого таймера дебаггера
 	startSystemWatchdog()
@@ -3197,7 +3208,8 @@ func publishCurrentState(ctx context.Context) {
 	}
 
 	if uiServer != nil {
-		uiServer.SetAppState(myDevID, myPublicIP, mySTUNAddr)
+		uiServer.SetAppState(myDevID, myPublicIP, mySTUNAddr, myVirtualIP)
+		uiServer.SetVirtualIP(myVirtualIP)
 		uiServer.SetDeviceName(myNick)
 	}
 
@@ -3336,7 +3348,7 @@ func updateData() {
 	if myNick != "" {
 		devTitle = fmt.Sprintf("%s (%s)", myNick, myDevID)
 	}
-	infoText := fmt.Sprintf("Устройство: %s | VIP: %s | Внешний IP: %s | STUN: %s", devTitle, myVirtualIP, ipStr, stunStr)
+	infoText := fmt.Sprintf("Устройство: %s | 🌐 Мой IP в сети (VIP): %s | Внешний: %s | STUN: %s", devTitle, myVirtualIP, ipStr, stunStr)
 	setControlText(hLblIpInfo, infoText)
 
 	chText := fmt.Sprintf("📡 Активный режим: %s", activeChannelStr)

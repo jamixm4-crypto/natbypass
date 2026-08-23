@@ -40,6 +40,7 @@ type Response struct {
 // AppState — состояние приложения для статус-эндпоинта
 type AppState struct {
 	DeviceID       string    `json:"device_id"`
+	VirtualIP      string    `json:"virtual_ip"`
 	PublicIP       string    `json:"public_ip"`
 	STUNAddr       string    `json:"stun_addr"`
 	Uptime         string    `json:"uptime"`
@@ -94,11 +95,21 @@ func (s *Server) SetConfigPath(path string) {
 }
 
 // SetAppState обновляет состояние приложения (вызывается из main)
-func (s *Server) SetAppState(deviceID, publicIP, stunAddr string) {
+func (s *Server) SetAppState(deviceID, publicIP, stunAddr string, virtualIP ...string) {
 	if s.state != nil {
 		s.state.DeviceID = deviceID
 		s.state.PublicIP = publicIP
 		s.state.STUNAddr = stunAddr
+		if len(virtualIP) > 0 && virtualIP[0] != "" {
+			s.state.VirtualIP = virtualIP[0]
+		}
+	}
+}
+
+// SetVirtualIP задаёт виртуальный IP адрес ноды в сети (10.200.0.x)
+func (s *Server) SetVirtualIP(vip string) {
+	if s.state != nil {
+		s.state.VirtualIP = vip
 	}
 }
 
@@ -339,6 +350,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]interface{}{
 		"device_id":       s.state.DeviceID,
 		"device_name":     s.deviceName,
+		"virtual_ip":      s.state.VirtualIP,
 		"public_ip":       s.state.PublicIP,
 		"stun_addr":       s.state.STUNAddr,
 		"uptime":          uptime,
@@ -1062,6 +1074,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"channel":           channelName,
 		"public_ip":         pubIP,
 		"stun_addr":         stunAddr,
+		"virtual_ip":        s.state.VirtualIP,
 		"device_id":         devID,
 		"device_name":       s.deviceName,
 		"awg_active":        awgActive,
