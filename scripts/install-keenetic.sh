@@ -41,7 +41,6 @@ ROUTER_NAME=""
 
 if [ -f /opt/bin/opkg ] && [ -d /opt/etc ]; then
     IS_KEENETIC=1
-    # Try reading Keenetic model from device tree or ndm
     if [ -f /proc/device-tree/model ]; then
         ROUTER_NAME=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
     fi
@@ -76,7 +75,6 @@ case "${RAW_ARCH}" in
         ARCH_DESC="ARM64 (Keenetic Titan/Hero/Giga/Ultra, RPi 4/5)"
         ;;
     mips)
-        # Test byte endianness (Big vs Little)
         if echo -n I | hexdump -o 2>/dev/null | grep -q '0000000 0001'; then
             BIN_SUFFIX="router-mips"
             ARCH_DESC="MIPS Big-Endian"
@@ -128,7 +126,7 @@ printf "✓ Тип окружения:    "; print_cyan "${SERVICE_TYPE}"
 printf "✓ Путь установки:   "; print_cyan "${TARGET_BIN}"
 
 # 4. Create Directories
-mkdir -p "${CONFIG_DIR}" "$(dirname "${TARGET_BIN}")" /opt/etc/init.d 2>/dev/null || true
+mkdir -p "${CONFIG_DIR}" "$(dirname "${TARGET_BIN}")" /opt/etc/init.d /opt/var/log /var/run 2>/dev/null || true
 
 # Stop previous running instance if any
 if [ "$IS_KEENETIC" -eq 1 ] && [ -f "${INIT_SCRIPT}" ]; then
@@ -162,7 +160,6 @@ if [ "$DOWNLOADED" -eq 0 ] || [ ! -s "${TARGET_BIN}" ]; then
 fi
 
 chmod +x "${TARGET_BIN}"
-# Create symlink in /opt/usr/bin if Keenetic
 if [ "$IS_KEENETIC" -eq 1 ]; then
     mkdir -p /opt/usr/bin 2>/dev/null || true
     ln -sf /opt/bin/natbypass /opt/usr/bin/natbypass 2>/dev/null || true
@@ -210,7 +207,7 @@ signaling:
       priority: 1
       enabled: true
       params:
-        broker_url: "tcp://broker.emqx.io:1883"
+        broker_url: "tcp://broker.hivemq.com:1883"
         topic: "natbypass/public/peers"
     - type: "telegram"
       priority: 2
@@ -224,31 +221,80 @@ wireguard:
   listen_port: 51820
   mtu: 1420
 EOF
-    print_green "✓ Конфигурация сохранена (Web UI открыт для локальной сети на порту 8080)."
+    print_green "✓ Конфигурация сохранена."
 fi
 
 # 7. Setup System Service and Autostart
 echo ">> Запуск службы NatBypass..."
 
 if [ "$IS_KEENETIC" -eq 1 ]; then
-    # Keenetic Entware init.d script
+    # Standalone robust Entware init script
     cat > "${INIT_SCRIPT}" << 'EOF'
 #!/bin/sh
 ENABLED=yes
 PROCS=natbypass
-ARGS="start --config /opt/etc/natbypass/config.yaml"
-PREARGS=""
+BIN=/opt/bin/natbypass
+CONFIG=/opt/etc/natbypass/config.yaml
+LOGFILE=/opt/var/log/natbypass.log
+PIDFILE=/var/run/natbypass.pid
 DESC="NatBypass Mesh Service"
-PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-. /opt/etc/init.d/rc.func
+
+start() {
+    [ "$ENABLED" != "yes" ] && exit 0
+    printf "Starting %s... " "$DESC"
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "already running."
+        return 0
+    fi
+    mkdir -p /opt/etc/natbypass /opt/var/log /var/run 2>/dev/null || true
+    $BIN start --config "$CONFIG" > "$LOGFILE" 2>&1 &
+    echo $! > "$PIDFILE"
+    echo "done."
+}
+
+stop() {
+    printf "Stopping %s... " "$DESC"
+    if [ -f "$PIDFILE" ]; then
+        kill "$(cat "$PIDFILE")" 2>/dev/null || true
+        rm -f "$PIDFILE"
+    fi
+    killall "$PROCS" 2>/dev/null || true
+    echo "done."
+}
+
+status() {
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "$DESC is running (PID: $(cat "$PIDFILE"))"
+    elif pidof "$PROCS" >/dev/null 2>&1; then
+        echo "$DESC is running (PID: $(pidof "$PROCS"))"
+    else
+        echo "$DESC is stopped."
+    fi
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        stop
+        sleep 1
+        start
+        ;;
+    status|check)
+        status
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
 EOF
     chmod +x "${INIT_SCRIPT}"
-    "${INIT_SCRIPT}" start >/dev/null 2>&1 || true
-    
-    # Direct background watchdog if rc.func is missing
-    if ! pidof natbypass >/dev/null 2>&1; then
-        nohup /opt/bin/natbypass start --config /opt/etc/natbypass/config.yaml >/dev/null 2>&1 &
-    fi
+    "${INIT_SCRIPT}" start
     print_green "✓ Служба Keenetic Entware запущена (/opt/etc/init.d/S99natbypass start)"
 
 elif [ "$IS_OPENWRT" -eq 1 ]; then
@@ -301,22 +347,18 @@ fi
 
 # 8. Robust IP Address Detection for Web UI Banner
 ROUTER_IP=""
-# 1) Try Keenetic bridge IP
 if [ -z "$ROUTER_IP" ]; then
     ROUTER_IP=$(ip addr show br0 2>/dev/null | grep -E 'inet ' | awk '{print $2}' | cut -d/ -f1 | head -n1 || true)
 fi
-# 2) Try route lookup
 if [ -z "$ROUTER_IP" ]; then
     ROUTER_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || true)
 fi
-# 3) Try looking for standard private LAN IPs
 if [ -z "$ROUTER_IP" ]; then
     ROUTER_IP=$(ip -4 addr show 2>/dev/null | grep -E 'inet 192\.168\.' | awk '{print $2}' | cut -d/ -f1 | head -n1 || true)
 fi
 if [ -z "$ROUTER_IP" ]; then
     ROUTER_IP=$(ip -4 addr show 2>/dev/null | grep -E 'inet 10\.' | awk '{print $2}' | cut -d/ -f1 | head -n1 || true)
 fi
-# 4) Fallback
 if [ -z "$ROUTER_IP" ]; then
     if [ "$IS_KEENETIC" -eq 1 ] || [ "$IS_OPENWRT" -eq 1 ]; then
         ROUTER_IP="192.168.1.1"
@@ -327,10 +369,11 @@ fi
 
 echo ""
 echo "=============================================================="
-print_green "🎉 NatBypass успешно установлен и готов к работе!"
+print_green "🎉 NatBypass успешно установлен и работает!"
 echo "=============================================================="
 printf " 🌐 Панель управления (Web UI): "; print_cyan "http://${ROUTER_IP}:8080"
 printf " 📁 Конфигурационный файл:     "; print_yellow "${CONFIG_FILE}"
+printf " 📋 Журнал работы (Логи):      "; print_cyan "/opt/var/log/natbypass.log"
 printf " ⚙️  Исполняемый файл:          %s\n" "${TARGET_BIN}"
 echo "=============================================================="
 print_bold " 💡 Подсказка: откройте в браузере http://${ROUTER_IP}:8080 для управления"
