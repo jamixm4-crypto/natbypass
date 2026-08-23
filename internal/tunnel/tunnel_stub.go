@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package tunnel
 
@@ -6,7 +6,7 @@ import (
 	"errors"
 )
 
-var ErrTunnelNotSupported = errors.New("wintun adapter is only supported on Windows")
+var ErrTunnelNotSupported = errors.New("tun adapter is only supported on Windows and Linux")
 
 type Device struct {
 	AdapterName string

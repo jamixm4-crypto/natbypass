@@ -25,6 +25,7 @@ import (
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/tray"
+	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/webui"
 	"github.com/natbypass/natbypass/internal/wireguard"
 )
@@ -309,6 +310,30 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}()
 	}
 
+	// 🚀 Автоматическое создание виртуального сетевого интерфейса (nb0 на Linux / NatBypass на Windows)
+	myVIPNum := 1
+	for _, b := range []byte(deviceID) {
+		myVIPNum = (myVIPNum*31 + int(b)) % 250
+	}
+	if myVIPNum == 0 {
+		myVIPNum = 1
+	}
+	myVirtualIP := fmt.Sprintf("10.200.0.%d", myVIPNum)
+
+	adapterName := "nb0"
+	if runtime.GOOS == "windows" {
+		adapterName = "NatBypass"
+	}
+	tunDev, tErr := tunnel.CreateAdapter(adapterName, myVirtualIP)
+	if tErr == nil {
+		log.Info().Str("adapter", adapterName).Str("vip", myVirtualIP).Msg("🛡️ Виртуальный сетевой интерфейс поднят! Прямой доступ к устройству активирован")
+		if uiServer != nil {
+			uiServer.AddEvent("info", "Сетевой интерфейс "+adapterName+" поднят", "IP: "+myVirtualIP+"/24")
+		}
+	} else {
+		log.Warn().Err(tErr).Msg("Не удалось поднять виртуальный интерфейс TUN (требуются права root или загруженный модуль tun)")
+	}
+
 	var puncher *network.UDPPuncher
 	puncher, err = network.NewUDPPuncher(51820, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		log.Info().Str("peer", remoteDevID).Dur("rtt", rtt).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг")
@@ -316,12 +341,56 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			p.DirectP2P = true
 			p.Latency = rtt
 			p.Online = true
+			p.ActiveEndpoint = fromAddr
 			p.LastSeen = time.Now()
 			registry.Upsert(p)
 		}
 	})
 	if err == nil {
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDPPuncher активен")
+		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+			if tunDev != nil {
+				_ = tunDev.WritePacket(payload)
+			}
+		})
+	}
+
+	// Фоновый поток чтения исходящих IP-пакетов из сетевого стека ОС и пересылка пирам
+	if tunDev != nil {
+		go func() {
+			for {
+				select {
+				case <-engineCtx.Done():
+					return
+				default:
+					packet, readErr := tunDev.ReadPacket()
+					if readErr != nil {
+						return
+					}
+					destIP := tunnel.GetDestIP(packet)
+					if destIP == nil {
+						continue
+					}
+					destStr := destIP.String()
+					if !strings.HasPrefix(destStr, "10.200.0.") || destStr == "10.200.0.255" || destStr == myVirtualIP {
+						continue
+					}
+					if registry != nil && puncher != nil {
+						peers := registry.List()
+						for _, p := range peers {
+							if p.DeviceID != deviceID && (p.VirtualIP == destStr || len(peers) == 1) {
+								if p.ActiveEndpoint != "" {
+									_ = puncher.SendDataPacket(p.ActiveEndpoint, packet)
+								}
+								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+									_ = puncher.SendDataPacket(p.STUNAddr, packet)
+								}
+							}
+						}
+					}
+				}
+			}
+		}()
 	}
 
 	// 🏠 LAN Broadcast Discovery (локальный поиск за <0.1с)
@@ -454,6 +523,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					DeviceID:         deviceID,
 					Nickname:         nick,
 					DeviceName:       nick,
+					VirtualIP:        myVirtualIP,
 					PublicKey:        crypto.KeyToHex(pubKey),
 					PublicIP:         ip.String(),
 					STUNAddr:         stunAddr,
@@ -502,9 +572,26 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					if p.DeviceID == "" || p.DeviceID == deviceID {
 						continue
 					}
+
+					peerVIP := p.VirtualIP
+					if peerVIP == "" {
+						pNum := 1
+						for _, b := range []byte(p.DeviceID) {
+							pNum = (pNum*31 + int(b)) % 250
+						}
+						if pNum == 0 {
+							pNum = 2
+						}
+						if pNum == myVIPNum {
+							pNum = (myVIPNum % 250) + 1
+						}
+						peerVIP = fmt.Sprintf("10.200.0.%d", pNum)
+					}
+
 					registry.Upsert(&peer.Peer{
 						DeviceID:         p.DeviceID,
 						Nickname:         p.Nickname,
+						VirtualIP:        peerVIP,
 						PublicKey:        p.PublicKey,
 						PublicIP:         p.PublicIP,
 						STUNAddr:         p.STUNAddr,
