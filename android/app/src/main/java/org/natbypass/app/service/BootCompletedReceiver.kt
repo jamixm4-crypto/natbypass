@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.service
+package org.natbypass.app.service
 
 import android.content.BroadcastReceiver
 import android.content.Context

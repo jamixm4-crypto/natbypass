@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui
+package org.natbypass.app.ui
 
 import android.Manifest
 import android.content.Context

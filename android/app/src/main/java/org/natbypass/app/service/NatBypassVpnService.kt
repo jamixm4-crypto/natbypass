@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.service
+package org.natbypass.app.service
 
 import android.app.Notification
 import android.app.NotificationChannel

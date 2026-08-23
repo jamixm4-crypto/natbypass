@@ -1,4 +1,4 @@
-﻿<resources>
+<resources>
     <style name="Theme.NatBypass" parent="Theme.Material3.Dark.NoActionBar">
         <item name="android:windowBackground">@color/bg_dark</item>
         <item name="android:statusBarColor">@color/bg_dark</item>
