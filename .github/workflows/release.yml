@@ -35,7 +35,8 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
-              $latestTag = (git describe --tags --abbrev=0 2>$null)
+              $allTags = git tag -l "v*"
+              $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
               if (!$latestTag) { $latestTag = "v1.1.6" }
               $tag = $latestTag
           }
@@ -102,7 +103,8 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
-              $latestTag = (git describe --tags --abbrev=0 2>$null)
+              $allTags = git tag -l "v*"
+              $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
               if (!$latestTag) { $latestTag = "v1.1.6" }
               $tag = $latestTag
           }
@@ -119,9 +121,9 @@ jobs:
               if ($relJson -and $relJson.assets) {
                   foreach ($a in $relJson.assets) {
                       $name = $a.name
-                      if ($name -match "^test-" -or ($name -match "v1\.1\.0" -and $tag -ne "v1.1.0")) {
+                      if ($name -match "^test-" -or ($name -notmatch "^NatBypass-$tag" -and $name -notmatch "^natbypass-$tag" -and $name -notmatch "^NatBypass\." -and $name -notmatch "^NatBypass-Builder\." -and $name -notmatch "^NatBypass-windows-" -and $name -notmatch "^config\.yaml")) {
                           Write-Host "==> Deleting stale asset: $name"
-                          gh release delete-asset $tag $name -y
+                          gh release delete-asset $tag $name -y 2>$null
                       }
                   }
               }
@@ -134,4 +136,7 @@ jobs:
               Write-Host "==> Uploading $($f.Name) ($([math]::Round($f.Length / 1MB, 2)) MB)..."
               gh release upload $tag $f.FullName --clobber
           }
-          Write-Host "==> All release files successfully uploaded!"
+          
+          # Ensure marked as Latest release
+          gh release edit $tag --latest --title "NatBypass $tag" 2>$null
+          Write-Host "==> All release files successfully uploaded for $tag!"

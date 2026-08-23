@@ -78,7 +78,8 @@ jobs:
           mkdir -p ../release_apk
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
-            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.1.6")
+            TAG=$(git tag -l "v*" | sort -V | tail -n 1)
+            [ -z "$TAG" ] && TAG="v1.1.6"
           fi
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-${TAG}.apk \;
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass.apk \;
@@ -96,7 +97,8 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
-            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.1.6")
+            TAG=$(git tag -l "v*" | sort -V | tail -n 1)
+            [ -z "$TAG" ] && TAG="v1.1.6"
           fi
           # Create release if it doesn't exist yet
           gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --target main || true
@@ -105,3 +107,4 @@ jobs:
               gh release upload "${TAG}" "$apk" --clobber || true
             fi
           done
+          gh release edit "${TAG}" --latest --title "NatBypass ${TAG}" 2>/dev/null || true
