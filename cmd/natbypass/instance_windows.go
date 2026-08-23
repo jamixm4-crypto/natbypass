@@ -175,51 +175,6 @@ func openAppWindow(port int) {
 }
 
 func openBrowserFallback(url string) {
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		localAppData = os.TempDir()
-	}
-	appDir := filepath.Join(localAppData, "NatBypass")
-	profileDir := filepath.Join(appDir, "app_profile")
-	_ = os.MkdirAll(profileDir, 0755)
-
-	execPath, _ := os.Executable()
-	if execPath != "" {
-		execPath, _ = filepath.Abs(execPath)
-	}
-
-	appCandidates := []string{
-		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
-		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
-		filepath.Join(localAppData, `Microsoft\Edge\Application\msedge.exe`),
-		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
-		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
-	}
-
-	var browserExe string
-	for _, p := range appCandidates {
-		if _, err := os.Stat(p); err == nil {
-			browserExe = p
-			break
-		}
-	}
-
-	if browserExe != "" {
-		cmd := exec.Command(browserExe,
-			fmt.Sprintf("--app=%s", url),
-			fmt.Sprintf("--user-data-dir=%s", profileDir),
-			"--app-id=NatBypassMeshApp",
-			"--new-window",
-			"--window-size=1280,860",
-		)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		if err := cmd.Start(); err == nil {
-			applyWindowIcon(execPath)
-			return
-		}
-	}
-
-	// Fallback
 	_ = exec.Command("cmd", "/c", "start", url).Start()
 }
 

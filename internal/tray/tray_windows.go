@@ -251,7 +251,7 @@ func (t *TrayApp) Run(ctx context.Context) error {
 	// Automatically open the standalone application window on startup
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		t.openWebUI()
+		t.activateExistingWindow()
 	}()
 
 	go func() {
@@ -320,7 +320,7 @@ func (t *TrayApp) showMenu() {
 func (t *TrayApp) handleCommand(cmdID uint32) {
 	switch cmdID {
 	case CMD_OPEN_WEBUI:
-		t.openWebUI()
+		t.activateExistingWindow()
 	case CMD_REFRESH_IP:
 		if t.opts.OnRefreshIP != nil {
 			t.opts.OnRefreshIP()
@@ -340,84 +340,17 @@ func (t *TrayApp) handleCommand(cmdID uint32) {
 	}
 }
 
-func (t *TrayApp) openWebUI() {
-	port := t.opts.WebUIPort
-	if t.opts.GetWebUIPort != nil {
-		if p := t.opts.GetWebUIPort(); p > 0 {
-			port = p
-		}
+func (t *TrayApp) activateExistingWindow() {
+	procFindWindowW := moduser32.NewProc("FindWindowW")
+	procSetForegroundWindow := moduser32.NewProc("SetForegroundWindow")
+	procShowWindow := moduser32.NewProc("ShowWindow")
+
+	titlePtr, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Network")
+	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
+	if hwnd != 0 {
+		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
+		procSetForegroundWindow.Call(hwnd)
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d", port)
-
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		localAppData = os.TempDir()
-	}
-	appDir := filepath.Join(localAppData, "NatBypass")
-	profileDir := filepath.Join(appDir, "app_profile")
-	_ = os.MkdirAll(profileDir, 0755)
-
-	execPath, _ := os.Executable()
-	if execPath != "" {
-		execPath, _ = filepath.Abs(execPath)
-	}
-
-	appData := os.Getenv("APPDATA")
-	if appData == "" {
-		appData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
-	}
-	programsDir := filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs")
-	_ = os.MkdirAll(programsDir, 0755)
-	shortcutPath := filepath.Join(programsDir, "NatBypass.lnk")
-
-	// Launch as a sleek standalone application window (no URL bar, no tabs)
-	appCandidates := []string{
-		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
-		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
-		filepath.Join(localAppData, `Microsoft\Edge\Application\msedge.exe`),
-		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
-		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
-	}
-
-	var browserExe string
-	for _, p := range appCandidates {
-		if _, err := os.Stat(p); err == nil {
-			browserExe = p
-			break
-		}
-	}
-
-	if browserExe != "" {
-		if execPath != "" {
-			psScript := fmt.Sprintf(
-				`$wsh = New-Object -ComObject WScript.Shell; $s = $wsh.CreateShortcut('%s'); $s.TargetPath = '%s'; $s.Arguments = '--app=%s --user-data-dir="%s" --app-id=NatBypassMeshApp'; $s.IconLocation = '%s,0'; $s.Description = 'NatBypass Mesh Network'; $s.Save()`,
-				shortcutPath, browserExe, url, profileDir, execPath,
-			)
-			psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-			psCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-			_ = psCmd.Run()
-
-			launchCmd := exec.Command("cmd.exe", "/c", "start", "", shortcutPath)
-			launchCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-			if err := launchCmd.Start(); err == nil {
-				return
-			}
-		}
-
-		cmd := exec.Command(browserExe,
-			fmt.Sprintf("--app=%s", url),
-			fmt.Sprintf("--user-data-dir=%s", profileDir),
-			"--app-id=NatBypassMeshApp",
-			"--new-window",
-			"--window-size=1180,820",
-		)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		if err := cmd.Start(); err == nil {
-			return
-		}
-	}
-
-	exec.Command("cmd", "/c", "start", url).Start()
 }
 
 func (t *TrayApp) ShowNotification(titleStr, msgStr string) {
