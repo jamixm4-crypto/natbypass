@@ -113,6 +113,18 @@ jobs:
               gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client."
           }
           
+          # Delete outdated / stale / test assets
+          $existingAssets = gh release view $tag --json assets --jq '.assets[].name' 2>$null
+          if ($existingAssets) {
+              foreach ($ea in ($existingAssets -split "`n")) {
+                  $ea = $ea.Trim()
+                  if ($ea -and ($ea -match "^test-" -or ($ea -match "v1\.1\.0" -and $tag -ne "v1.1.0"))) {
+                      Write-Host "==> Deleting stale asset: $ea"
+                      gh release delete-asset $tag $ea -y 2>$null
+                  }
+              }
+          }
+
           $files = Get-ChildItem -Path release -File
           foreach ($f in $files) {
               Write-Host "==> Uploading $($f.Name) ($([math]::Round($f.Length / 1MB, 2)) MB)..."
