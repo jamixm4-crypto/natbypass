@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -33,7 +35,9 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
-              $tag = "v1.1.0"
+              $latestTag = (git describe --tags --abbrev=0 2>$null)
+              if (!$latestTag) { $latestTag = "v1.1.4" }
+              $tag = $latestTag
           }
           Write-Host "Building release for tag: $tag"
           New-Item -ItemType Directory -Force -Path release | Out-Null
@@ -42,7 +46,8 @@ jobs:
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
-          Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass-$tag.exe" -Force
+          Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass-windows-amd64.exe" -Force
+          Copy-Item "release\NatBypass-$tag-windows-amd64.exe" "release\NatBypass.exe" -Force
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
           & go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
@@ -97,7 +102,9 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
-              $tag = "v1.1.0"
+              $latestTag = (git describe --tags --abbrev=0 2>$null)
+              if (!$latestTag) { $latestTag = "v1.1.4" }
+              $tag = $latestTag
           }
           
           # Create release if not exists
