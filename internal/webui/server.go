@@ -189,6 +189,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/routing/subnets", s.handleRoutingSubnets)
 	mux.HandleFunc("/api/routing/local-subnets", s.handleRoutingLocalSubnets)
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
+	mux.HandleFunc("/icon.png", s.handleIconPng)
 	mux.HandleFunc("/manifest.json", s.handleManifest)
 	mux.HandleFunc("/api/settings/save", s.handleSettingsSave)
 	// Автоматическое обновление
@@ -1476,24 +1477,46 @@ func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(svgIcon))
 }
 
+// handleIconPng — GET /icon.png — отдаёт 512x512 PNG значок для Chromium / Edge PWA фрейма
+func (s *Server) handleIconPng(w http.ResponseWriter, r *http.Request) {
+	pngData, err := staticFS.ReadFile("static/icon.png")
+	if err == nil && len(pngData) > 0 {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(pngData)
+		return
+	}
+	s.handleFavicon(w, r)
+}
+
 // handleManifest — GET /manifest.json — отдаёт PWA-манифест для Edge/Chrome App window
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	manifest := map[string]interface{}{
-		"name":             "NatBypass",
+		"name":             "NatBypass Mesh Network",
 		"short_name":        "NatBypass",
+		"description":       "NatBypass P2P Mesh VPN Network",
 		"start_url":         "/",
+		"scope":             "/",
 		"display":           "standalone",
-		"theme_color":       "#0c1017",
-		"background_color":  "#0c1017",
+		"orientation":       "any",
+		"theme_color":       "#07090e",
+		"background_color":  "#07090e",
 		"icons": []map[string]interface{}{
 			{
+				"src":     "/icon.png",
+				"sizes":   "512x512",
+				"type":    "image/png",
+				"purpose": "any maskable",
+			},
+			{
 				"src":   "/favicon.ico",
-				"sizes": "16x16 32x32 48x48 64x64 128x128 256x256",
+				"sizes": "64x64 32x32 24x24 16x16",
 				"type":  "image/x-icon",
 			},
 		},
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/manifest+json")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	json.NewEncoder(w).Encode(manifest)
 }
 

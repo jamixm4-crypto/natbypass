@@ -360,6 +360,7 @@ func (t *TrayApp) openWebUI() {
 	appCandidates := []string{
 		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
 		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+		filepath.Join(localAppData, `Microsoft\Edge\Application\msedge.exe`),
 		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
 		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
 	}
@@ -368,9 +369,11 @@ func (t *TrayApp) openWebUI() {
 			cmd := exec.Command(p,
 				fmt.Sprintf("--app=%s", url),
 				fmt.Sprintf("--user-data-dir=%s", profileDir),
+				fmt.Sprintf("--app-id=%s", "NatBypassMeshApp"),
 				"--new-window",
-				"--window-size=1120,780",
+				"--window-size=1180,820",
 			)
+			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 			if err := cmd.Start(); err == nil {
 				return
 			}
