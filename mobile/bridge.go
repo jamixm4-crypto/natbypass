@@ -178,6 +178,61 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
+	// UDP Puncher для реального P2P на Android
+	puncher, pErr := network.NewUDPPuncher(51820, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+		if p, ok := globalRegistry.Get(remoteDevID); ok {
+			p.DirectP2P = true
+			if rtt > 0 {
+				if p.Latency > 0 {
+					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
+				} else {
+					p.Latency = rtt
+				}
+				p.PingMs = p.Latency.Milliseconds()
+			}
+			p.Online = true
+			p.ActiveEndpoint = fromAddr
+			p.LastSeen = time.Now()
+			globalRegistry.Upsert(p)
+		}
+	})
+	if pErr == nil && puncher != nil {
+		logger.Info().Int("port", puncher.LocalPort()).Msg("Android P2P UDPPuncher запущен")
+	}
+
+	var tunFile *os.File
+	if tunFd > 0 {
+		tunFile = os.NewFile(uintptr(tunFd), "tun")
+	}
+
+	if puncher != nil && tunFile != nil {
+		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+			_, _ = tunFile.Write(payload)
+		})
+
+		go func() {
+			buf := make([]byte, 65535)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					n, err := tunFile.Read(buf)
+					if err != nil || n == 0 {
+						time.Sleep(10 * time.Millisecond)
+						continue
+					}
+					pkt := buf[:n]
+					for _, p := range globalRegistry.List() {
+						if p.Online && p.ActiveEndpoint != "" {
+							_ = puncher.SendDataPacket(p.ActiveEndpoint, pkt)
+						}
+					}
+				}
+			}
+		}()
+	}
+
 	engineRunning = true
 	logger.Info().Str("device_id", devID).Int("tun_fd", tunFd).Msg("NatBypass Android VpnService ядро запущено")
 	return ""

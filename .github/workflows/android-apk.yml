@@ -71,6 +71,15 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Build Go Mobile Core (AAR)
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+          mkdir -p android/app/libs
+          gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi=24 -o android/app/libs/mobile.aar ./mobile || true
+          ls -lh android/app/libs/ || true
+
       - name: Build Android APK
         run: |
           cd android
@@ -83,7 +92,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.1.6"
+            [ -z "$TAG" ] && TAG="v1.2.4"
           fi
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-${TAG}.apk \;
           ls -lh ../release_apk/
