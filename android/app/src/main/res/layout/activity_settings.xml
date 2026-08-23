@@ -14,16 +14,79 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⚙️ Настройки сети"
-            android:textColor="@color/accent_blue"
+            android:text="⚙️ Настройки NatBypass"
+            android:textColor="@color/accent_purple"
             android:textSize="20sp"
             android:textStyle="bold" />
 
-        <!-- Telegram Card -->
+        <!-- 1. General & System Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🏷️ Основные параметры"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:hint="Имя вашего устройства (Никнейм)">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etDeviceName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="text"
+                    android:textColor="@color/text_primary" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="Интервал рассылки маяков (сек)">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etPublishInterval"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    android:text="8"
+                    android:textColor="@color/text_primary" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swAutoStart"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Автозапуск при включении телефона"
+                android:textColor="@color/text_primary" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swSaveLogs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Сохранять логи в файл"
+                android:textColor="@color/text_primary" />
+        </LinearLayout>
+
+        <!-- 2. Telegram Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
             android:padding="16dp">
@@ -63,9 +126,23 @@
                     android:inputType="text"
                     android:textColor="@color/text_primary" />
             </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="SOCKS5 Прокси (опционально)">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etTgProxy"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="text"
+                    android:textColor="@color/text_primary" />
+            </com.google.android.material.textfield.TextInputLayout>
         </LinearLayout>
 
-        <!-- MQTT Card -->
+        <!-- 3. MQTT Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -92,7 +169,7 @@
                     android:id="@+id/etMqttBroker"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="tcp://mqtt.eclipseprojects.io:1883"
+                    android:text="tcp://broker.emqx.io:1883"
                     android:textColor="@color/text_primary" />
             </com.google.android.material.textfield.TextInputLayout>
 
@@ -100,7 +177,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:hint="Топик (уникальный для вашей сети)">
+                android:hint="Топик Mesh сети">
 
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/etMqttTopic"
@@ -109,9 +186,45 @@
                     android:text="natbypass/mynet/peers"
                     android:textColor="@color/text_primary" />
             </com.google.android.material.textfield.TextInputLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="Логин (опц.)">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etMqttUser"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_primary" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <View android:layout_width="8dp" android:layout_height="0dp" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="Пароль (опц.)">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etMqttPass"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textPassword"
+                        android:textColor="@color/text_primary" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
         </LinearLayout>
 
-        <!-- General Card -->
+        <!-- 4. Network & WireGuard Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -120,12 +233,108 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <com.google.android.material.materialswitch.MaterialSwitch
-                android:id="@+id/swAutoStart"
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔒 Сетевые параметры & WireGuard"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Автозапуск при включении телефона"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="UDP Порт WG/STUN">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etWgPort"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="51820"
+                        android:textColor="@color/text_primary" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <View android:layout_width="8dp" android:layout_height="0dp" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="MTU">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etMTU"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:text="1420"
+                        android:textColor="@color/text_primary" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swDoH"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="DoH (DNS over HTTPS Cloudflare)"
                 android:textColor="@color/text_primary" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swUpnp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="UPnP автоматический проброс порта"
+                android:textColor="@color/text_primary" />
+        </LinearLayout>
+
+        <!-- 5. Routing & Exit Node Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🌐 Маршрутизация & Шлюз"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swAllowExitNode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Разрешить выход в интернет через телефон (Exit Node)"
+                android:textColor="@color/text_primary" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:hint="Анонсируемые подсети (Site-to-Site LAN)">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etAdvSubnets"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="text"
+                    android:textColor="@color/text_primary" />
+            </com.google.android.material.textfield.TextInputLayout>
         </LinearLayout>
 
         <Button
@@ -133,7 +342,8 @@
             android:layout_width="match_parent"
             android:layout_height="52dp"
             android:layout_marginTop="20dp"
-            android:backgroundTint="@color/green_online"
+            android:layout_marginBottom="30dp"
+            android:backgroundTint="@color/accent_neon"
             android:text="💾 Сохранить настройки"
             android:textColor="@color/white"
             android:textSize="15sp"
