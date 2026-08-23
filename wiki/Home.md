@@ -7,30 +7,30 @@
 ## 🧭 Навигация по разделам
 
 ### 🚀 Быстрый старт и обзор
-* [[Quick-Start|🚀 Быстрый старт за 5 минут]] — пошаговая инструкция для новичков (без командной строки).
-* [[Architecture|🏗️ Архитектура и протоколы]] — как работает STUN UDP Hole Punching, AmneziaWG 2.0 и 4-уровневый стек отказоустойчивости.
+* [**🚀 Быстрый старт за 5 минут**](https://github.com/jamixm4-crypto/natbypass/wiki/Quick-Start) — пошаговая инструкция для новичков (без командной строки).
+* [**🏗️ Архитектура и протоколы**](https://github.com/jamixm4-crypto/natbypass/wiki/Architecture) — как работает STUN UDP Hole Punching, AmneziaWG 2.0 и 4-уровневый стек отказоустойчивости.
 
 ---
 
 ### 💻 Клиентские приложения
-* [[Windows-Guide|🪟 Руководство для Windows]] — встроенное Desktop-приложение, системный трей, Wintun-драйвер и автозапуск.
-* [[Android-Setup|📱 Руководство для Android]] — мобильное приложение, сканирование QR-кодов, VpnService и фоновая служба.
-* [[Linux-and-Server|🐧 Руководство для Linux и Серверов]] — systemd-служба, headless-режим, настройка Exit Node и маршрутизации.
+* [**🪟 Руководство для Windows**](https://github.com/jamixm4-crypto/natbypass/wiki/Windows-Guide) — встроенное Desktop-приложение, системный трей, Wintun-драйвер и автозапуск.
+* [**📱 Руководство для Android**](https://github.com/jamixm4-crypto/natbypass/wiki/Android-Setup) — мобильное приложение, сканирование QR-кодов, VpnService и фоновая служба.
+* [**🐧 Руководство для Linux и Серверов**](https://github.com/jamixm4-crypto/natbypass/wiki/Linux-and-Server) — systemd-служба, headless-режим, настройка Exit Node и маршрутизации.
 
 ---
 
 ### 📡 Роутеры и Сетевое оборудование
-* [[Keenetic-Routers|🌐 Роутеры Keenetic (Entware / NDMS)]] — установка в 1 команду, автозапуск `procd/init.d`, интеграция с Web-интерфейсом.
-* [[OpenWrt-Routers|📡 Роутеры OpenWrt]] — пакеты MIPS / MIPSLE / ARM64 / x86, настройка брандмауэра и зоны VPN.
+* [**🌐 Роутеры Keenetic (Entware / NDMS)**](https://github.com/jamixm4-crypto/natbypass/wiki/Keenetic-Routers) — установка в 1 команду, автозапуск `procd/init.d`, интеграция с Web-интерфейсом.
+* [**📡 Роутеры OpenWrt**](https://github.com/jamixm4-crypto/natbypass/wiki/OpenWrt-Routers) — пакеты MIPS / MIPSLE / ARM64 / x86, настройка брандмауэра и зоны VPN.
 
 ---
 
 ### 🛡️ Обход блокировок и Протоколы
-* [[AmneziaWG-DPI-Bypass|🛡️ Обход блокировок через AmneziaWG 2.0]] — тюнинг параметров Jc, S1, S2, H1..H4 для пробития TSPU / DPI.
-* [[Signaling-Telegram-MQTT|💬 Каналы сигнализации (Telegram & MQTT)]] — настройка собственного Telegram-бота или приватного MQTT брокера.
-* [[Xray-Reality-Relay|🛡️ Xray VLESS + XTLS Reality Relay]] — ультимативный 4-й уровень резервной связи через маскированный TCP 443.
+* [**🛡️ Обход блокировок через AmneziaWG 2.0**](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass) — тюнинг параметров Jc, S1, S2, H1..H4 для пробития TSPU / DPI.
+* [**💬 Каналы сигнализации (Telegram & MQTT)**](https://github.com/jamixm4-crypto/natbypass/wiki/Signaling-Telegram-MQTT) — настройка собственного Telegram-бота или приватного MQTT брокера.
+* [**🛡️ Xray VLESS + XTLS Reality Relay**](https://github.com/jamixm4-crypto/natbypass/wiki/Xray-Reality-Relay) — ультимативный 4-й уровень резервной связи через маскированный TCP 443.
 
 ---
 
 ### 🔧 Диагностика и Решение проблем
-* [[Troubleshooting-and-Diagnostics|🔧 Диагностика и Troubleshooting]] — расшифровка кодов ошибок, проверка NAT (Full Cone / Symmetric), CLI-утилита `natbypass-diag`.
+* [**🔧 Диагностика и Troubleshooting**](https://github.com/jamixm4-crypto/natbypass/wiki/Troubleshooting-and-Diagnostics) — расшифровка кодов ошибок, проверка NAT (Full Cone / Symmetric), CLI-утилита `natbypass-diag`.
