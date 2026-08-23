@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"syscall"
 	"time"
 	"unsafe"
 

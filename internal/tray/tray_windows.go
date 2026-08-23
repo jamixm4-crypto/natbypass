@@ -5,9 +5,7 @@ package tray
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -157,7 +155,7 @@ func wndProc(hwnd windows.HWND, msg uint32, wparam, lparam uintptr) uintptr {
 			}
 		case WM_LBUTTONDBLCLK:
 			if globalTray != nil {
-				globalTray.openWebUI()
+				globalTray.activateExistingWindow()
 			}
 		}
 		return 0
