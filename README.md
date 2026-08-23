@@ -1,157 +1,122 @@
-# NatBypass v1.1.0
+# NatBypass v1.2.4
 
-P2P Mesh VPN с автоматическим обходом NAT/CGNAT. Соединяет устройства напрямую без выделенного сервера — через STUN UDP Hole Punching. Работает на Windows, Linux, Keenetic, OpenWrt и Android.
+**P2P Mesh VPN & DPI Bypass** — прямое сокет-в-сокет соединение компьютеров, серверов, телефонов и роутеров через любые виды NAT/CGNAT без выделенных серверов.
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
-[![Release](https://img.shields.io/badge/Release-v1.1.0-8b5cf6?style=flat&logo=github)](https://github.com/jamixm4-crypto/natbypass/releases)
+[![Release](https://img.shields.io/badge/Release-v1.2.4-8b5cf6?style=flat&logo=github)](https://github.com/jamixm4-crypto/natbypass/releases/latest)
+[![Wiki](https://img.shields.io/badge/Wiki-Documentation-blue?style=flat&logo=gitbook)](wiki/Home.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20Keenetic%20%7C%20OpenWrt%20%7C%20Android-brightgreen)](#поддерживаемые-платформы)
 [![Zero CGO](https://img.shields.io/badge/CGO-Zero%20(Pure%20Go)-blue)](https://golang.org)
 
 ---
 
-## Что нового в 1.1.0
+## 📚 [Официальная База Знаний (Wiki)](wiki/Home.md)
 
-- **Нативный Win32 Desktop UI** — приложение отображается как обычное окно Windows без браузера, со своей иконкой в трее.
-- **Адресная книга** — задавайте удобные имена для каждого устройства в сети.
-- **Exit Node (Интернет-шлюз)** — раздайте свой интернет другим узлам через WireGuard NAT в один клик.
-- **Site-to-Site LAN** — анонсируйте локальную подсеть (например `192.168.1.0/24`) для доступа к роутерам, NAS и принтерам.
-- **AmneziaWG 2.0 пресеты** — переключение между обычным WireGuard, режимом обхода DPI и Stealth с ручной настройкой параметров `Jc`, `S1`, `S2`, `H1–H4`.
-- **Диагностика связности** — проверка интернета, внешнего IP, STUN, типа NAT (Full Cone / Symmetric / CGNAT) с кнопкой копирования отчёта.
-- **Windows DPAPI** — конфигурация и токены шифруются через встроенный механизм Windows Data Protection API.
-- **Мгновенный выход** — при закрытии приложения остальные устройства сети немедленно узнают об отключении.
+Полная документация и пошаговые инструкции доступны в нашей [**NatBypass Wiki**](wiki/Home.md):
+* 🚀 [**Быстрый старт за 5 минут**](wiki/Quick-Start.md) — подключение первой P2P-пары устройств без консоли.
+* 🛡️ [**Обход блокировок (AmneziaWG 2.0)**](wiki/AmneziaWG-DPI-Bypass.md) — тюнинг параметров $J_c, S_1, S_2, H_1..H_4$ против ТСПУ / DPI.
+* 🌐 [**Роутеры Keenetic (Entware)**](wiki/Keenetic-Routers.md) & [**OpenWrt**](wiki/OpenWrt-Routers.md) — установка в 1 команду и автозапуск.
+* 📱 [**Android-руководство**](wiki/Android-Setup.md) — подключение по QR-коду и системный VpnService.
+* 🔧 [**Диагностика и устранение неполадок**](wiki/Troubleshooting-and-Diagnostics.md) — расшифровка NAT-типов и проверка связности.
 
 ---
 
-## Как это работает
+## ✨ Что нового в версии 1.2.4
+
+- 🌊 **Шелковистые неоновые графики (Cardinal Spline)** — плавная отрисовка трафика и задержки кубическими сплайнами Безье с динамической неоновой подсветкой.
+- ⚡ **EMA-сглаживание пинга** — экспоненциальное скользящее среднее устраняет сетевой джиттер и предотвращает скачки RTT.
+- 🪟 **Нативное окно Windows (Embedded WebView2)** — красивый современный UI прямо в процессе `NatBypass.exe` с поддержкой Dark Mode, системным треем и защитой от дублирования окон.
+- 📱 **Полноценный GoMobile AAR для Android** — нативный P2P Go-движок внутри `NatBypass.apk` с поддержкой сканирования QR-кодов, AmneziaWG 2.0 и виджетом в шторке.
+- 📡 **4-уровневый стек отказоустойчивости** — автоматический переход: `Direct P2P UDP ➔ AmneziaWG 2.0 ➔ MQTT Datagram Stream ➔ Xray VLESS Reality (TCP 443)`.
+- 🔒 **Шифрование настроек DPAPI** — учетные данные и приватные ключи защищены криптографией Windows Data Protection.
+
+---
+
+## 🏗️ Архитектура P2P сети
 
 ```
               ┌──────────────────────────────────────────────┐
               │          Каналы сигнализации                 │
-              │     [MQTT Broker]  ──  [Telegram Bot]        │
+              │     [Telegram Bot]  ──  [MQTT Broker]        │
               └────────▲─────────────────────────▲──────────┘
-                       │  (зашифрованные беконы) │
+                       │  (зашифрованные маяки)  │
                        │                         │
          ┌─────────────┴──────────┐   ┌──────────┴─────────────┐
-         │    Устройство A        │   │    Устройство B         │
-         │  STUN Discovery        │   │  STUN Discovery         │
-         │  Win32 Desktop App     │   │  Linux/Router Daemon    │
-         │  IP: 10.200.0.1        │   │  IP: 10.200.0.2         │
+         │    Устройство A        │   │    Устройство B        │
+         │  STUN Discovery        │   │  STUN Discovery        │
+         │  Windows App (Wintun)  │   │  Keenetic / Linux / Android
+         │  IP: 10.200.0.1        │   │  IP: 10.200.0.2        │
          └─────────────┬──────────┘   └──────────┬─────────────┘
                        │                         │
-                       └──── Direct UDP Tunnel ───┘
+                       └──── Direct UDP Socket ──┘
                               (P2P / AWG 2.0)
 ```
 
-Устройства обмениваются зашифрованными маяками через MQTT или Telegram. Когда IP и порт обеих сторон известны, устанавливается прямой UDP-туннель. Промежуточный сервер для передачи трафика не нужен.
+Устройства обмениваются зашифрованными маяками через Telegram или MQTT. Когда внешние сокеты определены через STUN, открывается прямой P2P UDP-туннель. Серверы-посредники для самого трафика **не используются**.
 
 ---
 
-## Поддерживаемые платформы
+## 📦 Поддерживаемые платформы
 
-| Платформа | Архитектура | Устройства | Файл |
+| Платформа | Архитектура | Файл релиза | Описание |
 |---|---|---|---|
-| **Windows** | amd64 | Windows 10/11, Server 2019/2022 | `NatBypass-v1.1.0.exe` |
-| **Linux** | amd64 | Ubuntu, Debian, CentOS, Arch | `natbypass-v1.1.0-linux-amd64` |
-| **Linux ARM64** | arm64 | Raspberry Pi 3/4/5, Keenetic Ultra/Giga | `natbypass-v1.1.0-linux-arm64` |
-| **Роутеры MIPS** | mips | OpenWrt, MikroTik (Big Endian) | `natbypass-v1.1.0-router-mips` |
-| **Роутеры MIPSLE** | mipsle | Keenetic Start/City/Air, Xiaomi 3G/4A | `natbypass-v1.1.0-router-mipsle` |
-| **Android** | arm64 | Смартфоны (через Termux или APK) | `natbypass-v1.1.0-android-arm64` |
+| **Windows** | amd64 | [`NatBypass-v1.2.4-windows-amd64.exe`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Windows 10/11 (Desktop UI + Трей) |
+| **Android** | arm64 / arm / x64 | [`NatBypass-v1.2.4.apk`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Android 8.0+ (VpnService + QR-сканер) |
+| **Linux** | amd64 | `natbypass-v1.2.4-linux-amd64` | Ubuntu, Debian, CentOS, Arch |
+| **Linux ARM64** | arm64 | `natbypass-v1.2.4-linux-arm64` | Raspberry Pi 3/4/5, Keenetic Ultra/Giga |
+| **Роутеры MIPS** | mips (Big Endian) | `natbypass-v1.2.4-router-mips` | OpenWrt, MikroTik |
+| **Роутеры MIPSLE** | mipsle (Little Endian)| `natbypass-v1.2.4-router-mipsle`| Keenetic Start/City/Air, Xiaomi 3G/4A |
 
 ---
 
-## Быстрый старт
+## 🚀 Быстрая установка
 
 ### Windows
+1. Скачайте [**`NatBypass-v1.2.4-windows-amd64.exe`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+2. Запустите от имени администратора.
+3. В разделе **«Настройки»** укажите данные Telegram-бота или MQTT-брокера и нажмите **«💾 Сохранить»**.
 
-1. Скачайте [`NatBypass-v1.1.0.exe`](https://github.com/jamixm4-crypto/natbypass/releases/latest)
-2. Запустите — откроется нативное окно приложения
-3. В разделе **«Настройки»** введите токен Telegram-бота или адрес MQTT-брокера
-4. Нажмите **«💾 Сохранить»** и запустите программу на втором устройстве с теми же параметрами
-
-### Linux / Keenetic / OpenWrt / Raspberry Pi (Установка в 1 команду)
-
-Выполните на сервере или роутере (автоматически определит архитектуру `x86_64`, `ARM64`, `MIPS`, `MIPSLE` и настроит автозапуск службы):
-
+### Linux / Keenetic / OpenWrt (Установка в 1 команду)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh | sh
 ```
-или через `wget`:
-```bash
-wget -qO- https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh | sh
-```
+*(или через `wget`: `wget -qO- https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh | sh`)*
 
-После завершения перейдите в веб-панель: `http://<IP_РОУТЕРА>:8080`.
+Панель управления будет доступна по адресу: `http://<IP_УСТРОЙСТВА>:8080`.
 
-#### 🔄 Обновление в 1 команду (без потери настроек)
-
+#### 🔄 Обновление в 1 команду (сохраняет все настройки)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/update.sh | sh
 ```
-*(скрипт автоматически скачивает свежий бинарник под архитектуру вашего процессора, перезапускает службу и оставляет все конфиги, ключи и токены 100% нетронутыми)*
 
-#### 🗑️ Удаление с Linux / Keenetic / OpenWrt
-
-В одну команду:
+#### 🗑️ Удаление
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh
 ```
-*(для полного удаления вместе с конфигами и ключами добавьте флаг `--purge`: `curl -fsSL .../uninstall.sh | sh -s -- --purge`)*
-
-Вручную:
-- **Keenetic Entware**: `/opt/etc/init.d/S99natbypass stop && rm -f /opt/etc/init.d/S99natbypass /opt/bin/natbypass && rm -rf /opt/etc/natbypass`
-- **OpenWrt**: `/etc/init.d/natbypass stop && /etc/init.d/natbypass disable && rm -f /etc/init.d/natbypass /usr/bin/natbypass && rm -rf /etc/natbypass`
-- **Linux (systemd)**: `systemctl disable --now natbypass && rm -f /etc/systemd/system/natbypass.service /usr/local/bin/natbypass && rm -rf /etc/natbypass`
 
 ### Android
-
-1. Скачайте [`NatBypass-v1.1.0.apk`](https://github.com/jamixm4-crypto/natbypass/releases/latest) из раздела Releases
-2. Запустите приложение, отсканируйте QR-код с экрана ПК для моментального сопряжения!
-
----
-
-## Разделы интерфейса
-
-| Вкладка | Назначение |
-|---|---|
-| **Обзор** | Статус подключения, список активных устройств, задержка |
-| **Устройства** | Адресная книга, управление именами, пинг узлов |
-| **Шлюз / Сети** | Настройка Exit Node и Site-to-Site маршрутов |
-| **AmneziaWG 2.0** | Пресеты обхода DPI, экспорт `.conf` файлов |
-| **Журнал** | Лог событий в реальном времени |
-| **Диагностика** | Проверка интернета, STUN, NAT-типа |
-| **Настройки** | Telegram, MQTT, шифрование конфига |
+1. Скачайте [**`NatBypass-v1.2.4.apk`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+2. Нажмите **«📷 Сканировать QR»** и наведите камеру на QR-код во вкладке *«Быстрый старт»* на ПК для мгновенного импорта настроек!
 
 ---
 
-## Сборка из исходников
+## 🛠️ Сборка из исходников
 
 ```bash
-# Нативный Windows Desktop App
-GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -H=windowsgui" -o NatBypass.exe ./cmd/natbypass-gui
+# Windows Desktop App (с нативным WebView2)
+GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H=windowsgui" -o NatBypass.exe ./cmd/natbypass
 
-# Linux / Роутер
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o natbypass ./cmd/natbypass
+# Linux / Сервер
+GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o natbypass ./cmd/natbypass
 
-# MIPS для Keenetic/OpenWrt
-GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -ldflags="-s -w" -o natbypass-mipsle ./cmd/natbypass
+# MIPSLE для роутеров Keenetic / OpenWrt
+GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o natbypass-mipsle ./cmd/natbypass
 ```
 
-Или используйте **NatBypass Builder** — графический инструмент для сборки под все платформы одновременно.
-
 ---
 
-## Документация
+## 📄 Лицензия
 
-- [Быстрый старт за 5 минут](docs/QUICKSTART.md)
-- [Настройка AmneziaWG 2.0 и обход DPI](docs/AMNEZIA_WG.md)
-- [Установка на роутеры Keenetic](docs/ROUTERS_KEENETIC.md)
-- [Установка на OpenWrt](docs/ROUTERS_OPENWRT.md)
-- [Android](docs/ANDROID.md)
-- [Настройка Telegram и MQTT](docs/SIGNALING_SETUP.md)
+Проект распространяется под открытой лицензией [MIT](LICENSE).
 
----
-
-## Лицензия
-
-[MIT](LICENSE)
