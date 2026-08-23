@@ -1,5 +1,6 @@
 # Binaries and build outputs
 dist/
+release/
 bin/
 *.exe
 *.exe~

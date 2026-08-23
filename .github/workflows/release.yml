@@ -41,6 +41,7 @@ jobs:
               $tag = $latestTag
           }
           Write-Host "Building release for tag: $tag"
+          Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path release | Out-Null
 
           Write-Host "==> 1. Building Windows Standalone Desktop App (NatBypass.exe)..."
