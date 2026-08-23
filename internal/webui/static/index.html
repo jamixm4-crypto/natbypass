@@ -791,7 +791,10 @@
             <h3 style="font-size: 1rem; font-weight: 700;">👥 Устройства в вашей P2P Mesh сети</h3>
             <p style="font-size: 0.78rem; color: var(--text-muted);">Прямая связь сокет-в-сокет без промежуточных серверов</p>
           </div>
-          <button onclick="refreshData()" class="btn btn-glass" style="font-size: 0.78rem;">⚡ Синхронизация</button>
+          <div style="display:flex; gap:8px;">
+            <button onclick="clearPeersCache()" class="btn btn-glass" style="font-size: 0.78rem; border-color: rgba(239, 68, 68, 0.4); color: #f87171;" title="Сбросить кэш старых устройств и опросить только текущий топик">🧹 Очистить кэш</button>
+            <button onclick="refreshData()" class="btn btn-glass" style="font-size: 0.78rem;">⚡ Синхронизация</button>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -820,7 +823,10 @@
             <h2 style="font-size: 1.15rem; font-weight: 800;">👥 Адресная книга & Устройства сети</h2>
             <p style="color: var(--text-muted); font-size: 0.8rem;">Назначайте имена, копируйте Virtual IP, тестируйте RTT пинг сокетов</p>
           </div>
-          <button onclick="refreshData()" class="btn btn-neon">⚡ Обновить маяки</button>
+          <div style="display:flex; gap:8px;">
+            <button onclick="clearPeersCache()" class="btn btn-glass" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171;">🧹 Очистить кэш</button>
+            <button onclick="refreshData()" class="btn btn-neon">⚡ Обновить маяки</button>
+          </div>
         </div>
 
         <div class="table-wrap">
@@ -1148,9 +1154,14 @@
           </div>
         </div>
 
-        <button onclick="saveAllSettings()" class="btn btn-neon" style="width:100%; justify-content:center; padding: 12px;">
-          💾 Сохранить настройки с Windows DPAPI шифрованием
-        </button>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <button onclick="saveAllSettings()" class="btn btn-neon" style="width:100%; justify-content:center; padding: 12px;">
+            💾 Сохранить настройки с Windows DPAPI шифрованием
+          </button>
+          <button onclick="clearPeersCache()" class="btn btn-glass" style="width:100%; justify-content:center; padding: 10px; border-color: rgba(239, 68, 68, 0.4); color: #f87171;">
+            🧹 Очистить кэш устройств и пересканировать сеть
+          </button>
+        </div>
       </div>
     </div>
   </main>
@@ -2378,6 +2389,25 @@
         refreshData();
       } else {
         showToast('Ошибка сохранения: ' + json.error);
+      }
+    }
+
+    async function clearPeersCache() {
+      showToast('⏳ Очистка кэша устройств...');
+      try {
+        const res = await fetch('/api/peers/clear', {method: 'POST'});
+        const json = await res.json();
+        if (json.ok) {
+          cachedPeers = [];
+          renderPeers([]);
+          document.getElementById('statPeersCount').innerText = '0';
+          showToast('🧹 Кэш устройств очищен! Сеть пересканируется...');
+          setTimeout(refreshData, 600);
+        } else {
+          showToast('Ошибка сброса: ' + (json.error || 'неизвестно'));
+        }
+      } catch(e) {
+        showToast('Ошибка сети при сбросе кэша');
       }
     }
 

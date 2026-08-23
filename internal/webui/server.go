@@ -163,6 +163,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/peers", s.handlePeers)
+	mux.HandleFunc("/api/peers/clear", s.handlePeersClear)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/refresh-ip", s.handleRefreshIP)
 	mux.HandleFunc("/api/channel/switch", s.handleChannelSwitch)
@@ -1475,8 +1476,25 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.AddEvent("info", "Конфигурация зашифрована DPAPI и сохранена", fmt.Sprintf("device=%s", req.DeviceName))
-	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true}, "")
+	if s.registry != nil {
+		s.registry.ClearAll()
+	}
+	s.AddEvent("info", "Конфигурация зашифрована DPAPI и сохранена — кэш устройств очищен", fmt.Sprintf("device=%s", req.DeviceName))
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "Настройки сохранены! Кэш устройств сброшен."}, "")
+}
+
+// handlePeersClear — POST /api/peers/clear — принудительный сброс кэша устройств
+func (s *Server) handlePeersClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	if s.registry != nil {
+		s.registry.ClearAll()
+	}
+	s.AddEvent("info", "Кэш устройств очищен пользователем вручную", "")
+	slog.Info("Кэш устройств сброшен через Web UI")
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "Кэш устройств очищен. Сеть пересканируется."}, "")
 }
 
 // handleFavicon — GET /favicon.ico — отдаёт кастомный значок NatBypass для браузера и оконного фрейма
