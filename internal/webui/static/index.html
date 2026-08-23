@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -613,6 +613,7 @@
       z-index: 200;
     }
   </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <!-- SVG Gradients -->
@@ -688,7 +689,7 @@
       </div>
 
       <!-- Profile Capsule -->
-      <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство">
+      <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; padding: 7px 16px; border-radius: 20px; font-weight: 700; font-size: 0.84rem; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);" title="Показать QR-код для Android / WireGuard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg><span>📱 QR для Android</span></button>`n      <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство">
         <div class="user-avatar" id="userAvatar">N</div>
         <span id="userNameLabel" style="font-size:0.85rem; font-weight:700;">Мой компьютер</span>
         <div class="online-dot"></div>
@@ -935,7 +936,7 @@
 
         <div style="display:flex; gap: 12px;">
           <button onclick="copyAwgConf()" class="btn btn-neon">📋 Скопировать конфиг</button>
-          <a href="/api/awg/config" download="natbypass.conf" class="btn btn-glass">💾 Скачать natbypass.conf</a>
+          <a href="/api/awg/config" download="natbypass.conf" class="btn btn-glass">💾 Скачать natbypass.conf</a>`n          <button onclick="openQRModal('awg')" class="btn btn-glass" style="color:#c084fc; border-color:rgba(168,85,247,0.4);">📱 Показать QR для телефона</button>
         </div>
       </div>
     </div>
@@ -1123,6 +1124,48 @@
     </div>
   </div>
 
+    <!-- QR Code Modal -->
+  <div id="qrModal" class="modal-overlay">
+    <div class="modal-box" style="width: 500px; text-align: center;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+        <h3 style="font-size: 1.15rem; font-weight: 800; display:flex; align-items:center; gap:8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          QR-код для Android и WireGuard
+        </h3>
+        <button onclick="closeQRModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;">✕</button>
+      </div>
+
+      <!-- QR Mode Selector -->
+      <div class="segmented-group" style="width:100%; justify-content:center; margin-bottom: 18px;">
+        <button id="btnQrModeSync" onclick="switchQRMode('sync')" class="seg-btn active" style="flex:1;">⚡ Настройки Android</button>
+        <button id="btnQrModeAwg" onclick="switchQRMode('awg')" class="seg-btn" style="flex:1;">🛡️ AmneziaWG .conf</button>
+        <button id="btnQrModeInvite" onclick="switchQRMode('invite')" class="seg-btn" style="flex:1;">🔗 Invite Link</button>
+      </div>
+
+      <!-- QR Canvas Card with high contrast border -->
+      <div style="display:inline-block; padding: 16px; background: #ffffff; border-radius: 16px; box-shadow: 0 0 35px rgba(168, 85, 247, 0.4); margin-bottom: 16px;">
+        <div id="qrContainer" style="width:230px; height:230px; display:flex; align-items:center; justify-content:center;"></div>
+      </div>
+
+      <p id="qrDescText" style="color: var(--text-muted); font-size: 0.84rem; line-height: 1.5; margin-bottom: 16px;">
+        Откройте камеру в приложении <b>NatBypass Android</b> и отсканируйте код для мгновенной синхронизации всех параметров сети.
+      </p>
+
+      <div class="form-group" style="text-align: left; margin-bottom: 16px;">
+        <label class="form-label" style="display:flex; justify-content:space-between;">
+          <span>Текст / Данные QR-кода:</span>
+          <a href="javascript:void(0)" onclick="copyQRText()" style="color:#38bdf8; text-decoration:none; font-size:0.75rem;">📋 Скопировать</a>
+        </label>
+        <textarea id="qrRawText" class="form-input mono" rows="3" readonly style="font-size:0.78rem; line-height:1.3; resize:none;"></textarea>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap: 10px;">
+        <button onclick="closeQRModal()" class="btn btn-glass">Закрыть</button>
+        <button onclick="copyQRText()" class="btn btn-neon">📋 Скопировать данные</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div id="toast" class="toast">✓ Настройки успешно сохранены</div>
 
@@ -1132,6 +1175,110 @@
     let cachedPeers = [];
     let latencyHistory = [8, 12, 10, 14, 11, 16, 12, 15, 14, 12, 16, 14];
     let stunPulsePhase = 0;
+
+        let currentQRMode = 'sync';
+    let qrInstance = null;
+
+    function openQRModal(mode) {
+      if (mode) currentQRMode = mode;
+      document.getElementById('qrModal').classList.add('active');
+      switchQRMode(currentQRMode);
+    }
+
+    function closeQRModal() {
+      document.getElementById('qrModal').classList.remove('active');
+    }
+
+    async function switchQRMode(mode) {
+      currentQRMode = mode;
+      document.getElementById('btnQrModeSync').classList.toggle('active', mode === 'sync');
+      document.getElementById('btnQrModeAwg').classList.toggle('active', mode === 'awg');
+      document.getElementById('btnQrModeInvite').classList.toggle('active', mode === 'invite');
+
+      let qrPayload = '';
+      const descEl = document.getElementById('qrDescText');
+
+      if (mode === 'sync') {
+        descEl.innerHTML = 'Откройте сканер в приложении <b>NatBypass Android</b>. Приложение автоматически скопирует токен бота, чат и сетевые настройки.';
+        const devId = document.getElementById('userNameLabel').innerText || 'Device';
+        const tgToken = document.getElementById('cfgTgToken').value.trim();
+        const tgChat = document.getElementById('cfgTgChat').value.trim();
+        const mqttBroker = document.getElementById('cfgMqttBroker').value.trim();
+        const mqttTopic = document.getElementById('cfgMqttTopic').value.trim();
+        
+        qrPayload = JSON.stringify({
+          device_id: devId,
+          tg_token: tgToken,
+          tg_chat: tgChat,
+          mqtt_broker: mqttBroker,
+          mqtt_topic: mqttTopic
+        });
+      } else if (mode === 'awg') {
+        descEl.innerHTML = 'Отсканируйте камерой в приложении <b>AmneziaWG</b> или <b>WireGuard</b> на телефоне для добавления VPN-туннеля.';
+        qrPayload = document.getElementById('awgConfText').value.trim();
+        if (!qrPayload) {
+          try {
+            const res = await fetch('/api/awg/config');
+            qrPayload = await res.text();
+          } catch(e) {}
+        }
+      } else {
+        descEl.innerHTML = 'Универсальное приглашение в P2P сеть NatBypass для других компьютеров и серверов.';
+        const devId = document.getElementById('userNameLabel').innerText || 'Device';
+        const stunIp = (document.getElementById('topStunLabel').innerText || '').replace('STUN: ', '');
+        qrPayload = `NatBypass|${devId}|${stunIp}|https://github.com/jamixm4-crypto/natbypass/releases/latest`;
+      }
+
+      document.getElementById('qrRawText').value = qrPayload;
+      renderQR(qrPayload);
+    }
+
+    function renderQR(text) {
+      const container = document.getElementById('qrContainer');
+      container.innerHTML = '';
+      if (!text) {
+        container.innerHTML = '<span style="color:#666; font-size:0.8rem;">Нет данных</span>';
+        return;
+      }
+
+      if (typeof QRCode !== 'undefined') {
+        try {
+          qrInstance = new QRCode(container, {
+            text: text,
+            width: 230,
+            height: 230,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: (text.length > 250) ? QRCode.CorrectLevel.L : QRCode.CorrectLevel.M
+          });
+          return;
+        } catch(e) {
+          console.warn('QRCode JS error, falling back to SVG/Canvas:', e);
+        }
+      }
+
+      // Offline Fallback using online/offline Google Chart or canvas message
+      const img = document.createElement('img');
+      img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=230x230&data=' + encodeURIComponent(text);
+      img.style.width = '230px';
+      img.style.height = '230px';
+      img.onerror = () => {
+        container.innerHTML = '<div style="color:#000; font-size:0.75rem; word-break:break-all; padding:10px;"><b>Скопируйте текст вручную:</b><br>' + text.substring(0, 100) + '...</div>';
+      };
+      container.appendChild(img);
+    }
+
+    function copyQRText() {
+      const text = document.getElementById('qrRawText').value;
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('✓ Данные QR-кода скопированы в буфер обмена');
+      }).catch(() => {
+        document.getElementById('qrRawText').select();
+        document.execCommand('copy');
+        showToast('✓ Скопировано');
+      });
+    }
 
     function switchTab(tabName) {
       currentTab = tabName;
