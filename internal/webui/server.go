@@ -449,9 +449,18 @@ func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		cfg, err := config.Load(s.configPath)
-		if err != nil {
-			// Возвращаем дефолтный если файла нет
+		cfgPath := s.configPath
+		if cfgPath == "" || cfgPath == "config.yaml" {
+			if runtime.GOOS == "linux" {
+				if _, err := os.Stat("/etc/natbypass/config.yaml"); err == nil {
+					cfgPath = "/etc/natbypass/config.yaml"
+				} else if _, err := os.Stat("/opt/etc/natbypass/config.yaml"); err == nil {
+					cfgPath = "/opt/etc/natbypass/config.yaml"
+				}
+			}
+		}
+		cfg, err := config.Load(cfgPath)
+		if err != nil || cfg == nil {
 			cfg = &config.Config{}
 			cfg.WebUI.Port = s.port
 			cfg.WebUI.Enabled = true
