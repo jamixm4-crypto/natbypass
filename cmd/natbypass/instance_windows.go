@@ -1,4 +1,4 @@
-﻿//go:build windows
+//go:build windows
 
 package main
 
@@ -54,7 +54,7 @@ func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
 	}
-	url := fmt.Sprintf("http://localhost:%d", port)
+	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData == "" {

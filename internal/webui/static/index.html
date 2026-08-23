@@ -1584,36 +1584,49 @@
       if (progPct) progPct.innerText = '100%';
 
       let attempts = 0;
-      const maxAttempts = 30; // до 30 секунд ожидания
+      let consecutiveSuccess = 0;
+      const maxAttempts = 40; // до 40 секунд ожидания
       
       const checkInterval = setInterval(async () => {
         attempts++;
         if (progStatus) {
-          progStatus.innerText = `🔄 Перезапуск NatBypass... Ожидание готовности службы (${attempts}с)...`;
-          progStatus.style.color = '#38bdf8';
+          if (consecutiveSuccess > 0) {
+            progStatus.innerText = `🛡️ Сетевой адаптер инициализирован. Стабилизация подключения (${consecutiveSuccess}/3)...`;
+            progStatus.style.color = '#a855f7';
+          } else {
+            progStatus.innerText = `🔄 Перезапуск NatBypass... Ожидание готовности службы (${attempts}с)...`;
+            progStatus.style.color = '#38bdf8';
+          }
         }
 
         try {
           const res = await fetch('/api/status?_t=' + Date.now(), { cache: 'no-store' });
           if (res.ok) {
-            clearInterval(checkInterval);
-            if (progStatus) {
-              progStatus.innerText = '✓ Сервер готов! Обновление страницы...';
-              progStatus.style.color = '#10b981';
+            consecutiveSuccess++;
+            // Ждем 3 успешных ответа подряд, чтобы Wintun адаптер и маршруты
+            // полностью стабилизировались в Windows NLA и не вызвали ошибку ERR_NETWORK_CHANGED
+            if (consecutiveSuccess >= 3) {
+              clearInterval(checkInterval);
+              if (progStatus) {
+                progStatus.innerText = '✓ Сеть и служба готовы! Переход...';
+                progStatus.style.color = '#10b981';
+              }
+              showToast('🎉 NatBypass успешно обновлен и запущен!');
+              setTimeout(() => {
+                window.location.replace(window.location.origin + '/?v=' + Date.now());
+              }, 1000);
             }
-            showToast('🎉 NatBypass успешно обновлен и запущен!');
-            setTimeout(() => {
-              window.location.href = window.location.origin + '/?v=' + Date.now();
-            }, 800);
+          } else {
+            consecutiveSuccess = 0;
           }
         } catch (e) {
-          // Сервер еще поднимается
+          consecutiveSuccess = 0;
         }
 
         if (attempts >= maxAttempts) {
           clearInterval(checkInterval);
           if (progStatus) {
-            progStatus.innerHTML = `⚠️ Сервер перезапускается дольше обычного. <button onclick="window.location.reload()" class="btn btn-glass" style="margin-left:8px; padding:3px 8px;">🔄 Обновить вручную</button>`;
+            progStatus.innerHTML = `⚠️ Сервер перезапускается дольше обычного. <button onclick="window.location.replace(window.location.origin + '/?v=' + Date.now())" class="btn btn-glass" style="margin-left:8px; padding:3px 8px;">🔄 Обновить сейчас</button>`;
             progStatus.style.color = '#fbbf24';
           }
         }
