@@ -499,7 +499,7 @@ func startBuild(mode string) {
 	pass := getControlText(hTxtPass)
 
 	buildDate := time.Now().UTC().Format(time.RFC3339)
-	version := "1.0.0"
+	version := "1.1.0"
 	commit := "release"
 	module := "github.com/natbypass/natbypass"
 
@@ -607,11 +607,11 @@ func startBuild(mode string) {
 		}
 	}
 
-	// Also build natbypass-gui.exe if Windows was checked
+	// Build NatBypass.exe (Windows GUI Desktop App with Embedded Modern Web UI)
 	if isChecked(hChkWin) || mode == "all" {
-		guiOut := filepath.Join(distDir, "natbypass-gui.exe")
-		appendLog("   🔨 Компиляция GUI версии natbypass-gui.exe... ")
-		cmd := exec.Command(goExe, "build", "-trimpath", "-ldflags", ldflags+" -H=windowsgui", "-o", guiOut, "./cmd/natbypass-gui")
+		guiOut := filepath.Join(distDir, "NatBypass.exe")
+		appendLog("   🔨 Компиляция актуального NatBypass.exe с новым интерфейсом... ")
+		cmd := exec.Command(goExe, "build", "-trimpath", "-ldflags", ldflags+" -H=windowsgui", "-o", guiOut, "./cmd/natbypass")
 		cmd.Dir = projectRoot
 		cmd.Env = append(envBase, "GOOS=windows", "GOARCH=amd64")
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -622,8 +622,6 @@ func startBuild(mode string) {
 				sz = float64(fi.Size()) / (1024 * 1024)
 			}
 			appendLog(fmt.Sprintf("OK (%.2f МБ)\r\n", sz))
-			// Копируем как NatBypass.exe
-			exec.Command("cmd", "/c", "copy", "/y", guiOut, filepath.Join(distDir, "NatBypass.exe")).Run()
 		}
 	}
 
