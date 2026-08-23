@@ -106,27 +106,14 @@ jobs:
               $tag = $latestTag
           }
           
-          # Create release if not exists
-          $rel = gh release view $tag 2>$null
-          if (!$rel) {
-              gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --target main
-          }
-          
-          # Delete outdated / stale / test assets
-          try {
-              $relJson = gh release view $tag --json assets | ConvertFrom-Json
-              if ($relJson -and $relJson.assets) {
-                  foreach ($a in $relJson.assets) {
-                      $name = $a.name
-                      if ($name -match "^test-" -or ($name -notmatch "^NatBypass-$tag" -and $name -notmatch "^natbypass-$tag" -and $name -notmatch "^NatBypass\." -and $name -notmatch "^NatBypass-Builder\." -and $name -notmatch "^NatBypass-windows-" -and $name -notmatch "^config\.yaml")) {
-                          Write-Host "==> Deleting stale asset: $name"
-                          gh release delete-asset $tag $name -y 2>$null
-                      }
-                  }
-              }
-          } catch {
-              Write-Host "Asset cleanup notice: $_"
-          }
+          # Удаляем старый/загрязненный релиз перед созданием чистого
+          Write-Host "==> Purging old release $tag if exists..."
+          gh release delete $tag -y --cleanup-tag=false 2>$null
+          gh release delete v1.1.0 -y --cleanup-tag=false 2>$null
+
+          # Создаем чистый релиз с нуля
+          Write-Host "==> Creating brand new clean release $tag..."
+          gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --target main
 
           $files = Get-ChildItem -Path release -File
           foreach ($f in $files) {
@@ -134,6 +121,6 @@ jobs:
               gh release upload $tag $f.FullName --clobber
           }
           
-          # Ensure marked as Latest release
+          # Устанавливаем статус Latest
           gh release edit $tag --latest --title "NatBypass $tag" 2>$null
-          Write-Host "==> All release files successfully uploaded for $tag!"
+          Write-Host "==> All fresh release files successfully uploaded for $tag!"
