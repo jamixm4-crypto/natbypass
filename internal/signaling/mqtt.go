@@ -13,10 +13,13 @@ import (
 )
 
 type MQTTChannel struct {
-	client   mqtt.Client
-	topic    string
-	outMu    sync.RWMutex
-	outChans []chan *Payload
+	client        mqtt.Client
+	topic         string
+	outMu         sync.RWMutex
+	outChans      []chan *Payload
+	tunnelMu      sync.RWMutex
+	tunnelTopic   string
+	tunnelHandler func(pkt []byte)
 }
 
 func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTTChannel {
@@ -60,11 +63,23 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 	opts.SetWill(topic, string(lwtPayload), 0, false)
 
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
-			log.Info().Str("broker", brokerURL).Str("topic", topic).Msg("MQTT подключен, подписка на топик...")
-			c.Subscribe(topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-				ch.handleIncoming(msg)
+		log.Info().Str("broker", brokerURL).Str("topic", topic).Msg("MQTT подключен, подписка на топики...")
+		c.Subscribe(topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+			ch.handleIncoming(msg)
+		})
+		ch.tunnelMu.RLock()
+		tTopic := ch.tunnelTopic
+		tHandler := ch.tunnelHandler
+		ch.tunnelMu.RUnlock()
+		if tTopic != "" && tHandler != nil {
+			log.Info().Str("tunnel_topic", tTopic).Msg("MQTT подписка на туннельный поток...")
+			c.Subscribe(tTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				if len(msg.Payload()) >= 20 {
+					tHandler(msg.Payload())
+				}
 			})
-		}).
+		}
+	}).
 		SetConnectionLostHandler(func(c mqtt.Client, err error) {
 			log.Warn().Err(err).Msg("MQTT connection lost, reconnecting...")
 		})
@@ -167,8 +182,13 @@ func (m *MQTTChannel) PublishTunnelData(targetDevID string, pkt []byte) error {
 
 // SubscribeTunnelData подписывается на входящие пакеты туннеля для текущего узла
 func (m *MQTTChannel) SubscribeTunnelData(myDevID string, onPkt func(pkt []byte)) {
-	if m.client.IsConnected() {
-		topic := fmt.Sprintf("%s/tunnel/%s", m.topic, myDevID)
+	topic := fmt.Sprintf("%s/tunnel/%s", m.topic, myDevID)
+	m.tunnelMu.Lock()
+	m.tunnelTopic = topic
+	m.tunnelHandler = onPkt
+	m.tunnelMu.Unlock()
+
+	if m.client != nil && m.client.IsConnected() {
 		m.client.Subscribe(topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
 			if len(msg.Payload()) >= 20 && onPkt != nil {
 				onPkt(msg.Payload())

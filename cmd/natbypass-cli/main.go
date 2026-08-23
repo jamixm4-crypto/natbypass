@@ -30,7 +30,7 @@ import (
 
 // Заполняется при сборке через -ldflags -X
 var (
-	Version   = "1.2.0"
+	Version   = "1.2.1"
 	Commit    = "release"
 	BuildDate = "unknown"
 

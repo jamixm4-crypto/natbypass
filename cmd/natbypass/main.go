@@ -33,7 +33,7 @@ import (
 
 // Заполняется при сборке через -ldflags -X
 var (
-	Version   = "1.2.0"
+	Version   = "1.2.1"
 	Commit    = "release"
 	BuildDate = "unknown"
 
@@ -377,6 +377,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				log.Error().Err(err).Msg("Web UI остановлен")
 			}
 		}()
+		if runtime.GOOS == "windows" {
+			openAppWindow(port)
+		}
 	}
 
 	adapterName := "nb0"
