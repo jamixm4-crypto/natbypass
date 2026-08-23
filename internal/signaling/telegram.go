@@ -172,9 +172,6 @@ func (t *TelegramChannel) Receive(ctx context.Context) (<-chan *Payload, error) 
 
 				if err := json.Unmarshal(body, &result); err == nil && result.Ok {
 					for _, update := range result.Result {
-						if update.UpdateID >= lastOffset {
-							lastOffset = update.UpdateID + 1
-						}
 						t.seenMu.Lock()
 						if t.seenIDs[update.UpdateID] {
 							t.seenMu.Unlock()
