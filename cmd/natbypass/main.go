@@ -283,7 +283,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	}
 	if len(channels) == 0 {
 		log.Warn().Msg("⚠️ Сигнальные каналы не настроены в конфиге. Включен резервный публичный MQTT брокер (topic: natbypass/public/peers). Вы можете настроить личный Telegram-бот в Web UI (http://localhost:8080) или файле config.yaml")
-		channels = append(channels, signaling.NewMQTTChannel("tcp://mqtt.eclipseprojects.io:1883", "natbypass/public/peers", deviceID, "", ""))
+		channels = append(channels, signaling.NewMQTTChannel("tcp://broker.emqx.io:1883", "natbypass/public/peers", deviceID, "", ""))
 	}
 	sigMgr := signaling.NewFallbackManager(channels)
 	log.Info().Int("channels", len(channels)).Str("current", sigMgr.CurrentChannel()).Msg("Сигнальные каналы инициализированы")
