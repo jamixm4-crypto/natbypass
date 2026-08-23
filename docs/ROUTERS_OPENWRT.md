@@ -1,6 +1,6 @@
 # 📡 Инструкция по настройке для роутеров OpenWrt
 
-NatBypass идеально подходит для роутеров под управлением OpenWrt (Xiaomi, TP-Link, MikroTik, GL.iNet, Banana Pi и др.).
+NatBypass идеально подходит для роутеров под управлением OpenWrt (Xiaomi, TP-Link, GL.iNet, Banana Pi и др.).
 
 ---
 

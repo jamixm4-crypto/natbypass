@@ -65,7 +65,7 @@
 | **Android** | arm64 / arm / x64 | [`NatBypass-v1.2.4.apk`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Android 8.0+ (VpnService + QR-сканер) |
 | **Linux** | amd64 | `natbypass-v1.2.4-linux-amd64` | Ubuntu, Debian, CentOS, Arch |
 | **Linux ARM64** | arm64 | `natbypass-v1.2.4-linux-arm64` | Raspberry Pi 3/4/5, Keenetic Ultra/Giga |
-| **Роутеры MIPS** | mips (Big Endian) | `natbypass-v1.2.4-router-mips` | OpenWrt, MikroTik |
+| **Роутеры MIPS** | mips (Big Endian) | `natbypass-v1.2.4-router-mips` | OpenWrt (TP-Link, GL.iNet, Atheros) |
 | **Роутеры MIPSLE** | mipsle (Little Endian)| `natbypass-v1.2.4-router-mipsle`| Keenetic Start/City/Air, Xiaomi 3G/4A |
 
 ---
