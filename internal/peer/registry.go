@@ -210,8 +210,8 @@ func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				r.MarkOffline(25 * time.Second)
-				r.Cleanup(90 * time.Second)
+				r.MarkOffline(45 * time.Second)
+				r.Cleanup(15 * time.Minute)
 			}
 		}
 	}()

@@ -117,18 +117,12 @@ func (t *TelegramChannel) Receive(ctx context.Context) (<-chan *Payload, error) 
 
 	go func() {
 		defer close(out)
-		lastOffset := 0
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				var apiURL string
-				if lastOffset == 0 {
-					apiURL = fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=-20&limit=50&timeout=5", t.token)
-				} else {
-					apiURL = fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&limit=50&timeout=5", t.token, lastOffset)
-				}
+				apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=-40&limit=50&timeout=4", t.token)
 				req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 				if err != nil {
 					select {

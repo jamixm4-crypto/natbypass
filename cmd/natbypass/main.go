@@ -594,7 +594,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	}
 
 	publishInterval := time.Duration(cfg.App.PublishInterval) * time.Second
-	if publishInterval == 0 {
+	if publishInterval <= 0 || publishInterval > 15*time.Second {
 		publishInterval = 8 * time.Second
 	}
 
