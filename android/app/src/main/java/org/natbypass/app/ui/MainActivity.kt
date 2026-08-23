@@ -162,6 +162,13 @@ class MainActivity : AppCompatActivity() {
                 val obj = jsonArray.getJSONObject(i)
                 val id = if (obj.has("device_id")) obj.getString("device_id") else obj.optString("DeviceID", "Устройство $i")
                 val nick = if (obj.has("nickname")) obj.getString("nickname") else obj.optString("Nickname", "")
+                val displayName = if (nick.isNotEmpty()) "$nick ($id)" else id
+                val vip = if (obj.has("virtual_ip")) obj.getString("virtual_ip") else obj.optString("VirtualIP", "")
+                val pubIp = if (obj.has("public_ip")) obj.getString("public_ip") else obj.optString("PublicIP", "—")
+                val ipDisplay = if (vip.isNotEmpty()) vip else pubIp
+                val stun = if (obj.has("stun_addr")) obj.getString("stun_addr") else obj.optString("STUNAddr", "")
+                val isOnline = if (obj.has("online")) obj.getBoolean("online") else obj.optBoolean("Online", true)
+
                 var plat = if (obj.has("platform")) obj.getString("platform") else obj.optString("Platform", "")
                 if (plat.isEmpty()) {
                     val lower = id.lowercase()
