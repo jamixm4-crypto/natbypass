@@ -1624,8 +1624,7 @@
               }
               showToast('🎉 NatBypass успешно обновлен и запущен!');
               setTimeout(() => {
-                const port = window.location.port || '8080';
-                window.location.replace('http://127.0.0.1:' + port + '/?v=' + Date.now());
+                window.location.replace(window.location.pathname + '?v=' + Date.now());
               }, 1000);
             }
           } else {
@@ -1638,8 +1637,7 @@
         if (attempts >= maxAttempts) {
           clearInterval(checkInterval);
           if (progStatus) {
-            const port = window.location.port || '8080';
-            progStatus.innerHTML = `⚠️ Сервер перезапускается дольше обычного. <button onclick="window.location.replace('http://127.0.0.1:${port}/?v=' + Date.now())" class="btn btn-glass" style="margin-left:8px; padding:3px 8px;">🔄 Обновить сейчас</button>`;
+            progStatus.innerHTML = `⚠️ Сервер перезапускается дольше обычного. <button onclick="window.location.replace(window.location.pathname + '?v=' + Date.now())" class="btn btn-glass" style="margin-left:8px; padding:3px 8px;">🔄 Обновить сейчас</button>`;
             progStatus.style.color = '#fbbf24';
           }
         }
