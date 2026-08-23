@@ -113,6 +113,8 @@ func main() {
 		newWGCmd(),
 		newInstallCmd(),
 		newUpdateCmd(),
+		newSetTopicCmd(),
+		newSetTelegramCmd(),
 		newAntGravityCmd(),
 		newKonamiCmd(),
 		newVersionCmd(),
@@ -120,6 +122,114 @@ func main() {
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+// ── set-topic ──────────────────────────────────────────────────
+func newSetTopicCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set-topic [topic]",
+		Short: "Установить новый MQTT топик и применить настройки",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			newTopic := args[0]
+			cfgPath := configFile
+			if cfgPath == "config.yaml" && runtime.GOOS == "linux" {
+				if _, err := os.Stat("/etc/natbypass/config.yaml"); err == nil {
+					cfgPath = "/etc/natbypass/config.yaml"
+				} else if _, err := os.Stat("/opt/etc/natbypass/config.yaml"); err == nil {
+					cfgPath = "/opt/etc/natbypass/config.yaml"
+				}
+			}
+			cfg, err := config.Load(cfgPath)
+			if err != nil || cfg == nil {
+				cfg = buildDefaultConfig()
+			}
+			hasMqtt := false
+			for i, ch := range cfg.Signaling.Channels {
+				if ch.Type == "mqtt" {
+					hasMqtt = true
+					if ch.Params == nil { ch.Params = make(map[string]string) }
+					ch.Params["topic"] = newTopic
+					ch.Enabled = true
+					cfg.Signaling.Channels[i] = ch
+				}
+			}
+			if !hasMqtt {
+				cfg.Signaling.Channels = append(cfg.Signaling.Channels, config.ChannelConfig{
+					Type:    "mqtt",
+					Enabled: true,
+					Params:  map[string]string{"broker_url": "tcp://broker.emqx.io:1883", "topic": newTopic},
+				})
+			}
+			if err := config.Save(cfg, cfgPath, runtime.GOOS == "windows"); err != nil {
+				return fmt.Errorf("ошибка записи %s: %w", cfgPath, err)
+			}
+			fmt.Printf("✓ MQTT топик успешно обновлен на: %s (файл: %s)\n", newTopic, cfgPath)
+			if runtime.GOOS == "linux" {
+				if _, err := os.Stat("/etc/systemd/system/natbypass.service"); err == nil {
+					_ = exec.Command("systemctl", "restart", "natbypass").Run()
+					fmt.Println("✓ Служба systemd перезапущена.")
+				} else if _, err := os.Stat("/opt/etc/init.d/S99natbypass"); err == nil {
+					_ = exec.Command("/opt/etc/init.d/S99natbypass", "restart").Run()
+					fmt.Println("✓ Служба Keenetic Entware перезапущена.")
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// ── set-telegram ───────────────────────────────────────────────
+func newSetTelegramCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set-telegram [token] [chat_id]",
+		Short: "Установить токен и chat_id Telegram бота",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			token, chatID := args[0], args[1]
+			cfgPath := configFile
+			if cfgPath == "config.yaml" && runtime.GOOS == "linux" {
+				if _, err := os.Stat("/etc/natbypass/config.yaml"); err == nil {
+					cfgPath = "/etc/natbypass/config.yaml"
+				} else if _, err := os.Stat("/opt/etc/natbypass/config.yaml"); err == nil {
+					cfgPath = "/opt/etc/natbypass/config.yaml"
+				}
+			}
+			cfg, err := config.Load(cfgPath)
+			if err != nil || cfg == nil {
+				cfg = buildDefaultConfig()
+			}
+			hasTg := false
+			for i, ch := range cfg.Signaling.Channels {
+				if ch.Type == "telegram" {
+					hasTg = true
+					if ch.Params == nil { ch.Params = make(map[string]string) }
+					ch.Params["token"] = token
+					ch.Params["chat_id"] = chatID
+					ch.Enabled = true
+					cfg.Signaling.Channels[i] = ch
+				}
+			}
+			if !hasTg {
+				cfg.Signaling.Channels = append(cfg.Signaling.Channels, config.ChannelConfig{
+					Type:    "telegram",
+					Enabled: true,
+					Params:  map[string]string{"token": token, "chat_id": chatID},
+				})
+			}
+			if err := config.Save(cfg, cfgPath, runtime.GOOS == "windows"); err != nil {
+				return fmt.Errorf("ошибка записи %s: %w", cfgPath, err)
+			}
+			fmt.Printf("✓ Telegram бот успешно настроен (файл: %s)\n", cfgPath)
+			if runtime.GOOS == "linux" {
+				if _, err := os.Stat("/etc/systemd/system/natbypass.service"); err == nil {
+					_ = exec.Command("systemctl", "restart", "natbypass").Run()
+					fmt.Println("✓ Служба systemd перезапущена.")
+				}
+			}
+			return nil
+		},
 	}
 }
 
