@@ -55,7 +55,7 @@ func (m *FallbackManager) Send(ctx context.Context, payload *Payload) error {
 		name := ch.Name()
 
 		if breakerTime, ok := m.circuitBreaker[name]; ok {
-			if time.Since(breakerTime) < 5*time.Minute {
+			if len(m.channels) > 1 && time.Since(breakerTime) < 20*time.Second {
 				continue
 			}
 			delete(m.circuitBreaker, name)
@@ -79,7 +79,7 @@ func (m *FallbackManager) Send(ctx context.Context, payload *Payload) error {
 		m.statuses[name].LastError = err
 
 		if m.consecFailures[name] >= 3 {
-			log.Error().Str("channel", name).Msg("Circuit breaker open: channel marked unavailable")
+			log.Warn().Str("channel", name).Msg("Channel failed 3 times, temporary cooldown 20s")
 			m.circuitBreaker[name] = time.Now()
 			m.statuses[name].Available = false
 		}
@@ -90,24 +90,17 @@ func (m *FallbackManager) Send(ctx context.Context, payload *Payload) error {
 
 func (m *FallbackManager) sendWithRetry(ctx context.Context, ch SignalingChannel, payload *Payload) error {
 	var err error
-	backoff := 1 * time.Second
-
-	for attempt := 1; attempt <= 5; attempt++ {
+	for attempt := 1; attempt <= 2; attempt++ {
 		err = ch.Send(ctx, payload)
 		if err == nil {
 			return nil
 		}
-		
-		log.Debug().Str("channel", ch.Name()).Err(err).Int("attempt", attempt).Msg("Send failed, retrying")
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(backoff):
-			backoff *= 2
+		case <-time.After(300 * time.Millisecond):
 		}
 	}
-
 	return err
 }
 

@@ -220,9 +220,10 @@ func EncryptPayload(p *Payload, pubKey, privKey [32]byte) (*Payload, error) {
 		return nil, err
 	}
 
-	return &Payload{
-		Encrypted: enc,
-	}, nil
+	// Копируем все поля и прикрепляем зашифрованный блоб
+	res := *p
+	res.Encrypted = enc
+	return &res, nil
 }
 
 func DecryptPayload(p *Payload, senderPub, recipientPriv [32]byte) (*Payload, error) {

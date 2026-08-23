@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -196,8 +198,10 @@ func (t *TrayApp) Run(ctx context.Context) error {
 
 	className, _ := windows.UTF16PtrFromString("NatBypassTrayClass")
 	windowName, _ := windows.UTF16PtrFromString("NatBypassTrayWindow")
-
-	hIconRaw, _, _ := procLoadIconW.Call(0, uintptr(IDI_SHIELD))
+	hIconRaw, _, _ := procLoadIconW.Call(uintptr(t.hInst), 1)
+	if hIconRaw == 0 {
+		hIconRaw, _, _ = procLoadIconW.Call(0, uintptr(IDI_APPLICATION))
+	}
 	hIcon := windows.Handle(hIconRaw)
 
 	wndClass := WNDCLASSEXW{
@@ -243,6 +247,12 @@ func (t *TrayApp) Run(ctx context.Context) error {
 
 	procShell_NotifyIconW.Call(uintptr(NIM_ADD), uintptr(unsafe.Pointer(&t.nid)))
 	defer procShell_NotifyIconW.Call(uintptr(NIM_DELETE), uintptr(unsafe.Pointer(&t.nid)))
+
+	// Automatically open the standalone application window on startup
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		t.openWebUI()
+	}()
 
 	go func() {
 		select {
@@ -339,6 +349,13 @@ func (t *TrayApp) openWebUI() {
 	}
 	url := fmt.Sprintf("http://localhost:%d", port)
 
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData == "" {
+		localAppData = os.TempDir()
+	}
+	profileDir := filepath.Join(localAppData, "NatBypass", "app_profile")
+	_ = os.MkdirAll(profileDir, 0755)
+
 	// Launch as a sleek standalone application window (no URL bar, no tabs)
 	appCandidates := []string{
 		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
@@ -348,7 +365,12 @@ func (t *TrayApp) openWebUI() {
 	}
 	for _, p := range appCandidates {
 		if _, err := os.Stat(p); err == nil {
-			cmd := exec.Command(p, fmt.Sprintf("--app=%s", url), "--window-size=1120,780")
+			cmd := exec.Command(p,
+				fmt.Sprintf("--app=%s", url),
+				fmt.Sprintf("--user-data-dir=%s", profileDir),
+				"--new-window",
+				"--window-size=1120,780",
+			)
 			if err := cmd.Start(); err == nil {
 				return
 			}

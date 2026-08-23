@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,17 +24,31 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 		topic: topic,
 	}
 
+	if brokerURL == "" {
+		brokerURL = "tcp://broker.emqx.io:1883"
+	}
+
 	opts := mqtt.NewClientOptions().
-		AddBroker(brokerURL).
-		SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).
+		AddBroker(brokerURL)
+
+	// Автоматический резервный брокер для максимальной надежности
+	if strings.Contains(brokerURL, "broker.emqx.io") {
+		opts.AddBroker("tcp://broker.hivemq.com:1883")
+	} else if strings.Contains(brokerURL, "broker.hivemq.com") {
+		opts.AddBroker("tcp://broker.emqx.io:1883")
+	}
+
+	opts.SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).
 		SetUsername(username).
 		SetPassword(password).
 		SetCleanSession(true).
 		SetAutoReconnect(true).
 		SetConnectRetry(true).
-		SetConnectRetryInterval(2 * time.Second).
-		SetKeepAlive(10 * time.Second).
-		SetPingTimeout(3 * time.Second).
+		SetConnectRetryInterval(1 * time.Second).
+		SetConnectTimeout(5 * time.Second).
+		SetKeepAlive(20 * time.Second).
+		SetPingTimeout(5 * time.Second).
+		SetWriteTimeout(5 * time.Second).
 		SetResumeSubs(true).
 		SetOnConnectHandler(func(c mqtt.Client) {
 			log.Info().Str("broker", brokerURL).Str("topic", topic).Msg("MQTT подключен, подписка на топик...")
@@ -52,7 +67,7 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 			})
 		}).
 		SetConnectionLostHandler(func(c mqtt.Client, err error) {
-			log.Warn().Err(err).Msg("MQTT connection lost")
+			log.Warn().Err(err).Msg("MQTT connection lost, reconnecting...")
 		})
 
 	client := mqtt.NewClient(opts)
@@ -79,11 +94,13 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 
 	if !m.client.IsConnected() {
 		tok := m.client.Connect()
-		_ = tok.WaitTimeout(3 * time.Second)
+		if tok.WaitTimeout(4 * time.Second) && tok.Error() != nil {
+			return fmt.Errorf("MQTT reconnect: %w", tok.Error())
+		}
 	}
 
 	token := m.client.Publish(m.topic, 0, false, data)
-	if !token.WaitTimeout(5 * time.Second) {
+	if !token.WaitTimeout(4 * time.Second) {
 		return fmt.Errorf("MQTT publish timeout")
 	}
 	return token.Error()

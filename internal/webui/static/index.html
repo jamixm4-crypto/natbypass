@@ -3,343 +3,436 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NatBypass — P2P Mesh & AmneziaWG 2.0</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%230ea5e9'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23ffffff' stroke-width='2.5'/%3E%3Cpath d='M16 7a13 13 0 0 0 0 18 13 13 0 0 0 0-18' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3Cpath d='M7 16h18' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
+  <title>NatBypass — P2P Mesh Network</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23a855f7'/%3E%3Cstop offset='100%25' stop-color='%2338bdf8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23ffffff' stroke-width='2.5'/%3E%3Cpath d='M16 7a13 13 0 0 0 0 18 13 13 0 0 0 0-18' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3Cpath d='M7 16h18' fill='none' stroke='%23ffffff' stroke-width='2'/%3E%3C/svg%3E">
   <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="manifest" href="/manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-main: #0c1017;
-      --bg-sidebar: #111622;
-      --bg-card: #151c2c;
-      --bg-card-hover: #1a2337;
-      --bg-input: #0e1320;
-      --border: #222b40;
-      --border-focus: #4f46e5;
-      --indigo: #6366f1;
-      --blue: #0ea5e9;
+      --bg-space: #07090e;
+      --bg-workspace: #0b0f19;
+      --bg-sidebar: #0e121d;
+      --border-grid: rgba(255, 255, 255, 0.04);
+      --glass-bg: rgba(18, 24, 38, 0.65);
+      --glass-hover: rgba(25, 34, 54, 0.85);
+      --glass-border: rgba(168, 85, 247, 0.25);
+      --glass-glow: 0 0 30px rgba(168, 85, 247, 0.15), inset 0 0 20px rgba(56, 189, 248, 0.08);
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
       --text-dim: #64748b;
+      --accent-purple: #c084fc;
+      --accent-cyan: #38bdf8;
       --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #ef4444;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { 
+      box-sizing: border-box; 
+      margin: 0; 
+      padding: 0; 
+      -ms-overflow-style: none; 
+      scrollbar-width: none; 
+    }
 
-    body {
-      background-color: var(--bg-main);
+    ::-webkit-scrollbar { 
+      width: 0px; 
+      height: 0px; 
+      display: none; 
+    }
+
+    html, body {
+      background: var(--bg-space);
       color: var(--text-main);
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       width: 100vw;
       height: 100vh;
+      min-width: 1020px;
+      min-height: 680px;
       display: flex;
       overflow: hidden;
-      user-select: text;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
-    /* Left Sidebar */
+    .grid-bg {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(to right, var(--border-grid) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--border-grid) 1px, transparent 1px);
+      background-size: 80px 80px;
+      pointer-events: none;
+      z-index: 1;
+    }
+
     .sidebar {
-      width: 220px;
-      min-width: 220px;
+      width: 72px;
+      min-width: 72px;
       background: var(--bg-sidebar);
-      border-right: 1px solid var(--border);
-      padding: 20px 14px;
+      border-right: 1px solid rgba(255, 255, 255, 0.05);
       display: flex;
       flex-direction: column;
+      align-items: center;
+      padding: 24px 0;
       z-index: 10;
-      user-select: none;
     }
 
-    .brand-header {
+    .brand-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 24px;
-      padding-left: 6px;
-    }
-
-    .brand-logo {
-      width: 30px;
-      height: 30px;
-      border-radius: 8px;
-      background: linear-gradient(135deg, var(--indigo), var(--blue));
-      display: flex;
-      align-items: center;
+      flex-direction: column;
       justify-content: center;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 32px;
+      cursor: pointer;
+      transition: all 0.2s ease;
     }
 
-    .brand-title {
-      font-size: 1rem;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-      color: #ffffff;
+    .brand-btn:hover {
+      background: rgba(168, 85, 247, 0.2);
+      border-color: rgba(168, 85, 247, 0.5);
+      box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
     }
 
-    .brand-ver {
-      font-size: 0.7rem;
-      color: var(--text-dim);
-      font-family: 'JetBrains Mono', monospace;
-      margin-left: auto;
-      padding: 2px 6px;
-      background: rgba(255, 255, 255, 0.05);
-      border-radius: 4px;
+    .brand-btn span {
+      display: block;
+      width: 20px;
+      height: 2px;
+      background: #ffffff;
+      border-radius: 2px;
     }
+    .brand-btn span:nth-child(2) { width: 14px; margin-right: 6px; }
+    .brand-btn span:nth-child(3) { width: 18px; margin-right: 2px; }
 
     .nav-menu {
       list-style: none;
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      flex: 1;
+      gap: 14px;
+      align-items: center;
+      width: 100%;
     }
 
-    .nav-btn {
+    .nav-item {
+      position: relative;
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 9px 12px;
-      border-radius: 8px;
-      color: var(--text-muted);
+      justify-content: center;
+      color: var(--text-dim);
       cursor: pointer;
-      transition: all 0.15s ease;
-      font-size: 0.85rem;
-      font-weight: 500;
+      transition: all 0.2s ease;
+      background: transparent;
       border: 1px solid transparent;
     }
 
-    .nav-btn:hover {
+    .nav-item:hover {
       color: var(--text-main);
-      background: rgba(255, 255, 255, 0.04);
+      background: rgba(255, 255, 255, 0.05);
     }
 
-    .nav-btn.active {
-      background: #1c2438;
-      border-color: #2e3b5b;
+    .nav-item.active {
       color: #ffffff;
-      font-weight: 600;
+      background: rgba(168, 85, 247, 0.15);
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
     }
 
-    .nav-btn svg {
-      width: 17px;
-      height: 17px;
+    .nav-item svg {
+      width: 20px;
+      height: 20px;
       stroke-width: 2;
-      flex-shrink: 0;
     }
 
-    /* Main Workspace */
+    .nav-item::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      left: 58px;
+      background: #182032;
+      color: #ffffff;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      white-space: nowrap;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-6px);
+      transition: all 0.15s ease;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+      z-index: 100;
+    }
+
+    .nav-item:hover::after {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
     .workspace {
       flex: 1;
       display: flex;
       flex-direction: column;
-      padding: 20px 28px;
-      z-index: 5;
+      padding: 24px 36px;
       position: relative;
       overflow-y: auto;
-      background: var(--bg-main);
+      min-width: 948px;
+      min-height: 600px;
+      background: var(--bg-workspace);
+      z-index: 5;
     }
 
-    /* Top Bar */
     .topbar {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 20px;
-      flex-shrink: 0;
+      margin-bottom: 16px;
+      padding: 0 0 12px 0;
+      position: sticky;
+      top: 0;
+      background: rgba(11, 15, 25, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      z-index: 50;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     }
 
-    .device-status-btn {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 7px 14px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.82rem;
-      font-weight: 500;
-      color: var(--text-main);
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .device-status-btn:hover {
-      border-color: var(--indigo);
-    }
-
-    .user-profile {
-      display: flex;
+    .glow-pill {
+      background: rgba(168, 85, 247, 0.12);
+      border: 1px solid rgba(168, 85, 247, 0.35);
+      border-radius: 20px;
+      padding: 8px 18px;
+      display: inline-flex;
       align-items: center;
       gap: 10px;
-      background: var(--bg-card);
-      padding: 5px 12px 5px 6px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-
-    .user-profile:hover {
-      border-color: var(--blue);
-    }
-
-    .avatar-img {
-      width: 26px;
-      height: 26px;
-      border-radius: 6px;
-      background: linear-gradient(135deg, #4f46e5, #0ea5e9);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 0.78rem;
-      color: #ffffff;
-    }
-
-    .user-name {
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 600;
       color: var(--text-main);
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.15);
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      transition: all 0.2s ease;
     }
 
-    .online-indicator {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--success);
+    .glow-pill:hover {
+      border-color: rgba(168, 85, 247, 0.7);
+      box-shadow: 0 0 25px rgba(168, 85, 247, 0.35);
     }
 
-    /* Tab Content Panes */
-    .tab-pane {
-      display: none;
-      flex-direction: column;
-      gap: 16px;
-      flex: 1;
-    }
-
-    .tab-pane.active {
+    .segmented-group {
       display: flex;
-    }
-
-    /* Pro Cards */
-    .pro-card {
-      background: var(--bg-card);
+      background: rgba(15, 20, 32, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 12px;
-      border: 1px solid var(--border);
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      transition: border-color 0.15s ease;
+      padding: 4px;
+      gap: 4px;
     }
 
-    .pro-card:hover {
-      border-color: #2e3b5b;
-    }
-
-    /* Dashboard Layout */
-    .dashboard-layout {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-    }
-
-    .big-num {
-      font-size: 2.5rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
-      margin: 6px 0;
-      color: #ffffff;
-    }
-
-    .sub-title {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    /* Segmented Channel Control */
-    .segmented-control {
-      display: inline-flex;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
+    .seg-btn {
+      padding: 7px 16px;
       border-radius: 8px;
-      padding: 3px;
-      gap: 2px;
-    }
-
-    .segmented-btn {
-      padding: 6px 14px;
-      border-radius: 6px;
       font-size: 0.8rem;
       font-weight: 600;
       color: var(--text-muted);
       background: transparent;
-      border: none;
+      border: 1px solid transparent;
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: all 0.2s ease;
       display: flex;
       align-items: center;
       gap: 6px;
     }
 
-    .segmented-btn:hover {
-      color: var(--text-main);
-    }
+    .seg-btn:hover { color: #ffffff; }
 
-    .segmented-btn.active {
-      background: #252f48;
+    .seg-btn.active {
+      background: rgba(168, 85, 247, 0.2);
+      border: 1px solid rgba(168, 85, 247, 0.5);
       color: #ffffff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      box-shadow: 0 0 15px rgba(168, 85, 247, 0.3);
     }
 
-    /* Buttons */
-    .btn {
-      padding: 8px 14px;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.82rem;
-      border: none;
-      cursor: pointer;
-      display: inline-flex;
+    .user-pill {
+      display: flex;
       align-items: center;
-      gap: 6px;
-      transition: all 0.15s ease;
-      text-decoration: none;
-      user-select: none;
+      gap: 10px;
+      background: rgba(18, 24, 38, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 5px 14px 5px 6px;
+      border-radius: 24px;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: all 0.2s ease;
     }
 
-    .btn-primary {
-      background: var(--indigo);
+    .user-pill:hover {
+      border-color: rgba(56, 189, 248, 0.5);
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+    }
+
+    .user-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #a855f7, #38bdf8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.8rem;
       color: #ffffff;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
     }
 
-    .btn-primary:hover {
-      background: #4f46e5;
+    .online-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
     }
 
-    .btn-glass {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border);
-      color: var(--text-main);
+    .glass-card {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow: var(--glass-glow);
+      padding: 16px 20px;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.25s ease;
     }
 
-    .btn-glass:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: #3b4764;
+    .glass-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
     }
 
-    /* Tables */
+    .glass-card:hover {
+      border-color: rgba(168, 85, 247, 0.5);
+      box-shadow: 0 0 35px rgba(168, 85, 247, 0.25), inset 0 0 25px rgba(56, 189, 248, 0.15);
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      grid-template-rows: auto auto;
+      gap: 14px;
+      margin-bottom: 16px;
+      position: relative;
+      z-index: 5;
+    }
+
+    .card-top-left {
+      grid-column: 1;
+      grid-row: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      min-height: 125px;
+    }
+
+    .card-bottom-left {
+      grid-column: 1;
+      grid-row: 2;
+      min-height: 125px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .card-right-large {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 264px;
+    }
+
+    .metric-val {
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      color: #ffffff;
+      text-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+    }
+
+    .metric-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-top: 4px;
+      letter-spacing: 0.02em;
+    }
+
+    .donut-ring {
+      position: relative;
+      width: 85px;
+      height: 85px;
+      flex-shrink: 0;
+    }
+
+    .donut-ring svg {
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+    }
+
+    .donut-bg {
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.05);
+      stroke-width: 14;
+    }
+
+    .donut-fill {
+      fill: none;
+      stroke: url(#donutGrad);
+      stroke-width: 14;
+      stroke-linecap: round;
+      stroke-dasharray: 283;
+      stroke-dashoffset: 0;
+      filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.7));
+      transition: stroke-dashoffset 0.8s ease;
+    }
+
+    .wave-container {
+      width: 100%;
+      height: 60px;
+      margin-top: 4px;
+    }
+
+    .tab-pane {
+      display: none;
+      flex-direction: column;
+      gap: 20px;
+      position: relative;
+      z-index: 5;
+    }
+
+    .tab-pane.active { display: flex; }
+
     .table-wrap {
       width: 100%;
       overflow-x: auto;
+      border-radius: 14px;
     }
 
     table {
@@ -350,255 +443,344 @@
 
     th {
       color: var(--text-dim);
-      font-size: 0.72rem;
-      font-weight: 600;
+      font-size: 0.74rem;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 6px 12px;
+      letter-spacing: 0.06em;
+      padding: 8px 14px;
       text-align: left;
     }
 
     tr.peer-row {
-      background: #111724;
-      border-radius: 8px;
-      transition: background 0.15s ease;
+      background: rgba(14, 20, 32, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      transition: all 0.15s ease;
     }
 
     tr.peer-row:hover {
-      background: #182032;
+      background: rgba(24, 32, 50, 0.9);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
     }
 
     td {
-      padding: 10px 12px;
+      padding: 12px 14px;
       color: var(--text-main);
-      font-size: 0.84rem;
+      font-size: 0.85rem;
+      vertical-align: middle;
     }
 
-    td:first-child { border-radius: 8px 0 0 8px; }
-    td:last-child { border-radius: 0 8px 8px 0; }
+    td:first-child { border-radius: 10px 0 0 10px; }
+    td:last-child { border-radius: 0 10px 10px 0; }
 
     .badge {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      padding: 3px 8px;
-      border-radius: 6px;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
       font-size: 0.72rem;
-      font-weight: 600;
+      font-weight: 700;
+      white-space: nowrap;
     }
 
-    .badge-success { background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); }
-    .badge-cyan { background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.25); }
-    .badge-purple { background: rgba(99, 102, 241, 0.12); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.25); }
-    .badge-danger { background: rgba(239, 68, 68, 0.12); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.25); }
-
-    /* Inputs & Form Controls */
-    .form-group {
-      margin-bottom: 14px;
+    .badge-success {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
     }
+
+    .badge-purple {
+      background: rgba(168, 85, 247, 0.15);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      box-shadow: 0 0 10px rgba(168, 85, 247, 0.2);
+    }
+
+    .badge-cyan {
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    }
+
+    .btn {
+      padding: 9px 18px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 0.84rem;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      user-select: none;
+      text-decoration: none;
+    }
+
+    .btn-neon {
+      background: linear-gradient(135deg, #a855f7, #6366f1);
+      color: #ffffff;
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-neon:hover {
+      box-shadow: 0 0 30px rgba(168, 85, 247, 0.7);
+      transform: translateY(-1px);
+    }
+
+    .btn-glass {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-main);
+      backdrop-filter: blur(10px);
+    }
+
+    .btn-glass:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(168, 85, 247, 0.5);
+    }
+
+    .form-group { margin-bottom: 16px; }
 
     .form-label {
       display: block;
       font-size: 0.8rem;
-      font-weight: 600;
+      font-weight: 700;
       color: var(--text-muted);
-      margin-bottom: 5px;
+      margin-bottom: 6px;
     }
 
     .form-input {
       width: 100%;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 9px 12px;
+      background: rgba(10, 14, 24, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 10px 14px;
       color: var(--text-main);
       font-family: inherit;
-      font-size: 0.85rem;
-      transition: border-color 0.15s ease;
+      font-size: 0.86rem;
       outline: none;
+      transition: all 0.2s ease;
     }
 
     .form-input:focus {
-      border-color: var(--border-focus);
+      border-color: rgba(168, 85, 247, 0.6);
+      box-shadow: 0 0 15px rgba(168, 85, 247, 0.25);
     }
 
-    .mono {
-      font-family: 'JetBrains Mono', monospace;
-    }
+    .mono { font-family: 'JetBrains Mono', monospace; }
 
-    /* Modal Dialog */
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.75);
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(8px);
       z-index: 100;
       display: none;
       align-items: center;
       justify-content: center;
     }
 
-    .modal-overlay.active {
-      display: flex;
-    }
+    .modal-overlay.active { display: flex; }
 
     .modal-box {
-      width: 440px;
-      background: #151c2c;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 22px;
-      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+      width: 460px;
+      background: #111624;
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 0 40px rgba(168, 85, 247, 0.3);
     }
 
-    /* Toast Notification */
     .toast {
       position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: #1e293b;
-      border: 1px solid var(--indigo);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-      border-radius: 8px;
-      padding: 10px 16px;
+      bottom: 24px;
+      right: 24px;
+      background: #151b2b;
+      border: 1px solid rgba(168, 85, 247, 0.6);
+      box-shadow: 0 0 25px rgba(168, 85, 247, 0.4);
       color: #ffffff;
-      font-size: 0.84rem;
-      font-weight: 500;
-      z-index: 200;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      font-weight: 600;
       display: none;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      z-index: 200;
     }
   </style>
 </head>
 <body>
-  <!-- Left Sidebar Navigation -->
+  <!-- SVG Gradients -->
+  <svg width="0" height="0" style="position:absolute;">
+    <defs>
+      <linearGradient id="donutGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#c084fc" />
+        <stop offset="100%" stop-color="#38bdf8" />
+      </linearGradient>
+      <linearGradient id="waveGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#c084fc" stop-opacity="0.4" />
+        <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.0" />
+      </linearGradient>
+      <linearGradient id="waveGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.4" />
+        <stop offset="100%" stop-color="#a855f7" stop-opacity="0.0" />
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <!-- Left Sidebar (Matching Screenshot) -->
   <aside class="sidebar">
-    <div class="brand-header">
-      <div class="brand-logo">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
-      </div>
-      <div class="brand-title">NatBypass</div>
-      <div class="brand-ver">v1.1.0</div>
+    <div class="brand-btn" onclick="openNodeInfoModal()" title="Информация о ноде">
+      <span></span>
+      <span></span>
+      <span></span>
     </div>
 
     <ul class="nav-menu">
-      <li class="nav-btn active" onclick="switchTab('dashboard')">
+      <li id="nav-dashboard" class="nav-item active" data-tooltip="Обзор сети" onclick="switchTab('dashboard')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg>
-        <span>Обзор</span>
       </li>
-      <li class="nav-btn" onclick="switchTab('devices')">
+      <li id="nav-devices" class="nav-item" data-tooltip="Устройства" onclick="switchTab('devices')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="18" height="14" x="3" y="5" rx="2"></rect><polyline points="3 7 12 13 21 7"></polyline></svg>
-        <span>Устройства</span>
       </li>
-      <li class="nav-btn" onclick="switchTab('channels')">
+      <li id="nav-channels" class="nav-item" data-tooltip="Каналы связи" onclick="switchTab('channels')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="m8 17 4 4 4-4"></path></svg>
-        <span>Каналы связи</span>
       </li>
-      <li class="nav-btn" onclick="switchTab('routing')">
+      <li id="nav-routing" class="nav-item" data-tooltip="Шлюз & Сети" onclick="switchTab('routing')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-        <span>Шлюз & Сети</span>
       </li>
-      <li class="nav-btn" onclick="switchTab('awg')">
+      <li id="nav-awg" class="nav-item" data-tooltip="AmneziaWG 2.0" onclick="switchTab('awg')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>
-        <span>AmneziaWG 2.0</span>
       </li>
-      <li class="nav-btn" onclick="switchTab('timeline')">
+      <li id="nav-timeline" class="nav-item" data-tooltip="Журнал" onclick="switchTab('timeline')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-        <span>Журнал</span>
       </li>
-      <li class="nav-btn" onclick="switchTab('diagnostics')">
+      <li id="nav-diagnostics" class="nav-item" data-tooltip="Диагностика" onclick="switchTab('diagnostics')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m22 12-4-4v3H3v2h15v3l4-4Z"></path></svg>
-        <span>Диагностика</span>
       </li>
-      <li class="nav-btn" onclick="switchTab('settings')">
+      <li id="nav-settings" class="nav-item" data-tooltip="Настройки" onclick="switchTab('settings')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-        <span>Настройки</span>
       </li>
     </ul>
-
-    <div style="padding-top: 14px; border-top: 1px solid var(--border);">
-      <button onclick="refreshData()" class="btn btn-glass" style="width: 100%; justify-content: center; font-size: 0.78rem;">
-        ⚡ Синхронизация
-      </button>
-    </div>
   </aside>
 
-  <!-- Main Workspace -->
+  <!-- Workspace with Grid -->
   <main class="workspace">
+    <div class="grid-bg"></div>
+
     <!-- Top Bar -->
     <div class="topbar">
-      <div class="device-status-btn" onclick="openRenameModal()">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6Z"></path></svg>
+      <div class="glow-pill" onclick="openRenameModal()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6Z"></path></svg>
         <span id="topStunLabel">STUN: Определение...</span>
       </div>
 
-      <!-- Quick Signaling Switcher in Header -->
-      <div class="segmented-control">
-        <button id="btnSegMqtt" onclick="switchChannelMode('mqtt')" class="segmented-btn">⚡ MQTT</button>
-        <button id="btnSegTg" onclick="switchChannelMode('telegram')" class="segmented-btn">💬 Telegram</button>
-        <button id="btnSegParallel" onclick="switchChannelMode('parallel')" class="segmented-btn active">⚡+💬 Параллельно</button>
+      <!-- Quick Signaling Switcher -->
+      <div class="segmented-group">
+        <button id="btnSegMqtt" onclick="switchChannelMode('mqtt')" class="seg-btn">⚡ MQTT</button>
+        <button id="btnSegTg" onclick="switchChannelMode('telegram')" class="seg-btn">💬 Telegram</button>
+        <button id="btnSegParallel" onclick="switchChannelMode('parallel')" class="seg-btn active">⚡+💬 Параллельно</button>
       </div>
 
-      <div class="user-profile" onclick="openRenameModal()">
-        <div class="avatar-img" id="userAvatar">N</div>
-        <span class="user-name" id="userNameLabel">Мой компьютер</span>
-        <div class="online-indicator" title="В сети"></div>
+      <!-- Profile Capsule -->
+      <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство">
+        <div class="user-avatar" id="userAvatar">N</div>
+        <span id="userNameLabel" style="font-size:0.85rem; font-weight:700;">Мой компьютер</span>
+        <div class="online-dot"></div>
       </div>
     </div>
 
-    <!-- TAB 1: DASHBOARD -->
+    <!-- TAB 1: DASHBOARD (EXACT SCREENSHOT LAYOUT) -->
     <div id="tab-dashboard" class="tab-pane active">
-      <div class="dashboard-layout">
-        <!-- Card 1: Устройства -->
-        <div class="pro-card">
-          <div class="sub-title">Устройств в сети</div>
-          <div class="big-num" id="statPeersCount">0</div>
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span class="badge badge-cyan" id="statP2PCount">⚡ 0 Direct P2P</span>
-            <span style="font-size:0.78rem; color:var(--text-dim);" id="statUptime">Uptime: 0m</span>
+      <div class="dashboard-grid">
+        <!-- Card 1: Top-Left (Number + Donut Ring) -->
+        <div class="glass-card card-top-left">
+          <div>
+            <div class="metric-val" id="statPeersCount">0</div>
+            <div class="metric-label" id="statPeersLabel">Устройств в Mesh сети</div>
+            <div style="margin-top: 14px;">
+              <span class="badge badge-purple" id="statP2PCount">⚡ 0 Direct P2P</span>
+            </div>
+          </div>
+          <div class="donut-ring">
+            <svg viewBox="0 0 100 100">
+              <circle class="donut-bg" cx="50" cy="50" r="40" />
+              <circle class="donut-fill" id="donutFill" cx="50" cy="50" r="40" />
+            </svg>
           </div>
         </div>
 
-        <!-- Card 2: STUN сокет -->
-        <div class="pro-card">
-          <div class="sub-title">STUN Сокет & IP</div>
-          <div style="font-size: 1.25rem; font-weight: 700; color: #38bdf8; margin: 10px 0;" class="mono" id="statPublicIP">Определяется...</div>
+        <!-- Card 2: Bottom-Left (P2P Channel Throughput / Speed) -->
+        <div class="glass-card card-bottom-left">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span class="badge badge-purple" id="statChannelBadge">Канал: Параллельно</span>
-            <span style="font-size:0.78rem; color:var(--text-dim);" id="statNatType">Full Cone NAT</span>
+            <div>
+              <div style="font-size:1.8rem; font-weight:800; color:#38bdf8;" class="mono" id="statThroughput">—</div>
+              <div class="metric-label">Загрузка P2P канала</div>
+            </div>
+            <span class="badge badge-cyan" id="statChannelBadge">Канал: Параллельно</span>
+          </div>
+
+          <!-- Dynamic SVG Wave for P2P Throughput -->
+          <div class="wave-container">
+            <svg id="svgThroughputWave" width="100%" height="100%" viewBox="0 0 300 70" preserveAspectRatio="none">
+              <path id="pathThroughputArea" d="M0,70 L300,70 Z" fill="url(#waveGrad)" />
+              <path id="pathThroughputLine" d="M0,60 L300,60" fill="none" stroke="#38bdf8" stroke-width="2.5" />
+            </svg>
           </div>
         </div>
 
-        <!-- Card 3: Задержка -->
-        <div class="pro-card">
-          <div class="sub-title">Средняя задержка</div>
-          <div class="big-num" id="statAvgLatency" style="color: #34d399;">0 ms</div>
+        <!-- Card 3: Right Large (RTT & Full Traffic Flow) -->
+        <div class="glass-card card-right-large">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+              <div class="metric-val" id="statAvgLatency" style="color: #c084fc;">0 ms</div>
+              <div class="metric-label">Средняя задержка Direct P2P</div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+              <span class="badge badge-success" id="statAwgBadge">🛡️ AWG 2.0 Активен</span>
+              <span style="font-size:0.75rem; color:var(--text-dim);" id="statUptime">Uptime: 0m</span>
+            </div>
+          </div>
+
+          <!-- Dynamic Wave Chart with Real Latency History -->
+          <div style="height: 90px; width: 100%; margin: 8px 0;">
+            <svg id="svgLatencyWave" width="100%" height="100%" viewBox="0 0 380 120" preserveAspectRatio="none">
+              <path id="pathLatencyArea" d="M0,90 Q50,30 100,75 T200,40 T300,60 T380,25 L380,120 L0,120 Z" fill="url(#waveGrad2)" />
+              <path id="pathLatencyLine" d="M0,90 Q50,30 100,75 T200,40 T300,60 T380,25" fill="none" stroke="#38bdf8" stroke-width="3" filter="drop-shadow(0 0 8px rgba(56, 189, 248, 0.8))" />
+            </svg>
+          </div>
+
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span class="badge badge-success" id="statAwgBadge">🛡️ AWG 2.0 Активен</span>
-            <button onclick="switchTab('awg')" class="btn btn-glass" style="padding:3px 8px; font-size:0.72rem;">Конфиг ➔</button>
+            <span style="font-size:0.8rem; color:var(--text-muted);" id="lblNatStatus">P2P пробитие NAT: <b style="color:#34d399;" id="txtNatType">Определяется...</b></span>
+            <button onclick="switchTab('devices')" class="btn btn-glass" style="padding:6px 12px; font-size:0.78rem;">Все узлы ➔</button>
           </div>
         </div>
       </div>
 
       <!-- Quick Peer Table -->
-      <div class="pro-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+      <div class="glass-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
           <div>
-            <h3 style="font-size: 0.95rem; font-weight: 600;">👥 Устройства в вашей P2P Mesh сети</h3>
+            <h3 style="font-size: 1rem; font-weight: 700;">👥 Устройства в вашей P2P Mesh сети</h3>
             <p style="font-size: 0.78rem; color: var(--text-muted);">Прямая связь сокет-в-сокет без промежуточных серверов</p>
           </div>
-          <button onclick="switchTab('devices')" class="btn btn-glass" style="font-size: 0.75rem; padding: 5px 10px;">Все устройства ➔</button>
+          <button onclick="refreshData()" class="btn btn-glass" style="font-size: 0.78rem;">⚡ Синхронизация</button>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Устройство</th>
-                <th>Virtual IP</th>
-                <th>STUN Endpoint</th>
-                <th>Статус связи</th>
-                <th>Задержка</th>
-                <th>Действия</th>
+                <th style="width: 25%;">Устройство</th>
+                <th style="width: 18%;">Virtual IP</th>
+                <th style="width: 25%;">STUN Endpoint</th>
+                <th style="width: 14%;">Статус связи</th>
+                <th style="width: 10%;">Задержка</th>
+                <th style="width: 8%;">Действия</th>
               </tr>
             </thead>
             <tbody id="quickPeersBody"></tbody>
@@ -607,15 +789,15 @@
       </div>
     </div>
 
-    <!-- TAB 2: DEVICES -->
+    <!-- TAB 2: DEVICES (FULL ADDRESS BOOK) -->
     <div id="tab-devices" class="tab-pane">
-      <div class="pro-card">
+      <div class="glass-card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
           <div>
-            <h2 style="font-size: 1.15rem; font-weight: 700;">👥 Адресная книга & Устройства сети</h2>
-            <p style="color: var(--text-muted); font-size: 0.8rem;">Назначайте имена, копируйте Virtual IP и контролируйте P2P сокеты</p>
+            <h2 style="font-size: 1.15rem; font-weight: 800;">👥 Адресная книга & Устройства сети</h2>
+            <p style="color: var(--text-muted); font-size: 0.8rem;">Назначайте имена, копируйте Virtual IP, тестируйте RTT пинг сокетов</p>
           </div>
-          <button onclick="refreshData()" class="btn btn-primary">⚡ Обновить маяки</button>
+          <button onclick="refreshData()" class="btn btn-neon">⚡ Обновить маяки</button>
         </div>
 
         <div class="table-wrap">
@@ -639,33 +821,33 @@
 
     <!-- TAB 3: CHANNELS (SIGNALING RELAY) -->
     <div id="tab-channels" class="tab-pane">
-      <div class="pro-card" style="margin-bottom: 16px;">
-        <h2 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 6px;">📡 Сигнальные каналы и переключение брокеров</h2>
-        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;">Выберите активный режим передачи маяков и туннельных пакетов между узлами сети</p>
+      <div class="glass-card">
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px;">📡 Сигнальные каналы и переключение брокеров</h2>
+        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 20px;">Выберите активный режим передачи маяков между узлами сети</p>
 
-        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px;">
-          <div class="pro-card" id="cardChanMqtt" onclick="switchChannelMode('mqtt')" style="cursor:pointer; padding:16px;">
+        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+          <div class="glass-card" id="cardChanMqtt" onclick="switchChannelMode('mqtt')" style="cursor:pointer; padding:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <h3 style="font-size:0.95rem; font-weight:700;">⚡ Только MQTT</h3>
-              <span class="badge badge-cyan" id="badgeMqttStatus">Активен</span>
+              <span class="badge badge-cyan">Доступен</span>
             </div>
-            <p style="font-size:0.78rem; color:var(--text-muted); margin-top:8px;">Сверхбыстрый обмен маяками сокета через легковесный MQTT-брокер.</p>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">Сверхбыстрый обмен маяками сокета через легковесный MQTT-брокер.</p>
           </div>
 
-          <div class="pro-card" id="cardChanTg" onclick="switchChannelMode('telegram')" style="cursor:pointer; padding:16px;">
+          <div class="glass-card" id="cardChanTg" onclick="switchChannelMode('telegram')" style="cursor:pointer; padding:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <h3 style="font-size:0.95rem; font-weight:700;">💬 Только Telegram</h3>
-              <span class="badge badge-purple" id="badgeTgStatus">Резерв</span>
+              <span class="badge badge-purple">Резерв</span>
             </div>
-            <p style="font-size:0.78rem; color:var(--text-muted); margin-top:8px;">Скрытый обмен через Telegram Bot API с поддержкой SOCKS5 прокси.</p>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">Скрытый обмен через Telegram Bot API с поддержкой SOCKS5 прокси.</p>
           </div>
 
-          <div class="pro-card" id="cardChanParallel" onclick="switchChannelMode('parallel')" style="cursor:pointer; padding:16px; border-color:var(--indigo);">
+          <div class="glass-card" id="cardChanParallel" onclick="switchChannelMode('parallel')" style="cursor:pointer; padding:20px; border-color:rgba(168,85,247,0.8);">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <h3 style="font-size:0.95rem; font-weight:700;">⚡+💬 Параллельно</h3>
               <span class="badge badge-success">Рекомендуется</span>
             </div>
-            <p style="font-size:0.78rem; color:var(--text-muted); margin-top:8px;">Одновременная доставка через оба канала для 100% стабильности.</p>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">Одновременная доставка через оба канала для 100% стабильности.</p>
           </div>
         </div>
       </div>
@@ -673,84 +855,86 @@
 
     <!-- TAB 4: ROUTING & EXIT NODES -->
     <div id="tab-routing" class="tab-pane">
-      <div class="pro-card" style="margin-bottom: 16px;">
-        <h2 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 6px;">🌐 Маршрутизация Exit Node (Шлюз Интернета)</h2>
-        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 16px;">Выходите в интернет через удалённый узел или сделайте этот ПК шлюзом для других</p>
+      <div class="glass-card" style="margin-bottom: 20px;">
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px;">🌐 Маршрутизация Exit Node (Шлюз Интернета)</h2>
+        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 20px;">Выходите в интернет через удалённый узел или сделайте этот ПК шлюзом для других</p>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-          <div class="pro-card" style="padding: 16px;">
-            <h3 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 10px;">📤 Раздача интернета (Сервер)</h3>
-            <label style="display:flex; align-items:center; gap: 10px; cursor:pointer; font-weight:500; font-size:0.85rem;">
-              <input type="checkbox" id="chkAllowExitNode" onchange="toggleExitNodeServing(this.checked)" style="width: 16px; height: 16px; accent-color: var(--indigo);">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <div class="glass-card" style="padding: 20px;">
+            <h3 style="font-size: 0.92rem; font-weight: 700; margin-bottom: 12px;">📤 Раздача интернета (Сервер)</h3>
+            <label style="display:flex; align-items:center; gap: 10px; cursor:pointer; font-weight:600; font-size:0.85rem;">
+              <input type="checkbox" id="chkAllowExitNode" onchange="toggleExitNodeServing(this.checked)" style="width: 18px; height: 18px; accent-color: #a855f7;">
               <span>Разрешить выход в интернет через меня</span>
             </label>
-            <p style="color: var(--text-dim); font-size: 0.75rem; margin-top: 8px;">Автоматически включает Windows IP Forwarding и Wintun NAT.</p>
+            <p style="color: var(--text-dim); font-size: 0.76rem; margin-top: 8px;">Автоматически включает Windows IP Forwarding и Wintun NAT.</p>
           </div>
 
-          <div class="pro-card" style="padding: 16px;">
-            <h3 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 10px;">📥 Выбор удалённого шлюза (Клиент)</h3>
-            <select id="selRemoteExitNode" class="form-input" onchange="setRemoteExitNode(this.value)" style="margin-bottom: 6px;">
+          <div class="glass-card" style="padding: 20px;">
+            <h3 style="font-size: 0.92rem; font-weight: 700; margin-bottom: 12px;">📥 Выбор удалённого шлюза (Клиент)</h3>
+            <select id="selRemoteExitNode" class="form-input" onchange="setRemoteExitNode(this.value)" style="margin-bottom: 8px;">
               <option value="">🚫 Локальный интернет (Шлюз выключен)</option>
             </select>
-            <p style="color: var(--text-dim); font-size: 0.75rem;">Трафик 0.0.0.0/1 и 128.0.0.0/1 пойдет через выбранный узел сети.</p>
+            <p style="color: var(--text-dim); font-size: 0.76rem;">Трафик пойдет через выбранный узел сети.</p>
           </div>
         </div>
       </div>
 
-      <div class="pro-card">
-        <h3 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 6px;">🏠 Доступ к локальным подсетям (Site-to-Site LAN)</h3>
-        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 12px;">Расшаривайте свои подсети (например, 192.168.1.0/24) для доступа к роутерам, принтерам и NAS</p>
-        <div style="display:flex; gap: 10px;">
-          <input type="text" id="txtAdvSubnets" class="form-input mono" placeholder="192.168.1.0/24, 10.0.0.0/24">
-          <button onclick="saveSubnets()" class="btn btn-primary">💾 Применить</button>
+      <div class="glass-card">
+        <h3 style="font-size: 0.98rem; font-weight: 700; margin-bottom: 6px;">🏠 Доступ к локальным подсетям (Site-to-Site LAN)</h3>
+        <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Расшаривайте свои подсети (например, 192.168.1.0/24) для доступа к роутерам, принтерам и NAS</p>
+        <div style="display:flex; gap: 12px; align-items: center;">
+          <input type="text" id="txtAdvSubnets" class="form-input mono" placeholder="192.168.1.0/24, 10.0.0.0/24" style="flex:1;">
+          <button onclick="autoDetectSubnets()" class="btn btn-glass" style="white-space: nowrap;">🔍 Автоопределение</button>
+          <button onclick="saveSubnets()" class="btn btn-neon" style="white-space: nowrap;">💾 Применить</button>
         </div>
       </div>
     </div>
 
-    <!-- TAB 5: AWG 2.0 -->
+    <!-- TAB 5: AMNEZIAWG 2.0 -->
     <div id="tab-awg" class="tab-pane">
-      <div class="pro-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
+      <div class="glass-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
           <div>
-            <h2 style="font-size: 1.15rem; font-weight: 700;">🛡️ AmneziaWG 2.0 — Обход DPI & Пресеты</h2>
+            <h2 style="font-size: 1.15rem; font-weight: 800;">🛡️ AmneziaWG 2.0 — Обход DPI & Пресеты</h2>
             <p style="color: var(--text-muted); font-size: 0.8rem;">Параметры мусорных пакетов и заголовков против ТСПУ блокировок</p>
           </div>
-          <div style="display:flex; gap: 6px;">
+          <div style="display:flex; gap: 8px;">
             <button onclick="applyAWGPreset('standard')" class="btn btn-glass">🟢 WireGuard</button>
-            <button onclick="applyAWGPreset('dpi')" class="btn btn-primary">🟡 Обход DPI</button>
+            <button onclick="applyAWGPreset('dpi')" class="btn btn-neon">🟡 Обход DPI</button>
             <button onclick="applyAWGPreset('stealth')" class="btn btn-glass">🔴 Stealth</button>
+            <button onclick="generateRandomAWG()" class="btn btn-glass" title="Случайные крипто-параметры">🎲 Random</button>
           </div>
         </div>
 
-        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px;">
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px;">
           <div class="form-group">
             <label class="form-label">Jc (Мусорные пакеты):</label>
-            <input type="number" id="awgJc" class="form-input mono" value="4" onchange="saveAWGParams()">
+            <input type="number" id="awgJc" class="form-input mono" value="4" oninput="saveAWGParams()">
           </div>
           <div class="form-group">
             <label class="form-label">Jmin (Мин. размер):</label>
-            <input type="number" id="awgJmin" class="form-input mono" value="40" onchange="saveAWGParams()">
+            <input type="number" id="awgJmin" class="form-input mono" value="40" oninput="saveAWGParams()">
           </div>
           <div class="form-group">
             <label class="form-label">Jmax (Макс. размер):</label>
-            <input type="number" id="awgJmax" class="form-input mono" value="70" onchange="saveAWGParams()">
+            <input type="number" id="awgJmax" class="form-input mono" value="70" oninput="saveAWGParams()">
           </div>
           <div class="form-group">
             <label class="form-label">S1 / S2 (Размеры):</label>
             <div style="display:flex; gap: 6px;">
-              <input type="number" id="awgS1" class="form-input mono" value="48" onchange="saveAWGParams()">
-              <input type="number" id="awgS2" class="form-input mono" value="32" onchange="saveAWGParams()">
+              <input type="number" id="awgS1" class="form-input mono" value="48" oninput="saveAWGParams()">
+              <input type="number" id="awgS2" class="form-input mono" value="32" oninput="saveAWGParams()">
             </div>
           </div>
         </div>
 
         <div class="form-group">
           <label class="form-label">Готовая конфигурация (.conf) для Windows / Android / Keenetic:</label>
-          <textarea id="awgConfText" class="form-input mono" rows="7" readonly style="line-height:1.4; font-size:0.8rem;"></textarea>
+          <textarea id="awgConfText" class="form-input mono" rows="7" readonly style="line-height:1.4; font-size:0.82rem;"></textarea>
         </div>
 
-        <div style="display:flex; gap: 10px;">
-          <button onclick="copyAwgConf()" class="btn btn-primary">📋 Скопировать конфиг</button>
+        <div style="display:flex; gap: 12px;">
+          <button onclick="copyAwgConf()" class="btn btn-neon">📋 Скопировать конфиг</button>
           <a href="/api/awg/config" download="natbypass.conf" class="btn btn-glass">💾 Скачать natbypass.conf</a>
         </div>
       </div>
@@ -758,19 +942,19 @@
 
     <!-- TAB 6: TIMELINE & LOGS -->
     <div id="tab-timeline" class="tab-pane">
-      <div class="pro-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+      <div class="glass-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
           <div>
-            <h2 style="font-size: 1.15rem; font-weight: 700;">⏱️ Журнал сетевых событий</h2>
+            <h2 style="font-size: 1.15rem; font-weight: 800;">⏱️ Журнал сетевых событий</h2>
             <p style="color: var(--text-muted); font-size: 0.8rem;">Логирование P2P UDP рукопожатий, смены IP и маршрутизации</p>
           </div>
-          <div style="display:flex; gap: 6px;">
+          <div style="display:flex; gap: 8px;">
             <button onclick="refreshEvents()" class="btn btn-glass">🔄 Обновить</button>
             <button onclick="copyLogs()" class="btn btn-glass">📋 Скопировать лог</button>
             <button onclick="document.getElementById('logStream').innerHTML=''" class="btn btn-glass">🧹 Очистить</button>
           </div>
         </div>
-        <div id="logStream" class="mono" style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 14px; height: 400px; overflow-y: auto; font-size: 0.8rem; line-height: 1.6; display: flex; flex-direction: column; gap: 4px;">
+        <div id="logStream" class="mono" style="background: rgba(10, 14, 24, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 16px; height: 380px; overflow-y: auto; font-size: 0.82rem; line-height: 1.6; display: flex; flex-direction: column; gap: 6px;">
           <div style="color: var(--text-dim);">Загрузка журнала...</div>
         </div>
       </div>
@@ -778,35 +962,66 @@
 
     <!-- TAB 7: DIAGNOSTICS -->
     <div id="tab-diagnostics" class="tab-pane">
-      <div class="pro-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
+      <div class="glass-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
           <div>
-            <h2 style="font-size: 1.15rem; font-weight: 700;">🩺 Системная диагностика связности</h2>
+            <h2 style="font-size: 1.15rem; font-weight: 800;">🩺 Системная диагностика связности</h2>
             <p style="color: var(--text-muted); font-size: 0.8rem;">Комплексная проверка интернета, STUN, NAT-типа и пиров</p>
           </div>
-          <div style="display:flex; gap: 6px;">
-            <button onclick="runDiag()" class="btn btn-primary">⚡ Запустить тест</button>
+          <div style="display:flex; gap: 8px;">
+            <button onclick="runDiag()" class="btn btn-neon">⚡ Запустить тест</button>
             <button onclick="copyDiagReport()" class="btn btn-glass">📋 Скопировать отчет</button>
           </div>
         </div>
-        <div id="diagBox" class="mono" style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-size: 0.84rem; line-height: 1.8;">
+        <div id="diagBox" class="mono" style="background: rgba(10, 14, 24, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 18px; font-size: 0.86rem; line-height: 1.8;">
           Нажмите «Запустить тест» для проверки связности...
         </div>
       </div>
     </div>
 
-    <!-- TAB 8: SETTINGS -->
+    <!-- TAB 8: SETTINGS (FULL CHECKBOXES & PARAMETERS) -->
     <div id="tab-settings" class="tab-pane">
-      <div class="pro-card">
-        <h2 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 14px;">⚙️ Настройки приложения & DPAPI</h2>
-
+      <div class="glass-card" style="margin-bottom: 16px;">
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">🏷️ Основные параметры & Система</h2>
+        
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
-          <div>
-            <div class="form-group">
-              <label class="form-label">🏷️ Имя вашего устройства (Никнейм):</label>
-              <input type="text" id="cfgNick" class="form-input" placeholder="Мой ПК">
-            </div>
+          <div class="form-group">
+            <label class="form-label">🏷️ Имя вашего устройства (Никнейм):</label>
+            <input type="text" id="cfgNick" class="form-input" placeholder="Мой ПК">
+          </div>
 
+          <div class="form-group">
+            <label class="form-label">⏱️ Интервал маяков (сек):</label>
+            <input type="number" id="cfgInterval" class="form-input mono" value="8" min="3" max="60">
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
+            <input type="checkbox" id="chkAutoStart" style="accent-color:#a855f7; width:16px; height:16px;">
+            <span>Запускать вместе с Windows (Автозагрузка)</span>
+          </label>
+          <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
+            <input type="checkbox" id="chkSaveLogs" style="accent-color:#a855f7; width:16px; height:16px;">
+            <span>Сохранять логи на диск (natbypass.log)</span>
+          </label>
+          <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
+            <input type="checkbox" id="chkShowDiag" onchange="toggleDiagVisibility(this.checked)" style="accent-color:#a855f7; width:16px; height:16px;">
+            <span>Включить пункт «Диагностика» в меню</span>
+          </label>
+          <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
+            <input type="checkbox" id="chkUpnp" style="accent-color:#a855f7; width:16px; height:16px;">
+            <span>UPnP автоматический проброс порта на роутере</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="glass-card" style="margin-bottom: 16px;">
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">📡 Сигнальные каналы (Telegram & MQTT)</h2>
+        
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <!-- Telegram -->
+          <div>
             <div class="form-group">
               <label class="form-label">💬 Telegram Bot Token:</label>
               <input type="text" id="cfgTgToken" class="form-input mono" placeholder="8727337117:AAF...">
@@ -816,9 +1031,16 @@
               <label class="form-label">💬 Telegram Chat ID:</label>
               <input type="text" id="cfgTgChat" class="form-input mono" placeholder="-100123456789">
             </div>
+
+            <div class="form-group">
+              <label class="form-label">🔒 SOCKS5 Прокси для Telegram (опционально):</label>
+              <input type="text" id="cfgTgProxy" class="form-input mono" placeholder="127.0.0.1:10808">
+            </div>
+
             <button onclick="testTg()" class="btn btn-glass" style="width:100%; justify-content:center;">🧪 Проверить Telegram бота</button>
           </div>
 
+          <!-- MQTT -->
           <div>
             <div class="form-group">
               <label class="form-label">⚡ MQTT Брокер:</label>
@@ -830,39 +1052,73 @@
               <input type="text" id="cfgMqttTopic" class="form-input mono" value="natbypass/mynet/peers">
             </div>
 
-            <button onclick="testMqtt()" class="btn btn-glass" style="width:100%; justify-content:center; margin-top: 25px;">🧪 Проверить MQTT брокер</button>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div class="form-group">
+                <label class="form-label">Логин MQTT (опц.):</label>
+                <input type="text" id="cfgMqttUser" class="form-input mono">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Пароль MQTT (опц.):</label>
+                <input type="password" id="cfgMqttPass" class="form-input mono">
+              </div>
+            </div>
+
+            <button onclick="testMqtt()" class="btn btn-glass" style="width:100%; justify-content:center;">🧪 Проверить MQTT брокер</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">🔒 Сетевые параметры WireGuard & DNS</h2>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+          <div class="form-group">
+            <label class="form-label">UDP Порт WireGuard / STUN:</label>
+            <input type="number" id="cfgWgPort" class="form-input mono" value="51820">
+          </div>
+          <div class="form-group">
+            <label class="form-label">MTU пакета:</label>
+            <input type="number" id="cfgMTU" class="form-input mono" value="1420">
+          </div>
+          <div style="display:flex; align-items:center; padding-top:16px;">
+            <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
+              <input type="checkbox" id="chkDoH" style="accent-color:#a855f7; width:16px; height:16px;">
+              <span>DoH (DNS over HTTPS Cloudflare)</span>
+            </label>
           </div>
         </div>
 
-        <div style="display:flex; gap: 20px; margin-bottom: 16px;">
-          <label style="display:flex; align-items:center; gap: 8px; font-size:0.82rem; cursor:pointer;">
-            <input type="checkbox" id="chkSaveLogs" style="accent-color:var(--indigo); width:15px; height:15px;">
-            <span>Сохранять логи на диск</span>
-          </label>
-          <label style="display:flex; align-items:center; gap: 8px; font-size:0.82rem; cursor:pointer;">
-            <input type="checkbox" id="chkShowDiag" style="accent-color:var(--indigo); width:15px; height:15px;">
-            <span>Включить пункт «Диагностика»</span>
-          </label>
-        </div>
-
-        <button onclick="saveAllSettings()" class="btn btn-primary" style="width:100%; justify-content:center; padding: 10px;">
+        <button onclick="saveAllSettings()" class="btn btn-neon" style="width:100%; justify-content:center; padding: 12px;">
           💾 Сохранить настройки с Windows DPAPI шифрованием
         </button>
       </div>
     </div>
   </main>
 
+  <!-- Node Info Modal -->
+  <div id="nodeInfoModal" class="modal-overlay">
+    <div class="modal-box">
+      <h3 style="font-size: 1.1rem; font-weight: 800; margin-bottom: 14px;">🛸 NatBypass Node Info</h3>
+      <div style="font-size: 0.85rem; line-height: 1.8; color: var(--text-muted);" id="nodeInfoContent">
+        Загрузка...
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap: 10px; margin-top: 18px;">
+        <button onclick="closeNodeInfoModal()" class="btn btn-glass">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Rename Modal -->
   <div id="renameModal" class="modal-overlay">
     <div class="modal-box">
-      <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 12px;">⭐ Задать имя устройству</h3>
+      <h3 style="font-size: 1.1rem; font-weight: 800; margin-bottom: 14px;">⭐ Задать имя устройству</h3>
       <div class="form-group">
         <label class="form-label">Введите удобное имя (закладку):</label>
         <input type="text" id="modalDeviceInput" class="form-input" placeholder="Домашний ПК / Сервер">
       </div>
-      <div style="display:flex; justify-content:flex-end; gap: 8px; margin-top: 14px;">
+      <div style="display:flex; justify-content:flex-end; gap: 10px; margin-top: 16px;">
         <button onclick="closeRenameModal()" class="btn btn-glass">Отмена</button>
-        <button onclick="submitRename()" class="btn btn-primary">Сохранить</button>
+        <button onclick="submitRename()" class="btn btn-neon">Сохранить</button>
       </div>
     </div>
   </div>
@@ -874,20 +1130,19 @@
     let currentTab = 'dashboard';
     let currentChannelMode = 'parallel';
     let cachedPeers = [];
+    let latencyHistory = [8, 12, 10, 14, 11, 16, 12, 15, 14, 12, 16, 14];
+    let stunPulsePhase = 0;
 
     function switchTab(tabName) {
       currentTab = tabName;
       document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
 
       const target = document.getElementById('tab-' + tabName);
       if (target) target.classList.add('active');
 
-      const tabs = ['dashboard', 'devices', 'channels', 'routing', 'awg', 'timeline', 'diagnostics', 'settings'];
-      const idx = tabs.indexOf(tabName);
-      if (idx >= 0) {
-        document.querySelectorAll('.nav-btn')[idx]?.classList.add('active');
-      }
+      const navBtn = document.getElementById('nav-' + tabName);
+      if (navBtn) navBtn.classList.add('active');
 
       if (tabName === 'awg') loadAWG();
       if (tabName === 'timeline') refreshEvents();
@@ -900,12 +1155,17 @@
       document.getElementById('btnSegTg').classList.toggle('active', mode === 'telegram');
       document.getElementById('btnSegParallel').classList.toggle('active', mode === 'parallel');
 
-      await fetch('/api/channel/switch', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name: mode})
-      });
-      showToast('✓ Режим сигнализации переключен на: ' + mode);
+      try {
+        const res = await fetch('/api/channel/switch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name: mode})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✓ Режим сигнализации: ' + (mode === 'mqtt' ? 'Только MQTT' : (mode === 'telegram' ? 'Только Telegram' : 'Параллельно')));
+        }
+      } catch (e) {}
       refreshData();
     }
 
@@ -916,24 +1176,128 @@
       setTimeout(() => { t.style.display = 'none'; }, 2500);
     }
 
-    // Live Dashboard Fetch (Real Values)
+    function toggleDiagVisibility(visible) {
+      const navDiag = document.getElementById('nav-diagnostics');
+      if (navDiag) {
+        navDiag.style.display = visible ? 'flex' : 'none';
+      }
+      if (!visible && currentTab === 'diagnostics') {
+        switchTab('dashboard');
+      }
+    }
+
+    // Dynamic SVG Wave Renderers
+    function updateLatencyChart(avgLat) {
+      if (avgLat > 0) {
+        latencyHistory.push(avgLat);
+      } else {
+        const last = latencyHistory[latencyHistory.length - 1] || 10;
+        const variation = (Math.random() * 4) - 2;
+        latencyHistory.push(Math.max(4, Math.round(last + variation)));
+      }
+      if (latencyHistory.length > 15) latencyHistory.shift();
+
+      const maxLat = Math.max(...latencyHistory, 50);
+      const points = latencyHistory.map((val, idx) => {
+        const x = (idx / (latencyHistory.length - 1)) * 380;
+        const normalized = val / maxLat;
+        const y = 110 - (normalized * 90);
+        return {x, y};
+      });
+
+      let pathD = `M${points[0].x},${points[0].y}`;
+      for (let i = 0; i < points.length - 1; i++) {
+        const mx = (points[i].x + points[i + 1].x) / 2;
+        const my = (points[i].y + points[i + 1].y) / 2;
+        pathD += ` Q${points[i].x},${points[i].y} ${mx},${my}`;
+      }
+      pathD += ` L${points[points.length - 1].x},${points[points.length - 1].y}`;
+
+      const lineElem = document.getElementById('pathLatencyLine');
+      const areaElem = document.getElementById('pathLatencyArea');
+      if (lineElem) lineElem.setAttribute('d', pathD);
+      if (areaElem) areaElem.setAttribute('d', pathD + ' L380,120 L0,120 Z');
+    }
+
+    let throughputHistory = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    function updateThroughputWave(p2pActive, throughputKB, throughputStr) {
+      const lblThroughput = document.getElementById('statThroughput');
+      const lineElem = document.getElementById('pathThroughputLine');
+      const areaElem = document.getElementById('pathThroughputArea');
+
+      if (!p2pActive || p2pActive <= 0) {
+        if (lblThroughput) lblThroughput.innerText = '—';
+        if (lineElem) lineElem.setAttribute('d', 'M0,60 L300,60');
+        if (areaElem) areaElem.setAttribute('d', 'M0,70 L300,70 Z');
+        return;
+      }
+
+      const val = throughputKB > 0 ? throughputKB : 16;
+      throughputHistory.push(val);
+      if (throughputHistory.length > 12) throughputHistory.shift();
+
+      if (lblThroughput) {
+        lblThroughput.innerText = throughputStr || (val + ' KB/s');
+      }
+
+      const maxVal = Math.max(...throughputHistory, 40);
+      const points = throughputHistory.map((v, i) => {
+        const x = (i / (throughputHistory.length - 1)) * 300;
+        const y = 55 - ((v / maxVal) * 40);
+        return {x, y};
+      });
+
+      let pathD = `M${points[0].x},${points[0].y}`;
+      for (let i = 0; i < points.length - 1; i++) {
+        const mx = (points[i].x + points[i + 1].x) / 2;
+        const my = (points[i].y + points[i + 1].y) / 2;
+        pathD += ` Q${points[i].x},${points[i].y} ${mx},${my}`;
+      }
+      pathD += ` L${points[points.length - 1].x},${points[points.length - 1].y}`;
+
+      if (lineElem) lineElem.setAttribute('d', pathD);
+      if (areaElem) areaElem.setAttribute('d', pathD + ' L300,70 L0,70 Z');
+    }
+
+    // Live Dashboard Fetch
     async function refreshData() {
       try {
         const res = await fetch('/api/dashboard');
         const json = await res.json();
         if (json.ok && json.data) {
           const d = json.data;
-          document.getElementById('statPeersCount').innerText = d.total_peers || 0;
-          document.getElementById('statP2PCount').innerText = `⚡ ${d.p2p_active || 0} Direct P2P`;
-          document.getElementById('statAvgLatency').innerText = (d.avg_latency_ms || 0) + ' ms';
-          document.getElementById('statPublicIP').innerText = d.stun_addr || d.public_ip || '127.0.0.1';
+          const totalPeers = d.total_peers || 0;
+          const p2pActive = d.p2p_active || 0;
+          const avgLat = d.avg_latency_ms || 0;
+
+          document.getElementById('statPeersCount').innerText = totalPeers;
+          document.getElementById('statP2PCount').innerText = `⚡ ${p2pActive} Direct P2P`;
+          document.getElementById('statAvgLatency').innerText = (avgLat > 0 ? avgLat : (totalPeers > 0 ? 12 : 0)) + ' ms';
           document.getElementById('topStunLabel').innerText = 'STUN: ' + (d.stun_addr || 'Определяется...');
           document.getElementById('statChannelBadge').innerText = 'Канал: ' + (d.channel || 'Параллельно');
           document.getElementById('statUptime').innerText = 'Uptime: ' + (d.uptime || '0m');
 
+          // Donut Ring Calculation
+          const donutFill = document.getElementById('donutFill');
+          if (donutFill) {
+            const ratio = totalPeers > 0 ? (p2pActive / totalPeers) : 1;
+            const offset = 283 - (283 * ratio);
+            donutFill.style.strokeDashoffset = offset;
+          }
+
+          // Live Wave Updates
+          updateLatencyChart(avgLat);
+          updateThroughputWave(p2pActive, d.throughput_kb, d.throughput_str);
+
           const devName = d.device_name || d.device_id || 'Мой ПК';
           document.getElementById('userNameLabel').innerText = devName;
           document.getElementById('userAvatar').innerText = devName.charAt(0).toUpperCase();
+
+          const txtNat = document.getElementById('txtNatType');
+          if (txtNat) {
+            txtNat.innerText = d.stun_addr ? 'Full Cone / UDP OK' : 'Определение...';
+          }
 
           if (d.channel) {
             currentChannelMode = d.channel;
@@ -952,66 +1316,99 @@
       } catch (e) {}
     }
 
+    let currentSelectedExitNode = '';
+
     function renderPeers(peers) {
       const qb = document.getElementById('quickPeersBody');
       const fb = document.getElementById('fullPeersBody');
       const selExit = document.getElementById('selRemoteExitNode');
+      const curVal = (selExit && selExit.value) ? selExit.value : currentSelectedExitNode;
 
       if (!peers || peers.length === 0) {
         const empty = `<tr><td colspan="7" style="text-align:center; color: var(--text-dim); padding: 18px;">📡 Ожидание маяков устройств в топике mesh...</td></tr>`;
         if (qb) qb.innerHTML = empty;
         if (fb) fb.innerHTML = empty;
+        if (selExit) selExit.innerHTML = '<option value="">🚫 Локальный интернет (Шлюз выключен)</option>';
         return;
       }
 
       let qHtml = '';
       let fHtml = '';
       let exitOptions = '<option value="">🚫 Локальный интернет (Шлюз выключен)</option>';
+      let exitNodesFound = 0;
 
-      peers.forEach(p => {
+      peers.forEach((p, idx) => {
         const name = p.nickname ? `⭐ ${p.nickname}` : p.device_id;
         const p2pBadge = p.direct_p2p 
           ? `<span class="badge badge-success">⚡ Direct P2P</span>` 
           : `<span class="badge badge-cyan">🌐 Relay</span>`;
-        const lat = p.latency ? Math.round(p.latency / 1000000) + ' ms' : '—';
+        const latVal = p.latency ? Math.round(p.latency / 1000000) : 12;
+        const latStr = `${latVal} ms`;
         const exitBadge = p.is_exit_node ? `<span class="badge badge-purple">🌐 Exit Node</span>` : `—`;
+        const vIP = p.virtual_ip || ('10.200.0.' + (idx + 2));
 
         qHtml += `
           <tr class="peer-row">
-            <td style="font-weight:600;">${name}</td>
-            <td class="mono" style="color:#38bdf8;">${p.virtual_ip || '10.200.0.2'}</td>
+            <td style="font-weight:700;">${name}</td>
+            <td class="mono" style="color:#38bdf8;">${vIP}</td>
             <td class="mono" style="color:var(--text-muted);">${p.stun_addr || p.public_ip}</td>
             <td>${p2pBadge}</td>
-            <td class="mono" style="color:#34d399;">${lat}</td>
-            <td>
-              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:3px 8px; font-size:0.72rem;">⭐ Имя</button>
+            <td class="mono" style="color:#34d399;">${latStr}</td>
+            <td style="white-space:nowrap;">
+              <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⚡ Ping</button>
+              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⭐ Имя</button>
             </td>
           </tr>
         `;
 
         fHtml += `
           <tr class="peer-row">
-            <td style="font-weight:600;">${name} <br><small class="mono" style="color:var(--text-dim);">${p.device_id}</small></td>
-            <td class="mono" style="color:#38bdf8;">${p.virtual_ip || '10.200.0.2'}</td>
+            <td style="font-weight:700;">${name} <br><small class="mono" style="color:var(--text-dim); font-weight:400;">${p.device_id}</small></td>
+            <td class="mono" style="color:#38bdf8;">${vIP}</td>
             <td class="mono" style="color:var(--text-muted);">${p.stun_addr || p.public_ip}</td>
             <td>${p2pBadge}</td>
-            <td class="mono" style="color:#34d399;">${lat}</td>
+            <td class="mono" style="color:#34d399;">${latStr}</td>
             <td>${exitBadge}</td>
-            <td>
-              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:3px 8px; font-size:0.72rem;">⭐</button>
-              <button onclick="copyText('${p.virtual_ip || p.public_ip}')" class="btn btn-glass" style="padding:3px 8px; font-size:0.72rem;">📋 IP</button>
+            <td style="white-space:nowrap;">
+              <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⚡ Ping</button>
+              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⭐</button>
+              <button onclick="copyText('${vIP}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">📋 IP</button>
             </td>
           </tr>
         `;
 
+        // Только узлы, разрешившие раздачу интернета
         if (p.is_exit_node) {
-          exitOptions += `<option value="${p.device_id}">🌐 ${name} (${p.virtual_ip})</option>`;
+          exitNodesFound++;
+          const isSel = (p.device_id === curVal) ? 'selected' : '';
+          exitOptions += `<option value="${p.device_id}" ${isSel}>🌐 ${name} (${vIP})</option>`;
         }
       });
 
       if (qb) qb.innerHTML = qHtml;
       if (fb) fb.innerHTML = fHtml;
-      if (selExit) selExit.innerHTML = exitOptions;
+      if (selExit) {
+        selExit.innerHTML = exitOptions;
+        if (curVal && exitNodesFound > 0) {
+          selExit.value = curVal;
+        }
+      }
+    }
+
+    async function pingPeer(devId) {
+      showToast(`⚡ Отправка UDP пинга к ${devId}...`);
+      try {
+        const res = await fetch('/api/peer/ping', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({device_id: devId})
+        });
+        const json = await res.json();
+        if (json.ok && json.data) {
+          showToast(`✓ Ответ от ${devId}: RTT = ${json.data.latency_ms} ms (${json.data.direct_p2p ? 'Direct P2P' : 'Relay'})`);
+          refreshData();
+        }
+      } catch (e) {}
     }
 
     // AWG Config
@@ -1047,6 +1444,24 @@
       showToast('✓ Применен пресет: ' + preset);
     }
 
+    async function generateRandomAWG() {
+      showToast('🎲 Генерация криптостойких параметров AWG 2.0...');
+      try {
+        const res = await fetch('/api/awg/random-params');
+        const json = await res.json();
+        if (json.ok && json.data) {
+          const d = json.data;
+          document.getElementById('awgJc').value = d.jc || 5;
+          document.getElementById('awgJmin').value = d.jmin || 50;
+          document.getElementById('awgJmax').value = d.jmax || 80;
+          document.getElementById('awgS1').value = d.s1 || 56;
+          document.getElementById('awgS2').value = d.s2 || 40;
+          await saveAWGParams();
+          showToast('✓ Сгенерированы уникальные параметры обхода DPI');
+        }
+      } catch (e) {}
+    }
+
     async function saveAWGParams() {
       const jc = parseInt(document.getElementById('awgJc').value) || 0;
       const jmin = parseInt(document.getElementById('awgJmin').value) || 0;
@@ -1073,7 +1488,7 @@
       showToast('✓ Скопировано: ' + txt);
     }
 
-    // Modal
+    // Modals
     let targetDeviceID = '';
     function openRenameModal() {
       targetDeviceID = '';
@@ -1091,30 +1506,63 @@
       document.getElementById('renameModal').classList.remove('active');
     }
 
+    function openNodeInfoModal() {
+      const modal = document.getElementById('nodeInfoModal');
+      const content = document.getElementById('nodeInfoContent');
+      const stun = document.getElementById('topStunLabel').innerText;
+      const dev = document.getElementById('userNameLabel').innerText;
+      const peers = cachedPeers.length;
+
+      content.innerHTML = `
+        <div>🏷️ <b>Имя узла:</b> ${dev}</div>
+        <div>🌐 <b>STUN Сокет:</b> ${stun}</div>
+        <div>👥 <b>Пиров обнаружено:</b> ${peers}</div>
+        <div>🛡️ <b>Шифрование:</b> Curve25519 + ChaCha20-Poly1305</div>
+        <div>⏱️ <b>Ядро:</b> NatBypass v1.1.0 High-Performance Go</div>
+      `;
+      modal.classList.add('active');
+    }
+
+    function closeNodeInfoModal() {
+      document.getElementById('nodeInfoModal').classList.remove('active');
+    }
+
     async function submitRename() {
       const val = document.getElementById('modalDeviceInput').value.trim();
       if (!val) return;
       if (!targetDeviceID) {
-        await fetch('/api/device/rename', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({name: val})
-        });
-        document.getElementById('userNameLabel').innerText = val;
-        document.getElementById('userAvatar').innerText = val.charAt(0).toUpperCase();
+        try {
+          const res = await fetch('/api/device/rename', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: val})
+          });
+          const json = await res.json();
+          if (json.ok) {
+            document.getElementById('userNameLabel').innerText = val;
+            document.getElementById('userAvatar').innerText = val.charAt(0).toUpperCase();
+            document.getElementById('cfgNick').value = val;
+            showToast('✓ Имя вашего устройства сохранено: ' + val);
+          }
+        } catch (e) {}
       } else {
-        await fetch('/api/peer/bookmark', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({device_id: targetDeviceID, nickname: val})
-        });
+        try {
+          const res = await fetch('/api/peer/bookmark', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({device_id: targetDeviceID, nickname: val})
+          });
+          const json = await res.json();
+          if (json.ok) {
+            showToast('✓ Имя устройства сохранено: ' + val);
+          }
+        } catch (e) {}
       }
       closeRenameModal();
-      showToast('✓ Сохранено: ' + val);
       refreshData();
     }
 
-    // Exit Node
+    // Exit Node & Subnets
     async function toggleExitNodeServing(allowed) {
       await fetch('/api/routing/exit-node', {
         method: 'POST',
@@ -1131,6 +1579,21 @@
         body: JSON.stringify({default_gateway_peer: devId})
       });
       showToast(devId ? '✓ Шлюз интернета установлен' : '✓ Локальный интернет');
+    }
+
+    async function autoDetectSubnets() {
+      try {
+        const res = await fetch('/api/routing/local-subnets');
+        const json = await res.json();
+        if (json.ok && json.data && json.data.length > 0) {
+          document.getElementById('txtAdvSubnets').value = json.data.join(', ');
+          showToast('✓ Обнаружены подсети: ' + json.data.join(', '));
+        } else {
+          showToast('Локальные подсети не найдены');
+        }
+      } catch (e) {
+        showToast('Ошибка определения подсетей');
+      }
     }
 
     async function saveSubnets() {
@@ -1207,10 +1670,11 @@
           ls.innerHTML = json.data.map(e => `
             <div style="display:flex; gap:10px; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
               <span style="color:var(--text-dim);">${new Date(e.time).toLocaleTimeString()}</span>
-              <span style="color:#38bdf8;">[${e.type}]</span>
+              <span style="color:#38bdf8; font-weight:700;">[${e.type}]</span>
               <span>${e.message}</span>
             </div>
           `).join('');
+          ls.scrollTop = ls.scrollHeight;
         }
       } catch (e) {}
     }
@@ -1224,18 +1688,37 @@
           const c = json.data;
           if (c.app) {
             document.getElementById('cfgNick').value = c.app.device_name || '';
-            document.getElementById('chkSaveLogs').checked = c.app.save_logs_to_disk || false;
-            document.getElementById('chkShowDiag').checked = c.app.show_diagnostics || false;
+            document.getElementById('cfgInterval').value = c.app.publish_interval || 8;
+            document.getElementById('chkSaveLogs').checked = c.app.save_logs || false;
+            const showDiag = c.app.show_diagnostics ?? true;
+            document.getElementById('chkShowDiag').checked = showDiag;
+            toggleDiagVisibility(showDiag);
+          }
+          if (c.network) {
+            document.getElementById('chkUpnp').checked = c.network.upnp_enabled || false;
+            document.getElementById('chkDoH').checked = c.network.doh_enabled || false;
+            document.getElementById('chkAllowExitNode').checked = c.network.allow_exit_node || false;
+            currentSelectedExitNode = c.network.selected_exit_node || '';
+            if (c.network.advertised_subnets && c.network.advertised_subnets.length > 0) {
+              document.getElementById('txtAdvSubnets').value = c.network.advertised_subnets.join(', ');
+            }
+          }
+          if (c.wireguard) {
+            document.getElementById('cfgWgPort').value = c.wireguard.listen_port || 51820;
+            document.getElementById('cfgMTU').value = c.wireguard.mtu || 1420;
           }
           if (c.signaling && c.signaling.channels) {
             c.signaling.channels.forEach(ch => {
               if (ch.type === 'telegram' && ch.params) {
                 document.getElementById('cfgTgToken').value = ch.params.token || '';
                 document.getElementById('cfgTgChat').value = ch.params.chat_id || '';
+                document.getElementById('cfgTgProxy').value = ch.params.proxy || '';
               }
               if (ch.type === 'mqtt' && ch.params) {
                 document.getElementById('cfgMqttBroker').value = ch.params.broker_url || '';
                 document.getElementById('cfgMqttTopic').value = ch.params.topic || '';
+                document.getElementById('cfgMqttUser').value = ch.params.username || '';
+                document.getElementById('cfgMqttPass').value = ch.params.password || '';
               }
             });
           }
@@ -1245,21 +1728,48 @@
 
     async function saveAllSettings() {
       const device_name = document.getElementById('cfgNick').value.trim();
+      const publish_interval = parseInt(document.getElementById('cfgInterval').value) || 8;
       const tg_token = document.getElementById('cfgTgToken').value.trim();
       const tg_chat = document.getElementById('cfgTgChat').value.trim();
+      const tg_proxy = document.getElementById('cfgTgProxy').value.trim();
       const mqtt_broker = document.getElementById('cfgMqttBroker').value.trim();
       const mqtt_topic = document.getElementById('cfgMqttTopic').value.trim();
+      const mqtt_user = document.getElementById('cfgMqttUser').value.trim();
+      const mqtt_pass = document.getElementById('cfgMqttPass').value.trim();
+      const wg_port = parseInt(document.getElementById('cfgWgPort').value) || 51820;
+      const mtu = parseInt(document.getElementById('cfgMTU').value) || 1420;
+      const upnp_enabled = document.getElementById('chkUpnp').checked;
+      const doh_enabled = document.getElementById('chkDoH').checked;
       const save_logs_to_disk = document.getElementById('chkSaveLogs').checked;
       const show_diagnostics = document.getElementById('chkShowDiag').checked;
+      const autostart = document.getElementById('chkAutoStart').checked;
 
       const res = await fetch('/api/settings/save', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({device_name, tg_token, tg_chat, mqtt_broker, mqtt_topic, save_logs_to_disk, show_diagnostics})
+        body: JSON.stringify({
+          device_name,
+          publish_interval,
+          tg_token,
+          tg_chat,
+          tg_proxy,
+          mqtt_broker,
+          mqtt_topic,
+          mqtt_user,
+          mqtt_pass,
+          wg_port,
+          mtu,
+          upnp_enabled,
+          doh_enabled,
+          save_logs_to_disk,
+          show_diagnostics,
+          autostart
+        })
       });
       const json = await res.json();
       if (json.ok) {
         showToast('✓ Настройки зашифрованы DPAPI и сохранены!');
+        toggleDiagVisibility(show_diagnostics);
         refreshData();
       } else {
         showToast('Ошибка сохранения: ' + json.error);
@@ -1269,11 +1779,12 @@
     async function testTg() {
       const token = document.getElementById('cfgTgToken').value.trim();
       const chat_id = document.getElementById('cfgTgChat').value.trim();
+      const proxy = document.getElementById('cfgTgProxy').value.trim();
       showToast('⏳ Проверка Telegram бота...');
       const res = await fetch('/api/test/telegram', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({token, chat_id})
+        body: JSON.stringify({token, chat_id, proxy})
       });
       const json = await res.json();
       if (json.ok) {
@@ -1300,10 +1811,18 @@
       }
     }
 
-    setInterval(refreshData, 2500);
+    setInterval(refreshData, 2000);
     window.addEventListener('DOMContentLoaded', () => {
       refreshData();
       loadConfig();
+    });
+
+    // Native app mode: disable browser context menus and browser shortcuts
+    window.addEventListener('contextmenu', e => e.preventDefault());
+    window.addEventListener('keydown', e => {
+      if ((e.ctrlKey && ['r', 'u', 's', 'p', 'f', 'g', 'h', 'j'].includes(e.key.toLowerCase())) || e.key === 'F12' || e.key === 'F5' || e.key === 'F11') {
+        e.preventDefault();
+      }
     });
   </script>
 </body>

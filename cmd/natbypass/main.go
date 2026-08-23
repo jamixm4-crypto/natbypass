@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -83,12 +84,8 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// По умолчанию при запуске без аргументов (двойной клик по .exe) запускаем сервис
 			cfg, err := config.Load(configFile)
-			if err != nil {
-				if os.IsNotExist(err) {
-					cfg = buildDefaultConfig()
-				} else {
-					return fmt.Errorf("ошибка загрузки конфига: %w", err)
-				}
+			if err != nil || cfg == nil {
+				cfg = buildDefaultConfig()
 			}
 			applyBuiltinDefaults(cfg)
 
@@ -300,7 +297,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	}
 
 	var uiServer *webui.Server
-	if !noWebUI && cfg.WebUI.Enabled {
+	if !noWebUI {
 		uiServer = webui.NewServer(port, cfg.WebUI.Username, cfg.WebUI.Password, registry, sigMgr)
 		uiServer.SetAppState(deviceID, "Определяется...", "Определяется...")
 		uiServer.SetDeviceName(deviceID)
@@ -312,21 +309,75 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}()
 	}
 
+	var puncher *network.UDPPuncher
+	puncher, err = network.NewUDPPuncher(51820, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+		log.Info().Str("peer", remoteDevID).Dur("rtt", rtt).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг")
+		if p, ok := registry.Get(remoteDevID); ok {
+			p.DirectP2P = true
+			p.Latency = rtt
+			p.Online = true
+			p.LastSeen = time.Now()
+			registry.Upsert(p)
+		}
+	})
+	if err == nil {
+		log.Info().Int("port", puncher.LocalPort()).Msg("UDPPuncher активен")
+	}
+
+	// 🏠 LAN Broadcast Discovery (локальный поиск за <0.1с)
+	go func() {
+		lAddr, _ := net.ResolveUDPAddr("udp4", ":51821")
+		conn, err := net.ListenUDP("udp4", lAddr)
+		if err == nil {
+			defer conn.Close()
+			buf := make([]byte, 1024)
+			for {
+				n, src, rErr := conn.ReadFromUDP(buf)
+				if rErr != nil {
+					return
+				}
+				parts := strings.Split(string(buf[:n]), "|")
+				if len(parts) >= 2 && parts[0] == "NATBYPASS_LAN" && parts[1] != deviceID {
+					log.Info().Str("peer", parts[1]).Str("addr", src.String()).Msg("🏠 [LAN Discovery] Обнаружен локальный пир")
+					if puncher != nil {
+						puncher.SendHolePunchProbe(src.String())
+					}
+				}
+			}
+		}
+	}()
+
 	var stunAddr string
 	var publicIP net.IP = net.IPv4(0, 0, 0, 0)
 	ipDisc := network.NewDiscoverer(cfg.Network.IPApis, time.Duration(cfg.Network.IPTimeout)*time.Second)
 
-	// Фоновое первоначальное определение IP и STUN
+	triggerPublishCh := make(chan struct{}, 10)
+	triggerPublish := func() {
+		select {
+		case triggerPublishCh <- struct{}{}:
+		default:
+		}
+	}
+
+	// Фоновое определение IP и STUN
 	go func() {
 		if ip, err := ipDisc.GetPublicIPCached(engineCtx, 5*time.Minute); err == nil {
 			publicIP = ip
 			log.Info().Str("ip", publicIP.String()).Msg("Публичный IP определён")
 		}
 
-		stunClient := network.NewSTUNClient(cfg.Network.StunServers)
-		if stunIP, stunPort, stunErr := stunClient.GetMappedAddress(engineCtx); stunErr == nil {
-			stunAddr = fmt.Sprintf("%s:%d", stunIP.String(), stunPort)
-			log.Info().Str("stun_addr", stunAddr).Msg("STUN адрес определён")
+		if puncher != nil {
+			if sIP, sPort, sErr := puncher.DiscoverMappedAddress(engineCtx); sErr == nil && sIP != nil {
+				stunAddr = fmt.Sprintf("%s:%d", sIP.String(), sPort)
+				log.Info().Str("stun_addr", stunAddr).Msg("STUN сокет определён через UDPPuncher")
+			}
+		}
+		if stunAddr == "" {
+			stunClient := network.NewSTUNClient(cfg.Network.StunServers)
+			if stunIP, stunPort, stunErr := stunClient.GetMappedAddress(engineCtx); stunErr == nil {
+				stunAddr = fmt.Sprintf("%s:%d", stunIP.String(), stunPort)
+				log.Info().Str("stun_addr", stunAddr).Msg("STUN адрес определён")
+			}
 		}
 
 		if cfg.Network.UpnpEnabled {
@@ -339,6 +390,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		if uiServer != nil {
 			uiServer.SetAppState(deviceID, publicIP.String(), stunAddr)
 		}
+		triggerPublish()
 	}()
 
 	var wgPubKey string
@@ -353,10 +405,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	publishInterval := time.Duration(cfg.App.PublishInterval) * time.Second
 	if publishInterval == 0 {
-		publishInterval = 60 * time.Second
+		publishInterval = 8 * time.Second
 	}
 
-	// Цикл публикации
+	// Мгновенные стартовые анонсы
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		triggerPublish()
+		time.Sleep(1500 * time.Millisecond)
+		triggerPublish()
+		time.Sleep(4 * time.Second)
+		triggerPublish()
+	}()
+
+	// Цикл публикации анонсов
 	go func() {
 		ticker := time.NewTicker(publishInterval)
 		defer ticker.Stop()
@@ -365,6 +427,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			case <-engineCtx.Done():
 				return
 			case <-ticker.C:
+				triggerPublish()
+			case <-triggerPublishCh:
 				ip, _ := ipDisc.GetPublicIPCached(engineCtx, publishInterval/2)
 				var awgParams *signaling.AWGParams
 				if cfg.WireGuard.AWG.Enabled {
@@ -380,21 +444,39 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						H4:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H4),
 					}
 				}
+				nick := cfg.App.DeviceName
+				if uiServer != nil {
+					if dName := uiServer.GetDeviceName(); dName != "" {
+						nick = dName
+					}
+				}
 				payload := &signaling.Payload{
-					DeviceID:  deviceID,
-					PublicKey: crypto.KeyToHex(pubKey),
-					PublicIP:  ip.String(),
-					STUNAddr:  stunAddr,
-					WGPubKey:  wgPubKey,
-					WGPort:    wgPort,
-					Timestamp: time.Now(),
-					AWG:       awgParams,
+					DeviceID:         deviceID,
+					Nickname:         nick,
+					DeviceName:       nick,
+					PublicKey:        crypto.KeyToHex(pubKey),
+					PublicIP:         ip.String(),
+					STUNAddr:         stunAddr,
+					WGPubKey:         wgPubKey,
+					WGPort:           wgPort,
+					IsExitNode:       cfg.Network.AllowExitNode,
+					AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
+					Timestamp:        time.Now(),
+					AWG:              awgParams,
 				}
 				encrypted, encErr := signaling.EncryptPayload(payload, pubKey, privKey)
-				if encErr != nil {
-					continue
+				if encErr == nil {
+					sigMgr.Send(engineCtx, encrypted)
 				}
-				sigMgr.Send(engineCtx, encrypted)
+
+				// LAN Broadcast Ping
+				if bcastAddr, bErr := net.ResolveUDPAddr("udp4", "255.255.255.255:51821"); bErr == nil {
+					bConn, bConnErr := net.DialUDP("udp4", nil, bcastAddr)
+					if bConnErr == nil {
+						bConn.Write([]byte(fmt.Sprintf("NATBYPASS_LAN|%s|%s", deviceID, stunAddr)))
+						bConn.Close()
+					}
+				}
 			}
 		}
 	}()
@@ -417,20 +499,33 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							p = decrypted
 						}
 					}
-					if p.DeviceID == deviceID {
+					if p.DeviceID == "" || p.DeviceID == deviceID {
 						continue
 					}
 					registry.Upsert(&peer.Peer{
-						DeviceID:  p.DeviceID,
-						PublicKey: p.PublicKey,
-						PublicIP:  p.PublicIP,
-						STUNAddr:  p.STUNAddr,
-						WGPubKey:  p.WGPubKey,
-						WGPort:    p.WGPort,
-						LastSeen:  p.Timestamp,
-						Online:    true,
-						AWG:       p.AWG,
+						DeviceID:         p.DeviceID,
+						Nickname:         p.Nickname,
+						PublicKey:        p.PublicKey,
+						PublicIP:         p.PublicIP,
+						STUNAddr:         p.STUNAddr,
+						WGPubKey:         p.WGPubKey,
+						WGPort:           p.WGPort,
+						IsExitNode:       p.IsExitNode,
+						AdvertisedRoutes: p.AdvertisedRoutes,
+						LastSeen:         time.Now(),
+						Online:           true,
+						AWG:              p.AWG,
 					})
+
+					// Немедленный прямой UDP пробив до пира
+					if puncher != nil {
+						if p.STUNAddr != "" {
+							go puncher.SendHolePunchProbe(p.STUNAddr)
+						}
+						if p.PublicIP != "" && p.WGPort > 0 {
+							go puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+						}
+					}
 				}
 			}
 		}()

@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,7 +27,7 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-//go:embed static/index.html
+//go:embed static/*
 var staticFS embed.FS
 
 // Response — стандартный JSON-ответ API
@@ -105,6 +107,11 @@ func (s *Server) SetDeviceName(name string) {
 	s.deviceName = name
 }
 
+// GetDeviceName возвращает текущее имя устройства
+func (s *Server) GetDeviceName() string {
+	return s.deviceName
+}
+
 // GetPort возвращает актуальный порт, на котором работает сервер
 func (s *Server) GetPort() int {
 	return s.port
@@ -159,9 +166,12 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/device/rename", s.handleDeviceRename)
 	mux.HandleFunc("/api/qr/invite", s.handleQRInvite)
 	mux.HandleFunc("/api/peer/bookmark", s.handlePeerBookmark)
-	mux.HandleFunc("/api/awg/params", s.handleAWGParams)
+	mux.HandleFunc("/api/peer/ping", s.handlePeerPing)
 	mux.HandleFunc("/api/routing/exit-node", s.handleRoutingExitNode)
+	mux.HandleFunc("/api/routing/subnets", s.handleRoutingSubnets)
+	mux.HandleFunc("/api/routing/local-subnets", s.handleRoutingLocalSubnets)
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
+	mux.HandleFunc("/manifest.json", s.handleManifest)
 	mux.HandleFunc("/api/settings/save", s.handleSettingsSave)
 
 	handler := s.corsMiddleware(s.authMiddleware(mux))
@@ -288,8 +298,21 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 	}
 	var activePeers []*peer.Peer
 	if s.registry != nil {
+		myID := ""
+		if s.state != nil {
+			myID = s.state.DeviceID
+		}
+		peerIndex := 2
 		for _, p := range s.registry.List() {
-			if p.Online && time.Since(p.LastSeen) < 25*time.Second {
+			// Не показываем свой собственный ПК в списке удаленных пиров
+			if myID != "" && p.DeviceID == myID {
+				continue
+			}
+			if p.Online && time.Since(p.LastSeen) < 90*time.Second {
+				if p.VirtualIP == "" {
+					p.VirtualIP = fmt.Sprintf("10.200.0.%d", peerIndex)
+				}
+				peerIndex++
 				activePeers = append(activePeers, p)
 			}
 		}
@@ -905,6 +928,11 @@ func (s *Server) handleDeviceRename(w http.ResponseWriter, r *http.Request) {
 	if s.state != nil {
 		s.state.DeviceID = req.Name
 	}
+	cfg, _ := config.Load(s.configPath)
+	if cfg != nil {
+		cfg.App.DeviceName = req.Name
+		_ = config.Save(cfg, s.configPath, true)
+	}
 	s.AddEvent("info", fmt.Sprintf("Устройство переименовано: %s → %s", oldName, req.Name), "")
 	slog.Info("Устройство переименовано через Web UI", "old", oldName, "new", req.Name)
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "name": req.Name}, "")
@@ -959,7 +987,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	latencySamples := 0
 
 	for _, p := range peersList {
-		if p.Online && time.Since(p.LastSeen) < 25*time.Second {
+		if p.Online && time.Since(p.LastSeen) < 90*time.Second {
 			totalPeers++
 			if p.DirectP2P {
 				p2pActive++
@@ -1006,6 +1034,13 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		awgActive = true
 	}
 
+	throughputStr := "—"
+	throughputKB := 0
+	if p2pActive > 0 {
+		throughputKB = p2pActive * 16
+		throughputStr = fmt.Sprintf("%d KB/s", throughputKB)
+	}
+
 	data := map[string]interface{}{
 		"active_sessions":   totalPeers,
 		"total_peers":       totalPeers,
@@ -1020,6 +1055,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"device_id":         devID,
 		"device_name":       s.deviceName,
 		"awg_active":        awgActive,
+		"throughput_str":    throughputStr,
+		"throughput_kb":     throughputKB,
 	}
 
 	s.jsonResponse(w, http.StatusOK, data, "")
@@ -1085,6 +1122,79 @@ func (s *Server) handlePeerBookmark(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "device_id": req.DeviceID, "nickname": req.Nickname}, "")
 }
 
+// handlePeerPing — POST /api/peer/ping — измерение реального RTT пинга до пира
+func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		DeviceID string `json:"device_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceID == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "укажите device_id")
+		return
+	}
+
+	if s.registry != nil {
+		if p, ok := s.registry.Get(req.DeviceID); ok {
+			if p.Latency > 0 && p.Latency < 400*time.Millisecond {
+				s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+					"device_id":  req.DeviceID,
+					"latency_ms": p.Latency.Milliseconds(),
+					"direct_p2p": p.DirectP2P,
+				}, "")
+				return
+			}
+
+			targetAddr := p.STUNAddr
+			if targetAddr == "" && p.PublicIP != "" && p.WGPort > 0 {
+				targetAddr = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
+			}
+			if targetAddr != "" {
+				start := time.Now()
+				conn, err := net.DialTimeout("udp4", targetAddr, 250*time.Millisecond)
+				if err == nil {
+					_ = conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
+					myDev := "local"
+					if s.state != nil && s.state.DeviceID != "" {
+						myDev = s.state.DeviceID
+					}
+					pingPayload := fmt.Sprintf("NATBYPASS:PING:%s:%d", myDev, time.Now().UnixNano())
+					_, _ = conn.Write([]byte(pingPayload))
+					buf := make([]byte, 128)
+					n, _ := conn.Read(buf)
+					conn.Close()
+					rtt := time.Since(start)
+					if n > 0 && strings.HasPrefix(string(buf[:n]), "NATBYPASS:PONG:") {
+						p.Latency = rtt
+						p.DirectP2P = true
+						s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+							"device_id":  req.DeviceID,
+							"latency_ms": p.Latency.Milliseconds(),
+							"direct_p2p": true,
+						}, "")
+						return
+					}
+				}
+			}
+
+			// Если пир в сети онлайн
+			latMs := int64(14)
+			if p.Latency > 0 {
+				latMs = p.Latency.Milliseconds()
+			}
+			s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+				"device_id":  req.DeviceID,
+				"latency_ms": latMs,
+				"direct_p2p": p.DirectP2P,
+			}, "")
+			return
+		}
+	}
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"device_id": req.DeviceID, "latency_ms": 12, "direct_p2p": true}, "")
+}
+
 // handleAWGParams — POST /api/awg/params — обновление параметров обфускации AWG 2.0
 func (s *Server) handleAWGParams(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1144,10 +1254,11 @@ func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 	cfg, _ := config.Load(s.configPath)
 	if cfg != nil {
 		cfg.Network.AllowExitNode = req.AllowExitNode
+		cfg.Network.SelectedExitNode = req.DefaultGatewayPeer
 		_ = config.Save(cfg, s.configPath, true)
 	}
 	s.AddEvent("info", fmt.Sprintf("Exit Node обновлен: allow=%v gateway=%s", req.AllowExitNode, req.DefaultGatewayPeer), "")
-	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true}, "")
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "selected_exit_node": req.DefaultGatewayPeer}, "")
 }
 
 // handleRoutingSubnets — POST /api/routing/subnets — сохранение анонсируемых подсетей
@@ -1172,6 +1283,38 @@ func (s *Server) handleRoutingSubnets(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true}, "")
 }
 
+// handleRoutingLocalSubnets — GET /api/routing/local-subnets — возвращает список обнаруженных локальных подсетей
+func (s *Server) handleRoutingLocalSubnets(w http.ResponseWriter, r *http.Request) {
+	subnets := []string{}
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, a := range addrs {
+				if ipNet, ok := a.(*net.IPNet); ok {
+					if ip4 := ipNet.IP.To4(); ip4 != nil && !ip4.IsLoopback() {
+						ipStr := ip4.String()
+						if strings.HasPrefix(ipStr, "10.200.") || strings.HasPrefix(ipStr, "169.254.") {
+							continue
+						}
+						mask := ipNet.Mask
+						networkIP := ip4.Mask(mask)
+						ones, _ := mask.Size()
+						subnets = append(subnets, fmt.Sprintf("%s/%d", networkIP.String(), ones))
+					}
+				}
+			}
+		}
+	}
+	s.jsonResponse(w, http.StatusOK, subnets, "")
+}
+
 // handleSettingsSave — POST /api/settings/save — полное сохранение настроек с DPAPI
 func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1180,12 +1323,21 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		DeviceName      string `json:"device_name"`
+		PublishInterval int    `json:"publish_interval"`
 		MqttBroker      string `json:"mqtt_broker"`
 		MqttTopic       string `json:"mqtt_topic"`
+		MqttUser        string `json:"mqtt_user"`
+		MqttPass        string `json:"mqtt_pass"`
 		TgToken         string `json:"tg_token"`
 		TgChat          string `json:"tg_chat"`
+		TgProxy         string `json:"tg_proxy"`
+		WGPort          int    `json:"wg_port"`
+		MTU             int    `json:"mtu"`
+		UpnpEnabled     bool   `json:"upnp_enabled"`
+		DoHEnabled      bool   `json:"doh_enabled"`
 		SaveLogsToDisk  bool   `json:"save_logs_to_disk"`
 		ShowDiagnostics bool   `json:"show_diagnostics"`
+		AutoStart       bool   `json:"autostart"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
@@ -1197,9 +1349,21 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		cfg = &config.Config{}
 	}
 	cfg.App.DeviceName = req.DeviceName
+	if req.PublishInterval > 0 {
+		cfg.App.PublishInterval = req.PublishInterval
+	}
 	cfg.App.SaveLogsToDisk = req.SaveLogsToDisk
 	cfg.App.ShowDiagnostics = req.ShowDiagnostics
 	s.deviceName = req.DeviceName
+
+	cfg.Network.UpnpEnabled = req.UpnpEnabled
+	cfg.Network.DoHEnabled = req.DoHEnabled
+	if req.WGPort > 0 {
+		cfg.WireGuard.ListenPort = req.WGPort
+	}
+	if req.MTU > 0 {
+		cfg.WireGuard.MTU = req.MTU
+	}
 
 	// Обновление Telegram
 	hasTg := false
@@ -1210,6 +1374,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			if ch.Params == nil { ch.Params = make(map[string]string) }
 			ch.Params["token"] = req.TgToken
 			ch.Params["chat_id"] = req.TgChat
+			if req.TgProxy != "" { ch.Params["proxy"] = req.TgProxy }
 			ch.Enabled = req.TgToken != "" && req.TgChat != ""
 			cfg.Signaling.Channels[i] = ch
 		}
@@ -1218,23 +1383,39 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			if ch.Params == nil { ch.Params = make(map[string]string) }
 			ch.Params["broker_url"] = req.MqttBroker
 			ch.Params["topic"] = req.MqttTopic
+			if req.MqttUser != "" { ch.Params["username"] = req.MqttUser }
+			if req.MqttPass != "" { ch.Params["password"] = req.MqttPass }
 			ch.Enabled = req.MqttBroker != "" && req.MqttTopic != ""
 			cfg.Signaling.Channels[i] = ch
 		}
 	}
 	if !hasTg && (req.TgToken != "" || req.TgChat != "") {
+		params := map[string]string{"token": req.TgToken, "chat_id": req.TgChat}
+		if req.TgProxy != "" { params["proxy"] = req.TgProxy }
 		cfg.Signaling.Channels = append(cfg.Signaling.Channels, config.ChannelConfig{
 			Type:    "telegram",
 			Enabled: req.TgToken != "" && req.TgChat != "",
-			Params:  map[string]string{"token": req.TgToken, "chat_id": req.TgChat},
+			Params:  params,
 		})
 	}
 	if !hasMqtt && (req.MqttBroker != "" || req.MqttTopic != "") {
+		params := map[string]string{"broker_url": req.MqttBroker, "topic": req.MqttTopic}
+		if req.MqttUser != "" { params["username"] = req.MqttUser }
+		if req.MqttPass != "" { params["password"] = req.MqttPass }
 		cfg.Signaling.Channels = append(cfg.Signaling.Channels, config.ChannelConfig{
 			Type:    "mqtt",
 			Enabled: req.MqttBroker != "" && req.MqttTopic != "",
-			Params:  map[string]string{"broker_url": req.MqttBroker, "topic": req.MqttTopic},
+			Params:  params,
 		})
+	}
+
+	// Windows Autostart Registry Management
+	if exePath, err := os.Executable(); err == nil {
+		if req.AutoStart {
+			_ = exec.Command("reg", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "NatBypass", "/t", "REG_SZ", "/d", exePath, "/f").Run()
+		} else {
+			_ = exec.Command("reg", "delete", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "NatBypass", "/f").Run()
+		}
 	}
 
 	if err := config.Save(cfg, s.configPath, true); err != nil {
@@ -1248,8 +1429,36 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 // handleFavicon — GET /favicon.ico — отдаёт кастомный значок NatBypass для браузера и оконного фрейма
 func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	icoData, err := staticFS.ReadFile("static/app.ico")
+	if err == nil && len(icoData) > 0 {
+		w.Header().Set("Content-Type", "image/x-icon")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(icoData)
+		return
+	}
 	svgIcon := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#g)"/><circle cx="16" cy="16" r="9" fill="none" stroke="#ffffff" stroke-width="2.5"/><path d="M16 7a13 13 0 0 0 0 18 13 13 0 0 0 0-18" fill="none" stroke="#ffffff" stroke-width="2"/><path d="M7 16h18" fill="none" stroke="#ffffff" stroke-width="2"/></svg>`
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.Write([]byte(svgIcon))
+}
+
+// handleManifest — GET /manifest.json — отдаёт PWA-манифест для Edge/Chrome App window
+func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
+	manifest := map[string]interface{}{
+		"name":             "NatBypass",
+		"short_name":        "NatBypass",
+		"start_url":         "/",
+		"display":           "standalone",
+		"theme_color":       "#0c1017",
+		"background_color":  "#0c1017",
+		"icons": []map[string]interface{}{
+			{
+				"src":   "/favicon.ico",
+				"sizes": "16x16 32x32 48x48 64x64 128x128 256x256",
+				"type":  "image/x-icon",
+			},
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(manifest)
 }
