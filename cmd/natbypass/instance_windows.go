@@ -3,39 +3,56 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
+	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 var (
 	singleInstanceMutex windows.Handle
+	moduser32Instance   = windows.NewLazySystemDLL("user32.dll")
+	modshell32Instance  = windows.NewLazySystemDLL("shell32.dll")
 )
 
-// acquireSingleInstanceMutex пытается захватить глобальный именованный мьютекс Windows.
-// Если мьютекс уже занят другим запущенным процессом NatBypass, функция возвращает false.
+func init() {
+	if runtime.GOOS == "windows" {
+		procSetAppID := modshell32Instance.NewProc("SetCurrentProcessExplicitAppUserModelID")
+		if procSetAppID.Find() == nil {
+			appID, _ := windows.UTF16PtrFromString("NatBypass.MeshNetwork.App")
+			_, _, _ = procSetAppID.Call(uintptr(unsafe.Pointer(appID)))
+		}
+	}
+}
+
+// acquireSingleInstanceMutex гарантирует, что одновременно может работать только один экземпляр NatBypass
 func acquireSingleInstanceMutex(port int) bool {
 	if runtime.GOOS != "windows" {
 		return true
 	}
 
-	mutexName, _ := windows.UTF16PtrFromString("Local\\NatBypass_SingleInstance_App_Mutex")
-	hMutex, err := windows.CreateMutex(nil, false, mutexName)
-	if err != nil || hMutex == 0 {
-		return true
+	mutexName, _ := windows.UTF16PtrFromString("Global\\NatBypass_SingleInstance_App_Mutex")
+	hMutex, err := windows.CreateMutex(nil, true, mutexName)
+	if err != nil {
+		if errors.Is(err, windows.ERROR_ALREADY_EXISTS) || err == windows.ERROR_ALREADY_EXISTS || errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			if hMutex != 0 {
+				_ = windows.CloseHandle(hMutex)
+			}
+			// Экземпляр уже запущен — активируем окно приложения и выходим
+			openAppWindow(port)
+			return false
+		}
 	}
-
-	lastErr := windows.GetLastError()
-	if lastErr == windows.ERROR_ALREADY_EXISTS {
-		_ = windows.CloseHandle(hMutex)
-		// Экземпляр уже запущен — активируем окно приложения
-		openAppWindow(port)
-		return false
+	if hMutex == 0 {
+		return true
 	}
 
 	singleInstanceMutex = hMutex
@@ -120,10 +137,11 @@ func openAppWindow(port int) {
 			psCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 			_ = psCmd.Run()
 
-			// Запускаем через ярлык, чтобы Windows Taskbar закрепил фирменную иконку NatBypass за окном
-			launchCmd := exec.Command("cmd.exe", "/c", "start", "", shortcutPath)
+			// Запускаем через ярлык с помощью PowerShell Start-Process для корректной привязки иконки
+			launchCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", fmt.Sprintf(`Start-Process -FilePath '%s'`, strings.ReplaceAll(shortcutPath, "'", "''")))
 			launchCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 			if err := launchCmd.Start(); err == nil {
+				applyWindowIcon(execPath)
 				return
 			}
 		}
@@ -138,10 +156,40 @@ func openAppWindow(port int) {
 		)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		if err := cmd.Start(); err == nil {
+			applyWindowIcon(execPath)
 			return
 		}
 	}
 
 	// Fallback
 	_ = exec.Command("cmd", "/c", "start", url).Start()
+}
+
+// applyWindowIcon находит окно NatBypass и устанавливает иконку через WM_SETICON
+func applyWindowIcon(execPath string) {
+	if execPath == "" {
+		return
+	}
+	procExtractIconW := modshell32Instance.NewProc("ExtractIconW")
+	procFindWindowW := moduser32Instance.NewProc("FindWindowW")
+	procSendMessageW := moduser32Instance.NewProc("SendMessageW")
+
+	execPathPtr, _ := windows.UTF16PtrFromString(execPath)
+	hIcon, _, _ := procExtractIconW.Call(0, uintptr(unsafe.Pointer(execPathPtr)), 0)
+	if hIcon == 0 {
+		return
+	}
+
+	go func() {
+		for i := 0; i < 20; i++ {
+			time.Sleep(400 * time.Millisecond)
+			titlePtr, _ := windows.UTF16PtrFromString("NatBypass")
+			hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
+			if hwnd != 0 {
+				procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, hIcon)
+				procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, hIcon)
+				break
+			}
+		}
+	}()
 }
