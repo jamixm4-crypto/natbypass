@@ -290,6 +290,22 @@ func newUpdateCmd() *cobra.Command {
 
 // ── Основной движок ───────────────────────────────────────────
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
+	port := cfg.WebUI.Port
+	if webUIPort > 0 {
+		port = webUIPort
+	}
+	if port == 0 {
+		port = 8080
+	}
+
+	if runtime.GOOS == "windows" {
+		if !acquireSingleInstanceMutex(port) {
+			log.Warn().Msg("⚠️ Экземпляр NatBypass уже запущен. Открываем существующую панель управления...")
+			return nil
+		}
+		defer releaseSingleInstanceMutex()
+	}
+
 	setupLogging(cfg.App.LogLevel, cfg.App.LogFile)
 	log.Info().
 		Str("version", Version).
@@ -330,7 +346,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	sigMgr := signaling.NewFallbackManager(channels)
 	log.Info().Int("channels", len(channels)).Str("current", sigMgr.CurrentChannel()).Msg("Сигнальные каналы инициализированы")
 
-	port := cfg.WebUI.Port
+	port = cfg.WebUI.Port
 	if webUIPort > 0 {
 		port = webUIPort
 	}
