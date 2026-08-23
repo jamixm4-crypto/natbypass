@@ -519,8 +519,12 @@ network:
 			return
 		}
 
-		slog.Info("Настройки сохранены через Web UI", "file", targetPath)
-		s.jsonResponse(w, http.StatusOK, map[string]string{"message": "Конфигурация успешно сохранена!"}, "")
+		if s.registry != nil {
+			s.registry.ClearAll()
+		}
+		s.AddEvent("info", "Настройки обновлены — список пиров очищен для новой конфигурации", "")
+		slog.Info("Настройки сохранены через Web UI, реестр пиров очищен", "file", targetPath)
+		s.jsonResponse(w, http.StatusOK, map[string]string{"message": "Конфигурация успешно сохранена! Список устройств сброшен."}, "")
 
 	default:
 		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
