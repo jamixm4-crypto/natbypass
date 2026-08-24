@@ -141,13 +141,10 @@ wireguard:
                     val configFile = File(filesDir, "config.yaml")
                     configFile.writeText(configContent)
 
-                    try {
-                        val mobileClass = Class.forName("mobile.Mobile")
-                        val restartMethod = mobileClass.methods.firstOrNull { it.name.equals("restartEngine", ignoreCase = true) }
-                        restartMethod?.invoke(null, configContent)
-                    } catch (e: Exception) {}
-                    
-                    Toast.makeText(this, "✓ Конфигурация сети импортирована из QR!", Toast.LENGTH_LONG).show()
+                    org.natbypass.app.util.MobileBridge.restartEngine(configContent)
+                    org.natbypass.app.util.MobileBridge.clearPeers()
+
+                    Toast.makeText(this, "✓ Настройки сети применены из QR-кода!", Toast.LENGTH_LONG).show()
                     finish()
                 }
                 qrText.contains("[Interface]") -> {

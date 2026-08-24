@@ -118,11 +118,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun clearPeersCache() {
-        try {
-            val mobileClass = Class.forName("mobile.Mobile")
-            val clearMethod = mobileClass.getMethod("clearPeers")
-            clearMethod.invoke(null)
-        } catch (e: Exception) {}
+        org.natbypass.app.util.MobileBridge.clearPeers()
         peersList.clear()
         peersAdapter.notifyDataSetChanged()
         binding.tvPeersCount.text = "0 онлайн"
@@ -206,11 +202,7 @@ class MainActivity : AppCompatActivity() {
                     2 -> {
                         val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
                         prefs.edit().putString("selected_exit_node", peer.id).apply()
-                        try {
-                            val mobileClass = Class.forName("mobile.Mobile")
-                            val selectExitMethod = mobileClass.getMethod("selectExitNode", String::class.java)
-                            selectExitMethod.invoke(null, peer.id)
-                        } catch (e: Exception) {}
+                        org.natbypass.app.util.MobileBridge.selectExitNode(peer.id)
                         Toast.makeText(this, "✓ Шлюз Exit Node активирован через ${peer.name}!", Toast.LENGTH_SHORT).show()
                         if (NatBypassVpnService.isRunning) {
                             stopVpnService()
@@ -242,11 +234,7 @@ class MainActivity : AppCompatActivity() {
                     1 -> "dpi"
                     else -> "stealth"
                 }
-                try {
-                    val mobileClass = Class.forName("mobile.Mobile")
-                    val setPresetMethod = mobileClass.getMethod("setAWGPreset", String::class.java)
-                    setPresetMethod.invoke(null, presetName)
-                } catch (e: Exception) {}
+                org.natbypass.app.util.MobileBridge.setAWGPreset(presetName)
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
@@ -347,7 +335,8 @@ class MainActivity : AppCompatActivity() {
             binding.tvPublicIpAndStun.text = "🌐 IP: $pubIp  •  📡 STUN: ${if (stun.isNotEmpty()) stun else "$pubIp:51820"}"
         }
 
-        if (isRunning) {
+        val vpnActive = isRunning || NatBypassVpnService.isRunning
+        if (vpnActive) {
             binding.tvIpAddress.text = "Локальный VIP: $vip"
             binding.tvSignalingMode.text = if (curChannel.isNotEmpty()) "⚡ $curChannel" else "⚡ Direct P2P"
             updateVpnUI(true)
@@ -372,9 +361,13 @@ class MainActivity : AppCompatActivity() {
                 val id = if (obj.has("device_id")) obj.getString("device_id") else obj.optString("DeviceID", "Устройство $i")
                 val savedNick = prefs.getString("nick_$id", "") ?: ""
                 val nick = if (savedNick.isNotEmpty()) savedNick else if (obj.has("nickname")) obj.getString("nickname") else obj.optString("Nickname", "")
-                val displayName = if (nick.isNotEmpty()) "⭐ $nick ($id)" else id
+                val displayName = when {
+                    nick.isNotEmpty() && !nick.equals(id, ignoreCase = true) -> "⭐ $nick ($id)"
+                    nick.isNotEmpty() -> "⭐ $nick"
+                    else -> id
+                }
                 val vip = if (obj.has("virtual_ip")) obj.getString("virtual_ip") else obj.optString("VirtualIP", "10.200.0.${i+2}")
-                val pubIp = if (obj.has("public_ip")) obj.getString("public_ip") else obj.optString("PublicIP", "—")
+                val pubIp = if (obj.has("public_ip")) obj.getString("public_ip") else obj.optString("PublicIP", "")
                 val stun = if (obj.has("stun_addr")) obj.getString("stun_addr") else obj.optString("STUNAddr", "")
                 val isOnline = if (obj.has("online")) obj.getBoolean("online") else obj.optBoolean("Online", true)
                 val isExitNode = obj.optBoolean("is_exit_node", false) || obj.optBoolean("IsExitNode", false)
@@ -400,7 +393,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 val flag = if (obj.has("country_flag")) obj.getString("country_flag") else obj.optString("CountryFlag", "🌐")
                 val nameWithPlatform = "$displayName [$plat]"
-                val stunWithFlag = if (stun.isNotEmpty()) "$flag $vip • $stun" else "$flag $vip • $pubIp"
+                val stunWithFlag = when {
+                    stun.isNotEmpty() -> "$flag $vip • $stun"
+                    pubIp.isNotEmpty() && pubIp != "—" -> "$flag $vip • $pubIp"
+                    else -> "$flag VIP: $vip"
+                }
 
                 peersList.add(
                     PeerItem(

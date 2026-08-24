@@ -57,16 +57,18 @@ class NatBypassVpnService : VpnService() {
         if (isRunning) return
 
         try {
+            // 1. Немедленно запускаем Foreground Service для предотвращения закрытия ОС
+            startForeground(NOTIFICATION_ID, buildNotification("Подключение к P2P сети (10.200.0.100)..."))
+
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
             val useExitNode = selectedExitNode.isNotEmpty()
 
             // Создаем виртуальный TUN интерфейс 10.200.0.100/24
             val builder = Builder()
-                .setSession("NatBypass Mesh")
+                .setSession("NatBypass")
                 .addAddress("10.200.0.100", 24)
                 .setMtu(1420)
-                .setBlocking(false)
 
             if (useExitNode) {
                 // Если выбран Exit Node - перенаправляем весь интернет через удаленный узел
@@ -105,7 +107,8 @@ class NatBypassVpnService : VpnService() {
             org.natbypass.app.util.MobileBridge.startEngine(configYaml, fd)
 
             isRunning = true
-            startForeground(NOTIFICATION_ID, buildNotification("Подключено к P2P сети (10.200.0.100)"))
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.notify(NOTIFICATION_ID, buildNotification("Подключено к P2P сети (10.200.0.100)"))
 
             // Фоновый мониторинг состояния
             serviceJob = scope.launch {

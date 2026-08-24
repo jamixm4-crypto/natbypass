@@ -174,13 +174,7 @@ wireguard:
         val configFile = File(filesDir, "config.yaml")
         configFile.writeText(configContent)
 
-        try {
-            val mobileClass = Class.forName("mobile.Mobile")
-            val restartMethod = mobileClass.methods.firstOrNull { it.name.equals("restartEngine", ignoreCase = true) }
-            restartMethod?.invoke(null, configContent)
-            val clearMethod = mobileClass.methods.firstOrNull { it.name.equals("clearPeers", ignoreCase = true) }
-            clearMethod?.invoke(null)
-        } catch (e: Exception) {}
+        org.natbypass.app.util.MobileBridge.restartEngine(configContent)
 
         Toast.makeText(this, "✓ Настройки сохранены и синхронизированы!", Toast.LENGTH_SHORT).show()
         finish()
@@ -191,11 +185,10 @@ wireguard:
             var ip = ""
             var stun = ""
             try {
-                val mobileClass = Class.forName("mobile.Mobile")
-                val getIpMethod = mobileClass.getMethod("getPublicIP")
-                val getStunMethod = mobileClass.getMethod("getSTUNAddr")
-                ip = getIpMethod.invoke(null) as? String ?: ""
-                stun = getStunMethod.invoke(null) as? String ?: ""
+                val statusJson = org.natbypass.app.util.MobileBridge.getStatusJSON()
+                val obj = org.json.JSONObject(statusJson)
+                ip = obj.optString("public_ip", "")
+                stun = obj.optString("stun_addr", "")
             } catch (e: Exception) {}
 
             if (ip.isEmpty() || ip.contains("...")) {
@@ -223,14 +216,8 @@ wireguard:
         binding.btnTestTelegram.isEnabled = false
         binding.btnTestTelegram.text = "⏳ Проверяем связь..."
         lifecycleScope.launch(Dispatchers.IO) {
-            val res = try {
-                val mobileClass = Class.forName("mobile.Mobile")
-                val testTgMethod = mobileClass.getMethod("testTelegram", String::class.java, String::class.java, String::class.java)
-                val r = testTgMethod.invoke(null, token, chat, proxy) as? String ?: ""
-                if (r.isNotEmpty() && !r.startsWith("Ошибка: mobile")) r else org.natbypass.app.util.NetworkHelper.testTelegramHttp(token, chat)
-            } catch (e: Exception) {
-                org.natbypass.app.util.NetworkHelper.testTelegramHttp(token, chat)
-            }
+            val r = org.natbypass.app.util.MobileBridge.testTelegram(token, chat, proxy)
+            val res = if (r.isNotEmpty()) r else org.natbypass.app.util.NetworkHelper.testTelegramHttp(token, chat)
             withContext(Dispatchers.Main) {
                 binding.btnTestTelegram.isEnabled = true
                 binding.btnTestTelegram.text = "🧪 Проверить связь с Telegram"
@@ -251,14 +238,8 @@ wireguard:
         binding.btnTestMqtt.isEnabled = false
         binding.btnTestMqtt.text = "⏳ Проверяем связь..."
         lifecycleScope.launch(Dispatchers.IO) {
-            val res = try {
-                val mobileClass = Class.forName("mobile.Mobile")
-                val testMqttMethod = mobileClass.getMethod("testMQTT", String::class.java, String::class.java, String::class.java, String::class.java)
-                val r = testMqttMethod.invoke(null, broker, topic, user, pass) as? String ?: ""
-                if (r.isNotEmpty() && !r.startsWith("Ошибка: mobile")) r else org.natbypass.app.util.NetworkHelper.testMqttTcp(broker, topic)
-            } catch (e: Exception) {
-                org.natbypass.app.util.NetworkHelper.testMqttTcp(broker, topic)
-            }
+            val r = org.natbypass.app.util.MobileBridge.testMQTT(broker, topic, user, pass)
+            val res = if (r.isNotEmpty()) r else org.natbypass.app.util.NetworkHelper.testMqttTcp(broker, topic)
             withContext(Dispatchers.Main) {
                 binding.btnTestMqtt.isEnabled = true
                 binding.btnTestMqtt.text = "🧪 Проверить связь с MQTT брокером"

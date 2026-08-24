@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.util
+package org.natbypass.app.util
 
 import java.lang.reflect.Method
 
@@ -97,5 +97,44 @@ object MobileBridge {
         try {
             method.invoke(null)
         } catch (e: Exception) {}
+    }
+
+    fun clearPeers() {
+        val method = getMethod("clearPeers") ?: return
+        try {
+            method.invoke(null)
+        } catch (e: Exception) {}
+    }
+
+    fun selectExitNode(deviceId: String) {
+        val method = getMethod("selectExitNode") ?: return
+        try {
+            method.invoke(null, deviceId)
+        } catch (e: Exception) {}
+    }
+
+    fun setAWGPreset(preset: String) {
+        val method = getMethod("setAWGPreset") ?: return
+        try {
+            method.invoke(null, preset)
+        } catch (e: Exception) {}
+    }
+
+    fun testTelegram(token: String, chat: String, proxy: String): String {
+        val method = getMethod("testTelegram") ?: return ""
+        return try {
+            method.invoke(null, token, chat, proxy) as? String ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun testMQTT(broker: String, topic: String, user: String, pass: String): String {
+        val method = getMethod("testMQTT") ?: return ""
+        return try {
+            method.invoke(null, broker, topic, user, pass) as? String ?: ""
+        } catch (e: Exception) {
+            ""
+        }
     }
 }
