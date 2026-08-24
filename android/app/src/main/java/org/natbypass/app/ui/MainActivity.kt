@@ -76,16 +76,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val configFile = File(filesDir, "config.yaml")
                 val configYaml = if (configFile.exists()) configFile.readText() else "{}"
-                val mobileBridgeClass = Class.forName("mobile.Mobile")
-                val startMethod = mobileBridgeClass.methods.firstOrNull { it.name.equals("startEngine", ignoreCase = true) }
-                if (startMethod != null && startMethod.parameterTypes.size == 2) {
-                    val pType = startMethod.parameterTypes[1]
-                    if (pType == Long::class.javaPrimitiveType || pType == java.lang.Long::class.java) {
-                        startMethod.invoke(null, configYaml, 0L)
-                    } else {
-                        startMethod.invoke(null, configYaml, 0)
-                    }
-                }
+                org.natbypass.app.util.MobileBridge.startEngine(configYaml, 0)
             } catch (e: Exception) {}
         }
     }
@@ -332,10 +323,7 @@ class MainActivity : AppCompatActivity() {
         var isRunning = false
 
         try {
-            val mobileClass = Class.forName("mobile.Mobile")
-            val getStatusMethod = mobileClass.methods.firstOrNull { it.name.equals("getStatusJSON", ignoreCase = true) }
-            val jsonStr = (getStatusMethod?.invoke(null) as? String) ?: "{}"
-
+            val jsonStr = org.natbypass.app.util.MobileBridge.getStatusJSON()
             val obj = JSONObject(jsonStr)
             isRunning = obj.optBoolean("running", false)
             pubIp = obj.optString("public_ip", "")
@@ -370,9 +358,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun pollPeers() {
         try {
-            val mobileClass = Class.forName("mobile.Mobile")
-            val getPeersMethod = mobileClass.methods.firstOrNull { it.name.equals("getPeersJSON", ignoreCase = true) }
-            val jsonStr = (getPeersMethod?.invoke(null) as? String) ?: "[]"
+            val jsonStr = org.natbypass.app.util.MobileBridge.getPeersJSON()
 
             val jsonArray = JSONArray(jsonStr)
             peersList.clear()

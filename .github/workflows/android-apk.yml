@@ -73,14 +73,16 @@ jobs:
 
       - name: Build Go Mobile Core (AAR)
         run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
           export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$NDK_PATH}"
           export NDK_HOME="${ANDROID_NDK_HOME}"
           gomobile init
           mkdir -p android/app/libs
-          gomobile bind -v -target=android/arm64,android/arm -androidapi=24 -javapkg=mobile -o android/app/libs/mobile.aar github.com/natbypass/natbypass/mobile || true
-          ls -lh android/app/libs/ || true
+          gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi=24 -o android/app/libs/mobile.aar ./mobile
+          ls -lh android/app/libs/
+          test -f android/app/libs/mobile.aar || (echo "ERROR: mobile.aar was not created!" && exit 1)
 
       - name: Build Android APK
         run: |

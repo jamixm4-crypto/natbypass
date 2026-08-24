@@ -102,18 +102,7 @@ class NatBypassVpnService : VpnService() {
             val configYaml = if (configFile.exists()) configFile.readText() else "{}"
 
             // Запускаем нативный Go-движок через JNI / GoMobile
-            try {
-                val mobileBridgeClass = Class.forName("mobile.Mobile")
-                val startMethod = mobileBridgeClass.methods.firstOrNull { it.name.equals("startEngine", ignoreCase = true) }
-                if (startMethod != null && startMethod.parameterTypes.size == 2) {
-                    val pType = startMethod.parameterTypes[1]
-                    if (pType == Long::class.javaPrimitiveType || pType == java.lang.Long::class.java) {
-                        startMethod.invoke(null, configYaml, fd.toLong())
-                    } else {
-                        startMethod.invoke(null, configYaml, fd)
-                    }
-                }
-            } catch (e: Exception) {}
+            org.natbypass.app.util.MobileBridge.startEngine(configYaml, fd)
 
             isRunning = true
             startForeground(NOTIFICATION_ID, buildNotification("Подключено к P2P сети (10.200.0.100)"))
@@ -133,11 +122,7 @@ class NatBypassVpnService : VpnService() {
     private fun disconnect() {
         isRunning = false
         serviceJob?.cancel()
-        try {
-            val mobileBridgeClass = Class.forName("mobile.Mobile")
-            val stopMethod = mobileBridgeClass.getMethod("stopEngine")
-            stopMethod.invoke(null)
-        } catch (e: Exception) {}
+        org.natbypass.app.util.MobileBridge.stopEngine()
 
         try {
             vpnInterface?.close()

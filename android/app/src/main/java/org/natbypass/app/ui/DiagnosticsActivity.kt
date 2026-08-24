@@ -55,21 +55,13 @@ class DiagnosticsActivity : AppCompatActivity() {
                 var diagText = ""
                 var logsText = ""
 
-                try {
-                    val mobileClass = Class.forName("mobile.Mobile")
-                    val getDiagMethod = mobileClass.methods.firstOrNull { it.name.equals("getDiagnosticsJSON", ignoreCase = true) }
-                    val jsonStr = (getDiagMethod?.invoke(null) as? String) ?: "{}"
+                if (org.natbypass.app.util.MobileBridge.isAvailable()) {
+                    val jsonStr = org.natbypass.app.util.MobileBridge.getDiagnosticsJSON()
                     diagText = formatDiagnostics(jsonStr)
-                } catch (e: Exception) {
-                    diagText = "⚠️ Диагностика ядра недоступна"
-                }
-
-                try {
-                    val mobileClass = Class.forName("mobile.Mobile")
-                    val getLogsMethod = mobileClass.methods.firstOrNull { it.name.equals("getLogsText", ignoreCase = true) }
-                    logsText = (getLogsMethod?.invoke(null) as? String) ?: "Лог пока пуст."
-                } catch (e: Exception) {
-                    logsText = "Ошибка чтения логов: ${e.message}"
+                    logsText = org.natbypass.app.util.MobileBridge.getLogsText()
+                } else {
+                    diagText = "⚠️ Нативный модуль ядра GoMobile (mobile.aar) не найден в пакете приложения."
+                    logsText = "Убедитесь, что APK собран с модулем gomobile bind."
                 }
 
                 """
