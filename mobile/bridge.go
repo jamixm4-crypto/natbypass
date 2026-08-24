@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -22,6 +23,45 @@ import (
 	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v3"
 )
+
+type logRing struct {
+	mu    sync.Mutex
+	lines []string
+	max   int
+}
+
+var globalLogs = &logRing{
+	lines: make([]string, 0, 500),
+	max:   500,
+}
+
+func (lr *logRing) Write(p []byte) (n int, err error) {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+	msg := strings.TrimSpace(string(p))
+	if msg != "" {
+		if len(lr.lines) >= lr.max {
+			lr.lines = lr.lines[1:]
+		}
+		lr.lines = append(lr.lines, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg))
+	}
+	return len(p), nil
+}
+
+func (lr *logRing) GetText() string {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+	if len(lr.lines) == 0 {
+		return "Лог пока пуст. Запустите VPN или выполните диагностику."
+	}
+	return strings.Join(lr.lines, "\n")
+}
+
+func (lr *logRing) Clear() {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+	lr.lines = lr.lines[:0]
+}
 
 var (
 	engineMu        sync.Mutex
@@ -46,7 +86,8 @@ var (
 )
 
 func init() {
-	logger = zerolog.New(os.Stdout).With().Timestamp().Str("module", "mobile").Logger()
+	multiWriter := io.MultiWriter(os.Stdout, globalLogs)
+	logger = zerolog.New(multiWriter).With().Timestamp().Str("module", "mobile").Logger()
 }
 
 // StartEngine запускает ядро NatBypass внутри Android VpnService
@@ -390,6 +431,16 @@ func RestartEngine(configYAML string) string {
 	StopEngine()
 	time.Sleep(200 * time.Millisecond)
 	return StartEngine(configYAML, 0)
+}
+
+// GetLogsText возвращает полный лог ядра
+func GetLogsText() string {
+	return globalLogs.GetText()
+}
+
+// ClearLogs очищает накопленный буфер логов
+func ClearLogs() {
+	globalLogs.Clear()
 }
 
 // IsRunning возвращает true, если движок активен

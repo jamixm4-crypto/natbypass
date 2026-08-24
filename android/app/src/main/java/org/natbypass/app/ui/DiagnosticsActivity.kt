@@ -1,7 +1,11 @@
 package org.natbypass.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -22,35 +26,59 @@ class DiagnosticsActivity : AppCompatActivity() {
         binding.btnRunDiag.setOnClickListener {
             runDiagnostics()
         }
+
+        binding.btnCopyLogs.setOnClickListener {
+            val text = binding.tvDiagLogs.text.toString()
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("NatBypass Logs", text)
+            clipboard.setPrimaryClip(clip)
+            Toast.makeText(this, "📋 Логи скопированы в буфер обмена!", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnShareLogs.setOnClickListener {
+            val text = binding.tvDiagLogs.text.toString()
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "NatBypass Android Logs")
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            startActivity(Intent.createChooser(intent, "Поделиться логами NatBypass"))
+        }
+
         runDiagnostics()
     }
 
     private fun runDiagnostics() {
-        binding.tvDiagLogs.text = "⏳ Выполняем полную проверку сети и P2P сокетов...\n"
+        binding.tvDiagLogs.text = "⏳ Сбор диагностических данных и логов ядра...\n"
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
+                var diagText = ""
+                var logsText = ""
+
                 try {
                     val mobileClass = Class.forName("mobile.Mobile")
-                    val getDiagMethod = mobileClass.getMethod("getDiagnosticsJSON")
-                    val jsonStr = getDiagMethod.invoke(null) as? String ?: "{}"
-                    formatDiagnostics(jsonStr)
+                    val getDiagMethod = mobileClass.methods.firstOrNull { it.name.equals("getDiagnosticsJSON", ignoreCase = true) }
+                    val jsonStr = (getDiagMethod?.invoke(null) as? String) ?: "{}"
+                    diagText = formatDiagnostics(jsonStr)
                 } catch (e: Exception) {
-                    val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
-                    val devName = prefs.getString("device_name", android.os.Build.MODEL ?: "Android")
-                    val tgSet = prefs.getString("tg_token", "")?.isNotEmpty() == true
-                    val mqttSet = prefs.getString("mqtt_broker", "")?.isNotEmpty() == true
-                    
-                    """
-                    ✅ Интернет-соединение: Доступно (TCP/UDP открыты)
-                    ✅ Имя узла: $devName
-                    ✅ Внешний IP & STUN: Сокет инициализирован (Full Cone / Restricted Cone NAT)
-                    ✅ P2P UDP Hole Punching: Готов к прямому соединению
-                    ${if (tgSet) "✅ Сигнальный канал 1: Telegram Bot API настроен" else "⚪ Сигнальный канал 1: Telegram не настроен"}
-                    ${if (mqttSet) "✅ Сигнальный канал 2: MQTT Брокер активен" else "⚪ Сигнальный канал 2: MQTT не настроен"}
-                    ✅ Защита AmneziaWG 2.0: Обфускация DPI включена (Jc/Jmin/Jmax/S1/S2/H1-H4)
-                    ✅ Виртуальный интерфейс: 10.200.0.100/24 готов к маршрутизации
-                    """.trimIndent()
+                    diagText = "⚠️ Диагностика ядра недоступна"
                 }
+
+                try {
+                    val mobileClass = Class.forName("mobile.Mobile")
+                    val getLogsMethod = mobileClass.methods.firstOrNull { it.name.equals("getLogsText", ignoreCase = true) }
+                    logsText = (getLogsMethod?.invoke(null) as? String) ?: "Лог пока пуст."
+                } catch (e: Exception) {
+                    logsText = "Ошибка чтения логов: ${e.message}"
+                }
+
+                """
+                === 🩺 ДИАГНОСТИКА СЕТИ ===
+                $diagText
+
+                === 📋 ЖУРНАЛ ЯДРА (ПОСЛЕДНИЕ СОБЫТИЯ) ===
+                $logsText
+                """.trimIndent()
             }
             binding.tvDiagLogs.text = result
         }
