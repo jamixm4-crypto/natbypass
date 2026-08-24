@@ -1,12 +1,15 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_dark"
-    android:padding="16dp">
+    android:paddingStart="16dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="12dp">
 
-    <!-- 1. Top Header -->
+    <!-- 1. Top App Bar -->
     <LinearLayout
         android:id="@+id/headerLayout"
         android:layout_width="match_parent"
@@ -18,8 +21,8 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="🛸 NatBypass"
-            android:textColor="@color/accent_purple"
+            android:text="NatBypass"
+            android:textColor="@color/text_primary"
             android:textSize="20sp"
             android:textStyle="bold" />
 
@@ -28,7 +31,11 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:background="@drawable/bg_pill"
+            android:background="@drawable/bg_chip_blue"
+            android:paddingStart="6dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="6dp"
+            android:paddingBottom="2dp"
             android:text="v1.2.5"
             android:textColor="@color/accent_blue"
             android:textSize="11sp"
@@ -40,9 +47,19 @@
             android:layout_weight="1" />
 
         <ImageButton
+            android:id="@+id/btnScanQR"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_action_btn"
+            android:contentDescription="Сканировать QR"
+            app:srcCompat="@drawable/ic_qr_code"
+            app:tint="@color/text_primary" />
+
+        <ImageButton
             android:id="@+id/btnDiagnostics"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:layout_marginEnd="6dp"
             android:background="@drawable/bg_action_btn"
             android:contentDescription="@string/title_diagnostics"
@@ -51,143 +68,107 @@
 
         <ImageButton
             android:id="@+id/btnSettings"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:background="@drawable/bg_action_btn"
             android:contentDescription="@string/title_settings"
             app:srcCompat="@drawable/ic_settings"
             app:tint="@color/text_primary" />
     </LinearLayout>
 
-    <!-- 2. Quick Action Bar (4 Friendly Action Cards) -->
+    <!-- 2. Hero VPN Connection Card -->
     <LinearLayout
-        android:id="@+id/quickActionsLayout"
+        android:id="@+id/statusCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:orientation="horizontal"
+        android:background="@drawable/bg_card"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingTop="18dp"
+        android:paddingBottom="16dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
         app:layout_constraintTop_toBottomOf="@id/headerLayout">
 
-        <LinearLayout
-            android:id="@+id/btnCheckUpdate"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:background="@drawable/bg_action_btn"
+        <FrameLayout
+            android:id="@+id/btnVpnToggle"
+            android:layout_width="84dp"
+            android:layout_height="84dp"
+            android:background="@drawable/bg_vpn_button_disconnected"
             android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:padding="8dp">
+            android:focusable="true">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                app:srcCompat="@drawable/ic_cloud_download"
-                app:tint="@color/green_bright" />
+                android:id="@+id/ivVpnIcon"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_vpn_lock"
+                app:tint="@color/white" />
+        </FrameLayout>
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Обновить"
-                android:textColor="@color/text_primary"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/btnClearCache"
-            android:layout_width="0dp"
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:background="@drawable/bg_action_btn"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:padding="8dp">
+            android:layout_marginTop="10dp"
+            android:text="ОТКЛЮЧЕНО"
+            android:textColor="@color/text_muted"
+            android:textSize="15sp"
+            android:textStyle="bold" />
 
-            <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                app:srcCompat="@drawable/ic_clean"
-                app:tint="@color/red_bright" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Сброс кэша"
-                android:textColor="@color/text_primary"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/btnScanQR"
-            android:layout_width="0dp"
+        <TextView
+            android:id="@+id/tvIpAddress"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:background="@drawable/bg_action_btn"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:padding="8dp">
+            android:layout_marginTop="3dp"
+            android:text="Нажмите для подключения"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
 
-            <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                app:srcCompat="@drawable/ic_qr_code"
-                app:tint="@color/accent_blue" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Сканер QR"
-                android:textColor="@color/text_primary"
-                android:textSize="11sp" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/btnShareQR"
-            android:layout_width="0dp"
+        <TextView
+            android:id="@+id/tvPublicIpAndStun"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="@drawable/bg_action_btn"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:padding="8dp">
+            android:layout_marginTop="3dp"
+            android:text="IP: Определяется..."
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
 
-            <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                app:srcCompat="@drawable/ic_share"
-                app:tint="@color/accent_purple" />
+        <!-- AWG 2.0 Status Chip -->
+        <LinearLayout
+            android:id="@+id/awgTunnelBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip_green"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="10dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="4dp">
 
             <TextView
+                android:id="@+id/tvAwgTunnelStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Мой QR"
-                android:textColor="@color/text_primary"
-                android:textSize="11sp" />
+                android:text="AmneziaWG 2.0 • Готов к работе"
+                android:textColor="@color/green_bright"
+                android:textSize="11sp"
+                android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 3. Telemetry Metrics Grid -->
+    <!-- 3. Telemetry Metrics Row -->
     <LinearLayout
         android:id="@+id/metricsLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="8dp"
         android:orientation="horizontal"
-        app:layout_constraintTop_toBottomOf="@id/quickActionsLayout">
+        app:layout_constraintTop_toBottomOf="@id/statusCard">
 
         <LinearLayout
             android:layout_width="0dp"
@@ -200,7 +181,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="👥 Узлы в сети"
+                android:text="Узлы в сети"
                 android:textColor="@color/text_muted"
                 android:textSize="11sp" />
             <TextView
@@ -225,7 +206,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="⚡ RTT Пинг"
+                android:text="Задержка RTT"
                 android:textColor="@color/text_muted"
                 android:textSize="11sp" />
             <TextView
@@ -249,7 +230,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="📡 Сигнал"
+                android:text="Канал связи"
                 android:textColor="@color/text_muted"
                 android:textSize="11sp" />
             <TextView
@@ -257,113 +238,130 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:text="⚡ MQTT"
+                android:text="MQTT"
                 android:textColor="@color/accent_purple"
                 android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 4. Main VPN Connection Card -->
+    <!-- 4. Quick Action Row -->
     <LinearLayout
-        android:id="@+id/statusCard"
+        android:id="@+id/quickActionsLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:background="@drawable/bg_card"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:padding="14dp"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal"
         app:layout_constraintTop_toBottomOf="@id/metricsLayout">
 
-        <FrameLayout
-            android:id="@+id/btnVpnToggle"
-            android:layout_width="88dp"
-            android:layout_height="88dp"
-            android:background="@drawable/bg_vpn_button"
+        <LinearLayout
+            android:id="@+id/btnCheckUpdate"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_action_btn"
             android:clickable="true"
-            android:focusable="true">
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:padding="8dp">
 
             <ImageView
-                android:id="@+id/ivVpnIcon"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
-                android:layout_gravity="center"
-                android:src="@drawable/ic_vpn_lock"
-                app:tint="@color/white" />
-        </FrameLayout>
-
-        <TextView
-            android:id="@+id/tvStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="@string/vpn_status_disconnected"
-            android:textColor="@color/red_bright"
-            android:textSize="15sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tvIpAddress"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Нажмите кнопку для подключения"
-            android:textColor="@color/text_muted"
-            android:textSize="12sp" />
-
-        <TextView
-            android:id="@+id/tvPublicIpAndStun"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="🌐 Внешний IP: Определяется..."
-            android:textColor="@color/accent_blue"
-            android:textSize="11sp" />
-
-        <!-- AWG 2.0 Encrypted Tunnel Badge Indicator -->
-        <LinearLayout
-            android:id="@+id/awgTunnelBadge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_badge"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="5dp"
-            android:paddingBottom="5dp">
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                app:srcCompat="@drawable/ic_cloud_download"
+                app:tint="@color/accent_blue" />
 
             <TextView
-                android:id="@+id/tvAwgTunnelStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="🛡️ AWG 2.0: Ожидание подключения..."
-                android:textColor="@color/text_muted"
-                android:textSize="12sp"
+                android:layout_marginStart="6dp"
+                android:text="Обновить"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btnClearCache"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_action_btn"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:padding="8dp">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                app:srcCompat="@drawable/ic_clean"
+                app:tint="@color/red_bright" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="Очистить"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btnShareQR"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_action_btn"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:padding="8dp">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                app:srcCompat="@drawable/ic_share"
+                app:tint="@color/accent_purple" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="Поделиться"
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 5. AWG Mode Selector Card -->
+    <!-- 5. Obfuscation Mode Selector Card -->
     <LinearLayout
         android:id="@+id/awgCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="8dp"
         android:background="@drawable/bg_card"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="8dp"
-        app:layout_constraintTop_toBottomOf="@id/statusCard">
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="6dp"
+        app:layout_constraintTop_toBottomOf="@id/quickActionsLayout">
 
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="🛡️ Защита AWG 2.0:"
-            android:textColor="@color/text_primary"
+            android:text="Режим обфускации:"
+            android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
         <Spinner
@@ -373,14 +371,14 @@
             android:background="@drawable/bg_spinner" />
     </LinearLayout>
 
-    <!-- 6. Peers Header -->
+    <!-- 6. Peers Section Header -->
     <TextView
         android:id="@+id/tvPeersHeader"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="👥 Устройства в вашей P2P Mesh сети"
-        android:textColor="@color/accent_blue"
+        android:layout_marginTop="10dp"
+        android:text="Устройства в сети"
+        android:textColor="@color/text_secondary"
         android:textSize="13sp"
         android:textStyle="bold"
         app:layout_constraintStart_toStartOf="parent"

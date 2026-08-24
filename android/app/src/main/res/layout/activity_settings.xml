@@ -1,10 +1,13 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_dark"
-    android:padding="16dp">
+    android:paddingStart="16dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="24dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -14,8 +17,8 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⚙️ Настройки NatBypass"
-            android:textColor="@color/accent_purple"
+            android:text="Настройки"
+            android:textColor="@color/text_primary"
             android:textSize="20sp"
             android:textStyle="bold" />
 
@@ -23,7 +26,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
             android:padding="16dp">
@@ -31,33 +34,33 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="🏷️ Основные параметры"
+                android:text="Основные параметры"
                 android:textColor="@color/text_primary"
-                android:textSize="16sp"
+                android:textSize="15sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/tvCurrentPublicIp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="🌐 Внешний IP: Определяется..."
+                android:layout_marginTop="6dp"
+                android:text="Внешний IP: Определяется..."
                 android:textColor="@color/accent_blue"
-                android:textSize="13sp" />
+                android:textSize="12sp" />
 
             <TextView
                 android:id="@+id/tvCurrentStun"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="📡 STUN-сокет: Определяется..."
+                android:layout_marginTop="2dp"
+                android:text="STUN-сокет: Определяется..."
                 android:textColor="@color/accent_purple"
-                android:textSize="13sp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="10dp"
                 android:hint="Имя вашего устройства (Никнейм)">
 
                 <com.google.android.material.textfield.TextInputEditText
@@ -87,16 +90,16 @@
                 android:id="@+id/swAutoStart"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="Автозапуск при включении телефона"
+                android:layout_marginTop="10dp"
+                android:text="Автозапуск при включении устройства"
                 android:textColor="@color/text_primary" />
 
             <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/swSaveLogs"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Сохранять логи в файл"
+                android:layout_marginTop="6dp"
+                android:text="Сохранять журнал событий на диск"
                 android:textColor="@color/text_primary" />
         </LinearLayout>
 
@@ -104,7 +107,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="12dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
             android:padding="16dp">
@@ -112,15 +115,15 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="💬 Telegram Bot API"
+                android:text="Сигнализация Telegram"
                 android:textColor="@color/text_primary"
-                android:textSize="16sp"
+                android:textSize="15sp"
                 android:textStyle="bold" />
 
             <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="10dp"
                 android:hint="Bot Token">
 
                 <com.google.android.material.textfield.TextInputEditText
@@ -159,14 +162,14 @@
                     android:textColor="@color/text_primary" />
             </com.google.android.material.textfield.TextInputLayout>
 
-            <com.google.android.material.button.MaterialButton
+            <Button
                 android:id="@+id/btnTestTelegram"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="match_parent"
                 android:layout_height="44dp"
                 android:layout_marginTop="10dp"
-                android:backgroundTint="@color/accent_purple"
-                android:text="🧪 Проверить связь с Telegram"
-                android:textColor="@color/white"
+                android:text="Проверить связь с Telegram"
+                android:textColor="@color/text_primary"
                 android:textSize="13sp" />
         </LinearLayout>
 
@@ -174,7 +177,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="12dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
             android:padding="16dp">
@@ -182,23 +185,23 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="⚡ MQTT Брокер"
+                android:text="Сигнализация MQTT"
                 android:textColor="@color/text_primary"
-                android:textSize="16sp"
+                android:textSize="15sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Быстрый выбор сервера:"
-                android:textColor="@color/text_muted"
+                android:text="Сервер брокера:"
+                android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
             <Spinner
                 android:id="@+id/spMqttBrokerPreset"
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
+                android:layout_height="42dp"
                 android:layout_marginTop="4dp"
                 android:background="@drawable/bg_card" />
 
@@ -266,14 +269,14 @@
                 </com.google.android.material.textfield.TextInputLayout>
             </LinearLayout>
 
-            <com.google.android.material.button.MaterialButton
+            <Button
                 android:id="@+id/btnTestMqtt"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="match_parent"
                 android:layout_height="44dp"
                 android:layout_marginTop="10dp"
-                android:backgroundTint="@color/accent_blue"
-                android:text="🧪 Проверить связь с MQTT брокером"
-                android:textColor="@color/white"
+                android:text="Проверить связь с MQTT брокером"
+                android:textColor="@color/text_primary"
                 android:textSize="13sp" />
         </LinearLayout>
 
@@ -281,7 +284,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="12dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
             android:padding="16dp">
@@ -289,22 +292,22 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="🔒 Сетевые параметры и WireGuard"
+                android:text="Сетевые параметры"
                 android:textColor="@color/text_primary"
-                android:textSize="16sp"
+                android:textSize="15sp"
                 android:textStyle="bold" />
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="10dp"
                 android:orientation="horizontal">
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:hint="UDP Порт WG/STUN">
+                    android:hint="UDP Порт">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etWgPort"
@@ -337,15 +340,15 @@
                 android:id="@+id/swDoH"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="DoH (DNS over HTTPS Cloudflare)"
+                android:layout_marginTop="10dp"
+                android:text="DNS over HTTPS (Cloudflare)"
                 android:textColor="@color/text_primary" />
 
             <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/swUpnp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="6dp"
                 android:text="UPnP автоматический проброс порта"
                 android:textColor="@color/text_primary" />
         </LinearLayout>
@@ -354,7 +357,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="12dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
             android:padding="16dp">
@@ -362,23 +365,23 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="🌐 Маршрутизация и Шлюз"
+                android:text="Маршрутизация и шлюз"
                 android:textColor="@color/text_primary"
-                android:textSize="16sp"
+                android:textSize="15sp"
                 android:textStyle="bold" />
 
             <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/swAllowExitNode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="Разрешить выход в интернет через телефон (Exit Node)"
+                android:layout_marginTop="10dp"
+                android:text="Разрешить выход в интернет (Exit Node)"
                 android:textColor="@color/text_primary" />
 
             <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="10dp"
                 android:hint="Анонсируемые подсети (Site-to-Site LAN)">
 
                 <com.google.android.material.textfield.TextInputEditText
@@ -392,13 +395,14 @@
 
         <Button
             android:id="@+id/btnSaveSettings"
+            style="@style/Widget.Material3.Button"
             android:layout_width="match_parent"
             android:layout_height="52dp"
-            android:layout_marginTop="20dp"
-            android:layout_marginBottom="30dp"
-            android:backgroundTint="@color/accent_neon"
-            android:text="💾 Сохранить настройки"
-            android:textColor="@color/white"
+            android:layout_marginTop="18dp"
+            android:layout_marginBottom="24dp"
+            android:backgroundTint="@color/accent_blue"
+            android:text="Сохранить настройки"
+            android:textColor="@color/bg_dark"
             android:textSize="15sp"
             android:textStyle="bold" />
 

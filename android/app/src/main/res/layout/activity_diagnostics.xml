@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -9,24 +9,33 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="🩺 Диагностика сети"
-        android:textColor="@color/accent_blue"
+        android:text="Диагностика сети"
+        android:textColor="@color/text_primary"
         android:textSize="20sp"
         android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Проверка доступности STUN, сигнального канала и P2P-соединений"
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
 
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="14dp"
         android:layout_weight="1"
         android:background="@drawable/bg_card"
-        android:padding="12dp">
+        android:padding="14dp">
 
         <TextView
             android:id="@+id/tvDiagLogs"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
+            android:lineSpacingExtra="3dp"
             android:text="Нажмите кнопку ниже для запуска полной проверки сети..."
             android:textColor="@color/text_primary"
             android:textIsSelectable="true"
@@ -41,34 +50,37 @@
 
         <Button
             android:id="@+id/btnRunDiag"
+            style="@style/Widget.Material3.Button"
             android:layout_width="0dp"
             android:layout_height="48dp"
-            android:layout_weight="1"
+            android:layout_weight="1.2"
             android:backgroundTint="@color/accent_blue"
-            android:text="🔄 Обновить"
+            android:text="Обновить"
             android:textColor="@color/bg_dark"
             android:textSize="13sp"
             android:textStyle="bold" />
 
         <Button
             android:id="@+id/btnCopyLogs"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:backgroundTint="#30363d"
-            android:text="📋 Скопировать"
+            android:text="Копировать"
             android:textColor="@color/text_primary"
             android:textSize="13sp" />
 
         <Button
             android:id="@+id/btnShareLogs"
-            android:layout_width="48dp"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_marginStart="8dp"
-            android:backgroundTint="#30363d"
-            android:text="📤"
-            android:textColor="@color/text_primary" />
+            android:layout_weight="1"
+            android:text="Отправить"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp" />
     </LinearLayout>
 
 </LinearLayout>

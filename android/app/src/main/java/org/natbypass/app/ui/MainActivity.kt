@@ -9,12 +9,15 @@ import android.content.Intent
 import android.net.VpnService
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
@@ -134,10 +137,14 @@ class MainActivity : AppCompatActivity() {
         val inviteText = "NatBypass|$devName|$ip|https://github.com/jamixm4-crypto/natbypass/releases/latest"
 
         val dialog = Dialog(this)
-        dialog.setContentView(R.layout.activity_qr_scanner) // reuse or simple image dialog
-        val iv = ImageView(this)
-        iv.setPadding(32, 32, 32, 32)
-        iv.setBackgroundColor(Color.parseColor("#121826"))
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val view = layoutInflater.inflate(R.layout.dialog_qr_share, null)
+        dialog.setContentView(view)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+
+        val iv = view.findViewById<ImageView>(R.id.ivQrCode)
+        val btnCopy = view.findViewById<Button>(R.id.btnCopyLink)
+        val btnCancel = view.findViewById<Button>(R.id.btnCancel)
 
         try {
             val writer = QRCodeWriter()
@@ -147,35 +154,36 @@ class MainActivity : AppCompatActivity() {
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
             for (x in 0 until w) {
                 for (y in 0 until h) {
-                    bmp.setPixel(x, y, if (bitMatrix.get(x, y)) Color.WHITE else Color.parseColor("#07090E"))
+                    bmp.setPixel(x, y, if (bitMatrix.get(x, y)) Color.BLACK else Color.WHITE)
                 }
             }
             iv.setImageBitmap(bmp)
         } catch (e: Exception) {}
 
-        AlertDialog.Builder(this)
-            .setTitle("📤 QR-код приглашения в Mesh сеть")
-            .setMessage("Отсканируйте камерой на втором телефоне или через камеру роутера/ПК:")
-            .setView(iv)
-            .setPositiveButton("📋 Скопировать ссылку") { _, _ ->
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("NatBypass Invite", inviteText))
-                Toast.makeText(this, "✓ Приглашение скопировано", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Закрыть", null)
-            .show()
+        btnCopy.setOnClickListener {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("NatBypass Invite", inviteText))
+            Toast.makeText(this, "✓ Ссылка скопирована", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
     }
 
     private fun showPeerActionDialog(peer: PeerItem) {
         val options = arrayOf(
-            "📋 Скопировать Virtual IP (${peer.vip})",
-            "⭐ Задать имя / В закладки",
-            "🌐 Использовать как Exit Node (Шлюз)",
-            "📡 Пропинговать узел"
+            "Скопировать IP (${peer.vip})",
+            "Задать имя / В закладки",
+            "Использовать как шлюз (Exit Node)",
+            "Проверить пинг"
         )
 
         AlertDialog.Builder(this)
-            .setTitle("🛸 Узел: ${peer.name}")
+            .setTitle(peer.name)
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> {
@@ -184,16 +192,18 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "✓ IP ${peer.vip} скопирован", Toast.LENGTH_SHORT).show()
                     }
                     1 -> {
-                        val input = EditText(this)
-                        input.hint = "Например: Домашний ПК"
+                        val input = EditText(this).apply {
+                            hint = "Например: Домашний ПК"
+                            setSingleLine()
+                        }
                         AlertDialog.Builder(this)
-                            .setTitle("⭐ Задать имя узлу")
+                            .setTitle("Задать имя узлу")
                             .setView(input)
                             .setPositiveButton("Сохранить") { _, _ ->
                                 val nick = input.text.toString().trim()
                                 val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
                                 prefs.edit().putString("nick_${peer.id}", nick).apply()
-                                Toast.makeText(this, "✓ Закладка сохранена!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this, "✓ Имя сохранено!", Toast.LENGTH_SHORT).show()
                                 pollPeers()
                             }
                             .setNegativeButton("Отмена", null)
@@ -203,7 +213,7 @@ class MainActivity : AppCompatActivity() {
                         val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
                         prefs.edit().putString("selected_exit_node", peer.id).apply()
                         org.natbypass.app.util.MobileBridge.selectExitNode(peer.id)
-                        Toast.makeText(this, "✓ Шлюз Exit Node активирован через ${peer.name}!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "✓ Шлюз активирован через ${peer.name}!", Toast.LENGTH_SHORT).show()
                         if (NatBypassVpnService.isRunning) {
                             stopVpnService()
                             lifecycleScope.launch {
@@ -213,7 +223,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     3 -> {
-                        Toast.makeText(this, "⚡ RTT Пинг сокета: ${peer.ping}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Задержка: ${peer.ping}", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -222,7 +232,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupAWGSpinner() {
-        val modes = arrayOf("🟢 Стандартный WG", "🟡 Обход DPI (AWG 2.0)", "🔴 Макс. скрытность")
+        val modes = arrayOf("Стандартный WG", "Обход DPI (AWG 2.0)", "Макс. скрытность")
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, modes)
         binding.spAwgMode.adapter = adapter
         binding.spAwgMode.setSelection(1) // Default: Обход DPI
@@ -277,19 +287,20 @@ class MainActivity : AppCompatActivity() {
         prefs.edit().putBoolean("vpn_running", connected).apply()
 
         if (connected) {
-            binding.tvStatus.text = getString(R.string.vpn_status_connected)
+            binding.tvStatus.text = "ПОДКЛЮЧЕНО"
             binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.green_bright))
-            binding.btnVpnToggle.background = ContextCompat.getDrawable(this, R.drawable.bg_vpn_button)
-            binding.tvAwgTunnelStatus.text = "🛡️ AWG 2.0: ТУННЕЛЬ ПОДНЯТ • ШИФРОВАНИЕ АКТИВНО (Обход DPI)"
+            binding.btnVpnToggle.background = ContextCompat.getDrawable(this, R.drawable.bg_vpn_button_connected)
+            binding.tvAwgTunnelStatus.text = "AmneziaWG 2.0 • Защищенный туннель активен"
             binding.tvAwgTunnelStatus.setTextColor(ContextCompat.getColor(this, R.color.green_bright))
-            binding.awgTunnelBadge.setBackgroundResource(R.drawable.bg_pill)
+            binding.awgTunnelBadge.background = ContextCompat.getDrawable(this, R.drawable.bg_chip_green)
         } else {
-            binding.tvStatus.text = getString(R.string.vpn_status_disconnected)
-            binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.red_bright))
+            binding.tvStatus.text = "ОТКЛЮЧЕНО"
+            binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
+            binding.btnVpnToggle.background = ContextCompat.getDrawable(this, R.drawable.bg_vpn_button_disconnected)
             binding.tvIpAddress.text = "Нажмите для подключения"
-            binding.tvAwgTunnelStatus.text = "🛡️ AWG 2.0: Ожидание подключения"
+            binding.tvAwgTunnelStatus.text = "AmneziaWG 2.0 • Ожидание подключения"
             binding.tvAwgTunnelStatus.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
-            binding.awgTunnelBadge.setBackgroundResource(R.drawable.bg_badge)
+            binding.awgTunnelBadge.background = ContextCompat.getDrawable(this, R.drawable.bg_card)
         }
     }
 
@@ -328,17 +339,17 @@ class MainActivity : AppCompatActivity() {
                 val directIp = org.natbypass.app.util.NetworkHelper.getPublicIP()
                 val directStun = org.natbypass.app.util.NetworkHelper.getSTUNMappedAddress()
                 withContext(Dispatchers.Main) {
-                    binding.tvPublicIpAndStun.text = "🌐 IP: $directIp  •  📡 STUN: ${if (directStun.isNotEmpty()) directStun else "$directIp:51820 (P2P ready)"}"
+                    binding.tvPublicIpAndStun.text = "Внешний IP: $directIp • STUN: ${if (directStun.isNotEmpty()) directStun else "$directIp:51820"}"
                 }
             }
         } else {
-            binding.tvPublicIpAndStun.text = "🌐 IP: $pubIp  •  📡 STUN: ${if (stun.isNotEmpty()) stun else "$pubIp:51820"}"
+            binding.tvPublicIpAndStun.text = "Внешний IP: $pubIp • STUN: ${if (stun.isNotEmpty()) stun else "$pubIp:51820"}"
         }
 
         val vpnActive = isRunning || NatBypassVpnService.isRunning
         if (vpnActive) {
-            binding.tvIpAddress.text = "Локальный VIP: $vip"
-            binding.tvSignalingMode.text = if (curChannel.isNotEmpty()) "⚡ $curChannel" else "⚡ Direct P2P"
+            binding.tvIpAddress.text = "Локальный IP: $vip"
+            binding.tvSignalingMode.text = if (curChannel.isNotEmpty()) curChannel else "Direct P2P"
             updateVpnUI(true)
         } else {
             updateVpnUI(false)
@@ -362,8 +373,8 @@ class MainActivity : AppCompatActivity() {
                 val savedNick = prefs.getString("nick_$id", "") ?: ""
                 val nick = if (savedNick.isNotEmpty()) savedNick else if (obj.has("nickname")) obj.getString("nickname") else obj.optString("Nickname", "")
                 val displayName = when {
-                    nick.isNotEmpty() && !nick.equals(id, ignoreCase = true) -> "⭐ $nick ($id)"
-                    nick.isNotEmpty() -> "⭐ $nick"
+                    nick.isNotEmpty() && !nick.equals(id, ignoreCase = true) -> "$nick ($id)"
+                    nick.isNotEmpty() -> nick
                     else -> id
                 }
                 val vip = if (obj.has("virtual_ip")) obj.getString("virtual_ip") else obj.optString("VirtualIP", "10.200.0.${i+2}")
@@ -385,18 +396,17 @@ class MainActivity : AppCompatActivity() {
                 if (plat.isEmpty()) {
                     val lower = id.lowercase()
                     plat = when {
-                        lower.contains("cloud") || lower.contains("linux") || lower.contains("debian") -> "🐧 Linux"
-                        lower.contains("keenetic") || lower.contains("jcloud") || lower.contains("router") -> "🌐 Keenetic"
-                        lower.contains("android") -> "🤖 Android"
-                        else -> "🪟 Windows"
+                        lower.contains("cloud") || lower.contains("linux") || lower.contains("debian") -> "Linux"
+                        lower.contains("keenetic") || lower.contains("jcloud") || lower.contains("router") -> "Keenetic"
+                        lower.contains("android") -> "Android"
+                        else -> "Windows"
                     }
                 }
-                val flag = if (obj.has("country_flag")) obj.getString("country_flag") else obj.optString("CountryFlag", "🌐")
                 val nameWithPlatform = "$displayName [$plat]"
-                val stunWithFlag = when {
-                    stun.isNotEmpty() -> "$flag $vip • $stun"
-                    pubIp.isNotEmpty() && pubIp != "—" -> "$flag $vip • $pubIp"
-                    else -> "$flag VIP: $vip"
+                val stunFormatted = when {
+                    stun.isNotEmpty() -> "$vip • $stun"
+                    pubIp.isNotEmpty() && pubIp != "—" -> "$vip • $pubIp"
+                    else -> "VIP: $vip"
                 }
 
                 peersList.add(
@@ -404,7 +414,7 @@ class MainActivity : AppCompatActivity() {
                         id = id,
                         name = nameWithPlatform,
                         vip = vip,
-                        stun = stunWithFlag,
+                        stun = stunFormatted,
                         online = isOnline,
                         isExitNode = isExitNode,
                         ping = if (isOnline) "${if (pingMs > 0) pingMs else 14} ms" else "Офлайн"
@@ -417,9 +427,9 @@ class MainActivity : AppCompatActivity() {
             binding.tvAvgPing.text = "$avgPing ms"
 
             if (peersList.isEmpty()) {
-                binding.tvPeersHeader.text = "👥 Устройства в сети (Ожидание устройств...)"
+                binding.tvPeersHeader.text = "Устройства в сети (поиск...)"
             } else {
-                binding.tvPeersHeader.text = "👥 Устройства в сети ($onlineCount онлайн)"
+                binding.tvPeersHeader.text = "Устройства в сети ($onlineCount онлайн)"
             }
         } catch (e: Exception) {}
     }
@@ -456,9 +466,17 @@ class MainActivity : AppCompatActivity() {
             val item = items[position]
             holder.tvName.text = item.name
             holder.tvIp.text = item.stun
-            holder.tvStatus.text = if (item.online) "🟢" else "🔴"
+            holder.tvStatus.text = if (item.online) "🟢" else "⚪"
             holder.tvPing.text = item.ping
             holder.tvExitNodeBadge.visibility = if (item.isExitNode) View.VISIBLE else View.GONE
+
+            if (item.online) {
+                holder.tvPing.background = ContextCompat.getDrawable(holder.itemView.context, R.drawable.bg_chip_green)
+                holder.tvPing.setTextColor(ContextCompat.getColor(holder.itemView.context, R.color.green_bright))
+            } else {
+                holder.tvPing.background = ContextCompat.getDrawable(holder.itemView.context, R.drawable.bg_card)
+                holder.tvPing.setTextColor(ContextCompat.getColor(holder.itemView.context, R.color.text_muted))
+            }
 
             holder.itemView.setOnClickListener {
                 onItemClick(item)
