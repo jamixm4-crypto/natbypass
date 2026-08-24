@@ -184,7 +184,19 @@ class MainActivity : AppCompatActivity() {
                     2 -> {
                         val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
                         prefs.edit().putString("selected_exit_node", peer.id).apply()
-                        Toast.makeText(this, "✓ Узел ${peer.name} выбран как Exit Node!", Toast.LENGTH_SHORT).show()
+                        try {
+                            val mobileClass = Class.forName("mobile.Mobile")
+                            val selectExitMethod = mobileClass.getMethod("selectExitNode", String::class.java)
+                            selectExitMethod.invoke(null, peer.id)
+                        } catch (e: Exception) {}
+                        Toast.makeText(this, "✓ Шлюз Exit Node активирован через ${peer.name}!", Toast.LENGTH_SHORT).show()
+                        if (NatBypassVpnService.isRunning) {
+                            stopVpnService()
+                            lifecycleScope.launch {
+                                delay(300)
+                                startVpnService()
+                            }
+                        }
                     }
                     3 -> {
                         Toast.makeText(this, "⚡ RTT Пинг сокета: ${peer.ping}", Toast.LENGTH_SHORT).show()

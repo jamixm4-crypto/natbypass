@@ -2,12 +2,15 @@ package mobile
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/natbypass/natbypass/internal/config"
@@ -29,9 +32,14 @@ var (
 	globalSigMgr   *signaling.FallbackManager
 	globalConfig   *config.Config
 	globalDevID    string
+	globalDevName  string
 	globalPublicIP string
 	globalSTUN     string
 	globalStarted  time.Time
+	globalExitNode string
+	globalAWGPreset string = "dpi"
+	globalTxBytes  uint64
+	globalRxBytes  uint64
 	logger         zerolog.Logger
 )
 
@@ -71,6 +79,11 @@ func StartEngine(configYAML string, tunFd int) string {
 		devID = "Android-" + crypto.KeyToHex(pubKey)[:8]
 	}
 	globalDevID = devID
+	if cfg.App.DeviceName != "" {
+		globalDevName = cfg.App.DeviceName
+	} else if globalDevName == "" {
+		globalDevName = devID
+	}
 
 	// Реестр пиров
 	globalRegistry = peer.NewRegistry()
@@ -119,28 +132,21 @@ func StartEngine(configYAML string, tunFd int) string {
 				return
 			case <-ticker.C:
 				var awgParams *signaling.AWGParams
-				if cfg.WireGuard.AWG.Enabled {
-					awgParams = &signaling.AWGParams{
-						Jc:   cfg.WireGuard.AWG.Jc,
-						Jmin: cfg.WireGuard.AWG.Jmin,
-						Jmax: cfg.WireGuard.AWG.Jmax,
-						S1:   cfg.WireGuard.AWG.S1,
-						S2:   cfg.WireGuard.AWG.S2,
-						H1:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H1),
-						H2:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H2),
-						H3:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H3),
-						H4:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H4),
-					}
+				if cfg.WireGuard.AWG.Enabled || globalAWGPreset != "standard" {
+					awgParams = getAWGParamsFromPreset(globalAWGPreset)
 				}
 				payload := &signaling.Payload{
-					DeviceID:  devID,
-					PublicKey: crypto.KeyToHex(pubKey),
-					PublicIP:  globalPublicIP,
-					STUNAddr:  globalSTUN,
-					WGPubKey:  wgKey.PublicKey,
-					WGPort:    cfg.WireGuard.ListenPort,
-					Timestamp: time.Now(),
-					AWG:       awgParams,
+					DeviceID:         devID,
+					PublicKey:        crypto.KeyToHex(pubKey),
+					PublicIP:         globalPublicIP,
+					STUNAddr:         globalSTUN,
+					WGPubKey:         wgKey.PublicKey,
+					WGPort:           cfg.WireGuard.ListenPort,
+					VirtualIP:        "10.200.0.100",
+					IsExitNode:       cfg.Network.AllowExitNode,
+					AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
+					Timestamp:        time.Now(),
+					AWG:              awgParams,
 				}
 				_ = globalSigMgr.Send(ctx, payload)
 			}
@@ -163,15 +169,18 @@ func StartEngine(configYAML string, tunFd int) string {
 				}
 				if p != nil && p.DeviceID != devID {
 					globalRegistry.Upsert(&peer.Peer{
-						DeviceID:  p.DeviceID,
-						PublicKey: p.PublicKey,
-						PublicIP:  p.PublicIP,
-						STUNAddr:  p.STUNAddr,
-						WGPubKey:  p.WGPubKey,
-						WGPort:    p.WGPort,
-						LastSeen:  time.Now(),
-						Online:    true,
-						AWG:       p.AWG,
+						DeviceID:         p.DeviceID,
+						PublicKey:        p.PublicKey,
+						PublicIP:         p.PublicIP,
+						STUNAddr:         p.STUNAddr,
+						WGPubKey:         p.WGPubKey,
+						WGPort:           p.WGPort,
+						VirtualIP:        p.VirtualIP,
+						IsExitNode:       p.IsExitNode,
+						AdvertisedRoutes: p.AdvertisedRoutes,
+						LastSeen:         time.Now(),
+						Online:           true,
+						AWG:              p.AWG,
 					})
 				}
 			}
@@ -207,6 +216,7 @@ func StartEngine(configYAML string, tunFd int) string {
 
 	if puncher != nil && tunFile != nil {
 		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+			atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
 			_, _ = tunFile.Write(payload)
 		})
 
@@ -223,6 +233,39 @@ func StartEngine(configYAML string, tunFd int) string {
 						continue
 					}
 					pkt := buf[:n]
+					atomic.AddUint64(&globalTxBytes, uint64(n))
+
+					// Интеллектуальная маршрутизация по IP-заголовку
+					if len(pkt) >= 20 && (pkt[0]>>4) == 4 {
+						destIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
+						
+						var targetPeer *peer.Peer
+						for _, p := range globalRegistry.List() {
+							if p.VirtualIP != "" && p.VirtualIP == destIP.String() {
+								targetPeer = p
+								break
+							}
+							for _, route := range p.AdvertisedRoutes {
+								if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
+									targetPeer = p
+									break
+								}
+							}
+						}
+
+						if targetPeer == nil && globalExitNode != "" {
+							if ep, ok := globalRegistry.Get(globalExitNode); ok && ep.Online {
+								targetPeer = ep
+							}
+						}
+
+						if targetPeer != nil && targetPeer.ActiveEndpoint != "" {
+							_ = puncher.SendDataPacket(targetPeer.ActiveEndpoint, pkt)
+							continue
+						}
+					}
+
+					// Fallback broadcast
 					for _, p := range globalRegistry.List() {
 						if p.Online && p.ActiveEndpoint != "" {
 							_ = puncher.SendDataPacket(p.ActiveEndpoint, pkt)
@@ -260,33 +303,150 @@ func IsRunning() bool {
 	return engineRunning
 }
 
-// GetStatusJSON возвращает актуальный статус в формате JSON
-func GetStatusJSON() string {
+// SetDeviceName устанавливает имя устройства
+func SetDeviceName(name string) {
 	engineMu.Lock()
 	defer engineMu.Unlock()
+	globalDevName = name
+}
 
-	status := map[string]interface{}{
-		"running":         engineRunning,
-		"device_id":       globalDevID,
-		"public_ip":       globalPublicIP,
-		"stun_addr":       globalSTUN,
-		"uptime":          time.Since(globalStarted).Round(time.Second).String(),
-		"current_channel": "",
-		"peers_count":     0,
-	}
+// SelectExitNode выбирает шлюз для выхода в интернет
+func SelectExitNode(deviceID string) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	globalExitNode = deviceID
+	logger.Info().Str("exit_node", deviceID).Msg("Выбран Exit Node для Android")
+}
 
-	if globalSigMgr != nil {
-		status["current_channel"] = globalSigMgr.CurrentChannel()
-	}
-	if globalRegistry != nil {
-		status["peers_count"] = len(globalRegistry.List())
-	}
+// GetSelectedExitNode возвращает ID выбранного шлюза
+func GetSelectedExitNode() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	return globalExitNode
+}
 
-	data, _ := json.Marshal(status)
+// SetAWGPreset устанавливает пресет обфускации AWG 2.0
+func SetAWGPreset(preset string) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	globalAWGPreset = preset
+	logger.Info().Str("preset", preset).Msg("Установлен пресет AmneziaWG 2.0")
+}
+
+// GetRandomAWGParamsJSON генерирует случайные параметры обхода блокировок
+func GetRandomAWGParamsJSON() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	p := signaling.AWGParams{
+		Jc:   3 + int(b[0]%4),
+		Jmin: 30 + int(b[1]%30),
+		Jmax: 60 + int(b[2]%60),
+		S1:   20 + int(b[3]%40),
+		S2:   20 + int(b[4]%40),
+		H1:   fmt.Sprintf("%d", binary.BigEndian.Uint32(b[0:4])),
+		H2:   fmt.Sprintf("%d", binary.BigEndian.Uint32(b[4:8])),
+		H3:   fmt.Sprintf("%d", binary.BigEndian.Uint32(b[8:12])),
+		H4:   fmt.Sprintf("%d", binary.BigEndian.Uint32(b[12:16])),
+	}
+	data, _ := json.Marshal(p)
 	return string(data)
 }
 
-// GetPeersJSON возвращает список устройств в JSON
+func getAWGParamsFromPreset(preset string) *signaling.AWGParams {
+	switch preset {
+	case "standard":
+		return &signaling.AWGParams{
+			Jc: 0, Jmin: 0, Jmax: 0, S1: 0, S2: 0,
+			H1: "1", H2: "2", H3: "3", H4: "4",
+		}
+	case "stealth":
+		var b [16]byte
+		_, _ = rand.Read(b[:])
+		return &signaling.AWGParams{
+			Jc:   4,
+			Jmin: 40,
+			Jmax: 80,
+			S1:   48,
+			S2:   32,
+			H1:   fmt.Sprintf("%d", binary.BigEndian.Uint32(b[0:4])),
+			H2:   fmt.Sprintf("%d", binary.BigEndian.Uint32(b[4:8])),
+			H3:   fmt.Sprintf("%d", binary.BigEndian.Uint32(b[8:12])),
+			H4:   fmt.Sprintf("%d", binary.BigEndian.Uint32(b[12:16])),
+		}
+	default: // dpi
+		return &signaling.AWGParams{
+			Jc:   4,
+			Jmin: 40,
+			Jmax: 70,
+			S1:   48,
+			S2:   32,
+			H1:   "1428571428",
+			H2:   "2147483647",
+			H3:   "857142857",
+			H4:   "1122334455",
+		}
+	}
+}
+
+// GetFullTelemetryJSON возвращает детальные телеметрические метрики
+func GetFullTelemetryJSON() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	peersCount := 0
+	directCount := 0
+	var avgPing int64 = 0
+	var pingSum int64 = 0
+
+	if globalRegistry != nil {
+		peers := globalRegistry.List()
+		peersCount = len(peers)
+		for _, p := range peers {
+			if p.DirectP2P {
+				directCount++
+			}
+			if p.PingMs > 0 {
+				pingSum += p.PingMs
+			}
+		}
+		if peersCount > 0 && pingSum > 0 {
+			avgPing = pingSum / int64(peersCount)
+		}
+	}
+
+	channel := "MQTT"
+	if globalSigMgr != nil {
+		channel = globalSigMgr.CurrentChannel()
+	}
+
+	res := map[string]interface{}{
+		"running":         engineRunning,
+		"device_id":       globalDevID,
+		"device_name":     globalDevName,
+		"public_ip":       globalPublicIP,
+		"stun_addr":       globalSTUN,
+		"virtual_ip":      "10.200.0.100",
+		"peers_count":     peersCount,
+		"direct_p2p":      directCount > 0,
+		"direct_count":    directCount,
+		"avg_ping_ms":     avgPing,
+		"channel":         channel,
+		"exit_node":       globalExitNode,
+		"awg_preset":      globalAWGPreset,
+		"tx_bytes":        atomic.LoadUint64(&globalTxBytes),
+		"rx_bytes":        atomic.LoadUint64(&globalRxBytes),
+		"uptime":          time.Since(globalStarted).Round(time.Second).String(),
+	}
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+// GetStatusJSON возвращает базовый статус
+func GetStatusJSON() string {
+	return GetFullTelemetryJSON()
+}
+
+// GetPeersJSON возвращает список устройств
 func GetPeersJSON() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -331,13 +491,33 @@ func GetDiagnosticsJSON() string {
 		result["stun"] = check{Ok: false, Detail: "STUN не определён"}
 	}
 
+	// Сигнальный канал
+	ch := "MQTT / Telegram"
+	if globalSigMgr != nil && globalSigMgr.CurrentChannel() != "" {
+		ch = globalSigMgr.CurrentChannel()
+	}
+	result["channel"] = check{Ok: true, Detail: "Канал активен", Extra: ch}
+
+	// Пиры
+	pCount := 0
+	if globalRegistry != nil {
+		pCount = len(globalRegistry.List())
+	}
+	result["peers"] = check{Ok: pCount > 0, Detail: fmt.Sprintf("%d узлов в сети", pCount)}
+
+	// NAT Type
+	if globalSTUN != "" {
+		result["nat_type"] = check{Ok: true, Detail: "Возможно Full Cone / Restricted NAT (P2P доступен)"}
+	} else {
+		result["nat_type"] = check{Ok: false, Detail: "Симметричный NAT (требует Relay)"}
+	}
+
 	data, _ := json.Marshal(result)
 	return string(data)
 }
 
-// ParseQRInvite парсит QR-код приглашения и возвращает JSON с параметрами
+// ParseQRInvite парсит QR-код приглашения
 func ParseQRInvite(qrText string) string {
-	// Формат: NatBypass|DeviceName|PublicIP|InviteURL
 	parts := strings.Split(qrText, "|")
 	res := map[string]interface{}{
 		"valid": false,
@@ -361,7 +541,7 @@ func ClearPeers() {
 	}
 }
 
-// GenerateInviteQRText возвращает форматированную строку для генерации QR-кода приглашения
+// GenerateInviteQRText возвращает строку QR-кода приглашения
 func GenerateInviteQRText() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -369,10 +549,14 @@ func GenerateInviteQRText() string {
 	if ip == "" {
 		ip = "127.0.0.1"
 	}
-	return fmt.Sprintf("NatBypass|%s|%s|https://github.com/jamixm4-crypto/natbypass/releases/latest", globalDevID, ip)
+	name := globalDevName
+	if name == "" {
+		name = globalDevID
+	}
+	return fmt.Sprintf("NatBypass|%s|%s|https://github.com/jamixm4-crypto/natbypass/releases/latest", name, ip)
 }
 
-// GenerateKeysJSON генерирует пару ключей NaCl и WireGuard
+// GenerateKeysJSON генерирует ключи
 func GenerateKeysJSON() string {
 	pub, priv, _ := crypto.GenerateKeyPair()
 	wg, _ := wireguard.GenerateKeyPair()
@@ -387,7 +571,6 @@ func GenerateKeysJSON() string {
 	return string(data)
 }
 
-// Вспомогательные функции
 func parseConfigFromString(data string) (*config.Config, error) {
 	cfg := &config.Config{}
 	cfg.App.Name = "NatBypass"

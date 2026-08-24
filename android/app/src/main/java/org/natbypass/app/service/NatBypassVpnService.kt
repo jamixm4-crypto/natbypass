@@ -57,13 +57,42 @@ class NatBypassVpnService : VpnService() {
         if (isRunning) return
 
         try {
+            val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+            val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
+            val useExitNode = selectedExitNode.isNotEmpty()
+
             // Создаем виртуальный TUN интерфейс 10.200.0.100/24
             val builder = Builder()
                 .setSession("NatBypass Mesh")
                 .addAddress("10.200.0.100", 24)
-                .addRoute("10.200.0.0", 24)
                 .setMtu(1420)
                 .setBlocking(false)
+
+            if (useExitNode) {
+                // Если выбран Exit Node - перенаправляем весь интернет через удаленный узел
+                builder.addRoute("0.0.0.0", 0)
+                builder.addDnsServer("1.1.1.1")
+                builder.addDnsServer("8.8.8.8")
+            } else {
+                // Только локальная mesh-подсеть
+                builder.addRoute("10.200.0.0", 24)
+            }
+
+            // Добавляем анонсированные подсети (например, домашняя сеть роутера 192.168.1.0/24)
+            val advSubnets = prefs.getString("adv_subnets", "") ?: ""
+            if (advSubnets.isNotEmpty()) {
+                for (subnet in advSubnets.split(",")) {
+                    val s = subnet.trim()
+                    if (s.contains("/")) {
+                        val parts = s.split("/")
+                        val ip = parts[0]
+                        val prefix = parts[1].toIntOrNull() ?: 24
+                        try {
+                            builder.addRoute(ip, prefix)
+                        } catch (e: Exception) {}
+                    }
+                }
+            }
 
             vpnInterface = builder.establish()
             val fd = vpnInterface?.fd ?: -1
