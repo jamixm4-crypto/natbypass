@@ -118,8 +118,8 @@ func openAppWindow(port int) {
 			AutoFocus: true,
 			WindowOptions: webview2.WindowOptions{
 				Title:  "NatBypass — P2P Mesh Network",
-				Width:  1280,
-				Height: 860,
+				Width:  1020,
+				Height: 630,
 				Center: true,
 			},
 		})
@@ -161,9 +161,9 @@ func openAppWindow(port int) {
 				});
 			`)
 
-			// 4. ЖЕСТКО задаем минимальный размер окна (HintMin = 2) и начальный размер
-			w.SetSize(1100, 750, webview2.HintMin)
-			w.SetSize(1280, 860, webview2.HintNone)
+			// 4. Задаем компактный минимальный размер окна и начальный размер под любые ноутбуки
+			w.SetSize(840, 520, webview2.HintMin)
+			w.SetSize(1020, 630, webview2.HintNone)
 			w.Navigate(url)
 			w.Run()
 			return

@@ -793,7 +793,7 @@ func main() {
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowTitle)),
 		WS_FIXEDWINDOW|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
-		100, 80, 1080, 740,
+		60, 40, 960, 620,
 		0, 0, hInstance, 0,
 	)
 	hMainWnd = hwnd
