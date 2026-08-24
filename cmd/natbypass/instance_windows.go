@@ -46,7 +46,7 @@ func acquireSingleInstanceMutex(port int) bool {
 			if hMutex != 0 {
 				_ = windows.CloseHandle(hMutex)
 			}
-			// Экземпляр уже запущен — активируем существующее окно и мгновенно выходим (НИКАКИХ вторых окон!)
+			// Экземпляр уже запущен — активируем существующее окно и выходим
 			activateExistingWindow()
 			return false
 		}

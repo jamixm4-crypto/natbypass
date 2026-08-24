@@ -61,6 +61,14 @@ var (
 )
 
 func main() {
+	// Устанавливаем рабочую директорию на папку с исполняемым файлом (важно для Windows UAC)
+	if exe, err := os.Executable(); err == nil {
+		_ = os.Chdir(filepath.Dir(exe))
+	}
+
+	// Инициализируем логирование сразу, чтобы natbypass.log всегда создавался в папке программы
+	setupLogging("info", "")
+
 	// Автоматический запрос прав Администратора через UAC на Windows при обычном запуске
 	ensureAdminOnWindows()
 

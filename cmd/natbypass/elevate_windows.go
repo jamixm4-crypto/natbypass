@@ -1,9 +1,10 @@
-﻿//go:build windows
+//go:build windows
 
 package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"unsafe"
 
@@ -19,6 +20,7 @@ func ensureAdminOnWindows() {
 			return
 		}
 		exePathPtr, _ := windows.UTF16PtrFromString(exePath)
+		dirPtr, _ := windows.UTF16PtrFromString(filepath.Dir(exePath))
 
 		var args string
 		if len(os.Args) > 1 {
@@ -28,7 +30,14 @@ func ensureAdminOnWindows() {
 
 		modshell32 := windows.NewLazySystemDLL("shell32.dll")
 		procShellExecuteW := modshell32.NewProc("ShellExecuteW")
-		ret, _, _ := procShellExecuteW.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(exePathPtr)), uintptr(unsafe.Pointer(argsPtr)), 0, 1 /* SW_SHOWNORMAL */)
+		ret, _, _ := procShellExecuteW.Call(
+			0,
+			uintptr(unsafe.Pointer(verb)),
+			uintptr(unsafe.Pointer(exePathPtr)),
+			uintptr(unsafe.Pointer(argsPtr)),
+			uintptr(unsafe.Pointer(dirPtr)),
+			1, /* SW_SHOWNORMAL */
+		)
 		if ret > 32 {
 			os.Exit(0)
 		}
