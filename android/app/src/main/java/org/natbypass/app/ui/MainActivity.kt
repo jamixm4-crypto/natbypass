@@ -406,6 +406,12 @@ class MainActivity : AppCompatActivity() {
             binding.tvPeersCount.text = "$onlineCount онлайн"
             val avgPing = if (countWithLatency > 0) totalLatency / countWithLatency else if (onlineCount > 0) 14L else 0L
             binding.tvAvgPing.text = "$avgPing ms"
+
+            if (peersList.isEmpty()) {
+                binding.tvPeersHeader.text = "👥 Устройства в сети (Ожидание устройств...)"
+            } else {
+                binding.tvPeersHeader.text = "👥 Устройства в сети ($onlineCount онлайн)"
+            }
         } catch (e: Exception) {}
     }
 
