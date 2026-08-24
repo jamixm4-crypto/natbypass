@@ -119,9 +119,10 @@ jobs:
               gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --target main
           }
 
-          # Удаляем устаревший Setup.exe если он присутствовал в релизе
+          # Удаляем устаревшие файлы если они присутствовали в релизе
           gh release delete-asset $tag "NatBypass-$tag-Setup.exe" -y 2>$null
           gh release delete-asset $tag "NatBypass-Setup-$tag.exe" -y 2>$null
+          gh release delete-asset $tag "natbypass-$tag-windows-amd64.exe" -y 2>$null
 
           $files = Get-ChildItem -Path release -File
           foreach ($f in $files) {
