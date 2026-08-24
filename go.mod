@@ -1,10 +1,11 @@
 module github.com/natbypass/natbypass
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.4.3
 	github.com/huin/goupnp v1.3.0
+	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	github.com/pion/stun/v2 v2.0.0
 	github.com/rs/zerolog v1.33.0
 	github.com/spf13/cobra v1.8.1
@@ -21,7 +22,6 @@ require (
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808 // indirect
 	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
