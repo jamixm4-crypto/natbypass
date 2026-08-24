@@ -125,7 +125,7 @@ class NatBypassVpnService : VpnService() {
     private fun disconnect() {
         isRunning = false
         serviceJob?.cancel()
-        org.natbypass.app.util.MobileBridge.stopEngine()
+        org.natbypass.app.util.MobileBridge.detachTUN()
 
         try {
             vpnInterface?.close()

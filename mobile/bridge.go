@@ -410,6 +410,17 @@ func attachTUN(tunFd int) {
 	}
 }
 
+// DetachTUN отключает TUN-интерфейс без остановки сигнального канала
+func DetachTUN() {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalTunFile != nil {
+		_ = globalTunFile.Close()
+		globalTunFile = nil
+	}
+	logger.Info().Msg("TUN интерфейс отключен (сигнальный канал продолжает работу)")
+}
+
 // StopEngine останавливает фоновый движок
 func StopEngine() {
 	engineMu.Lock()
@@ -421,7 +432,10 @@ func StopEngine() {
 	if engineCancel != nil {
 		engineCancel()
 	}
-	globalTunFile = nil
+	if globalTunFile != nil {
+		_ = globalTunFile.Close()
+		globalTunFile = nil
+	}
 	engineRunning = false
 	logger.Info().Msg("NatBypass Android ядро остановлено")
 }

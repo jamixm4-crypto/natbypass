@@ -56,6 +56,13 @@ object MobileBridge {
         } catch (e: Exception) {}
     }
 
+    fun detachTUN() {
+        val method = getMethod("detachTUN") ?: return
+        try {
+            method.invoke(null)
+        } catch (e: Exception) {}
+    }
+
     fun getStatusJSON(): String {
         val method = getMethod("getStatusJSON") ?: return "{}"
         return try {
