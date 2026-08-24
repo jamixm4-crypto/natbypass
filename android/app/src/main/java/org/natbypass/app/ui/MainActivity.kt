@@ -533,8 +533,17 @@ class MainActivity : AppCompatActivity() {
                                 }
                                 .setNegativeButton("Позже", null)
                                 .show()
+                        } else if (manual && apkDownloadUrl.isNotEmpty()) {
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle("🔄 Свежий билд: v$tagName")
+                                .setMessage("У вас уже установлена версия v$currentVer.\n\nХотите загрузить и переустановить самый свежий билд v$tagName с GitHub (со всеми последними обновлениями и исправлениями)?\n\n$releaseBody")
+                                .setPositiveButton("⬇️ Скачать свежий билд") { _, _ ->
+                                    downloadAndInstallApk(apkDownloadUrl)
+                                }
+                                .setNegativeButton("Отмена", null)
+                                .show()
                         } else if (manual) {
-                            Toast.makeText(this@MainActivity, "✓ У вас установлена последняя версия v$currentVer!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "✓ У вас установлена версия v$currentVer (новых бинарников на GitHub пока нет)", Toast.LENGTH_SHORT).show()
                         } else {
                             // no-op
                         }
