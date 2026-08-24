@@ -51,7 +51,8 @@ jobs:
           Write-Host "==> 1. Building Windows Standalone Desktop App (NatBypass.exe)..."
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
-          & go build -trimpath -ldflags="-w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
+          & go build -trimpath -ldflags="-w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass-gui
+          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-windows-amd64.exe" ./cmd/natbypass
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
           & go build -trimpath -ldflags="-w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
@@ -59,7 +60,7 @@ jobs:
           Write-Host "==> 3. Building Linux x64..."
           $env:GOOS = "linux"
           $env:GOARCH = "amd64"
-          & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-linux-amd64" ./cmd/natbypass
+          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-linux-amd64" ./cmd/natbypass
 
           Write-Host "==> 4. Building Linux ARM64..."
           $env:GOARCH = "arm64"

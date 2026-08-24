@@ -1,9 +1,9 @@
-# NatBypass v1.2.4
+# NatBypass v1.2.5
 
 **P2P Mesh VPN & DPI Bypass** — прямое сокет-в-сокет соединение компьютеров, серверов, телефонов и роутеров через любые виды NAT/CGNAT без выделенных серверов.
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
-[![Release](https://img.shields.io/badge/Release-v1.2.4-8b5cf6?style=flat&logo=github)](https://github.com/jamixm4-crypto/natbypass/releases/latest)
+[![Release](https://img.shields.io/badge/Release-v1.2.5-8b5cf6?style=flat&logo=github)](https://github.com/jamixm4-crypto/natbypass/releases/latest)
 [![Wiki](https://img.shields.io/badge/Wiki-Documentation-blue?style=flat&logo=gitbook)](wiki/Home.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20Keenetic%20%7C%20OpenWrt%20%7C%20Android-brightgreen)](#поддерживаемые-платформы)
@@ -22,7 +22,7 @@
 
 ---
 
-## ✨ Что нового в версии 1.2.4
+## ✨ Что нового в версии 1.2.5
 
 - 🌊 **Шелковистые неоновые графики (Cardinal Spline)** — плавная отрисовка трафика и задержки кубическими сплайнами Безье с динамической неоновой подсветкой.
 - ⚡ **EMA-сглаживание пинга** — экспоненциальное скользящее среднее устраняет сетевой джиттер и предотвращает скачки RTT.
@@ -61,19 +61,19 @@
 
 | Платформа | Архитектура | Файл релиза | Описание |
 |---|---|---|---|
-| **Windows** | amd64 | [`NatBypass-v1.2.4-windows-amd64.exe`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Windows 10/11 (Desktop UI + Трей) |
-| **Android** | arm64 / arm / x64 | [`NatBypass-v1.2.4.apk`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Android 8.0+ (VpnService + QR-сканер) |
-| **Linux** | amd64 | `natbypass-v1.2.4-linux-amd64` | Ubuntu, Debian, CentOS, Arch |
-| **Linux ARM64** | arm64 | `natbypass-v1.2.4-linux-arm64` | Raspberry Pi 3/4/5, Keenetic Ultra/Giga |
-| **Роутеры MIPS** | mips (Big Endian) | `natbypass-v1.2.4-router-mips` | OpenWrt (TP-Link, GL.iNet, Atheros) |
-| **Роутеры MIPSLE** | mipsle (Little Endian)| `natbypass-v1.2.4-router-mipsle`| Keenetic Start/City/Air, Xiaomi 3G/4A |
+| **Windows** | amd64 | [`NatBypass-v1.2.5-windows-amd64.exe`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Windows 10/11 (Desktop UI + Трей) |
+| **Android** | arm64 / arm / x64 | [`NatBypass-v1.2.5.apk`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Android 8.0+ (VpnService + QR-сканер) |
+| **Linux** | amd64 | `natbypass-v1.2.5-linux-amd64` | Ubuntu, Debian, CentOS, Arch |
+| **Linux ARM64** | arm64 | `natbypass-v1.2.5-linux-arm64` | Raspberry Pi 3/4/5, Keenetic Ultra/Giga |
+| **Роутеры MIPS** | mips (Big Endian) | `natbypass-v1.2.5-router-mips` | OpenWrt (TP-Link, GL.iNet, Atheros) |
+| **Роутеры MIPSLE** | mipsle (Little Endian)| `natbypass-v1.2.5-router-mipsle`| Keenetic Start/City/Air, Xiaomi 3G/4A |
 
 ---
 
 ## 🚀 Быстрая установка
 
 ### Windows
-1. Скачайте [**`NatBypass-v1.2.4-windows-amd64.exe`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+1. Скачайте [**`NatBypass-v1.2.5-windows-amd64.exe`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
 2. Запустите от имени администратора.
 3. В разделе **«Настройки»** укажите данные Telegram-бота или MQTT-брокера и нажмите **«💾 Сохранить»**.
 
@@ -96,7 +96,7 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/unins
 ```
 
 ### Android
-1. Скачайте [**`NatBypass-v1.2.4.apk`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+1. Скачайте [**`NatBypass-v1.2.5.apk`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
 2. Нажмите **«📷 Сканировать QR»** и наведите камеру на QR-код во вкладке *«Быстрый старт»* на ПК для мгновенного импорта настроек!
 
 ---

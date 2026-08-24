@@ -29,7 +29,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_pill"
-            android:text="v1.2.4"
+            android:text="v1.2.5"
             android:textColor="@color/accent_blue"
             android:textSize="11sp"
             android:textStyle="bold" />

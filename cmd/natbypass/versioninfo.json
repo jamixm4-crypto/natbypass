@@ -22,14 +22,14 @@
 		"Comments": "NatBypass P2P Mesh Network and VPN Client",
 		"CompanyName": "NatBypass Open Source Project",
 		"FileDescription": "NatBypass P2P Mesh Network Daemon and Client",
-		"FileVersion": "1.2.4.0",
+		"FileVersion": "1.2.5.0",
 		"InternalName": "NatBypass",
 		"LegalCopyright": "Copyright (c) 2024-2026 NatBypass Project. All rights reserved.",
 		"LegalTrademarks": "NatBypass",
 		"OriginalFilename": "NatBypass.exe",
 		"PrivateBuild": "",
 		"ProductName": "NatBypass",
-		"ProductVersion": "1.2.4.0",
+		"ProductVersion": "1.2.5.0",
 		"SpecialBuild": ""
 	},
 	"VarFileInfo": {
