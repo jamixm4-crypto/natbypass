@@ -202,3 +202,25 @@ func extractIPv4Subnet(addr net.Addr) string {
 
 	return fmt.Sprintf("%s/%d", networkIP.String(), ones)
 }
+
+// GetLocalLANIP возвращает основной локальный IPv4-адрес устройства
+func GetLocalLANIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+			if ip4 := ipNet.IP.To4(); ip4 != nil {
+				ipStr := ip4.String()
+				if strings.HasPrefix(ipStr, "10.200.") {
+					continue
+				}
+				if strings.HasPrefix(ipStr, "192.168.") || strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "172.") {
+					return ipStr
+				}
+			}
+		}
+	}
+	return ""
+}

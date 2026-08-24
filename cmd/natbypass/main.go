@@ -772,6 +772,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				rawOS, platformName, osEmoji := network.DetectPlatform()
 				flag := network.LookupCountryFlag(engineCtx, ip.String())
+				lanIP := network.GetLocalLANIP()
+				localAddr := ""
+				if lanIP != "" {
+					localAddr = fmt.Sprintf("%s:%d", lanIP, wgPort)
+				}
 				payload := &signaling.Payload{
 					DeviceID:         deviceID,
 					Nickname:         nick,
@@ -779,6 +784,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					VirtualIP:        myVirtualIP,
 					PublicKey:        crypto.KeyToHex(pubKey),
 					PublicIP:         ip.String(),
+					LocalAddr:        localAddr,
 					STUNAddr:         stunAddr,
 					WGPubKey:         wgPubKey,
 					WGPort:           wgPort,
@@ -870,6 +876,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						VirtualIP:        peerVIP,
 						PublicKey:        p.PublicKey,
 						PublicIP:         p.PublicIP,
+						LocalAddr:        p.LocalAddr,
 						STUNAddr:         p.STUNAddr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,

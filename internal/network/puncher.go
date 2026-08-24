@@ -213,6 +213,9 @@ func (p *UDPPuncher) readLoop() {
 			parts := strings.Split(data, ":")
 			if len(parts) >= 4 {
 				senderID := parts[2]
+				if senderID == p.myDevID {
+					continue
+				}
 				sentTs := parts[3]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
@@ -229,6 +232,9 @@ func (p *UDPPuncher) readLoop() {
 			parts := strings.Split(data, ":")
 			if len(parts) >= 4 {
 				senderID := parts[2]
+				if senderID == p.myDevID {
+					continue
+				}
 				sentNano, err := strconv.ParseInt(parts[3], 10, 64)
 				if err == nil {
 					rtt := time.Since(time.Unix(0, sentNano))

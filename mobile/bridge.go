@@ -172,10 +172,16 @@ func StartEngine(configYAML string, tunFd int) string {
 				if cfg.WireGuard.AWG.Enabled || globalAWGPreset != "standard" {
 					awgParams = getAWGParamsFromPreset(globalAWGPreset)
 				}
+				lanIP := network.GetLocalLANIP()
+				localAddr := ""
+				if lanIP != "" {
+					localAddr = fmt.Sprintf("%s:%d", lanIP, cfg.WireGuard.ListenPort)
+				}
 				payload := &signaling.Payload{
 					DeviceID:         devID,
 					PublicKey:        crypto.KeyToHex(pubKey),
 					PublicIP:         globalPublicIP,
+					LocalAddr:        localAddr,
 					STUNAddr:         globalSTUN,
 					WGPubKey:         wgKey.PublicKey,
 					WGPort:           cfg.WireGuard.ListenPort,
