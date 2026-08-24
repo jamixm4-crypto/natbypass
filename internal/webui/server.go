@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -21,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/natbypass/natbypass/internal/autostart"
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
@@ -1472,16 +1472,10 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Windows Autostart Registry Management
 	isWindows := runtime.GOOS == "windows"
-	if isWindows {
-		if exePath, err := os.Executable(); err == nil {
-			if req.AutoStart {
-				_ = exec.Command("reg", "add", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "NatBypass", "/t", "REG_SZ", "/d", exePath, "/f").Run()
-			} else {
-				_ = exec.Command("reg", "delete", `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "NatBypass", "/f").Run()
-			}
-		}
+	// Windows Autostart Registry Management (Native API)
+	if exePath, err := os.Executable(); err == nil && isWindows {
+		_ = autostart.SetAutoStart("NatBypass", exePath, req.AutoStart)
 	}
 
 	targetPath := s.configPath
