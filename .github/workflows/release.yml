@@ -53,7 +53,6 @@ jobs:
           $env:GOARCH = "amd64"
           & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
           & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-cli-$tag-windows-amd64.exe" ./cmd/natbypass
-          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\diagnostic-tool-$tag-windows.exe" ./cmd/natbypass-diag
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
           & go build -trimpath -ldflags="-w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
@@ -125,6 +124,8 @@ jobs:
           gh release delete-asset $tag "NatBypass-Setup-$tag.exe" -y 2>$null
           gh release delete-asset $tag "natbypass-diag-$tag-windows-amd64.exe" -y 2>$null
           gh release delete-asset $tag "natbypass-diag-v1.2.5-windows-amd64.exe" -y 2>$null
+          gh release delete-asset $tag "diagnostic-tool-$tag-windows.exe" -y 2>$null
+          gh release delete-asset $tag "diagnostic-tool-v1.2.5-windows.exe" -y 2>$null
 
           $files = Get-ChildItem -Path release -File
           foreach ($f in $files) {
