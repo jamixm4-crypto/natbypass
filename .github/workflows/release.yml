@@ -48,13 +48,20 @@ jobs:
           Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path release | Out-Null
 
-          Write-Host "==> 1. Building Windows Desktop GUI (NatBypass.exe - Stylish WebView2 Desktop App)..."
+          Write-Host "==> 1. Generating Windows Resources (Manifest + Icon)..."
+          & go install github.com/akavel/rsrc@latest
+          $rsrcPath = Join-Path (go env GOPATH) "bin\rsrc.exe"
+          if (Test-Path $rsrcPath) {
+              & $rsrcPath -manifest "cmd\natbypass\natbypass.manifest" -ico "app.ico" -o "cmd\natbypass\rsrc_windows_amd64.syso"
+          }
+
+          Write-Host "==> 2. Building Windows Desktop GUI (NatBypass.exe - Stylish WebView2 Desktop App)..."
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
           & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-cli-$tag-windows-amd64.exe" ./cmd/natbypass
 
-          Write-Host "==> 2. Building Windows Router Builder GUI..."
+          Write-Host "==> 3. Building Windows Router Builder GUI..."
           & go build -trimpath -ldflags="-w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
 
           Write-Host "==> 3. Building Linux x64..."
