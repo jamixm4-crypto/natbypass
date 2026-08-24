@@ -626,6 +626,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
 								_ = puncher.SendHolePunchProbe(p.STUNAddr)
 							}
+							if p.PublicIP != "" {
+								port := p.WGPort
+								if port <= 0 {
+									port = 51820
+								}
+								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
+							}
 							if p.LocalAddr != "" {
 								_ = puncher.SendHolePunchProbe(p.LocalAddr)
 							}

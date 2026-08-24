@@ -67,7 +67,27 @@ class MainActivity : AppCompatActivity() {
 
         setupUI()
         setupAWGSpinner()
+        ensureEngineStarted()
         startStatusPolling()
+    }
+
+    private fun ensureEngineStarted() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val configFile = File(filesDir, "config.yaml")
+                val configYaml = if (configFile.exists()) configFile.readText() else "{}"
+                val mobileBridgeClass = Class.forName("mobile.Mobile")
+                val startMethod = mobileBridgeClass.methods.firstOrNull { it.name.equals("startEngine", ignoreCase = true) }
+                if (startMethod != null && startMethod.parameterTypes.size == 2) {
+                    val pType = startMethod.parameterTypes[1]
+                    if (pType == Long::class.javaPrimitiveType || pType == java.lang.Long::class.java) {
+                        startMethod.invoke(null, configYaml, 0L)
+                    } else {
+                        startMethod.invoke(null, configYaml, 0)
+                    }
+                }
+            } catch (e: Exception) {}
+        }
     }
 
     private fun setupUI() {

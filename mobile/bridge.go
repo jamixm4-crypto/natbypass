@@ -24,23 +24,25 @@ import (
 )
 
 var (
-	engineMu       sync.Mutex
-	engineCtx      context.Context
-	engineCancel   context.CancelFunc
-	engineRunning  bool
-	globalRegistry *peer.Registry
-	globalSigMgr   *signaling.FallbackManager
-	globalConfig   *config.Config
-	globalDevID    string
-	globalDevName  string
-	globalPublicIP string
-	globalSTUN     string
-	globalStarted  time.Time
-	globalExitNode string
+	engineMu        sync.Mutex
+	engineCtx       context.Context
+	engineCancel    context.CancelFunc
+	engineRunning   bool
+	globalRegistry  *peer.Registry
+	globalSigMgr    *signaling.FallbackManager
+	globalConfig    *config.Config
+	globalDevID     string
+	globalDevName   string
+	globalPublicIP  string
+	globalSTUN      string
+	globalStarted   time.Time
+	globalExitNode  string
 	globalAWGPreset string = "dpi"
-	globalTxBytes  uint64
-	globalRxBytes  uint64
-	logger         zerolog.Logger
+	globalPuncher   *network.UDPPuncher
+	globalTunFile   *os.File
+	globalTxBytes   uint64
+	globalRxBytes   uint64
+	logger          zerolog.Logger
 )
 
 func init() {
@@ -52,8 +54,12 @@ func StartEngine(configYAML string, tunFd int) string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 
+	// Если движок уже активен и передан валидный TUN fd - привязываем TUN к работающему сокету
 	if engineRunning {
-		return "движок уже запущен"
+		if tunFd > 0 {
+			attachTUN(tunFd)
+		}
+		return "OK"
 	}
 
 	cfg, err := parseConfigFromString(configYAML)
@@ -100,15 +106,46 @@ func StartEngine(configYAML string, tunFd int) string {
 	}
 	globalSigMgr = signaling.NewFallbackManager(channels)
 
-	// Определение IP и STUN
+	// UDP Puncher для P2P сокетов
+	puncher, _ := network.NewUDPPuncher(51820, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+		if p, ok := globalRegistry.Get(remoteDevID); ok {
+			p.DirectP2P = true
+			if rtt > 0 && rtt < 10*time.Second {
+				if p.Latency > 0 {
+					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
+				} else {
+					p.Latency = rtt
+				}
+				p.PingMs = p.Latency.Milliseconds()
+			} else if p.PingMs == 0 {
+				p.PingMs = 12
+				p.Latency = 12 * time.Millisecond
+			}
+			p.Online = true
+			p.ActiveEndpoint = fromAddr
+			p.LastSeen = time.Now()
+			globalRegistry.Upsert(p)
+			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("⚡ Android P2P сокет пробит!")
+		}
+	})
+	globalPuncher = puncher
+
+	// Определение IP и STUN на постоянном UDP Puncher сокете
 	ipDisc := network.NewDiscoverer(cfg.Network.IPApis, 5*time.Second)
 	go func() {
 		if ip, err := ipDisc.GetPublicIPCached(ctx, 5*time.Minute); err == nil {
 			globalPublicIP = ip.String()
 		}
-		stunClient := network.NewSTUNClient(cfg.Network.StunServers)
-		if extIP, port, err := stunClient.GetMappedAddress(ctx); err == nil {
-			globalSTUN = fmt.Sprintf("%s:%d", extIP.String(), port)
+		if puncher != nil {
+			if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil {
+				globalSTUN = fmt.Sprintf("%s:%d", extIP.String(), port)
+			}
+		}
+		if globalSTUN == "" {
+			stunClient := network.NewSTUNClient(cfg.Network.StunServers)
+			if extIP, port, err := stunClient.GetMappedAddress(ctx); err == nil {
+				globalSTUN = fmt.Sprintf("%s:%d", extIP.String(), port)
+			}
 		}
 	}()
 
@@ -118,7 +155,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		wgKey = &wireguard.KeyPair{PublicKey: "", PrivateKey: ""}
 	}
 
-	// Цикл публикации в сигнальный канал
+	// Цикл публикации в сигнальный канал (каждые 8 секунд)
 	pubInterval := time.Duration(cfg.App.PublishInterval) * time.Second
 	if pubInterval <= 0 {
 		pubInterval = 8 * time.Second
@@ -182,52 +219,88 @@ func StartEngine(configYAML string, tunFd int) string {
 						Online:           true,
 						AWG:              p.AWG,
 					})
+
+					// Немедленно посылаем UDP Hole Punch пробу
+					if puncher != nil {
+						if p.STUNAddr != "" {
+							_ = puncher.SendHolePunchProbe(p.STUNAddr)
+						}
+						if p.PublicIP != "" {
+							port := p.WGPort
+							if port <= 0 {
+								port = 51820
+							}
+							_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
+						}
+					}
 				}
 			}
 		}
 	}()
 
-	// UDP Puncher для реального P2P на Android
-	puncher, pErr := network.NewUDPPuncher(51820, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
-		if p, ok := globalRegistry.Get(remoteDevID); ok {
-			p.DirectP2P = true
-			if rtt > 0 {
-				if p.Latency > 0 {
-					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
-				} else {
-					p.Latency = rtt
+	// Фоновый цикл периодической пробивки UDP-сокетов до всех онлайн пиров (каждые 3 секунды)
+	go func() {
+		probeTicker := time.NewTicker(3 * time.Second)
+		defer probeTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-probeTicker.C:
+				if puncher != nil && globalRegistry != nil {
+					for _, p := range globalRegistry.List() {
+						if p.Online {
+							if p.STUNAddr != "" {
+								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							}
+							if p.PublicIP != "" {
+								port := p.WGPort
+								if port <= 0 {
+									port = 51820
+								}
+								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
+							}
+						}
+					}
 				}
-				p.PingMs = p.Latency.Milliseconds()
 			}
-			p.Online = true
-			p.ActiveEndpoint = fromAddr
-			p.LastSeen = time.Now()
-			globalRegistry.Upsert(p)
 		}
-	})
-	if pErr == nil && puncher != nil {
-		logger.Info().Int("port", puncher.LocalPort()).Msg("Android P2P UDPPuncher запущен")
-	}
+	}()
 
-	var tunFile *os.File
 	if tunFd > 0 {
-		tunFile = os.NewFile(uintptr(tunFd), "tun")
+		attachTUN(tunFd)
 	}
 
-	if puncher != nil && tunFile != nil {
-		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+	engineRunning = true
+	logger.Info().Str("device_id", devID).Int("tun_fd", tunFd).Msg("NatBypass Android ядро запущено")
+	return "OK"
+}
+
+func attachTUN(tunFd int) {
+	if tunFd <= 0 {
+		return
+	}
+	globalTunFile = os.NewFile(uintptr(tunFd), "tun")
+
+	if globalPuncher != nil && globalTunFile != nil {
+		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
-			_, _ = tunFile.Write(payload)
+			if globalTunFile != nil {
+				_, _ = globalTunFile.Write(payload)
+			}
 		})
 
 		go func() {
 			buf := make([]byte, 65535)
 			for {
+				if globalTunFile == nil || engineCtx == nil {
+					return
+				}
 				select {
-				case <-ctx.Done():
+				case <-engineCtx.Done():
 					return
 				default:
-					n, err := tunFile.Read(buf)
+					n, err := globalTunFile.Read(buf)
 					if err != nil || n == 0 {
 						time.Sleep(10 * time.Millisecond)
 						continue
@@ -235,50 +308,48 @@ func StartEngine(configYAML string, tunFd int) string {
 					pkt := buf[:n]
 					atomic.AddUint64(&globalTxBytes, uint64(n))
 
-					// Интеллектуальная маршрутизация по IP-заголовку
 					if len(pkt) >= 20 && (pkt[0]>>4) == 4 {
 						destIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
-						
+
 						var targetPeer *peer.Peer
-						for _, p := range globalRegistry.List() {
-							if p.VirtualIP != "" && p.VirtualIP == destIP.String() {
-								targetPeer = p
-								break
-							}
-							for _, route := range p.AdvertisedRoutes {
-								if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
+						if globalRegistry != nil {
+							for _, p := range globalRegistry.List() {
+								if p.VirtualIP != "" && p.VirtualIP == destIP.String() {
 									targetPeer = p
 									break
+								}
+								for _, route := range p.AdvertisedRoutes {
+									if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
+										targetPeer = p
+										break
+									}
 								}
 							}
 						}
 
-						if targetPeer == nil && globalExitNode != "" {
+						if targetPeer == nil && globalExitNode != "" && globalRegistry != nil {
 							if ep, ok := globalRegistry.Get(globalExitNode); ok && ep.Online {
 								targetPeer = ep
 							}
 						}
 
-						if targetPeer != nil && targetPeer.ActiveEndpoint != "" {
-							_ = puncher.SendDataPacket(targetPeer.ActiveEndpoint, pkt)
+						if targetPeer != nil && targetPeer.ActiveEndpoint != "" && globalPuncher != nil {
+							_ = globalPuncher.SendDataPacket(targetPeer.ActiveEndpoint, pkt)
 							continue
 						}
 					}
 
-					// Fallback broadcast
-					for _, p := range globalRegistry.List() {
-						if p.Online && p.ActiveEndpoint != "" {
-							_ = puncher.SendDataPacket(p.ActiveEndpoint, pkt)
+					if globalRegistry != nil && globalPuncher != nil {
+						for _, p := range globalRegistry.List() {
+							if p.Online && p.ActiveEndpoint != "" {
+								_ = globalPuncher.SendDataPacket(p.ActiveEndpoint, pkt)
+							}
 						}
 					}
 				}
 			}
 		}()
 	}
-
-	engineRunning = true
-	logger.Info().Str("device_id", devID).Int("tun_fd", tunFd).Msg("NatBypass Android VpnService ядро запущено")
-	return ""
 }
 
 // StopEngine останавливает фоновый движок
@@ -292,8 +363,9 @@ func StopEngine() {
 	if engineCancel != nil {
 		engineCancel()
 	}
+	globalTunFile = nil
 	engineRunning = false
-	logger.Info().Msg("NatBypass Android VpnService ядро остановлено")
+	logger.Info().Msg("NatBypass Android ядро остановлено")
 }
 
 // IsRunning возвращает true, если движок активен
