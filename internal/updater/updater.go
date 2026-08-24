@@ -194,11 +194,11 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 
-	// 1. Исключаем нерелевантные файлы (исходники, тулкиты, тестовые сборки)
+	// 1. Исключаем нерелевантные файлы (диагностику, сборщики роутеров, тулкиты, тестовые архивы)
 	var filtered []GitHubAsset
 	for _, a := range assets {
 		nl := strings.ToLower(a.Name)
-		if strings.Contains(nl, "builder") || strings.Contains(nl, "toolkit") || strings.HasPrefix(nl, "test-") || strings.HasSuffix(nl, ".zip") || strings.HasSuffix(nl, ".tar.gz") || strings.HasSuffix(nl, ".example") {
+		if strings.Contains(nl, "diag") || strings.Contains(nl, "builder") || strings.Contains(nl, "toolkit") || strings.HasPrefix(nl, "test-") || strings.HasSuffix(nl, ".zip") || strings.HasSuffix(nl, ".tar.gz") || strings.HasSuffix(nl, ".example") {
 			continue
 		}
 		if osName == "windows" {
@@ -222,12 +222,10 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	var candidates []string
 	if osName == "windows" {
 		candidates = []string{
-			"-windows-amd64.exe",
 			"natbypass-v",
-			"natbypass.exe",
+			"natbypass-",
 			"windows-amd64.exe",
-			"windows.exe",
-			".exe",
+			"natbypass.exe",
 		}
 	} else if osName == "linux" {
 		if arch == "arm64" {
