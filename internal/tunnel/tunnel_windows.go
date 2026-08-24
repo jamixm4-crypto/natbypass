@@ -107,50 +107,7 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 	}
 
 	// 2. Настройка статического IP адреса интерфейса через netsh (совместимо с Win7 - Win11)
-	runNetsh := func(args ...string) error {
-		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-		defer cancel()
-		c := exec.CommandContext(ctx, "netsh", args...)
-		c.SysProcAttr = &syscall.SysProcAttr{
-			HideWindow:    true,
-			CreationFlags: 0x08000000,
-		}
-		return c.Run()
-	}
-
-	// Ожидаем готовности интерфейса в NDIS и устанавливаем статический IP
-	for i := 0; i < 8; i++ {
-		time.Sleep(350 * time.Millisecond)
-		err := runNetsh("interface", "ipv4", "set", "address",
-			fmt.Sprintf("name=%s", adapterName),
-			"source=static",
-			fmt.Sprintf("address=%s", virtualIP),
-			"mask=255.255.255.0",
-		)
-		if err == nil {
-			break
-		}
-	}
-
-	// Разрешаем входящий ICMP ping и пакеты в Брандмауэре Windows
-	_ = runNetsh("advfirewall", "firewall", "add", "rule", "name=NatBypass ICMP", "dir=in", "action=allow", "protocol=icmpv4:8,any", "interface=NatBypass")
-	_ = runNetsh("advfirewall", "firewall", "add", "rule", "name=NatBypass Allow All", "dir=in", "action=allow", "interface=NatBypass")
-	_ = runNetsh("advfirewall", "firewall", "add", "rule",
-		"name=NatBypass-Inbound",
-		"dir=in",
-		"action=allow",
-		fmt.Sprintf("interface=%s", adapterName),
-		"enable=yes",
-	)
-	_ = runNetsh("advfirewall", "firewall", "add", "rule",
-		"name=NatBypass-ICMPv4",
-		"dir=in",
-		"action=allow",
-		"protocol=icmpv4:8,any",
-		"enable=yes",
-	)
-
-	// 3. Запуск сессии Wintun с кольцевым буфером 4 MB
+	// 2. Запуск сессии Wintun с кольцевым буфером 4 MB
 	hSession, _, _ := procWintunStartSession.Call(hAdapter, 0x400000)
 	if hSession == 0 {
 		procWintunCloseAdapter.Call(hAdapter)
@@ -166,6 +123,45 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		hSession:    hSession,
 		hReadEvent:  windows.Handle(hEvent),
 	}
+
+	// 3. Асинхронная настройка IP-адреса и правил брандмауэра в фоне (никогда не блокирует GUI!)
+	go func() {
+		runNetsh := func(args ...string) error {
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
+			c := exec.CommandContext(ctx, "netsh", args...)
+			c.SysProcAttr = &syscall.SysProcAttr{
+				HideWindow:    true,
+				CreationFlags: 0x08000000,
+			}
+			return c.Run()
+		}
+
+		// Ожидаем готовности интерфейса в NDIS и устанавливаем статический IP
+		for i := 0; i < 6; i++ {
+			time.Sleep(200 * time.Millisecond)
+			err := runNetsh("interface", "ipv4", "set", "address",
+				fmt.Sprintf("name=%s", adapterName),
+				"source=static",
+				fmt.Sprintf("address=%s", virtualIP),
+				"mask=255.255.255.0",
+			)
+			if err == nil {
+				break
+			}
+		}
+
+		// Разрешаем входящий ICMP ping и пакеты в Брандмауэре Windows
+		_ = runNetsh("advfirewall", "firewall", "add", "rule", "name=NatBypass ICMP", "dir=in", "action=allow", "protocol=icmpv4:8,any", "interface=NatBypass")
+		_ = runNetsh("advfirewall", "firewall", "add", "rule", "name=NatBypass Allow All", "dir=in", "action=allow", "interface=NatBypass")
+		_ = runNetsh("advfirewall", "firewall", "add", "rule",
+			"name=NatBypass-Inbound",
+			"dir=in",
+			"action=allow",
+			fmt.Sprintf("interface=%s", adapterName),
+			"enable=yes",
+		)
+	}()
 
 	return dev, nil
 }

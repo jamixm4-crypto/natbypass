@@ -104,6 +104,9 @@ func openAppWindow(port int) {
 	// 1. Запуск нативного окна WebView2 напрямую в процессе NatBypass.exe
 	// Это дает 100% фирменную иконку на панели задач и в заголовке окна без значка Edge!
 	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
 		defer func() {
 			if r := recover(); r != nil {
 				openBrowserFallback(url)
