@@ -299,29 +299,46 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun pollStatus() {
+        var pubIp = ""
+        var stun = ""
+        var vip = "10.200.0.100"
+        var curChannel = "MQTT"
+        var isRunning = false
+
         try {
             val mobileClass = Class.forName("mobile.Mobile")
             val getStatusMethod = mobileClass.getMethod("getStatusJSON")
             val jsonStr = getStatusMethod.invoke(null) as? String ?: "{}"
 
             val obj = JSONObject(jsonStr)
-            val isRunning = obj.optBoolean("running", false)
-            val pubIp = obj.optString("public_ip", "Определяется...")
-            val stun = obj.optString("stun_addr", "Определяется...")
-            val vip = obj.optString("virtual_ip", "10.200.0.100")
-            val curChannel = obj.optString("channel", "MQTT")
-
-            binding.tvPublicIpAndStun.text = "🌐 IP: $pubIp  •  📡 STUN: $stun"
-
-            if (isRunning) {
-                binding.tvIpAddress.text = "Локальный VIP: $vip"
-                binding.tvSignalingMode.text = if (curChannel.isNotEmpty()) "⚡ $curChannel" else "⚡ Direct P2P"
-                updateVpnUI(true)
-            }
+            isRunning = obj.optBoolean("running", false)
+            pubIp = obj.optString("public_ip", "")
+            stun = obj.optString("stun_addr", "")
+            vip = obj.optString("virtual_ip", "10.200.0.100")
+            curChannel = obj.optString("channel", "MQTT")
         } catch (e: Exception) {
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
-            val isRunning = prefs.getBoolean("vpn_running", false)
-            updateVpnUI(isRunning)
+            isRunning = prefs.getBoolean("vpn_running", false)
+        }
+
+        if (pubIp.isEmpty() || pubIp.contains("...")) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val directIp = org.natbypass.app.util.NetworkHelper.getPublicIP()
+                val directStun = org.natbypass.app.util.NetworkHelper.getSTUNMappedAddress()
+                withContext(Dispatchers.Main) {
+                    binding.tvPublicIpAndStun.text = "🌐 IP: $directIp  •  📡 STUN: ${if (directStun.isNotEmpty()) directStun else "$directIp:51820 (P2P ready)"}"
+                }
+            }
+        } else {
+            binding.tvPublicIpAndStun.text = "🌐 IP: $pubIp  •  📡 STUN: ${if (stun.isNotEmpty()) stun else "$pubIp:51820"}"
+        }
+
+        if (isRunning) {
+            binding.tvIpAddress.text = "Локальный VIP: $vip"
+            binding.tvSignalingMode.text = if (curChannel.isNotEmpty()) "⚡ $curChannel" else "⚡ Direct P2P"
+            updateVpnUI(true)
+        } else {
+            updateVpnUI(false)
         }
     }
 

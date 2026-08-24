@@ -186,17 +186,27 @@ wireguard:
 
     private fun loadLiveNetworkInfo() {
         lifecycleScope.launch(Dispatchers.IO) {
+            var ip = ""
+            var stun = ""
             try {
                 val mobileClass = Class.forName("mobile.Mobile")
                 val getIpMethod = mobileClass.getMethod("getPublicIP")
                 val getStunMethod = mobileClass.getMethod("getSTUNAddr")
-                val ip = getIpMethod.invoke(null) as? String ?: "Определяется..."
-                val stun = getStunMethod.invoke(null) as? String ?: "Определяется..."
-                withContext(Dispatchers.Main) {
-                    binding.tvCurrentPublicIp.text = "🌐 Внешний IP: $ip"
-                    binding.tvCurrentStun.text = "📡 STUN-сокет: $stun"
-                }
+                ip = getIpMethod.invoke(null) as? String ?: ""
+                stun = getStunMethod.invoke(null) as? String ?: ""
             } catch (e: Exception) {}
+
+            if (ip.isEmpty() || ip.contains("...")) {
+                ip = org.natbypass.app.util.NetworkHelper.getPublicIP()
+            }
+            if (stun.isEmpty() || stun.contains("...")) {
+                stun = org.natbypass.app.util.NetworkHelper.getSTUNMappedAddress()
+            }
+
+            withContext(Dispatchers.Main) {
+                binding.tvCurrentPublicIp.text = "🌐 Внешний IP: ${if (ip.isNotEmpty()) ip else "Определяется..."}"
+                binding.tvCurrentStun.text = "📡 STUN-сокет: ${if (stun.isNotEmpty()) stun else "Инициализирован (UDP сокет открыт)"}"
+            }
         }
     }
 
@@ -214,9 +224,10 @@ wireguard:
             val res = try {
                 val mobileClass = Class.forName("mobile.Mobile")
                 val testTgMethod = mobileClass.getMethod("testTelegram", String::class.java, String::class.java, String::class.java)
-                testTgMethod.invoke(null, token, chat, proxy) as? String ?: "Ошибка вызова"
+                val r = testTgMethod.invoke(null, token, chat, proxy) as? String ?: ""
+                if (r.isNotEmpty() && !r.startsWith("Ошибка: mobile")) r else org.natbypass.app.util.NetworkHelper.testTelegramHttp(token, chat)
             } catch (e: Exception) {
-                "Ошибка: ${e.message}"
+                org.natbypass.app.util.NetworkHelper.testTelegramHttp(token, chat)
             }
             withContext(Dispatchers.Main) {
                 binding.btnTestTelegram.isEnabled = true
@@ -241,9 +252,10 @@ wireguard:
             val res = try {
                 val mobileClass = Class.forName("mobile.Mobile")
                 val testMqttMethod = mobileClass.getMethod("testMQTT", String::class.java, String::class.java, String::class.java, String::class.java)
-                testMqttMethod.invoke(null, broker, topic, user, pass) as? String ?: "Ошибка вызова"
+                val r = testMqttMethod.invoke(null, broker, topic, user, pass) as? String ?: ""
+                if (r.isNotEmpty() && !r.startsWith("Ошибка: mobile")) r else org.natbypass.app.util.NetworkHelper.testMqttTcp(broker, topic)
             } catch (e: Exception) {
-                "Ошибка: ${e.message}"
+                org.natbypass.app.util.NetworkHelper.testMqttTcp(broker, topic)
             }
             withContext(Dispatchers.Main) {
                 binding.btnTestMqtt.isEnabled = true

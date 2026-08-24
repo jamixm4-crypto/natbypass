@@ -75,9 +75,11 @@ jobs:
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
+          export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$NDK_PATH}"
+          export NDK_HOME="${ANDROID_NDK_HOME}"
           gomobile init
           mkdir -p android/app/libs
-          gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi=24 -o android/app/libs/mobile.aar ./mobile || true
+          gomobile bind -v -target=android/arm64,android/arm -androidapi=24 -javapkg=mobile -o android/app/libs/mobile.aar github.com/natbypass/natbypass/mobile || true
           ls -lh android/app/libs/ || true
 
       - name: Build Android APK
