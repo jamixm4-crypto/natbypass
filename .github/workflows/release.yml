@@ -96,19 +96,6 @@ jobs:
           python -c "import shutil; shutil.make_archive('release/NatBypass-Builder-Toolkit-$tag-windows', 'zip', 'toolkit')"
           Remove-Item -Recurse -Force toolkit
 
-          Write-Host "==> 10. Compiling Inno Setup Windows Installer..."
-          $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (Test-Path $isccPath) {
-              & $isccPath "/DAppVer=$tag" installer.iss
-          } else {
-              $found = Get-ChildItem -Path "C:\Program Files*" -Filter "ISCC.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($found) {
-                  & $found.FullName "/DAppVer=$tag" installer.iss
-              } else {
-                  Write-Host "ISCC not found, skipping installer compilation."
-              }
-          }
-
           Write-Host "==> All Files in release/:"
           Get-ChildItem -Path release -File | Select-Object Name, Length | Format-Table -AutoSize
 
@@ -131,6 +118,10 @@ jobs:
               Write-Host "==> Creating clean release $tag..."
               gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --target main
           }
+
+          # Удаляем устаревший Setup.exe если он присутствовал в релизе
+          gh release delete-asset $tag "NatBypass-$tag-Setup.exe" -y 2>$null
+          gh release delete-asset $tag "NatBypass-Setup-$tag.exe" -y 2>$null
 
           $files = Get-ChildItem -Path release -File
           foreach ($f in $files) {
