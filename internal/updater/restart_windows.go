@@ -11,13 +11,11 @@ import (
 	"time"
 )
 
-// restartService перезапускает сервис на Windows с поддержкой путей со скобками (1), пробелами и спецсимволами
+// restartService перезапускает сервис на Windows с правами Администратора (UAC RunAs)
 func restartService(execPath string) {
-	// Используем PowerShell Start-Process с задержкой 1.5 сек в полностью отвязанной группе процессов.
-	// Это гарантирует, что текущий процесс успеет освободить порт 8080 и мьютекс,
-	// а пути вида "NatBypass (1).exe" гарантированно корректно запустятся без синтаксических ошибок cmd.exe!
 	escapedPath := strings.ReplaceAll(execPath, "'", "''")
-	psScript := fmt.Sprintf(`Start-Sleep -Milliseconds 1500; Start-Process -FilePath '%s' -ArgumentList 'gui'`, escapedPath)
+	// Задержка 1.5 сек для полного освобождения портов и мьютексов, затем чистый запуск от Администратора
+	psScript := fmt.Sprintf(`Start-Sleep -Milliseconds 1500; Start-Process -FilePath '%s' -Verb RunAs`, escapedPath)
 
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
