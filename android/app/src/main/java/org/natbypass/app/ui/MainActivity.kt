@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui
+package org.natbypass.app.ui
 
 import android.app.Activity
 import android.app.Dialog
@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.VpnService
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
@@ -235,7 +236,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startVpnService() {
         val intent = Intent(this, NatBypassVpnService::class.java).apply {
-            action = NatBypassVpnService.ACTION_START
+            action = NatBypassVpnService.ACTION_CONNECT
         }
         ContextCompat.startForegroundService(this, intent)
         updateVpnUI(true)
@@ -243,7 +244,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopVpnService() {
         val intent = Intent(this, NatBypassVpnService::class.java).apply {
-            action = NatBypassVpnService.ACTION_STOP
+            action = NatBypassVpnService.ACTION_DISCONNECT
         }
         startService(intent)
         updateVpnUI(false)
