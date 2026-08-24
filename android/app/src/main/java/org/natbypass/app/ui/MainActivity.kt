@@ -486,6 +486,8 @@ class MainActivity : AppCompatActivity() {
                                 .show()
                         } else if (manual) {
                             Toast.makeText(this@MainActivity, "✓ У вас установлена последняя версия v$currentVer!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            // no-op
                         }
                     }
                 } else if (manual) {
