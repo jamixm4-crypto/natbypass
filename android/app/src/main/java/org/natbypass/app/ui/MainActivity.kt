@@ -23,19 +23,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.natbypass.app.R
 import org.natbypass.app.databinding.ActivityMainBinding
 import org.natbypass.app.service.NatBypassVpnService
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
@@ -72,6 +79,10 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnVpnToggle.setOnClickListener {
             toggleVpn()
+        }
+
+        binding.btnCheckUpdate.setOnClickListener {
+            checkForUpdates(manual = true)
         }
 
         binding.btnClearCache.setOnClickListener {
@@ -295,13 +306,16 @@ class MainActivity : AppCompatActivity() {
 
             val obj = JSONObject(jsonStr)
             val isRunning = obj.optBoolean("running", false)
-            val pubIp = obj.optString("public_ip", "—")
+            val pubIp = obj.optString("public_ip", "Определяется...")
+            val stun = obj.optString("stun_addr", "Определяется...")
             val vip = obj.optString("virtual_ip", "10.200.0.100")
-            val curChannel = obj.optString("current_channel", "mqtt")
+            val curChannel = obj.optString("channel", "MQTT")
+
+            binding.tvPublicIpAndStun.text = "🌐 IP: $pubIp  •  📡 STUN: $stun"
 
             if (isRunning) {
-                binding.tvIpAddress.text = "$vip • $pubIp"
-                binding.tvSignalingMode.text = if (curChannel.isNotEmpty()) "⚡ $curChannel" else "⚡ P2P Direct"
+                binding.tvIpAddress.text = "Локальный VIP: $vip"
+                binding.tvSignalingMode.text = if (curChannel.isNotEmpty()) "⚡ $curChannel" else "⚡ Direct P2P"
                 updateVpnUI(true)
             }
         } catch (e: Exception) {
@@ -420,5 +434,130 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun getItemCount() = items.size
+    }
+
+    private fun checkForUpdates(manual: Boolean) {
+        val currentVer = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2.4"
+        } catch (e: Exception) {
+            "1.2.4"
+        }
+
+        if (manual) {
+            Toast.makeText(this, "🔍 Проверяем обновления на GitHub...", Toast.LENGTH_SHORT).show()
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val url = URL("https://api.github.com/repos/jamixm4-crypto/natbypass/releases/latest")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 8000
+                conn.readTimeout = 8000
+                conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
+
+                if (conn.responseCode == 200) {
+                    val response = conn.inputStream.bufferedReader().use { it.readText() }
+                    val releaseObj = JSONObject(response)
+                    val tagName = releaseObj.optString("tag_name", "").removePrefix("v")
+                    val releaseBody = releaseObj.optString("body", "Улучшена стабильность и производительность.")
+                    
+                    var apkDownloadUrl = ""
+                    val assets = releaseObj.optJSONArray("assets")
+                    if (assets != null) {
+                        for (i in 0 until assets.length()) {
+                            val asset = assets.getJSONObject(i)
+                            val name = asset.optString("name", "")
+                            if (name.endsWith(".apk", ignoreCase = true)) {
+                                apkDownloadUrl = asset.optString("browser_download_url", "")
+                                break
+                            }
+                        }
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        if (isNewerVersion(currentVer, tagName) && apkDownloadUrl.isNotEmpty()) {
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle("🎉 Доступно обновление: v$tagName")
+                                .setMessage("Текущая версия: v$currentVer\nНовая версия: v$tagName\n\n$releaseBody")
+                                .setPositiveButton("⬇️ Скачать и обновить") { _, _ ->
+                                    downloadAndInstallApk(apkDownloadUrl)
+                                }
+                                .setNegativeButton("Позже", null)
+                                .show()
+                        } else if (manual) {
+                            Toast.makeText(this@MainActivity, "✓ У вас установлена последняя версия v$currentVer!", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } else if (manual) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "⚠️ Не удалось связаться с сервером обновлений (Код ${conn.responseCode})", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                if (manual) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "Ошибка проверки: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun isNewerVersion(current: String, latest: String): Boolean {
+        try {
+            val curParts = current.split(".").map { it.toIntOrNull() ?: 0 }
+            val latParts = latest.split(".").map { it.toIntOrNull() ?: 0 }
+            for (i in 0 until maxOf(curParts.size, latParts.size)) {
+                val c = curParts.getOrElse(i) { 0 }
+                val l = latParts.getOrElse(i) { 0 }
+                if (l > c) return true
+                if (l < c) return false
+            }
+        } catch (e: Exception) {}
+        return false
+    }
+
+    private fun downloadAndInstallApk(apkUrl: String) {
+        Toast.makeText(this, "⏳ Загрузка APK обновления...", Toast.LENGTH_LONG).show()
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val url = URL(apkUrl)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 15000
+                conn.readTimeout = 30000
+                conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
+
+                val apkFile = File(cacheDir, "NatBypass-update.apk")
+                if (apkFile.exists()) apkFile.delete()
+
+                conn.inputStream.use { input ->
+                    FileOutputStream(apkFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    try {
+                        val apkUri = FileProvider.getUriForFile(
+                            this@MainActivity,
+                            "${packageName}.provider",
+                            apkFile
+                        )
+                        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(apkUri, "application/vnd.android.package-archive")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        }
+                        startActivity(installIntent)
+                    } catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, "Ошибка запуска установщика: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Ошибка скачивания: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 }

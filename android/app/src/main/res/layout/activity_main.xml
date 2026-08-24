@@ -25,6 +25,15 @@
             android:textStyle="bold" />
 
         <ImageButton
+            android:id="@+id/btnCheckUpdate"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Проверить обновления"
+            app:srcCompat="@drawable/ic_refresh"
+            app:tint="@color/green_bright" />
+
+        <ImageButton
             android:id="@+id/btnClearCache"
             android:layout_width="38dp"
             android:layout_height="38dp"
@@ -198,6 +207,15 @@
             android:text="Нажмите для подключения"
             android:textColor="@color/text_muted"
             android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvPublicIpAndStun"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="🌐 Внешний IP: Определяется..."
+            android:textColor="@color/accent_blue"
+            android:textSize="11sp" />
     </LinearLayout>
 
     <!-- AWG Mode Selector Card -->

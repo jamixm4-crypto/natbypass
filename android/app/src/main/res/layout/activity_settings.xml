@@ -36,6 +36,24 @@
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
+            <TextView
+                android:id="@+id/tvCurrentPublicIp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="🌐 Внешний IP: Определяется..."
+                android:textColor="@color/accent_blue"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/tvCurrentStun"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="📡 STUN-сокет: Определяется..."
+                android:textColor="@color/accent_purple"
+                android:textSize="13sp" />
+
             <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -140,6 +158,16 @@
                     android:inputType="text"
                     android:textColor="@color/text_primary" />
             </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTestTelegram"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginTop="10dp"
+                android:backgroundTint="@color/accent_purple"
+                android:text="🧪 Проверить связь с Telegram"
+                android:textColor="@color/white"
+                android:textSize="13sp" />
         </LinearLayout>
 
         <!-- 3. MQTT Card -->
@@ -237,6 +265,16 @@
                         android:textColor="@color/text_primary" />
                 </com.google.android.material.textfield.TextInputLayout>
             </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTestMqtt"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginTop="10dp"
+                android:backgroundTint="@color/accent_blue"
+                android:text="🧪 Проверить связь с MQTT брокером"
+                android:textColor="@color/white"
+                android:textSize="13sp" />
         </LinearLayout>
 
         <!-- 4. Network & WireGuard Card -->

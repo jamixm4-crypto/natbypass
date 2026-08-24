@@ -303,6 +303,66 @@ func IsRunning() bool {
 	return engineRunning
 }
 
+// TestTelegram проверяет подключение к Telegram Bot API
+func TestTelegram(token, chatID, proxyURL string) string {
+	if token == "" || chatID == "" {
+		return "Ошибка: укажите токен и Chat ID бота"
+	}
+	ch := signaling.NewTelegramChannel(token, chatID, proxyURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+
+	p := &signaling.Payload{
+		DeviceID:  "test-probe",
+		PublicKey: "00000000000000000000000000000000",
+		Timestamp: time.Now(),
+	}
+	if err := ch.Send(ctx, p); err != nil {
+		return fmt.Sprintf("Ошибка связи с Telegram: %v", err)
+	}
+	return "✓ Бот успешно ответил! Тестовое сообщение отправлено."
+}
+
+// TestMQTT проверяет подключение к MQTT брокеру
+func TestMQTT(broker, topic, user, pass string) string {
+	if broker == "" || topic == "" {
+		return "Ошибка: укажите URL брокера и топик"
+	}
+	ch := signaling.NewMQTTChannel(broker, topic, "test-probe", user, pass)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+
+	p := &signaling.Payload{
+		DeviceID:  "test-probe",
+		PublicKey: "00000000000000000000000000000000",
+		Timestamp: time.Now(),
+	}
+	if err := ch.Send(ctx, p); err != nil {
+		return fmt.Sprintf("Ошибка связи с MQTT: %v", err)
+	}
+	return fmt.Sprintf("✓ Успешное подключение к брокеру %s (топик: %s)!", broker, topic)
+}
+
+// GetPublicIP возвращает текущий публичный IP
+func GetPublicIP() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalPublicIP != "" {
+		return globalPublicIP
+	}
+	return "Определяется..."
+}
+
+// GetSTUNAddr возвращает текущий STUN-адрес
+func GetSTUNAddr() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalSTUN != "" {
+		return globalSTUN
+	}
+	return "Определяется..."
+}
+
 // SetDeviceName устанавливает имя устройства
 func SetDeviceName(name string) {
 	engineMu.Lock()

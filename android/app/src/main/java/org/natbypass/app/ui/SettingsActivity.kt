@@ -4,6 +4,10 @@ import android.content.Context
 import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.natbypass.app.databinding.ActivitySettingsBinding
 import java.io.File
 
@@ -20,6 +24,14 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.btnSaveSettings.setOnClickListener {
             saveSettings()
+        }
+
+        binding.btnTestTelegram.setOnClickListener {
+            testTelegram()
+        }
+
+        binding.btnTestMqtt.setOnClickListener {
+            testMQTT()
         }
     }
 
@@ -80,6 +92,8 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.swAllowExitNode.isChecked = prefs.getBoolean("allow_exit_node", false)
         binding.etAdvSubnets.setText(prefs.getString("adv_subnets", ""))
+
+        loadLiveNetworkInfo()
     }
 
     private fun saveSettings() {
@@ -168,5 +182,74 @@ wireguard:
 
         Toast.makeText(this, "✓ Настройки сохранены и синхронизированы!", Toast.LENGTH_SHORT).show()
         finish()
+    }
+
+    private fun loadLiveNetworkInfo() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val mobileClass = Class.forName("mobile.Mobile")
+                val getIpMethod = mobileClass.getMethod("getPublicIP")
+                val getStunMethod = mobileClass.getMethod("getSTUNAddr")
+                val ip = getIpMethod.invoke(null) as? String ?: "Определяется..."
+                val stun = getStunMethod.invoke(null) as? String ?: "Определяется..."
+                withContext(Dispatchers.Main) {
+                    binding.tvCurrentPublicIp.text = "🌐 Внешний IP: $ip"
+                    binding.tvCurrentStun.text = "📡 STUN-сокет: $stun"
+                }
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun testTelegram() {
+        val token = binding.etTgToken.text.toString().trim()
+        val chat = binding.etTgChat.text.toString().trim()
+        val proxy = binding.etTgProxy.text.toString().trim()
+        if (token.isEmpty() || chat.isEmpty()) {
+            Toast.makeText(this, "⚠️ Введите Bot Token и Chat ID", Toast.LENGTH_SHORT).show()
+            return
+        }
+        binding.btnTestTelegram.isEnabled = false
+        binding.btnTestTelegram.text = "⏳ Проверяем связь..."
+        lifecycleScope.launch(Dispatchers.IO) {
+            val res = try {
+                val mobileClass = Class.forName("mobile.Mobile")
+                val testTgMethod = mobileClass.getMethod("testTelegram", String::class.java, String::class.java, String::class.java)
+                testTgMethod.invoke(null, token, chat, proxy) as? String ?: "Ошибка вызова"
+            } catch (e: Exception) {
+                "Ошибка: ${e.message}"
+            }
+            withContext(Dispatchers.Main) {
+                binding.btnTestTelegram.isEnabled = true
+                binding.btnTestTelegram.text = "🧪 Проверить связь с Telegram"
+                Toast.makeText(this@SettingsActivity, res, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun testMQTT() {
+        val broker = binding.etMqttBroker.text.toString().trim()
+        val topic = binding.etMqttTopic.text.toString().trim()
+        val user = binding.etMqttUser.text.toString().trim()
+        val pass = binding.etMqttPass.text.toString().trim()
+        if (broker.isEmpty() || topic.isEmpty()) {
+            Toast.makeText(this, "⚠️ Введите Broker URL и топик", Toast.LENGTH_SHORT).show()
+            return
+        }
+        binding.btnTestMqtt.isEnabled = false
+        binding.btnTestMqtt.text = "⏳ Проверяем связь..."
+        lifecycleScope.launch(Dispatchers.IO) {
+            val res = try {
+                val mobileClass = Class.forName("mobile.Mobile")
+                val testMqttMethod = mobileClass.getMethod("testMQTT", String::class.java, String::class.java, String::class.java, String::class.java)
+                testMqttMethod.invoke(null, broker, topic, user, pass) as? String ?: "Ошибка вызова"
+            } catch (e: Exception) {
+                "Ошибка: ${e.message}"
+            }
+            withContext(Dispatchers.Main) {
+                binding.btnTestMqtt.isEnabled = true
+                binding.btnTestMqtt.text = "🧪 Проверить связь с MQTT брокером"
+                Toast.makeText(this@SettingsActivity, res, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 }
