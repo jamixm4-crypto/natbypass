@@ -51,10 +51,10 @@ jobs:
           Write-Host "==> 1. Building Windows Standalone Desktop App (NatBypass.exe)..."
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
-          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
+          & go build -trimpath -ldflags="-w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
-          & go build -trimpath -ldflags="-s -w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
+          & go build -trimpath -ldflags="-w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
 
           Write-Host "==> 3. Building Linux x64..."
           $env:GOOS = "linux"
@@ -94,6 +94,19 @@ jobs:
           
           python -c "import shutil; shutil.make_archive('release/NatBypass-Builder-Toolkit-$tag-windows', 'zip', 'toolkit')"
           Remove-Item -Recurse -Force toolkit
+
+          Write-Host "==> 10. Compiling Inno Setup Windows Installer..."
+          $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $isccPath) {
+              & $isccPath "/DAppVer=$tag" installer.iss
+          } else {
+              $found = Get-ChildItem -Path "C:\Program Files*" -Filter "ISCC.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($found) {
+                  & $found.FullName "/DAppVer=$tag" installer.iss
+              } else {
+                  Write-Host "ISCC not found, skipping installer compilation."
+              }
+          }
 
           Write-Host "==> All Files in release/:"
           Get-ChildItem -Path release -File | Select-Object Name, Length | Format-Table -AutoSize
