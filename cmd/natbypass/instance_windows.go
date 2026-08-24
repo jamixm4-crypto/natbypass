@@ -113,16 +113,36 @@ func openAppWindow(port int) {
 			}
 		}()
 
-		// Небольшая задержка 150мс для гарантии готовности HTTP порта
-		time.Sleep(150 * time.Millisecond)
+		// Включаем Per-Monitor DPI Awareness для четкого отображения на 1080p/2K/4K и ноутбуках с масштабированием 125%-175%
+		procSetProcessDpiAwarenessContext := moduser32Instance.NewProc("SetProcessDpiAwarenessContext")
+		if procSetProcessDpiAwarenessContext.Find() == nil {
+			_, _, _ = procSetProcessDpiAwarenessContext.Call(^uintptr(3)) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+		} else {
+			procSetProcessDPIAware := moduser32Instance.NewProc("SetProcessDPIAware")
+			if procSetProcessDPIAware.Find() == nil {
+				_, _, _ = procSetProcessDPIAware.Call()
+			}
+		}
+
+		screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0 /* SM_CXSCREEN */)
+		screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1 /* SM_CYSCREEN */)
+
+		winWidth := 1180
+		winHeight := 750
+		if screenWidth > 0 && int(screenWidth) < winWidth+60 {
+			winWidth = int(screenWidth) - 60
+		}
+		if screenHeight > 0 && int(screenHeight) < winHeight+60 {
+			winHeight = int(screenHeight) - 60
+		}
 
 		w := webview2.NewWithOptions(webview2.WebViewOptions{
 			Debug:     false,
 			AutoFocus: true,
 			WindowOptions: webview2.WindowOptions{
 				Title:  "NatBypass — P2P Mesh Network",
-				Width:  1020,
-				Height: 630,
+				Width:  uint(winWidth),
+				Height: uint(winHeight),
 				Center: true,
 			},
 		})
@@ -164,9 +184,23 @@ func openAppWindow(port int) {
 				});
 			`)
 
-			// 4. Задаем компактный минимальный размер окна и начальный размер под любые ноутбуки
-			w.SetSize(840, 520, webview2.HintMin)
-			w.SetSize(1020, 630, webview2.HintNone)
+			// 4. Задаем комфортные размеры и позиционирование окна
+			w.SetSize(880, 560, webview2.HintMin)
+			w.SetSize(winWidth, winHeight, webview2.HintNone)
+
+			if screenWidth > 0 && screenHeight > 0 {
+				x := (int(screenWidth) - winWidth) / 2
+				y := (int(screenHeight) - winHeight) / 2
+				if x < 0 {
+					x = 10
+				}
+				if y < 0 {
+					y = 10
+				}
+				procSetWindowPos := moduser32Instance.NewProc("SetWindowPos")
+				_, _, _ = procSetWindowPos.Call(hwnd, 0, uintptr(x), uintptr(y), uintptr(winWidth), uintptr(winHeight), 0x0040 /* SWP_SHOWWINDOW */)
+			}
+
 			w.Navigate(url)
 			w.Run()
 			return
