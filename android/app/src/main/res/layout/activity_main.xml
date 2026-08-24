@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -6,7 +6,7 @@
     android:background="@color/bg_dark"
     android:padding="16dp">
 
-    <!-- Header Toolbar -->
+    <!-- Top Navigation Toolbar -->
     <LinearLayout
         android:id="@+id/headerLayout"
         android:layout_width="match_parent"
@@ -20,14 +20,32 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="🛸 NatBypass"
-            android:textColor="@color/accent_blue"
-            android:textSize="22sp"
+            android:textColor="@color/accent_purple"
+            android:textSize="20sp"
             android:textStyle="bold" />
 
         <ImageButton
+            android:id="@+id/btnClearCache"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Очистить кэш"
+            app:srcCompat="@drawable/ic_refresh"
+            app:tint="@color/red_bright" />
+
+        <ImageButton
+            android:id="@+id/btnShareQR"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Поделиться QR"
+            app:srcCompat="@drawable/ic_share"
+            app:tint="@color/accent_blue" />
+
+        <ImageButton
             android:id="@+id/btnScanQR"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/title_qr_scanner"
             app:srcCompat="@drawable/ic_qr_code"
@@ -35,8 +53,8 @@
 
         <ImageButton
             android:id="@+id/btnDiagnostics"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/title_diagnostics"
             app:srcCompat="@drawable/ic_diagnostics"
@@ -44,39 +62,119 @@
 
         <ImageButton
             android:id="@+id/btnSettings"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/title_settings"
             app:srcCompat="@drawable/ic_settings"
             app:tint="@color/text_muted" />
     </LinearLayout>
 
-    <!-- Status Card -->
+    <!-- Telemetry Metrics Grid -->
+    <LinearLayout
+        android:id="@+id/metricsLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal"
+        app:layout_constraintTop_toBottomOf="@id/headerLayout">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="10dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Узлов в сети"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/tvPeersCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 онлайн"
+                android:textColor="@color/green_bright"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="10dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RTT Пинг"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/tvAvgPing"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 ms"
+                android:textColor="@color/accent_blue"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="10dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Канал связи"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp" />
+            <TextView
+                android:id="@+id/tvSignalingMode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚡ P2P Direct"
+                android:textColor="@color/accent_purple"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Main VPN Toggle Card -->
     <LinearLayout
         android:id="@+id/statusCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
+        android:layout_marginTop="12dp"
         android:background="@drawable/bg_card"
         android:gravity="center"
         android:orientation="vertical"
-        android:padding="24dp"
-        app:layout_constraintTop_toBottomOf="@id/headerLayout">
+        android:padding="18dp"
+        app:layout_constraintTop_toBottomOf="@id/metricsLayout">
 
-        <!-- Big Toggle Button -->
         <FrameLayout
             android:id="@+id/btnVpnToggle"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
+            android:layout_width="100dp"
+            android:layout_height="100dp"
             android:background="@drawable/bg_vpn_button"
             android:clickable="true"
             android:focusable="true">
 
             <ImageView
                 android:id="@+id/ivVpnIcon"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
                 android:layout_gravity="center"
                 android:src="@drawable/ic_vpn_lock"
                 app:tint="@color/white" />
@@ -86,10 +184,10 @@
             android:id="@+id/tvStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="12dp"
             android:text="@string/vpn_status_disconnected"
             android:textColor="@color/red_bright"
-            android:textSize="18sp"
+            android:textSize="16sp"
             android:textStyle="bold" />
 
         <TextView
@@ -99,7 +197,7 @@
             android:layout_marginTop="4dp"
             android:text="Нажмите для подключения"
             android:textColor="@color/text_muted"
-            android:textSize="13sp" />
+            android:textSize="12sp" />
     </LinearLayout>
 
     <!-- AWG Mode Selector Card -->
@@ -107,10 +205,10 @@
         android:id="@+id/awgCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
+        android:layout_marginTop="10dp"
         android:background="@drawable/bg_card"
         android:orientation="horizontal"
-        android:padding="12dp"
+        android:padding="10dp"
         app:layout_constraintTop_toBottomOf="@id/statusCard">
 
         <TextView
@@ -132,10 +230,10 @@
         android:id="@+id/tvPeersHeader"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="18dp"
-        android:text="@string/title_peers"
+        android:layout_marginTop="14dp"
+        android:text="👥 Устройства в вашей P2P Mesh сети"
         android:textColor="@color/accent_blue"
-        android:textSize="15sp"
+        android:textSize="14sp"
         android:textStyle="bold"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/awgCard" />

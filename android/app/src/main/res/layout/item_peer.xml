@@ -1,11 +1,14 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="8dp"
     android:background="@drawable/bg_card"
     android:orientation="horizontal"
-    android:padding="12dp">
+    android:padding="12dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground">
 
     <TextView
         android:id="@+id/tvPeerStatus"
@@ -22,22 +25,46 @@
         android:layout_weight="1"
         android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/tvPeerName"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="ПК-Дома"
-            android:textColor="@color/text_primary"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvPeerName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ПК-Дома"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvExitNodeBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/bg_badge"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:text="🌐 Exit Node"
+                android:textColor="@color/accent_purple"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tvPeerIp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
             android:text="10.200.0.2 • 198.51.100.4:51820"
             android:textColor="@color/text_muted"
-            android:textSize="12sp" />
+            android:textSize="11sp" />
     </LinearLayout>
 
     <TextView
@@ -45,8 +72,13 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center_vertical"
-        android:text="24 ms"
-        android:textColor="@color/accent_blue"
-        android:textSize="13sp"
+        android:background="@drawable/bg_badge"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:text="14 ms"
+        android:textColor="@color/green_bright"
+        android:textSize="12sp"
         android:textStyle="bold" />
 </LinearLayout>

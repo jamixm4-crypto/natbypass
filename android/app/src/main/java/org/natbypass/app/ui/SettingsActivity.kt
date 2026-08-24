@@ -160,6 +160,12 @@ wireguard:
         val configFile = File(filesDir, "config.yaml")
         configFile.writeText(configContent)
 
+        try {
+            val mobileClass = Class.forName("mobile.Mobile")
+            val clearMethod = mobileClass.getMethod("clearPeers")
+            clearMethod.invoke(null)
+        } catch (e: Exception) {}
+
         Toast.makeText(this, "✓ Настройки сохранены и синхронизированы!", Toast.LENGTH_SHORT).show()
         finish()
     }

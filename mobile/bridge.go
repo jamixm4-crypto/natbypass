@@ -352,6 +352,26 @@ func ParseQRInvite(qrText string) string {
 	return string(data)
 }
 
+// ClearPeers очищает кэш всех узлов в оперативной памяти
+func ClearPeers() {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalRegistry != nil {
+		globalRegistry.ClearAll()
+	}
+}
+
+// GenerateInviteQRText возвращает форматированную строку для генерации QR-кода приглашения
+func GenerateInviteQRText() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	ip := globalPublicIP
+	if ip == "" {
+		ip = "127.0.0.1"
+	}
+	return fmt.Sprintf("NatBypass|%s|%s|https://github.com/jamixm4-crypto/natbypass/releases/latest", globalDevID, ip)
+}
+
 // GenerateKeysJSON генерирует пару ключей NaCl и WireGuard
 func GenerateKeysJSON() string {
 	pub, priv, _ := crypto.GenerateKeyPair()

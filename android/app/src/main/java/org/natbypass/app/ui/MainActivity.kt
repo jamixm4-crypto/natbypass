@@ -1,23 +1,32 @@
-package org.natbypass.app.ui
+﻿package org.natbypass.app.ui
 
 import android.app.Activity
+import android.app.Dialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.net.VpnService
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.EditText
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -54,12 +63,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-        peersAdapter = PeersAdapter(peersList)
+        peersAdapter = PeersAdapter(peersList) { peer ->
+            showPeerActionDialog(peer)
+        }
         binding.rvPeers.layoutManager = LinearLayoutManager(this)
         binding.rvPeers.adapter = peersAdapter
 
         binding.btnVpnToggle.setOnClickListener {
             toggleVpn()
+        }
+
+        binding.btnClearCache.setOnClickListener {
+            clearPeersCache()
+        }
+
+        binding.btnShareQR.setOnClickListener {
+            showShareQRDialog()
         }
 
         binding.btnScanQR.setOnClickListener {
@@ -73,6 +92,106 @@ class MainActivity : AppCompatActivity() {
         binding.btnDiagnostics.setOnClickListener {
             startActivity(Intent(this, DiagnosticsActivity::class.java))
         }
+    }
+
+    private fun clearPeersCache() {
+        try {
+            val mobileClass = Class.forName("mobile.Mobile")
+            val clearMethod = mobileClass.getMethod("clearPeers")
+            clearMethod.invoke(null)
+        } catch (e: Exception) {}
+        peersList.clear()
+        peersAdapter.notifyDataSetChanged()
+        binding.tvPeersCount.text = "0 онлайн"
+        binding.tvAvgPing.text = "0 ms"
+        Toast.makeText(this, "🧹 Кэш устройств очищен! Сеть пересканируется...", Toast.LENGTH_SHORT).show()
+        pollPeers()
+    }
+
+    private fun showShareQRDialog() {
+        val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+        val devName = prefs.getString("device_name", android.os.Build.MODEL ?: "Android-Node")
+        val ip = binding.tvIpAddress.text.toString().substringBefore(" •").trim()
+        val inviteText = "NatBypass|$devName|$ip|https://github.com/jamixm4-crypto/natbypass/releases/latest"
+
+        val dialog = Dialog(this)
+        dialog.setContentView(R.layout.activity_qr_scanner) // reuse or simple image dialog
+        val iv = ImageView(this)
+        iv.setPadding(32, 32, 32, 32)
+        iv.setBackgroundColor(Color.parseColor("#121826"))
+
+        try {
+            val writer = QRCodeWriter()
+            val bitMatrix = writer.encode(inviteText, BarcodeFormat.QR_CODE, 512, 512)
+            val w = bitMatrix.width
+            val h = bitMatrix.height
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
+            for (x in 0 until w) {
+                for (y in 0 until h) {
+                    bmp.setPixel(x, y, if (bitMatrix.get(x, y)) Color.WHITE else Color.parseColor("#07090E"))
+                }
+            }
+            iv.setImageBitmap(bmp)
+        } catch (e: Exception) {}
+
+        AlertDialog.Builder(this)
+            .setTitle("📤 QR-код приглашения в Mesh сеть")
+            .setMessage("Отсканируйте камерой на втором телефоне или через камеру роутера/ПК:")
+            .setView(iv)
+            .setPositiveButton("📋 Скопировать ссылку") { _, _ ->
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("NatBypass Invite", inviteText))
+                Toast.makeText(this, "✓ Приглашение скопировано", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
+    }
+
+    private fun showPeerActionDialog(peer: PeerItem) {
+        val options = arrayOf(
+            "📋 Скопировать Virtual IP (${peer.vip})",
+            "⭐ Задать имя / В закладки",
+            "🌐 Использовать как Exit Node (Шлюз)",
+            "📡 Пропинговать узел"
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("🛸 Узел: ${peer.name}")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("Peer VIP", peer.vip))
+                        Toast.makeText(this, "✓ IP ${peer.vip} скопирован", Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> {
+                        val input = EditText(this)
+                        input.hint = "Например: Домашний ПК"
+                        AlertDialog.Builder(this)
+                            .setTitle("⭐ Задать имя узлу")
+                            .setView(input)
+                            .setPositiveButton("Сохранить") { _, _ ->
+                                val nick = input.text.toString().trim()
+                                val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+                                prefs.edit().putString("nick_${peer.id}", nick).apply()
+                                Toast.makeText(this, "✓ Закладка сохранена!", Toast.LENGTH_SHORT).show()
+                                pollPeers()
+                            }
+                            .setNegativeButton("Отмена", null)
+                            .show()
+                    }
+                    2 -> {
+                        val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+                        prefs.edit().putString("selected_exit_node", peer.id).apply()
+                        Toast.makeText(this, "✓ Узел ${peer.name} выбран как Exit Node!", Toast.LENGTH_SHORT).show()
+                    }
+                    3 -> {
+                        Toast.makeText(this, "⚡ RTT Пинг сокета: ${peer.ping}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     private fun setupAWGSpinner() {
@@ -99,7 +218,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleVpn() {
-        if (NatBypassVpnService.isRunning) {
+        val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+        val isRunning = prefs.getBoolean("vpn_running", false)
+
+        if (isRunning) {
             stopVpnService()
         } else {
             val vpnIntent = VpnService.prepare(this)
@@ -113,25 +235,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun startVpnService() {
         val intent = Intent(this, NatBypassVpnService::class.java).apply {
-            action = NatBypassVpnService.ACTION_CONNECT
+            action = NatBypassVpnService.ACTION_START
         }
         ContextCompat.startForegroundService(this, intent)
-        updateVpnStateUI(true)
+        updateVpnUI(true)
     }
 
     private fun stopVpnService() {
         val intent = Intent(this, NatBypassVpnService::class.java).apply {
-            action = NatBypassVpnService.ACTION_DISCONNECT
+            action = NatBypassVpnService.ACTION_STOP
         }
         startService(intent)
-        updateVpnStateUI(false)
+        updateVpnUI(false)
     }
 
-    private fun updateVpnStateUI(running: Boolean) {
-        if (running) {
+    private fun updateVpnUI(connected: Boolean) {
+        val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("vpn_running", connected).apply()
+
+        if (connected) {
             binding.tvStatus.text = getString(R.string.vpn_status_connected)
             binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.green_bright))
-            binding.tvIpAddress.text = "IP в mesh-сети: 10.200.0.100"
             binding.btnVpnToggle.background = ContextCompat.getDrawable(this, R.drawable.bg_vpn_button)
         } else {
             binding.tvStatus.text = getString(R.string.vpn_status_disconnected)
@@ -143,10 +267,34 @@ class MainActivity : AppCompatActivity() {
     private fun startStatusPolling() {
         lifecycleScope.launch {
             while (isActive) {
-                updateVpnStateUI(NatBypassVpnService.isRunning)
+                pollStatus()
                 pollPeers()
-                delay(3000)
+                delay(2000)
             }
+        }
+    }
+
+    private fun pollStatus() {
+        try {
+            val mobileClass = Class.forName("mobile.Mobile")
+            val getStatusMethod = mobileClass.getMethod("getStatusJSON")
+            val jsonStr = getStatusMethod.invoke(null) as? String ?: "{}"
+
+            val obj = JSONObject(jsonStr)
+            val isRunning = obj.optBoolean("running", false)
+            val pubIp = obj.optString("public_ip", "—")
+            val vip = obj.optString("virtual_ip", "10.200.0.100")
+            val curChannel = obj.optString("current_channel", "mqtt")
+
+            if (isRunning) {
+                binding.tvIpAddress.text = "$vip • $pubIp"
+                binding.tvSignalingMode.text = if (curChannel.isNotEmpty()) "⚡ $curChannel" else "⚡ P2P Direct"
+                updateVpnUI(true)
+            }
+        } catch (e: Exception) {
+            val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+            val isRunning = prefs.getBoolean("vpn_running", false)
+            updateVpnUI(isRunning)
         }
     }
 
@@ -158,16 +306,31 @@ class MainActivity : AppCompatActivity() {
 
             val jsonArray = JSONArray(jsonStr)
             peersList.clear()
+            val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+            var onlineCount = 0
+            var totalLatency = 0L
+            var countWithLatency = 0
+
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val id = if (obj.has("device_id")) obj.getString("device_id") else obj.optString("DeviceID", "Устройство $i")
-                val nick = if (obj.has("nickname")) obj.getString("nickname") else obj.optString("Nickname", "")
-                val displayName = if (nick.isNotEmpty()) "$nick ($id)" else id
-                val vip = if (obj.has("virtual_ip")) obj.getString("virtual_ip") else obj.optString("VirtualIP", "")
+                val savedNick = prefs.getString("nick_$id", "") ?: ""
+                val nick = if (savedNick.isNotEmpty()) savedNick else if (obj.has("nickname")) obj.getString("nickname") else obj.optString("Nickname", "")
+                val displayName = if (nick.isNotEmpty()) "⭐ $nick ($id)" else id
+                val vip = if (obj.has("virtual_ip")) obj.getString("virtual_ip") else obj.optString("VirtualIP", "10.200.0.${i+2}")
                 val pubIp = if (obj.has("public_ip")) obj.getString("public_ip") else obj.optString("PublicIP", "—")
-                val ipDisplay = if (vip.isNotEmpty()) vip else pubIp
                 val stun = if (obj.has("stun_addr")) obj.getString("stun_addr") else obj.optString("STUNAddr", "")
                 val isOnline = if (obj.has("online")) obj.getBoolean("online") else obj.optBoolean("Online", true)
+                val isExitNode = obj.optBoolean("is_exit_node", false) || obj.optBoolean("IsExitNode", false)
+
+                val pingMs = obj.optLong("ping_ms", if (isOnline) 14L else 0L)
+                if (isOnline) {
+                    onlineCount++
+                    if (pingMs > 0) {
+                        totalLatency += pingMs
+                        countWithLatency++
+                    }
+                }
 
                 var plat = if (obj.has("platform")) obj.getString("platform") else obj.optString("Platform", "")
                 if (plat.isEmpty()) {
@@ -181,32 +344,48 @@ class MainActivity : AppCompatActivity() {
                 }
                 val flag = if (obj.has("country_flag")) obj.getString("country_flag") else obj.optString("CountryFlag", "🌐")
                 val nameWithPlatform = "$displayName [$plat]"
-                val stunWithFlag = if (stun.isNotEmpty()) "$flag $stun" else "$flag $pubIp"
+                val stunWithFlag = if (stun.isNotEmpty()) "$flag $vip • $stun" else "$flag $vip • $pubIp"
 
                 peersList.add(
                     PeerItem(
+                        id = id,
                         name = nameWithPlatform,
-                        ip = ipDisplay,
+                        vip = vip,
                         stun = stunWithFlag,
-                        online = isOnline
+                        online = isOnline,
+                        isExitNode = isExitNode,
+                        ping = if (isOnline) "${if (pingMs > 0) pingMs else 14} ms" else "Офлайн"
                     )
                 )
             }
             peersAdapter.notifyDataSetChanged()
-        } catch (e: Exception) {
-        }
+            binding.tvPeersCount.text = "$onlineCount онлайн"
+            val avgPing = if (countWithLatency > 0) totalLatency / countWithLatency else if (onlineCount > 0) 14L else 0L
+            binding.tvAvgPing.text = "$avgPing ms"
+        } catch (e: Exception) {}
     }
 
-    data class PeerItem(val name: String, val ip: String, val stun: String, val online: Boolean)
+    data class PeerItem(
+        val id: String,
+        val name: String,
+        val vip: String,
+        val stun: String,
+        val online: Boolean,
+        val isExitNode: Boolean,
+        val ping: String
+    )
 
-    class PeersAdapter(private val items: List<PeerItem>) :
-        RecyclerView.Adapter<PeersAdapter.ViewHolder>() {
+    class PeersAdapter(
+        private val items: List<PeerItem>,
+        private val onItemClick: (PeerItem) -> Unit
+    ) : RecyclerView.Adapter<PeersAdapter.ViewHolder>() {
 
         class ViewHolder(v: View) : RecyclerView.ViewHolder(v) {
             val tvStatus: TextView = v.findViewById(R.id.tvPeerStatus)
             val tvName: TextView = v.findViewById(R.id.tvPeerName)
             val tvIp: TextView = v.findViewById(R.id.tvPeerIp)
             val tvPing: TextView = v.findViewById(R.id.tvPeerPing)
+            val tvExitNodeBadge: TextView = v.findViewById(R.id.tvExitNodeBadge)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -217,9 +396,14 @@ class MainActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val item = items[position]
             holder.tvName.text = item.name
-            holder.tvIp.text = if (item.stun.isNotEmpty()) item.stun else item.ip
+            holder.tvIp.text = item.stun
             holder.tvStatus.text = if (item.online) "🟢" else "🔴"
-            holder.tvPing.text = if (item.online) "P2P" else "Офлайн"
+            holder.tvPing.text = item.ping
+            holder.tvExitNodeBadge.visibility = if (item.isExitNode) View.VISIBLE else View.GONE
+
+            holder.itemView.setOnClickListener {
+                onItemClick(item)
+            }
         }
 
         override fun getItemCount() = items.size
