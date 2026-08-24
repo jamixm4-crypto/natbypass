@@ -1,20 +1,14 @@
-﻿package diagnostic
+package diagnostic
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"runtime"
-	"syscall"
 	"time"
 
-	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/pion/stun/v2"
-	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
 )
 
 type DiagnosticItem struct {
@@ -26,14 +20,14 @@ type DiagnosticItem struct {
 }
 
 type DiagnosticReport struct {
-	Timestamp  time.Time        `json:"timestamp"`
-	OS         string           `json:"os"`
-	Arch       string           `json:"arch"`
-	Hostname   string           `json:"hostname"`
-	IsAdmin    bool             `json:"is_admin"`
-	Items      []DiagnosticItem `json:"items"`
-	AllPassed  bool             `json:"all_passed"`
-	Summary    string           `json:"summary"`
+	Timestamp time.Time        `json:"timestamp"`
+	OS        string           `json:"os"`
+	Arch      string           `json:"arch"`
+	Hostname  string           `json:"hostname"`
+	IsAdmin   bool             `json:"is_admin"`
+	Items     []DiagnosticItem `json:"items"`
+	AllPassed bool             `json:"all_passed"`
+	Summary   string           `json:"summary"`
 }
 
 // RunFullDiagnostics выполняет глубокую аппаратную и системную диагностику
@@ -49,7 +43,7 @@ func RunFullDiagnostics() *DiagnosticReport {
 		report.Hostname = hn
 	}
 
-	// 1. Проверка прав Администратора (UAC Elevation)
+	// 1. Проверка прав Администратора (UAC Elevation / Root)
 	report.IsAdmin = CheckIsAdmin()
 	report.Items = append(report.Items, CheckAdminPrivileges(report.IsAdmin))
 
@@ -83,92 +77,22 @@ func RunFullDiagnostics() *DiagnosticReport {
 	return report
 }
 
-func CheckIsAdmin() bool {
-	if runtime.GOOS != "windows" {
-		return os.Geteuid() == 0
-	}
-	var token windows.Token
-	h := windows.CurrentProcess()
-	err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &token)
-	if err != nil {
-		return false
-	}
-	defer token.Close()
-	return token.IsElevated()
-}
-
 func CheckAdminPrivileges(isAdmin bool) DiagnosticItem {
 	start := time.Now()
 	if isAdmin {
 		return DiagnosticItem{
-			Name:    "Права Администратора (UAC)",
+			Name:    "Права Администратора (UAC / Root)",
 			Passed:  true,
 			Elapsed: time.Since(start),
-			Message: "✓ Процесс запущен с повышенными привилегиями Администратора (Elevated)",
+			Message: "✓ Процесс запущен с повышенными привилегиями Администратора (Elevated / Root)",
 		}
 	}
 	return DiagnosticItem{
-		Name:    "Права Администратора (UAC)",
+		Name:    "Права Администратора (UAC / Root)",
 		Passed:  false,
 		Elapsed: time.Since(start),
-		Message: "❌ Нет прав Администратора. Создание Wintun адаптера и настройка маршрутов будут заблокированы Windows!",
-		Details: "Запустите NatBypass от имени Администратора (ПКМ -> Запуск от имени администратора).",
-	}
-}
-
-func CheckWintunDriver() DiagnosticItem {
-	start := time.Now()
-	if runtime.GOOS != "windows" {
-		return DiagnosticItem{Name: "Wintun Driver", Passed: true, Elapsed: time.Since(start), Message: "Пропущено (не Windows)"}
-	}
-
-	testAdapterName := fmt.Sprintf("NatBypassDiag_%d", time.Now().Unix()%10000)
-	dev, err := tunnel.CreateAdapter(testAdapterName, "10.200.250.1")
-	if err != nil {
-		return DiagnosticItem{
-			Name:    "Драйвер Wintun / NDIS Адаптер",
-			Passed:  false,
-			Elapsed: time.Since(start),
-			Message: fmt.Sprintf("❌ Ошибка инициализации Wintun: %v", err),
-			Details: "Возможные причины: антивирус блокирует установку драйвера, поврежден wintun.dll или завис предыдущий сетевой адаптер в диспетчере устройств.",
-		}
-	}
-	_ = dev.Close()
-
-	return DiagnosticItem{
-		Name:    "Драйвер Wintun / NDIS Адаптер",
-		Passed:  true,
-		Elapsed: time.Since(start),
-		Message: "✓ Драйвер Wintun успешно загружен, тестовый виртуальный сетевой адаптер создан и закрыт без ошибок",
-	}
-}
-
-func CheckNetshAndFirewall() DiagnosticItem {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "netsh", "interface", "ipv4", "show", "subinterfaces")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-	out, err := cmd.Output()
-	elapsed := time.Since(start)
-
-	if err != nil || ctx.Err() != nil {
-		return DiagnosticItem{
-			Name:    "Быстродействие Netsh / Маршрутизация",
-			Passed:  false,
-			Elapsed: elapsed,
-			Message: "❌ Утилита netsh зависает или заблокирована политиками безопасности Windows",
-			Details: fmt.Sprintf("Ошибка: %v. Проверьте службы Windows Network Location Awareness (NLA) и DHCP Client.", err),
-		}
-	}
-
-	return DiagnosticItem{
-		Name:    "Быстродействие Netsh / Маршрутизация",
-		Passed:  true,
-		Elapsed: elapsed,
-		Message: fmt.Sprintf("✓ Netsh отвечает быстро (%d ms), стек сетевой маршрутизации Windows исправен", elapsed.Milliseconds()),
-		Details: string(out[:min(len(out), 200)]),
+		Message: "❌ Нет прав Администратора. Создание виртуального адаптера и настройка маршрутов могут быть заблокированы ОС!",
+		Details: "Запустите NatBypass от имени Администратора (sudo на Linux / Run as Administrator на Windows).",
 	}
 }
 
@@ -290,50 +214,6 @@ func CheckSignalingConnectivity() DiagnosticItem {
 	}
 }
 
-func CheckWebView2Runtime() DiagnosticItem {
-	start := time.Now()
-	if runtime.GOOS != "windows" {
-		return DiagnosticItem{Name: "WebView2 Runtime", Passed: true, Elapsed: time.Since(start), Message: "Пропущено (не Windows)"}
-	}
-
-	// Проверяем наличие в реестре
-	regPaths := []string{
-		`SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`,
-		`SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`,
-	}
-
-	var version string
-	for _, p := range regPaths {
-		k, err := registry.OpenKey(registry.LOCAL_MACHINE, p, registry.QUERY_VALUE)
-		if err == nil {
-			v, _, err := k.GetStringValue("pv")
-			k.Close()
-			if err == nil && v != "" && v != "0.0.0.0" {
-				version = v
-				break
-			}
-		}
-	}
-
-	elapsed := time.Since(start)
-	if version != "" {
-		return DiagnosticItem{
-			Name:    "Microsoft Edge WebView2 Runtime",
-			Passed:  true,
-			Elapsed: elapsed,
-			Message: fmt.Sprintf("✓ WebView2 Runtime установлен (версия %s)", version),
-		}
-	}
-
-	return DiagnosticItem{
-		Name:    "Microsoft Edge WebView2 Runtime",
-		Passed:  true, // Не критично, откроется браузер
-		Elapsed: elapsed,
-		Message: "⚠️ WebView2 Runtime не найден. Графический интерфейс автоматически откроется в системном браузере (Fallback).",
-		Details: "Для встроенного окна установите 'Microsoft Edge WebView2 Evergreen Runtime' с сайта Microsoft.",
-	}
-}
-
 func CheckNetworkInterfaces() DiagnosticItem {
 	start := time.Now()
 	ifaces, err := net.Interfaces()
@@ -353,7 +233,7 @@ func CheckNetworkInterfaces() DiagnosticItem {
 	}
 
 	return DiagnosticItem{
-		Name:    "Сетевые адаптеры системы (NDIS)",
+		Name:    "Сетевые адаптеры системы (NDIS / Netlink)",
 		Passed:  true,
 		Elapsed: elapsed,
 		Message: fmt.Sprintf("✓ Найдено сетевых адаптеров: %d (активных: %d)", len(ifaces), upCount),
