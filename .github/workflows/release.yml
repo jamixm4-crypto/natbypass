@@ -53,6 +53,7 @@ jobs:
           $env:GOARCH = "amd64"
           & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
           & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-cli-$tag-windows-amd64.exe" ./cmd/natbypass
+          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-diag-$tag-windows-amd64.exe" ./cmd/natbypass-diag
 
           Write-Host "==> 2. Building Windows Router Builder GUI..."
           & go build -trimpath -ldflags="-w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
