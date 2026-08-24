@@ -333,8 +333,8 @@ class MainActivity : AppCompatActivity() {
 
         try {
             val mobileClass = Class.forName("mobile.Mobile")
-            val getStatusMethod = mobileClass.getMethod("getStatusJSON")
-            val jsonStr = getStatusMethod.invoke(null) as? String ?: "{}"
+            val getStatusMethod = mobileClass.methods.firstOrNull { it.name.equals("getStatusJSON", ignoreCase = true) }
+            val jsonStr = (getStatusMethod?.invoke(null) as? String) ?: "{}"
 
             val obj = JSONObject(jsonStr)
             isRunning = obj.optBoolean("running", false)
@@ -371,8 +371,8 @@ class MainActivity : AppCompatActivity() {
     private fun pollPeers() {
         try {
             val mobileClass = Class.forName("mobile.Mobile")
-            val getPeersMethod = mobileClass.getMethod("getPeersJSON")
-            val jsonStr = getPeersMethod.invoke(null) as? String ?: "[]"
+            val getPeersMethod = mobileClass.methods.firstOrNull { it.name.equals("getPeersJSON", ignoreCase = true) }
+            val jsonStr = (getPeersMethod?.invoke(null) as? String) ?: "[]"
 
             val jsonArray = JSONArray(jsonStr)
             peersList.clear()

@@ -102,8 +102,8 @@ class QRScannerActivity : AppCompatActivity() {
                     val devId = json.optString("device_id", "")
                     val tgToken = json.optString("tg_token", "")
                     val tgChat = json.optString("tg_chat", "")
-                    val mqttBroker = json.optString("mqtt_broker", "")
-                    val mqttTopic = json.optString("mqtt_topic", "")
+                    val mqttBroker = json.optString("mqtt_broker", "tcp://broker.emqx.io:1883")
+                    val mqttTopic = json.optString("mqtt_topic", "natbypass/mynet/peers")
                     
                     val editor = prefs.edit()
                     if (devId.isNotEmpty()) editor.putString("last_paired_peer", devId)
@@ -112,6 +112,40 @@ class QRScannerActivity : AppCompatActivity() {
                     if (mqttBroker.isNotEmpty()) editor.putString("mqtt_broker", mqttBroker)
                     if (mqttTopic.isNotEmpty()) editor.putString("mqtt_topic", mqttTopic)
                     editor.apply()
+
+                    val configContent = """
+app:
+  name: "Android-Device"
+  log_level: "info"
+  publish_interval: 8
+signaling:
+  channels:
+    - type: "telegram"
+      priority: 1
+      enabled: ${tgToken.isNotEmpty() && tgChat.isNotEmpty()}
+      params:
+        token: "$tgToken"
+        chat_id: "$tgChat"
+    - type: "mqtt"
+      priority: 2
+      enabled: ${mqttBroker.isNotEmpty()}
+      params:
+        broker_url: "$mqttBroker"
+        topic: "$mqttTopic"
+wireguard:
+  enabled: true
+  listen_port: 51820
+  mtu: 1420
+""".trimIndent()
+
+                    val configFile = File(filesDir, "config.yaml")
+                    configFile.writeText(configContent)
+
+                    try {
+                        val mobileClass = Class.forName("mobile.Mobile")
+                        val restartMethod = mobileClass.methods.firstOrNull { it.name.equals("restartEngine", ignoreCase = true) }
+                        restartMethod?.invoke(null, configContent)
+                    } catch (e: Exception) {}
                     
                     Toast.makeText(this, "✓ Конфигурация сети импортирована из QR!", Toast.LENGTH_LONG).show()
                     finish()

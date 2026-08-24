@@ -121,20 +121,21 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	}
 
 	nowNano := time.Now().UnixNano()
-	probeData := fmt.Sprintf("NATBYPASS:PING:%s:%d", p.myDevID, nowNano)
+	probeData := []byte(fmt.Sprintf("NATBYPASS:PING:%s:%d", p.myDevID, nowNano))
 
-	// 1. Отправка на точный STUN порт
-	_, err = p.conn.WriteToUDP([]byte(probeData), rAddr)
+	// 1. Отправка серии пакетов на точный сокет для открытия Stateful NAT
+	_, err = p.conn.WriteToUDP(probeData, rAddr)
+	_, _ = p.conn.WriteToUDP(probeData, rAddr)
 
-	// 2. Multi-Port Symmetric NAT Port Prediction (±5 портов вокруг STUN адреса)
+	// 2. Multi-Port Symmetric NAT Port Prediction (±8 портов вокруг STUN адреса)
 	basePort := rAddr.Port
 	ip := rAddr.IP
-	for delta := 1; delta <= 5; delta++ {
+	for delta := 1; delta <= 8; delta++ {
 		if basePort+delta <= 65535 {
-			_, _ = p.conn.WriteToUDP([]byte(probeData), &net.UDPAddr{IP: ip, Port: basePort + delta})
+			_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort + delta})
 		}
 		if basePort-delta > 1024 {
-			_, _ = p.conn.WriteToUDP([]byte(probeData), &net.UDPAddr{IP: ip, Port: basePort - delta})
+			_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort - delta})
 		}
 	}
 

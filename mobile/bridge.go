@@ -213,8 +213,10 @@ func StartEngine(configYAML string, tunFd int) string {
 				if p != nil && p.DeviceID != devID {
 					globalRegistry.Upsert(&peer.Peer{
 						DeviceID:         p.DeviceID,
+						Nickname:         p.Nickname,
 						PublicKey:        p.PublicKey,
 						PublicIP:         p.PublicIP,
+						LocalAddr:        p.LocalAddr,
 						STUNAddr:         p.STUNAddr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
@@ -226,10 +228,13 @@ func StartEngine(configYAML string, tunFd int) string {
 						AWG:              p.AWG,
 					})
 
-					// Немедленно посылаем UDP Hole Punch пробу
+					// Немедленно посылаем UDP Hole Punch пробу по всем 3 векторам
 					if puncher != nil {
 						if p.STUNAddr != "" {
 							_ = puncher.SendHolePunchProbe(p.STUNAddr)
+						}
+						if p.LocalAddr != "" {
+							_ = puncher.SendHolePunchProbe(p.LocalAddr)
 						}
 						if p.PublicIP != "" {
 							port := p.WGPort
@@ -256,8 +261,14 @@ func StartEngine(configYAML string, tunFd int) string {
 				if puncher != nil && globalRegistry != nil {
 					for _, p := range globalRegistry.List() {
 						if p.Online {
-							if p.STUNAddr != "" {
+							if p.ActiveEndpoint != "" {
+								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+							}
+							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
 								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							}
+							if p.LocalAddr != "" {
+								_ = puncher.SendHolePunchProbe(p.LocalAddr)
 							}
 							if p.PublicIP != "" {
 								port := p.WGPort
@@ -372,6 +383,13 @@ func StopEngine() {
 	globalTunFile = nil
 	engineRunning = false
 	logger.Info().Msg("NatBypass Android ядро остановлено")
+}
+
+// RestartEngine перезапускает движок с новым конфигом
+func RestartEngine(configYAML string) string {
+	StopEngine()
+	time.Sleep(200 * time.Millisecond)
+	return StartEngine(configYAML, 0)
 }
 
 // IsRunning возвращает true, если движок активен

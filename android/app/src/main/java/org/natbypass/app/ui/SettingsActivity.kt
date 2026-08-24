@@ -176,8 +176,10 @@ wireguard:
 
         try {
             val mobileClass = Class.forName("mobile.Mobile")
-            val clearMethod = mobileClass.getMethod("clearPeers")
-            clearMethod.invoke(null)
+            val restartMethod = mobileClass.methods.firstOrNull { it.name.equals("restartEngine", ignoreCase = true) }
+            restartMethod?.invoke(null, configContent)
+            val clearMethod = mobileClass.methods.firstOrNull { it.name.equals("clearPeers", ignoreCase = true) }
+            clearMethod?.invoke(null)
         } catch (e: Exception) {}
 
         Toast.makeText(this, "✓ Настройки сохранены и синхронизированы!", Toast.LENGTH_SHORT).show()
