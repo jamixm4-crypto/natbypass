@@ -3592,6 +3592,9 @@ func updateData() {
 					}
 
 					var extraTags []string
+					if p.AWG != nil || p.DirectP2P {
+						extraTags = append(extraTags, "[🛡️ AWG 2.0]")
+					}
 					if p.IsExitNode {
 						extraTags = append(extraTags, "[🌐 Шлюз]")
 					}

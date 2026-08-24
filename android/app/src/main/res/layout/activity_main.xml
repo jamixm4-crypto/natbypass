@@ -320,6 +320,30 @@
             android:text="🌐 Внешний IP: Определяется..."
             android:textColor="@color/accent_blue"
             android:textSize="11sp" />
+
+        <!-- AWG 2.0 Encrypted Tunnel Badge Indicator -->
+        <LinearLayout
+            android:id="@+id/awgTunnelBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_badge"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp">
+
+            <TextView
+                android:id="@+id/tvAwgTunnelStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🛡️ AWG 2.0: Ожидание подключения..."
+                android:textColor="@color/text_muted"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- 5. AWG Mode Selector Card -->

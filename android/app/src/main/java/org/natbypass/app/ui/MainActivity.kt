@@ -301,10 +301,16 @@ class MainActivity : AppCompatActivity() {
             binding.tvStatus.text = getString(R.string.vpn_status_connected)
             binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.green_bright))
             binding.btnVpnToggle.background = ContextCompat.getDrawable(this, R.drawable.bg_vpn_button)
+            binding.tvAwgTunnelStatus.text = "🛡️ AWG 2.0: ТУННЕЛЬ ПОДНЯТ • ШИФРОВАНИЕ АКТИВНО (Обход DPI)"
+            binding.tvAwgTunnelStatus.setTextColor(ContextCompat.getColor(this, R.color.green_bright))
+            binding.awgTunnelBadge.setBackgroundResource(R.drawable.bg_pill)
         } else {
             binding.tvStatus.text = getString(R.string.vpn_status_disconnected)
             binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.red_bright))
             binding.tvIpAddress.text = "Нажмите для подключения"
+            binding.tvAwgTunnelStatus.text = "🛡️ AWG 2.0: Ожидание подключения"
+            binding.tvAwgTunnelStatus.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
+            binding.awgTunnelBadge.setBackgroundResource(R.drawable.bg_badge)
         }
     }
 
