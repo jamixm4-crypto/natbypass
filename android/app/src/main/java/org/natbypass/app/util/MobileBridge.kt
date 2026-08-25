@@ -144,4 +144,72 @@ object MobileBridge {
             ""
         }
     }
+
+    fun getProfilesJSON(): String {
+        val method = getMethod("getProfilesJSON") ?: return "{}"
+        return try {
+            method.invoke(null) as? String ?: "{}"
+        } catch (e: Exception) {
+            "{}"
+        }
+    }
+
+    fun createProfile(name: String, broker: String, topic: String, user: String, pass: String, tgToken: String, tgChat: Long, tgProxy: String, awgPreset: String, autoSwitch: Boolean): String {
+        val method = getMethod("createProfile") ?: return ""
+        return try {
+            method.invoke(null, name, broker, topic, user, pass, tgToken, tgChat, tgProxy, awgPreset, autoSwitch) as? String ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun switchProfile(profileId: String): Boolean {
+        val method = getMethod("switchProfile") ?: return false
+        return try {
+            method.invoke(null, profileId) as? Boolean ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun deleteProfile(profileId: String): Boolean {
+        val method = getMethod("deleteProfile") ?: return false
+        return try {
+            method.invoke(null, profileId) as? Boolean ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun exportProfileURI(profileId: String): String {
+        val method = getMethod("exportProfileURI") ?: return ""
+        return try {
+            method.invoke(null, profileId) as? String ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun importProfileURI(rawUri: String): String {
+        val method = getMethod("importProfileURI") ?: return ""
+        return try {
+            method.invoke(null, rawUri) as? String ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun pingPeer(deviceId: String): Long {
+        val method = getMethod("pingPeer") ?: return -1L
+        return try {
+            val res = method.invoke(null, deviceId)
+            when (res) {
+                is Long -> res
+                is Int -> res.toLong()
+                else -> -1L
+            }
+        } catch (e: Exception) {
+            -1L
+        }
+    }
 }

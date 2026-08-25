@@ -115,13 +115,15 @@ type DaemonConfig struct {
 
 // Config — корневая структура конфигурации
 type Config struct {
-	App       AppConfig       `mapstructure:"app" yaml:"app"`
-	WebUI     WebUIConfig     `mapstructure:"web_ui" yaml:"web_ui"`
-	Network   NetworkConfig   `mapstructure:"network" yaml:"network"`
-	Signaling SignalingConfig `mapstructure:"signaling" yaml:"signaling"`
-	WireGuard WireGuardConfig `mapstructure:"wireguard" yaml:"wireguard"`
-	Crypto    CryptoConfig    `mapstructure:"crypto" yaml:"crypto"`
-	Daemon    DaemonConfig    `mapstructure:"daemon" yaml:"daemon"`
+	App             AppConfig       `mapstructure:"app" yaml:"app"`
+	WebUI           WebUIConfig     `mapstructure:"web_ui" yaml:"web_ui"`
+	Network         NetworkConfig   `mapstructure:"network" yaml:"network"`
+	Signaling       SignalingConfig `mapstructure:"signaling" yaml:"signaling"`
+	WireGuard       WireGuardConfig `mapstructure:"wireguard" yaml:"wireguard"`
+	Crypto          CryptoConfig    `mapstructure:"crypto" yaml:"crypto"`
+	Daemon          DaemonConfig    `mapstructure:"daemon" yaml:"daemon"`
+	Profiles        []Profile       `mapstructure:"profiles" yaml:"profiles,omitempty"`
+	ActiveProfileID string          `mapstructure:"active_profile_id" yaml:"active_profile_id,omitempty"`
 }
 
 // setDefaults устанавливает значения по умолчанию

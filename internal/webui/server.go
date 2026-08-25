@@ -69,10 +69,16 @@ type Server struct {
 	sigMgr     *signaling.FallbackManager
 	state      *AppState
 	srv        *http.Server
-	events     []EventEntry
-	eventsMu   sync.Mutex
-	setupDone  bool
-	deviceName string
+	events          []EventEntry
+	eventsMu        sync.Mutex
+	setupDone       bool
+	deviceName      string
+	onProfileSwitch func(p *config.Profile) error
+}
+
+// SetOnProfileSwitch устанавливает колбэк для переключения профиля
+func (s *Server) SetOnProfileSwitch(cb func(p *config.Profile) error) {
+	s.onProfileSwitch = cb
 }
 
 // NewServer создаёт новый экземпляр Web UI сервера
@@ -199,6 +205,13 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/update/check", s.handleUpdateCheck)
 	mux.HandleFunc("/api/update/apply", s.handleUpdateApply)
 	mux.HandleFunc("/api/update/status", s.handleUpdateStatus)
+	// Профили сети (Multi-Profile Mesh Networks)
+	mux.HandleFunc("/api/profiles", s.handleProfilesList)
+	mux.HandleFunc("/api/profiles/create", s.handleProfileCreate)
+	mux.HandleFunc("/api/profiles/switch", s.handleProfileSwitch)
+	mux.HandleFunc("/api/profiles/delete", s.handleProfileDelete)
+	mux.HandleFunc("/api/profiles/export", s.handleProfileExport)
+	mux.HandleFunc("/api/profiles/import", s.handleProfileImport)
 
 	handler := s.corsMiddleware(s.authMiddleware(mux))
 
@@ -1651,4 +1664,261 @@ func (s *Server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	st := updater.GetStatus()
 	s.jsonResponse(w, http.StatusOK, st, "")
+}
+
+// handleProfilesList — GET /api/profiles — список всех профилей сети и активный профиль
+func (s *Server) handleProfilesList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	cfg, err := config.Load(s.configPath)
+	if err != nil || cfg == nil {
+		cfg = &config.Config{}
+	}
+	active := cfg.EnsureActiveProfile()
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"profiles":       cfg.Profiles,
+		"active_id":      cfg.ActiveProfileID,
+		"active_profile": active,
+	}, "")
+}
+
+// handleProfileCreate — POST /api/profiles/create — создание нового профиля сети
+func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		Name       string `json:"name"`
+		MQTTBroker string `json:"mqtt_broker"`
+		MQTTTopic  string `json:"mqtt_topic"`
+		MQTTUser   string `json:"mqtt_user"`
+		MQTTPass   string `json:"mqtt_pass"`
+		TGToken    string `json:"tg_token"`
+		TGChatID   int64  `json:"tg_chat_id"`
+		TGProxy    string `json:"tg_proxy"`
+		AWGPreset  string `json:"awg_preset"`
+		AutoSwitch bool   `json:"auto_switch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
+		return
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	if req.Name == "" {
+		req.Name = fmt.Sprintf("Сеть #%d", len(cfg.Profiles)+1)
+	}
+	if req.MQTTTopic == "" {
+		req.MQTTTopic = "natbypass/mesh/" + config.GenerateRandomHex(8)
+	}
+	if req.MQTTBroker == "" {
+		req.MQTTBroker = "tcp://broker.emqx.io:1883"
+	}
+	if req.AWGPreset == "" {
+		req.AWGPreset = "dpi"
+	}
+
+	newProf := config.Profile{
+		ID:         "p-" + config.GenerateRandomHex(4),
+		Name:       req.Name,
+		NetworkKey: config.GenerateRandomHex(16),
+		MQTTBroker: req.MQTTBroker,
+		MQTTTopic:  req.MQTTTopic,
+		MQTTUser:   req.MQTTUser,
+		MQTTPass:   req.MQTTPass,
+		TGToken:    req.TGToken,
+		TGChatID:   req.TGChatID,
+		TGProxy:    req.TGProxy,
+		AWGPreset:  req.AWGPreset,
+		IsActive:   req.AutoSwitch || len(cfg.Profiles) == 0,
+		CreatedAt:  time.Now(),
+	}
+
+	saved := cfg.AddOrUpdateProfile(newProf)
+	_ = config.Save(cfg, s.configPath, false)
+
+	if req.AutoSwitch && s.onProfileSwitch != nil {
+		_ = s.onProfileSwitch(saved)
+		s.AddEvent("channel_switch", "Создан и активирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
+	} else {
+		s.AddEvent("info", "Создан новый профиль сети: "+newProf.Name, "Топик: "+newProf.MQTTTopic)
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":      true,
+		"profile": saved,
+		"uri":     config.ExportProfileURI(*saved),
+	}, "")
+}
+
+// handleProfileSwitch — POST /api/profiles/switch — переключение на другой профиль сети
+func (s *Server) handleProfileSwitch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан ID профиля")
+		return
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка загрузки конфига")
+		return
+	}
+
+	active, err := cfg.SwitchProfile(req.ID)
+	if err != nil {
+		s.jsonResponse(w, http.StatusNotFound, nil, err.Error())
+		return
+	}
+
+	_ = config.Save(cfg, s.configPath, false)
+
+	if s.onProfileSwitch != nil {
+		_ = s.onProfileSwitch(active)
+	}
+	if s.registry != nil {
+		s.registry.ClearAll()
+	}
+
+	s.AddEvent("channel_switch", "Переключен профиль сети: "+active.Name, "Топик: "+active.MQTTTopic)
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":      true,
+		"profile": active,
+	}, "")
+}
+
+// handleProfileDelete — POST /api/profiles/delete — удаление профиля сети
+func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан ID профиля")
+		return
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка загрузки конфига")
+		return
+	}
+
+	wasActive := (cfg.ActiveProfileID == req.ID)
+	if err := cfg.DeleteProfile(req.ID); err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, err.Error())
+		return
+	}
+
+	_ = config.Save(cfg, s.configPath, false)
+
+	if wasActive && s.onProfileSwitch != nil {
+		active := cfg.GetActiveProfile()
+		_ = s.onProfileSwitch(active)
+		if s.registry != nil {
+			s.registry.ClearAll()
+		}
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":        true,
+		"active_id": cfg.ActiveProfileID,
+	}, "")
+}
+
+// handleProfileExport — GET /api/profiles/export?id=... — экспорт ссылки/QR для шеринга
+func (s *Server) handleProfileExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	id := r.URL.Query().Get("id")
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	var target *config.Profile
+	if id != "" {
+		for i := range cfg.Profiles {
+			if cfg.Profiles[i].ID == id {
+				target = &cfg.Profiles[i]
+				break
+			}
+		}
+	}
+	if target == nil {
+		target = cfg.EnsureActiveProfile()
+	}
+
+	uri := config.ExportProfileURI(*target)
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"uri":        uri,
+		"qr_payload": uri,
+		"profile":    target,
+	}, "")
+}
+
+// handleProfileImport — POST /api/profiles/import — импорт профиля по ссылке / QR строке
+func (s *Server) handleProfileImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		URI        string `json:"uri"`
+		AutoSwitch bool   `json:"auto_switch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URI == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указана строка профиля")
+		return
+	}
+
+	parsed, err := config.ImportProfileURI(req.URI)
+	if err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "некорректный формат ссылки профиля: "+err.Error())
+		return
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	parsed.IsActive = req.AutoSwitch
+	saved := cfg.AddOrUpdateProfile(*parsed)
+	_ = config.Save(cfg, s.configPath, false)
+
+	if req.AutoSwitch && s.onProfileSwitch != nil {
+		_ = s.onProfileSwitch(saved)
+		if s.registry != nil {
+			s.registry.ClearAll()
+		}
+		s.AddEvent("channel_switch", "Импортирован и активирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
+	} else {
+		s.AddEvent("info", "Импортирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":      true,
+		"profile": saved,
+	}, "")
 }

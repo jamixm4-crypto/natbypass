@@ -158,9 +158,6 @@ func StartEngine(configYAML string, tunFd int) string {
 					p.Latency = rtt
 				}
 				p.PingMs = p.Latency.Milliseconds()
-			} else if p.PingMs == 0 {
-				p.PingMs = 12
-				p.Latency = 12 * time.Millisecond
 			}
 			p.Online = true
 			p.ActiveEndpoint = fromAddr
@@ -842,6 +839,9 @@ func buildChannels(cfg *config.Config, deviceID string) ([]signaling.SignalingCh
 			}
 		case "mqtt":
 			broker := ch.Params["broker_url"]
+			if broker == "" {
+				broker = ch.Params["broker"]
+			}
 			topic := ch.Params["topic"]
 			user := ch.Params["username"]
 			pass := ch.Params["password"]
@@ -851,4 +851,223 @@ func buildChannels(cfg *config.Config, deviceID string) ([]signaling.SignalingCh
 		}
 	}
 	return channels, nil
+}
+
+// GetProfilesJSON возвращает JSON список всех профилей с указанием активного
+func GetProfilesJSON() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	cfg := globalConfig
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	active := cfg.EnsureActiveProfile()
+
+	res := map[string]interface{}{
+		"profiles":       cfg.Profiles,
+		"active_id":      cfg.ActiveProfileID,
+		"active_profile": active,
+	}
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+// CreateProfile создает новый профиль сети и опционально переключается на него
+func CreateProfile(name, broker, topic, user, pass, tgToken string, tgChat int64, tgProxy, awgPreset string, autoSwitch bool) string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if globalConfig == nil {
+		globalConfig = &config.Config{}
+	}
+
+	if name == "" {
+		name = fmt.Sprintf("Сеть #%d", len(globalConfig.Profiles)+1)
+	}
+	if topic == "" {
+		topic = "natbypass/mesh/" + config.GenerateRandomHex(8)
+	}
+	if broker == "" {
+		broker = "tcp://broker.emqx.io:1883"
+	}
+	if awgPreset == "" {
+		awgPreset = "dpi"
+	}
+
+	newProf := config.Profile{
+		ID:         "p-" + config.GenerateRandomHex(4),
+		Name:       name,
+		NetworkKey: config.GenerateRandomHex(16),
+		MQTTBroker: broker,
+		MQTTTopic:  topic,
+		MQTTUser:   user,
+		MQTTPass:   pass,
+		TGToken:    tgToken,
+		TGChatID:   tgChat,
+		TGProxy:    tgProxy,
+		AWGPreset:  awgPreset,
+		IsActive:   autoSwitch || len(globalConfig.Profiles) == 0,
+		CreatedAt:  time.Now(),
+	}
+
+	saved := globalConfig.AddOrUpdateProfile(newProf)
+	if autoSwitch {
+		rebuildSignalingInternal(saved)
+	}
+
+	data, _ := json.Marshal(saved)
+	return string(data)
+}
+
+// SwitchProfile переключает активный профиль по ID
+func SwitchProfile(profileID string) bool {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if globalConfig == nil {
+		return false
+	}
+
+	target, err := globalConfig.SwitchProfile(profileID)
+	if err != nil {
+		logger.Error().Err(err).Msg("Ошибка переключения профиля")
+		return false
+	}
+
+	rebuildSignalingInternal(target)
+	return true
+}
+
+// DeleteProfile удаляет профиль
+func DeleteProfile(profileID string) bool {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if globalConfig == nil {
+		return false
+	}
+
+	wasActive := (globalConfig.ActiveProfileID == profileID)
+	if err := globalConfig.DeleteProfile(profileID); err != nil {
+		return false
+	}
+
+	if wasActive {
+		active := globalConfig.GetActiveProfile()
+		rebuildSignalingInternal(active)
+	}
+	return true
+}
+
+// ExportProfileURI формирует natbypass://profile?... для QR или шеринга
+func ExportProfileURI(profileID string) string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if globalConfig == nil {
+		return ""
+	}
+
+	var target *config.Profile
+	if profileID != "" {
+		for i := range globalConfig.Profiles {
+			if globalConfig.Profiles[i].ID == profileID {
+				target = &globalConfig.Profiles[i]
+				break
+			}
+		}
+	}
+	if target == nil {
+		target = globalConfig.EnsureActiveProfile()
+	}
+
+	return config.ExportProfileURI(*target)
+}
+
+// ImportProfileURI импортирует профиль по ссылке или QR строке
+func ImportProfileURI(rawURI string) string {
+	parsed, err := config.ImportProfileURI(rawURI)
+	if err != nil {
+		return fmt.Sprintf("ERR: %v", err)
+	}
+
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if globalConfig == nil {
+		globalConfig = &config.Config{}
+	}
+
+	parsed.IsActive = true
+	saved := globalConfig.AddOrUpdateProfile(*parsed)
+	rebuildSignalingInternal(saved)
+
+	data, _ := json.Marshal(saved)
+	return string(data)
+}
+
+// rebuildSignalingInternal пересобирает сигнальные каналы при смене профиля (вызывается под engineMu)
+func rebuildSignalingInternal(p *config.Profile) {
+	if p == nil {
+		return
+	}
+	logger.Info().Str("profile", p.Name).Str("topic", p.MQTTTopic).Msg("🔄 Переключение сигнального канала на новый профиль...")
+
+	if globalRegistry != nil {
+		globalRegistry.ClearAll()
+	}
+
+	if globalSigMgr != nil {
+		globalSigMgr.UpdateMQTTTopic(p.MQTTTopic)
+	}
+
+	if p.AWGPreset != "" {
+		globalAWGPreset = p.AWGPreset
+	}
+}
+
+// PingPeer активно отправляет UDP зонд пиру и возвращает реальный RTT в миллисекундах (-1 при отсутствии ответа)
+func PingPeer(deviceID string) int64 {
+	engineMu.Lock()
+	p := globalPuncher
+	reg := globalRegistry
+	engineMu.Unlock()
+
+	if p == nil || reg == nil {
+		return -1
+	}
+
+	peerObj, ok := reg.Get(deviceID)
+	if !ok || !peerObj.Online {
+		return -1
+	}
+
+	initialTs := peerObj.LastSeen
+
+	// Отправляем зонды на все известные адреса пира
+	if peerObj.ActiveEndpoint != "" {
+		_ = p.SendHolePunchProbe(peerObj.ActiveEndpoint)
+	}
+	if peerObj.STUNAddr != "" && peerObj.STUNAddr != peerObj.ActiveEndpoint {
+		_ = p.SendHolePunchProbe(peerObj.STUNAddr)
+	}
+	if peerObj.LocalAddr != "" {
+		_ = p.SendHolePunchProbe(peerObj.LocalAddr)
+	}
+
+	// Ждем до 400мс реального эхо-ответа
+	for i := 0; i < 8; i++ {
+		time.Sleep(50 * time.Millisecond)
+		if updated, exists := reg.Get(deviceID); exists {
+			if updated.LastSeen.After(initialTs) && updated.PingMs > 0 {
+				return updated.PingMs
+			}
+		}
+	}
+
+	if updated, exists := reg.Get(deviceID); exists && updated.PingMs > 0 {
+		return updated.PingMs
+	}
+	return -1
 }

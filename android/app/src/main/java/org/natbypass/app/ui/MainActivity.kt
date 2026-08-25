@@ -91,6 +91,10 @@ class MainActivity : AppCompatActivity() {
         binding.rvPeers.layoutManager = LinearLayoutManager(this)
         binding.rvPeers.adapter = peersAdapter
 
+        binding.btnProfileSelector.setOnClickListener {
+            showProfileManagerDialog()
+        }
+
         binding.btnVpnToggle.setOnClickListener {
             toggleVpn()
         }
@@ -120,22 +124,182 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun clearPeersCache() {
-        org.natbypass.app.util.MobileBridge.clearPeers()
-        peersList.clear()
-        peersAdapter.notifyDataSetChanged()
-        binding.tvPeersCount.text = "0 онлайн"
-        binding.tvAvgPing.text = "0 ms"
-        Toast.makeText(this, "🧹 Кэш устройств очищен! Сеть пересканируется...", Toast.LENGTH_SHORT).show()
-        pollPeers()
+    private fun showProfileManagerDialog() {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val view = layoutInflater.inflate(R.layout.dialog_profile_manager, null)
+        dialog.setContentView(view)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.92).toInt(),
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+
+        val tvActiveName = view.findViewById<TextView>(R.id.tvActiveProfileName)
+        val tvActiveTopic = view.findViewById<TextView>(R.id.tvActiveProfileTopic)
+        val btnShareQR = view.findViewById<Button>(R.id.btnShareActiveProfileQR)
+        val btnCopyLink = view.findViewById<Button>(R.id.btnCopyActiveProfileLink)
+        val container = view.findViewById<LinearLayout>(R.id.containerProfilesList)
+        val btnCreate = view.findViewById<Button>(R.id.btnCreateProfile)
+        val btnImport = view.findViewById<Button>(R.id.btnImportProfile)
+        val btnClose = view.findViewById<android.widget.ImageButton>(R.id.btnDialogClose)
+
+        btnClose.setOnClickListener { dialog.dismiss() }
+
+        fun reloadProfiles() {
+            container.removeAllViews()
+            try {
+                val jsonStr = org.natbypass.app.util.MobileBridge.getProfilesJSON()
+                val json = JSONObject(jsonStr)
+                val profiles = json.optJSONArray("profiles") ?: JSONArray()
+                val activeProfile = json.optJSONObject("active_profile")
+
+                if (activeProfile != null) {
+                    val aName = activeProfile.optString("name", "Основная сеть")
+                    val aTopic = activeProfile.optString("mqtt_topic", "")
+                    tvActiveName.text = aName
+                    tvActiveTopic.text = "Топик: $aTopic"
+                    binding.tvCurrentProfileName.text = aName
+
+                    val activeId = activeProfile.optString("id", "")
+                    btnShareQR.setOnClickListener {
+                        val uri = org.natbypass.app.util.MobileBridge.exportProfileURI(activeId)
+                        showQRForPayload(uri, "QR-код профиля «$aName»")
+                    }
+                    btnCopyLink.setOnClickListener {
+                        val uri = org.natbypass.app.util.MobileBridge.exportProfileURI(activeId)
+                        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("NatBypass Profile", uri))
+                        Toast.makeText(this, "✓ Ссылка на профиль скопирована!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                for (i in 0 until profiles.length()) {
+                    val p = profiles.getJSONObject(i)
+                    val pId = p.optString("id", "")
+                    val pName = p.optString("name", "")
+                    val pTopic = p.optString("mqtt_topic", "")
+                    val isActive = p.optBoolean("is_active", false)
+
+                    if (isActive) continue
+
+                    val itemView = layoutInflater.inflate(R.layout.item_peer, container, false)
+                    val tvName = itemView.findViewById<TextView>(R.id.tvPeerName)
+                    val tvIp = itemView.findViewById<TextView>(R.id.tvPeerIp)
+                    val tvPing = itemView.findViewById<TextView>(R.id.tvPeerPing)
+                    val tvStatus = itemView.findViewById<TextView>(R.id.tvPeerStatus)
+
+                    tvStatus.text = "⚪"
+                    tvName.text = pName
+                    tvIp.text = "Топик: $pTopic"
+                    tvPing.text = "Переключить"
+                    tvPing.background = ContextCompat.getDrawable(this, R.drawable.bg_chip_blue)
+                    tvPing.setTextColor(ContextCompat.getColor(this, R.color.text_primary))
+
+                    itemView.setOnClickListener {
+                        val switched = org.natbypass.app.util.MobileBridge.switchProfile(pId)
+                        if (switched) {
+                            Toast.makeText(this, "✓ Переключено на сеть «$pName»", Toast.LENGTH_SHORT).show()
+                            reloadProfiles()
+                            pollPeers()
+                        }
+                    }
+                    itemView.setOnLongClickListener {
+                        AlertDialog.Builder(this)
+                            .setTitle("Удалить профиль «$pName»?")
+                            .setMessage("Устройства в этой сети больше не будут синхронизироваться.")
+                            .setPositiveButton("Удалить") { _, _ ->
+                                org.natbypass.app.util.MobileBridge.deleteProfile(pId)
+                                reloadProfiles()
+                            }
+                            .setNegativeButton("Отмена", null)
+                            .show()
+                        true
+                    }
+                    container.addView(itemView)
+                }
+            } catch (e: Exception) {}
+        }
+
+        reloadProfiles()
+
+        btnCreate.setOnClickListener {
+            dialog.dismiss()
+            showCreateProfileDialog { reloadProfiles() }
+        }
+
+        btnImport.setOnClickListener {
+            dialog.dismiss()
+            showImportProfileDialog { reloadProfiles() }
+        }
+
+        dialog.show()
     }
 
-    private fun showShareQRDialog() {
-        val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
-        val devName = prefs.getString("device_name", android.os.Build.MODEL ?: "Android-Node")
-        val ip = binding.tvIpAddress.text.toString().substringBefore(" •").trim()
-        val inviteText = "NatBypass|$devName|$ip|https://github.com/jamixm4-crypto/natbypass/releases/latest"
+    private fun showCreateProfileDialog(onDone: () -> Unit) {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val view = layoutInflater.inflate(R.layout.dialog_profile_create, null)
+        dialog.setContentView(view)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.92).toInt(),
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
 
+        val etName = view.findViewById<EditText>(R.id.etNewProfileName)
+        val etTopic = view.findViewById<EditText>(R.id.etNewProfileTopic)
+        val etBroker = view.findViewById<EditText>(R.id.etNewProfileBroker)
+        val btnCancel = view.findViewById<Button>(R.id.btnCancelCreateProfile)
+        val btnSubmit = view.findViewById<Button>(R.id.btnSubmitCreateProfile)
+
+        btnCancel.setOnClickListener { dialog.dismiss() }
+        btnSubmit.setOnClickListener {
+            val name = etName.text.toString().trim()
+            val topic = etTopic.text.toString().trim()
+            val broker = etBroker.text.toString().trim()
+
+            org.natbypass.app.util.MobileBridge.createProfile(
+                name, broker, topic, "", "", "", 0L, "", "dpi", true
+            )
+            Toast.makeText(this, "✓ Профиль сети «$name» создан!", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+            onDone()
+            pollPeers()
+        }
+        dialog.show()
+    }
+
+    private fun showImportProfileDialog(onDone: () -> Unit) {
+        val input = EditText(this).apply {
+            hint = "Вставьте natbypass://profile?... или JSON"
+            setSingleLine(false)
+            maxLines = 4
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Импорт профиля сети")
+            .setView(input)
+            .setPositiveButton("Импортировать") { _, _ ->
+                val uri = input.text.toString().trim()
+                if (uri.isNotEmpty()) {
+                    val res = org.natbypass.app.util.MobileBridge.importProfileURI(uri)
+                    if (res.startsWith("ERR:")) {
+                        Toast.makeText(this, "Ошибка импорта: $res", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(this, "✓ Профиль успешно импортирован!", Toast.LENGTH_SHORT).show()
+                        onDone()
+                        pollPeers()
+                    }
+                }
+            }
+            .setNeutralButton("📷 Сканировать QR") { _, _ ->
+                startActivity(Intent(this, QRScannerActivity::class.java))
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun showQRForPayload(payload: String, title: String) {
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val view = layoutInflater.inflate(R.layout.dialog_qr_share, null)
@@ -148,7 +312,7 @@ class MainActivity : AppCompatActivity() {
 
         try {
             val writer = QRCodeWriter()
-            val bitMatrix = writer.encode(inviteText, BarcodeFormat.QR_CODE, 512, 512)
+            val bitMatrix = writer.encode(payload, BarcodeFormat.QR_CODE, 512, 512)
             val w = bitMatrix.width
             val h = bitMatrix.height
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
@@ -162,7 +326,7 @@ class MainActivity : AppCompatActivity() {
 
         btnCopy.setOnClickListener {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("NatBypass Invite", inviteText))
+            cm.setPrimaryClip(ClipData.newPlainText("NatBypass Profile", payload))
             Toast.makeText(this, "✓ Ссылка скопирована", Toast.LENGTH_SHORT).show()
             dialog.dismiss()
         }
@@ -174,12 +338,31 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    private fun clearPeersCache() {
+        org.natbypass.app.util.MobileBridge.clearPeers()
+        peersList.clear()
+        peersAdapter.notifyDataSetChanged()
+        binding.tvPeersCount.text = "0 онлайн"
+        binding.tvAvgPing.text = "—"
+        Toast.makeText(this, "🧹 Кэш устройств очищен! Сеть пересканируется...", Toast.LENGTH_SHORT).show()
+        pollPeers()
+    }
+
+    private fun showShareQRDialog() {
+        val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+        val devName = prefs.getString("device_name", android.os.Build.MODEL ?: "Android-Node")
+        val ip = binding.tvIpAddress.text.toString().substringBefore(" •").trim()
+        val inviteText = "NatBypass|$devName|$ip|https://github.com/jamixm4-crypto/natbypass/releases/latest"
+
+        showQRForPayload(inviteText, "QR-код устройства")
+    }
+
     private fun showPeerActionDialog(peer: PeerItem) {
         val options = arrayOf(
             "Скопировать IP (${peer.vip})",
             "Задать имя / В закладки",
             "Использовать как шлюз (Exit Node)",
-            "Проверить пинг"
+            "⚡ Проверить реальный пинг (UDP)"
         )
 
         AlertDialog.Builder(this)
@@ -223,7 +406,18 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     3 -> {
-                        Toast.makeText(this, "Задержка: ${peer.ping}", Toast.LENGTH_SHORT).show()
+                        lifecycleScope.launch {
+                            Toast.makeText(this@MainActivity, "📡 Отправка UDP эхо-зонда на ${peer.name}...", Toast.LENGTH_SHORT).show()
+                            val measuredRtt = withContext(Dispatchers.IO) {
+                                org.natbypass.app.util.MobileBridge.pingPeer(peer.id)
+                            }
+                            if (measuredRtt >= 0) {
+                                Toast.makeText(this@MainActivity, "⚡ Реальный RTT: $measuredRtt ms", Toast.LENGTH_LONG).show()
+                                pollPeers()
+                            } else {
+                                Toast.makeText(this@MainActivity, "⚠️ Узел не ответил на прямой UDP-зонд (возможно заблокирован файрволом или находится в спящем режиме)", Toast.LENGTH_LONG).show()
+                            }
+                        }
                     }
                 }
             }
@@ -383,7 +577,7 @@ class MainActivity : AppCompatActivity() {
                 val isOnline = if (obj.has("online")) obj.getBoolean("online") else obj.optBoolean("Online", true)
                 val isExitNode = obj.optBoolean("is_exit_node", false) || obj.optBoolean("IsExitNode", false)
 
-                val pingMs = obj.optLong("ping_ms", if (isOnline) 14L else 0L)
+                val pingMs = obj.optLong("ping_ms", obj.optLong("PingMs", 0L))
                 if (isOnline) {
                     onlineCount++
                     if (pingMs > 0) {
@@ -409,6 +603,12 @@ class MainActivity : AppCompatActivity() {
                     else -> "VIP: $vip"
                 }
 
+                val pingFormatted = when {
+                    !isOnline -> "Офлайн"
+                    pingMs > 0 -> "$pingMs ms"
+                    else -> "—"
+                }
+
                 peersList.add(
                     PeerItem(
                         id = id,
@@ -417,14 +617,14 @@ class MainActivity : AppCompatActivity() {
                         stun = stunFormatted,
                         online = isOnline,
                         isExitNode = isExitNode,
-                        ping = if (isOnline) "${if (pingMs > 0) pingMs else 14} ms" else "Офлайн"
+                        ping = pingFormatted
                     )
                 )
             }
             peersAdapter.notifyDataSetChanged()
             binding.tvPeersCount.text = "$onlineCount онлайн"
-            val avgPing = if (countWithLatency > 0) totalLatency / countWithLatency else if (onlineCount > 0) 14L else 0L
-            binding.tvAvgPing.text = "$avgPing ms"
+            val avgPing = if (countWithLatency > 0) totalLatency / countWithLatency else 0L
+            binding.tvAvgPing.text = if (avgPing > 0) "$avgPing ms" else "—"
 
             if (peersList.isEmpty()) {
                 binding.tvPeersHeader.text = "Устройства в сети (поиск...)"

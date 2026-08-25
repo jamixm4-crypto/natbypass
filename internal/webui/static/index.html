@@ -713,6 +713,13 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6Z"></path></svg>
           <span id="topStunLabel" style="font-size:0.82rem;">STUN: Определение...</span>
         </div>
+
+        <div class="glow-pill" onclick="openProfileModal()" title="Управление профилями сети (нажмите для переключения или создания)" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; cursor: pointer; padding: 6px 14px; border-radius: 20px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <span style="font-size:0.8rem; font-weight:700; opacity:0.85;">Сеть:</span>
+          <span id="topProfileLabel" style="font-weight:700; color:#ffffff; font-size:0.85rem; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Основная сеть</span>
+          <span style="font-size:0.75rem; opacity:0.7;">▾</span>
+        </div>
       </div>
 
       <!-- Right: Action Buttons & User Profile -->
@@ -1250,6 +1257,100 @@
       <div style="display:flex; justify-content:flex-end; gap: 10px;">
         <button onclick="closeQRModal()" class="btn btn-glass">Закрыть</button>
         <button onclick="copyQRText()" class="btn btn-neon">📋 Скопировать данные</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Profile Manager Modal -->
+  <div id="profileModal" class="modal-overlay">
+    <div class="modal-box" style="width: 580px; max-width: 95%;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+        <h3 style="font-size: 1.15rem; font-weight: 800; display:flex; align-items:center; gap:8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          Профили сети (Mesh Profiles)
+        </h3>
+        <button onclick="closeProfileModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;">✕</button>
+      </div>
+
+      <p style="color:var(--text-dim); font-size:0.84rem; line-height:1.4; margin-bottom:14px;">
+        Каждый профиль создает изолированную приватную сеть с уникальным топиком и ключами шифрования.
+      </p>
+
+      <!-- Active Profile Card -->
+      <div style="background:rgba(168,85,247,0.08); border:1px solid rgba(168,85,247,0.3); border-radius:14px; padding:16px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:0.75rem; font-weight:700; color:#4ade80; text-transform:uppercase; letter-spacing:0.5px;">🟢 ТЕКУЩИЙ АКТИВНЫЙ ПРОФИЛЬ</span>
+          <span id="activeProfileBadge" class="badge badge-purple">DPI обход</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h4 id="activeProfileName" style="font-size:1.2rem; font-weight:800; color:#ffffff; margin:0;">Основная сеть</h4>
+          <div style="display:flex; gap:6px;">
+            <button onclick="shareActiveProfileQR()" class="btn-pill" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;">📱 QR-код</button>
+            <button onclick="copyActiveProfileURI()" class="btn-pill" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#ffffff; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;">🔗 Ссылка</button>
+          </div>
+        </div>
+        <div style="font-size:0.78rem; color:var(--text-muted); font-family:monospace; line-height:1.4;">
+          <div>Топик: <span id="activeProfileTopic" style="color:#e2e8f0;">natbypass/mesh/...</span></div>
+          <div>Брокер: <span id="activeProfileBroker" style="color:#e2e8f0;">tcp://broker.emqx.io:1883</span></div>
+        </div>
+      </div>
+
+      <!-- Other Profiles List -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:0.82rem; font-weight:700; color:var(--text-dim); margin-bottom:8px;">Доступные профили:</div>
+        <div id="profilesListContainer" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display:flex; justify-content:space-between; gap:10px;">
+        <button onclick="openCreateProfileModal()" class="btn btn-neon" style="flex:1;">➕ Создать профиль</button>
+        <button onclick="openImportProfileModal()" class="btn btn-glass" style="flex:1;">📥 Импортировать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Profile Modal -->
+  <div id="createProfileModal" class="modal-overlay">
+    <div class="modal-box" style="width: 480px; max-width: 95%;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+        <h3 style="font-size: 1.15rem; font-weight: 800;">Новый профиль сети</h3>
+        <button onclick="closeCreateProfileModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;">✕</button>
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="form-label">Имя профиля:</label>
+        <input type="text" id="newProfName" class="form-input" placeholder="Например: Домашняя сеть, Офис, Семья" value="Личная сеть">
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="form-label">MQTT Топик (оставьте пустым для безопасной автогенерации):</label>
+        <input type="text" id="newProfTopic" class="form-input mono" placeholder="natbypass/mesh/...">
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label class="form-label">MQTT Брокер:</label>
+        <input type="text" id="newProfBroker" class="form-input mono" value="tcp://broker.emqx.io:1883">
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:10px;">
+        <button onclick="closeCreateProfileModal()" class="btn btn-glass">Отмена</button>
+        <button onclick="submitCreateProfile()" class="btn btn-neon">Создать и переключиться</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Profile Modal -->
+  <div id="importProfileModal" class="modal-overlay">
+    <div class="modal-box" style="width: 480px; max-width: 95%;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+        <h3 style="font-size: 1.15rem; font-weight: 800;">Импорт профиля сети</h3>
+        <button onclick="closeImportProfileModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;">✕</button>
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label class="form-label">Вставьте ссылку профиля (natbypass://profile?...) или JSON:</label>
+        <textarea id="importProfileRaw" class="form-input mono" rows="4" placeholder="natbypass://profile?name=..."></textarea>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:10px;">
+        <button onclick="closeImportProfileModal()" class="btn btn-glass">Отмена</button>
+        <button onclick="submitImportProfile()" class="btn btn-neon">Импортировать и подключиться</button>
       </div>
     </div>
   </div>
@@ -2462,6 +2563,199 @@
       }
     }
 
+    // --- PROFILES MANAGEMENT ---
+    let currentProfiles = [];
+    let currentActiveProfile = null;
+
+    async function loadProfiles() {
+      try {
+        const res = await fetch('/api/profiles');
+        const json = await res.json();
+        if (json.ok && json.data) {
+          currentProfiles = json.data.profiles || [];
+          currentActiveProfile = json.data.active_profile || null;
+
+          if (currentActiveProfile) {
+            document.getElementById('topProfileLabel').innerText = currentActiveProfile.name || 'Основная сеть';
+            document.getElementById('activeProfileName').innerText = currentActiveProfile.name || 'Основная сеть';
+            document.getElementById('activeProfileTopic').innerText = currentActiveProfile.mqtt_topic || '';
+            document.getElementById('activeProfileBroker').innerText = currentActiveProfile.mqtt_broker || '';
+            document.getElementById('activeProfileBadge').innerText = (currentActiveProfile.awg_preset || 'dpi').toUpperCase() + ' защита';
+          }
+
+          renderProfilesList();
+        }
+      } catch (e) {}
+    }
+
+    function renderProfilesList() {
+      const container = document.getElementById('profilesListContainer');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const otherProfiles = currentProfiles.filter(p => !p.is_active);
+      if (otherProfiles.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-dim); font-size:0.8rem; font-style:italic; padding:6px 0;">Других профилей пока нет. Создайте второй профиль для изоляции сети.</div>';
+        return;
+      }
+
+      otherProfiles.forEach(p => {
+        const item = document.createElement('div');
+        item.style = 'background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;';
+        item.innerHTML = `
+          <div>
+            <div style="font-weight:700; color:#ffffff; font-size:0.9rem;">${escapeHtml(p.name)}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); font-family:monospace;">${escapeHtml(p.mqtt_topic)}</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button onclick="switchProfile('${p.id}')" class="btn-pill" style="background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); color:#c084fc; padding:4px 10px; font-size:0.78rem; font-weight:700; border-radius:10px; cursor:pointer;">Переключить</button>
+            <button onclick="deleteProfile('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#ef4444; padding:4px 8px; font-size:0.78rem; border-radius:10px; cursor:pointer;" title="Удалить профиль">🗑️</button>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function openProfileModal() {
+      loadProfiles();
+      document.getElementById('profileModal').style.display = 'flex';
+    }
+
+    function closeProfileModal() {
+      document.getElementById('profileModal').style.display = 'none';
+    }
+
+    async function switchProfile(id) {
+      showToast('🔄 Переключение профиля сети...');
+      try {
+        const res = await fetch('/api/profiles/switch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✅ Профиль сети переключен на: ' + json.data.profile.name);
+          loadProfiles();
+          refreshData();
+        } else {
+          showToast('❌ Ошибка: ' + json.error);
+        }
+      } catch (e) {
+        showToast('❌ Ошибка связи');
+      }
+    }
+
+    async function deleteProfile(id, name) {
+      if (!confirm(`Удалить профиль «${name}»?`)) return;
+      try {
+        const res = await fetch('/api/profiles/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✓ Профиль удален');
+          loadProfiles();
+        } else {
+          showToast('❌ Ошибка: ' + json.error);
+        }
+      } catch (e) {}
+    }
+
+    function openCreateProfileModal() {
+      document.getElementById('newProfName').value = 'Сеть #' + (currentProfiles.length + 1);
+      document.getElementById('newProfTopic').value = '';
+      document.getElementById('createProfileModal').style.display = 'flex';
+    }
+
+    function closeCreateProfileModal() {
+      document.getElementById('createProfileModal').style.display = 'none';
+    }
+
+    async function submitCreateProfile() {
+      const name = document.getElementById('newProfName').value.trim();
+      const mqtt_topic = document.getElementById('newProfTopic').value.trim();
+      const mqtt_broker = document.getElementById('newProfBroker').value.trim();
+
+      try {
+        const res = await fetch('/api/profiles/create', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name, mqtt_topic, mqtt_broker, auto_switch: true})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✅ Создан новый профиль сети: ' + json.data.profile.name);
+          closeCreateProfileModal();
+          loadProfiles();
+          refreshData();
+        } else {
+          showToast('❌ Ошибка: ' + json.error);
+        }
+      } catch (e) {}
+    }
+
+    function openImportProfileModal() {
+      document.getElementById('importProfileRaw').value = '';
+      document.getElementById('importProfileModal').style.display = 'flex';
+    }
+
+    function closeImportProfileModal() {
+      document.getElementById('importProfileModal').style.display = 'none';
+    }
+
+    async function submitImportProfile() {
+      const uri = document.getElementById('importProfileRaw').value.trim();
+      if (!uri) {
+        showToast('⚠️ Вставьте ссылку на профиль');
+        return;
+      }
+      try {
+        const res = await fetch('/api/profiles/import', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({uri, auto_switch: true})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✅ Профиль успешно импортирован: ' + json.data.profile.name);
+          closeImportProfileModal();
+          loadProfiles();
+          refreshData();
+        } else {
+          showToast('❌ Ошибка импорта: ' + json.error);
+        }
+      } catch (e) {}
+    }
+
+    async function shareActiveProfileQR() {
+      if (!currentActiveProfile) return;
+      try {
+        const res = await fetch('/api/profiles/export?id=' + currentActiveProfile.id);
+        const json = await res.json();
+        if (json.ok && json.data.uri) {
+          openQRModal();
+          document.getElementById('qrRawText').value = json.data.uri;
+          renderQR(json.data.uri);
+          document.getElementById('qrDescText').innerHTML = 'Отсканируйте камерой смартфона в приложении <b>NatBypass Android</b> для мгновенного импорта сети «' + escapeHtml(currentActiveProfile.name) + '».';
+        }
+      } catch (e) {}
+    }
+
+    async function copyActiveProfileURI() {
+      if (!currentActiveProfile) return;
+      try {
+        const res = await fetch('/api/profiles/export?id=' + currentActiveProfile.id);
+        const json = await res.json();
+        if (json.ok && json.data.uri) {
+          copyText(json.data.uri);
+          showToast('✓ Ссылка на профиль сети скопирована!');
+        }
+      } catch (e) {}
+    }
+
     setInterval(refreshData, 2000);
     window.addEventListener('DOMContentLoaded', () => {
       // Ensure all sidebar nav items have direct click bindings
@@ -2478,6 +2772,7 @@
 
       refreshData();
       loadConfig();
+      loadProfiles();
       // Background update check after 3s
       setTimeout(checkUpdateManual, 3000);
     });
