@@ -20,11 +20,14 @@ type MQTTChannel struct {
 	tunnelMu      sync.RWMutex
 	tunnelTopic   string
 	tunnelHandler func(pkt []byte)
+	dedupMu       sync.Mutex
+	dedupSeen     map[string]time.Time // deviceID -> last received time
 }
 
 func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTTChannel {
 	ch := &MQTTChannel{
-		topic: topic,
+		topic:     topic,
+		dedupSeen: make(map[string]time.Time),
 	}
 
 	if brokerURL == "" {
@@ -98,16 +101,35 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 
 func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 	var p Payload
-	if err := json.Unmarshal(msg.Payload(), &p); err == nil && p.DeviceID != "" {
-		p.Channel = "mqtt"
-		m.outMu.RLock()
-		defer m.outMu.RUnlock()
-		for _, out := range m.outChans {
-			cp := p
-			select {
-			case out <- &cp:
-			default:
+	if err := json.Unmarshal(msg.Payload(), &p); err != nil || p.DeviceID == "" {
+		return
+	}
+	// Дедупликация: пропускаем повторный маяк от того же устройства в течение 1 секунды
+	m.dedupMu.Lock()
+	if last, ok := m.dedupSeen[p.DeviceID]; ok && time.Since(last) < time.Second {
+		m.dedupMu.Unlock()
+		return
+	}
+	m.dedupSeen[p.DeviceID] = time.Now()
+	// Очищаем старые записи раз в 100 маяков (не блокируем надолго)
+	if len(m.dedupSeen) > 200 {
+		cutoff := time.Now().Add(-10 * time.Second)
+		for k, v := range m.dedupSeen {
+			if v.Before(cutoff) {
+				delete(m.dedupSeen, k)
 			}
+		}
+	}
+	m.dedupMu.Unlock()
+
+	p.Channel = "mqtt"
+	m.outMu.RLock()
+	defer m.outMu.RUnlock()
+	for _, out := range m.outChans {
+		cp := p
+		select {
+		case out <- &cp:
+		default:
 		}
 	}
 }

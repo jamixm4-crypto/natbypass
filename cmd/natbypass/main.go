@@ -457,18 +457,34 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	defer cancel()
 
 	registry := peer.NewRegistry()
-	registry.StartMonitor(engineCtx, 2*time.Minute)
+	registry.StartMonitor(engineCtx, 30*time.Second)
+
+	// Определяем топик из активного профиля (при наличии), иначе — уникальный на основе deviceID
+	activeProf := cfg.EnsureActiveProfile()
+	defaultTopic := fmt.Sprintf("natbypass/%s/peers", deviceID[:min8(len(deviceID), 8)])
+	if activeProf != nil && activeProf.MQTTTopic != "" {
+		defaultTopic = activeProf.MQTTTopic
+	}
 
 	channels, err := buildSignalingChannels(cfg)
 	if err != nil {
-		log.Warn().Err(err).Msg("Ошибка парсинга каналов, используется публичный резервный канал")
+		log.Warn().Err(err).Msg("Ошибка парсинга каналов, используется резервный канал")
 	}
 	if len(channels) == 0 {
-		log.Warn().Msg("⚠️ Сигнальные каналы не настроены в конфиге. Включен резервный MQTT брокер (topic: natbypass/mynet/peers). Вы можете настроить личный Telegram-бот в Web UI (http://localhost:8080) или файле config.yaml")
-		channels = append(channels, signaling.NewMQTTChannel("tcp://broker.emqx.io:1883", "natbypass/mynet/peers", deviceID, "", ""))
+		log.Info().Str("topic", defaultTopic).Msg("⚙️ Сигнальные каналы не настроены. Использую персональный топик MQTT.")
+		channels = append(channels, signaling.NewMQTTChannel("tcp://broker.emqx.io:1883", defaultTopic, deviceID, "", ""))
+	} else {
+		// Применяем топик активного профиля ко всем MQTT-каналам при старте
+		if activeProf != nil && activeProf.MQTTTopic != "" {
+			for _, ch := range channels {
+				if mqCh, ok := ch.(*signaling.MQTTChannel); ok {
+					mqCh.UpdateTopic(activeProf.MQTTTopic)
+				}
+			}
+		}
 	}
 	sigMgr := signaling.NewFallbackManager(channels)
-	log.Info().Int("channels", len(channels)).Str("current", sigMgr.CurrentChannel()).Msg("Сигнальные каналы инициализированы")
+	log.Info().Int("channels", len(channels)).Str("current", sigMgr.CurrentChannel()).Str("topic", defaultTopic).Msg("Сигнальные каналы инициализированы")
 
 	port = cfg.WebUI.Port
 	if webUIPort > 0 {
@@ -535,7 +551,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	}
 
 	var puncher *network.UDPPuncher
-	puncher, err = network.NewUDPPuncher(51820, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+	// Используем порт 47832 для пробивки NAT — отдельный от WireGuard (51820),
+	// чтобы избежать конфликта портов и сохранить правильный STUN-адрес в маяке.
+	puncher, err = network.NewUDPPuncher(47832, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		log.Info().Str("peer", remoteDevID).Dur("rtt", rtt).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг")
 		if p, ok := registry.Get(remoteDevID); ok {
 			p.DirectP2P = true
@@ -638,6 +656,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
+		// Вспомогательная функция: 3 пробы на один адрес с интервалом 150мс
+		probe3 := func(addr string) {
+			if addr == "" {
+				return
+			}
+			for i := 0; i < 3; i++ {
+				_ = puncher.SendHolePunchProbe(addr)
+				if i < 2 {
+					time.Sleep(150 * time.Millisecond)
+				}
+			}
+		}
 		for {
 			select {
 			case <-engineCtx.Done():
@@ -646,22 +676,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if puncher != nil && registry != nil {
 					for _, p := range registry.List() {
 						if p.Online && p.DeviceID != deviceID {
-							if p.ActiveEndpoint != "" {
-								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
-							}
-							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(p.STUNAddr)
-							}
-							if p.PublicIP != "" {
-								port := p.WGPort
-								if port <= 0 {
-									port = 51820
+							go func(peer *peer.Peer) {
+								probe3(peer.ActiveEndpoint)
+								if peer.STUNAddr != "" && peer.STUNAddr != peer.ActiveEndpoint {
+									probe3(peer.STUNAddr)
 								}
-								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
-							}
-							if p.LocalAddr != "" {
-								_ = puncher.SendHolePunchProbe(p.LocalAddr)
-							}
+								if peer.PublicIP != "" {
+									port := peer.WGPort
+									if port <= 0 {
+										port = 47832
+									}
+									probe3(fmt.Sprintf("%s:%d", peer.PublicIP, port))
+								}
+								if peer.LocalAddr != "" && peer.LocalAddr != peer.ActiveEndpoint {
+									probe3(peer.LocalAddr)
+								}
+							}(p)
 						}
 					}
 				}
@@ -1390,6 +1420,13 @@ func generateDeviceID(pubKey [32]byte) string {
 		return "dev-" + hex[:12]
 	}
 	return "dev-unknown"
+}
+
+func min8(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func buildSignalingChannels(cfg *config.Config) ([]signaling.SignalingChannel, error) {
