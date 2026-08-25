@@ -139,6 +139,7 @@ class MainActivity : AppCompatActivity() {
 
         val tvActiveName = view.findViewById<TextView>(R.id.tvActiveProfileName)
         val tvActiveTopic = view.findViewById<TextView>(R.id.tvActiveProfileTopic)
+        val btnEditActive = view.findViewById<Button>(R.id.btnEditActiveProfile)
         val btnShareQR = view.findViewById<Button>(R.id.btnShareActiveProfileQR)
         val btnCopyLink = view.findViewById<Button>(R.id.btnCopyActiveProfileLink)
         val container = view.findViewById<LinearLayout>(R.id.containerProfilesList)
@@ -147,6 +148,16 @@ class MainActivity : AppCompatActivity() {
         val btnClose = view.findViewById<android.widget.ImageButton>(R.id.btnDialogClose)
 
         btnClose.setOnClickListener { dialog.dismiss() }
+
+        fun saveConfigToDisk() {
+            try {
+                val yaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
+                if (yaml.isNotEmpty() && yaml != "{}") {
+                    val configFile = File(filesDir, "config.yaml")
+                    configFile.writeText(yaml)
+                }
+            } catch (e: Exception) {}
+        }
 
         fun reloadProfiles() {
             container.removeAllViews()
@@ -159,11 +170,20 @@ class MainActivity : AppCompatActivity() {
                 if (activeProfile != null) {
                     val aName = activeProfile.optString("name", "Основная сеть")
                     val aTopic = activeProfile.optString("mqtt_topic", "")
+                    val aBroker = activeProfile.optString("mqtt_broker", "tcp://broker.emqx.io:1883")
+                    val activeId = activeProfile.optString("id", "")
+
                     tvActiveName.text = aName
                     tvActiveTopic.text = "Топик: $aTopic"
                     binding.tvCurrentProfileName.text = aName
 
-                    val activeId = activeProfile.optString("id", "")
+                    btnEditActive.setOnClickListener {
+                        showEditProfileDialog(activeId, aName, aTopic, aBroker) {
+                            reloadProfiles()
+                            pollPeers()
+                        }
+                    }
+
                     btnShareQR.setOnClickListener {
                         val uri = org.natbypass.app.util.MobileBridge.exportProfileURI(activeId)
                         showQRForPayload(uri, "QR-код профиля «$aName»")
@@ -181,6 +201,7 @@ class MainActivity : AppCompatActivity() {
                     val pId = p.optString("id", "")
                     val pName = p.optString("name", "")
                     val pTopic = p.optString("mqtt_topic", "")
+                    val pBroker = p.optString("mqtt_broker", "tcp://broker.emqx.io:1883")
                     val isActive = p.optBoolean("is_active", false)
 
                     if (isActive) continue
@@ -189,6 +210,7 @@ class MainActivity : AppCompatActivity() {
                     val tvName = itemView.findViewById<TextView>(R.id.tvProfileName)
                     val tvTopic = itemView.findViewById<TextView>(R.id.tvProfileTopic)
                     val btnSwitch = itemView.findViewById<Button>(R.id.btnProfileSwitch)
+                    val btnEdit = itemView.findViewById<Button>(R.id.btnProfileEdit)
                     val btnQR = itemView.findViewById<Button>(R.id.btnProfileQR)
                     val btnShare = itemView.findViewById<Button>(R.id.btnProfileShare)
                     val btnDelete = itemView.findViewById<Button>(R.id.btnProfileDelete)
@@ -199,6 +221,7 @@ class MainActivity : AppCompatActivity() {
                     val switchAction = {
                         val switched = org.natbypass.app.util.MobileBridge.switchProfile(pId)
                         if (switched) {
+                            saveConfigToDisk()
                             Toast.makeText(this, "✓ Переключено на сеть «$pName»", Toast.LENGTH_SHORT).show()
                             reloadProfiles()
                             pollPeers()
@@ -207,6 +230,13 @@ class MainActivity : AppCompatActivity() {
 
                     itemView.setOnClickListener { switchAction() }
                     btnSwitch.setOnClickListener { switchAction() }
+
+                    btnEdit.setOnClickListener {
+                        showEditProfileDialog(pId, pName, pTopic, pBroker) {
+                            reloadProfiles()
+                            pollPeers()
+                        }
+                    }
 
                     btnQR.setOnClickListener {
                         val uri = org.natbypass.app.util.MobileBridge.exportProfileURI(pId)
@@ -226,8 +256,10 @@ class MainActivity : AppCompatActivity() {
                             .setMessage("Вы потеряете связь с устройствами из этой сети.")
                             .setPositiveButton("Удалить") { _, _ ->
                                 org.natbypass.app.util.MobileBridge.deleteProfile(pId)
+                                saveConfigToDisk()
                                 Toast.makeText(this, "✓ Профиль «$pName» удален", Toast.LENGTH_SHORT).show()
                                 reloadProfiles()
+                                pollPeers()
                             }
                             .setNegativeButton("Отмена", null)
                             .show()
@@ -242,14 +274,70 @@ class MainActivity : AppCompatActivity() {
 
         btnCreate.setOnClickListener {
             dialog.dismiss()
-            showCreateProfileDialog { reloadProfiles() }
+            showCreateProfileDialog {
+                reloadProfiles()
+                showProfileManagerDialog()
+            }
         }
 
         btnImport.setOnClickListener {
             dialog.dismiss()
-            showImportProfileDialog { reloadProfiles() }
+            showImportProfileDialog {
+                reloadProfiles()
+                showProfileManagerDialog()
+            }
         }
 
+        dialog.show()
+    }
+
+    private fun showEditProfileDialog(
+        profileId: String,
+        currentName: String,
+        currentTopic: String,
+        currentBroker: String,
+        onDone: () -> Unit
+    ) {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val view = layoutInflater.inflate(R.layout.dialog_profile_edit, null)
+        dialog.setContentView(view)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.92).toInt(),
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+
+        val etName = view.findViewById<EditText>(R.id.etEditProfileName)
+        val etTopic = view.findViewById<EditText>(R.id.etEditProfileTopic)
+        val etBroker = view.findViewById<EditText>(R.id.etEditProfileBroker)
+        val btnCancel = view.findViewById<Button>(R.id.btnCancelEditProfile)
+        val btnSave = view.findViewById<Button>(R.id.btnSaveEditProfile)
+
+        etName.setText(currentName)
+        etTopic.setText(currentTopic)
+        etBroker.setText(currentBroker)
+
+        btnCancel.setOnClickListener { dialog.dismiss() }
+        btnSave.setOnClickListener {
+            val name = etName.text.toString().trim()
+            val topic = etTopic.text.toString().trim()
+            val broker = etBroker.text.toString().trim()
+
+            org.natbypass.app.util.MobileBridge.updateProfile(
+                profileId, name, broker, topic, "", "", "", 0L, "", "dpi"
+            )
+            try {
+                val yaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
+                if (yaml.isNotEmpty() && yaml != "{}") {
+                    File(filesDir, "config.yaml").writeText(yaml)
+                }
+            } catch (e: Exception) {}
+
+            Toast.makeText(this, "✓ Профиль «$name» обновлен!", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+            onDone()
+        }
         dialog.show()
     }
 
@@ -279,6 +367,13 @@ class MainActivity : AppCompatActivity() {
             org.natbypass.app.util.MobileBridge.createProfile(
                 name, broker, topic, "", "", "", 0L, "", "dpi", true
             )
+            try {
+                val yaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
+                if (yaml.isNotEmpty() && yaml != "{}") {
+                    File(filesDir, "config.yaml").writeText(yaml)
+                }
+            } catch (e: Exception) {}
+
             Toast.makeText(this, "✓ Профиль сети «$name» создан!", Toast.LENGTH_SHORT).show()
             dialog.dismiss()
             onDone()
@@ -303,6 +398,13 @@ class MainActivity : AppCompatActivity() {
                     if (res.startsWith("ERR:")) {
                         Toast.makeText(this, "Ошибка импорта: $res", Toast.LENGTH_LONG).show()
                     } else {
+                        try {
+                            val yaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
+                            if (yaml.isNotEmpty() && yaml != "{}") {
+                                File(filesDir, "config.yaml").writeText(yaml)
+                            }
+                        } catch (e: Exception) {}
+
                         Toast.makeText(this, "✓ Профиль успешно импортирован!", Toast.LENGTH_SHORT).show()
                         onDone()
                         pollPeers()

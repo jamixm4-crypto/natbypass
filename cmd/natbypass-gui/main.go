@@ -297,9 +297,9 @@ var (
 	buttonLabels = make(map[uint32]string)
 	buttonTypes  = make(map[uint32]string)
 
-	navButtons [5]uintptr
+	navButtons [6]uintptr
 	currentTab = 0
-	tabPages   [5][]uintptr
+	tabPages   [6][]uintptr
 
 	// Вкладка 0: Обзор
 	hLblStatus            uintptr
@@ -311,13 +311,27 @@ var (
 	hBtnToggleSubnetRoute uintptr
 	hListPeers            uintptr
 	hBtnRefresh           uintptr
+	hBtnManageProfiles    uintptr
 	lastPeersHash         string
 	activeExitNodeID      string
 	activeExitVIP         string
 	activeSubnetRoutes    = make(map[string]string)
 	activeSubnetRoutesMu  sync.RWMutex
 
-	// Вкладка 1: AmneziaWG
+	// Вкладка 1: Профили сетей
+	hListProfiles   uintptr
+	hBtnProfSwitch  uintptr
+	hBtnProfCreate  uintptr
+	hBtnProfImport  uintptr
+	hEditProfName   uintptr
+	hBtnProfExport  uintptr
+	hEditProfTopic  uintptr
+	hEditProfBroker uintptr
+	hBtnProfSave    uintptr
+	hBtnProfDelete  uintptr
+	selectedProfID  string
+
+	// Вкладка 2: AmneziaWG
 	hBtnAwgStd        uintptr
 	hBtnAwgDpi        uintptr
 	hBtnAwgStealth    uintptr
@@ -441,24 +455,26 @@ const (
 
 	// Навигация
 	ID_NAV_DASHBOARD = 3001
-	ID_NAV_AWG       = 3002
-	ID_NAV_SETTINGS  = 3003
-	ID_NAV_DIAG      = 3004
-	ID_NAV_LOGS      = 3005
+	ID_NAV_PROFILES  = 3002
+	ID_NAV_AWG       = 3003
+	ID_NAV_SETTINGS  = 3004
+	ID_NAV_DIAG      = 3005
+	ID_NAV_LOGS      = 3006
 
 	// Действия
 	ID_BTN_VPN             = 4001
 	ID_BTN_REFRESH         = 4002
-	ID_BTN_AWG_STD         = 4003
-	ID_BTN_AWG_DPI         = 4004
-	ID_BTN_AWG_STEALTH     = 4005
-	ID_BTN_RAND_AWG        = 4006
-	ID_BTN_COPY_AWG        = 4007
-	ID_BTN_TEST_TG         = 4008
-	ID_BTN_TEST_MQTT       = 4009
-	ID_BTN_SAVE_CFG        = 4010
-	ID_BTN_RUN_DIAG        = 4011
-	ID_BTN_CLR_LOGS        = 4012
+	ID_BTN_MANAGE_PROFILES = 4003
+	ID_BTN_AWG_STD         = 4004
+	ID_BTN_AWG_DPI         = 4005
+	ID_BTN_AWG_STEALTH     = 4006
+	ID_BTN_RAND_AWG        = 4007
+	ID_BTN_COPY_AWG        = 4008
+	ID_BTN_TEST_TG         = 4009
+	ID_BTN_TEST_MQTT       = 4010
+	ID_BTN_SAVE_CFG        = 4011
+	ID_BTN_RUN_DIAG        = 4012
+	ID_BTN_CLR_LOGS        = 4013
 	ID_BTN_MODE_PARALLEL   = 4020
 	ID_BTN_MODE_MQTT       = 4021
 	ID_BTN_MODE_TG         = 4022
@@ -479,6 +495,14 @@ const (
 	ID_BTN_MQ_MOSQ         = 4053
 	ID_BTN_MQ_ECL          = 4054
 	ID_BTN_CHECK_UPDATE    = 4055
+
+	// Профили
+	ID_BTN_PROF_SWITCH = 4060
+	ID_BTN_PROF_CREATE = 4061
+	ID_BTN_PROF_SAVE   = 4062
+	ID_BTN_PROF_DELETE = 4063
+	ID_BTN_PROF_EXPORT = 4064
+	ID_BTN_PROF_IMPORT = 4065
 )
 
 func initDebugLog() {
@@ -932,6 +956,10 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 
 	case WM_COMMAND:
 		id := LOWORD(wParam)
+		if lParam == hListProfiles && HIWORD(wParam) == 1 /* LBN_SELCHANGE */ {
+			onProfileSelectionChange()
+			return 0
+		}
 		handleCommand(id)
 		return 0
 
@@ -1180,14 +1208,37 @@ func handleCommand(id uint16) {
 	switch id {
 	case ID_NAV_DASHBOARD:
 		selectTab(0)
-	case ID_NAV_AWG:
+	case ID_NAV_PROFILES:
 		selectTab(1)
-	case ID_NAV_SETTINGS:
+	case ID_NAV_AWG:
 		selectTab(2)
-	case ID_NAV_DIAG:
+	case ID_NAV_SETTINGS:
 		selectTab(3)
-	case ID_NAV_LOGS:
+	case ID_NAV_DIAG:
 		selectTab(4)
+	case ID_NAV_LOGS:
+		selectTab(5)
+
+	case ID_BTN_MANAGE_PROFILES:
+		selectTab(1)
+
+	case ID_BTN_PROF_SWITCH:
+		handleProfileSwitch()
+
+	case ID_BTN_PROF_CREATE:
+		handleProfileCreate()
+
+	case ID_BTN_PROF_SAVE:
+		handleProfileSave()
+
+	case ID_BTN_PROF_DELETE:
+		handleProfileDelete()
+
+	case ID_BTN_PROF_EXPORT:
+		handleProfileExport()
+
+	case ID_BTN_PROF_IMPORT:
+		handleProfileImport()
 
 	case ID_BTN_VPN:
 		toggleVPNManual()
@@ -1872,24 +1923,389 @@ func bookmarkDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	return ret
 }
 
+func HIWORD(l uintptr) uint16 {
+	return uint16((l >> 16) & 0xFFFF)
+}
+
+func refreshProfilesUI() {
+	if hListProfiles == 0 || cfg == nil {
+		return
+	}
+	procSendMessageW.Call(hListProfiles, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+	active := cfg.EnsureActiveProfile()
+
+	var selectedIndex int = 0
+	for i, p := range cfg.Profiles {
+		prefix := "⚪ [Неактивна]  "
+		if p.ID == cfg.ActiveProfileID || (active != nil && p.ID == active.ID) {
+			prefix = "🟢 [✓ АКТИВНА] "
+			selectedIndex = i
+		}
+		itemText := fmt.Sprintf("%s• %s  |  Топик: %s  |  Брокер: %s", prefix, p.Name, p.MQTTTopic, p.MQTTBroker)
+		wText, _ := syscall.UTF16PtrFromString(itemText)
+		procSendMessageW.Call(hListProfiles, 0x0180 /* LB_ADDSTRING */, 0, uintptr(unsafe.Pointer(wText)))
+	}
+
+	if len(cfg.Profiles) > 0 {
+		procSendMessageW.Call(hListProfiles, 0x0186 /* LB_SETCURSEL */, uintptr(selectedIndex), 0)
+		onProfileSelectionChange()
+	}
+}
+
+func onProfileSelectionChange() {
+	if hListProfiles == 0 || cfg == nil || len(cfg.Profiles) == 0 {
+		return
+	}
+	sel, _, _ := procSendMessageW.Call(hListProfiles, 0x0188 /* LB_GETCURSEL */, 0, 0)
+	idx := int(int32(sel))
+	if idx < 0 || idx >= len(cfg.Profiles) {
+		return
+	}
+	p := cfg.Profiles[idx]
+	selectedProfID = p.ID
+	setControlText(hEditProfName, p.Name)
+	setControlText(hEditProfTopic, p.MQTTTopic)
+	setControlText(hEditProfBroker, p.MQTTBroker)
+}
+
+func handleProfileSwitch() {
+	if cfg == nil || len(cfg.Profiles) == 0 {
+		return
+	}
+	sel, _, _ := procSendMessageW.Call(hListProfiles, 0x0188 /* LB_GETCURSEL */, 0, 0)
+	idx := int(int32(sel))
+	if idx < 0 || idx >= len(cfg.Profiles) {
+		return
+	}
+	p := cfg.Profiles[idx]
+	target, err := cfg.SwitchProfile(p.ID)
+	if err != nil {
+		addLog("❌ Ошибка переключения: " + err.Error())
+		return
+	}
+	_ = config.Save(cfg, configPath, false)
+	setControlText(hEditMqttBr, target.MQTTBroker)
+	setControlText(hEditMqttTp, target.MQTTTopic)
+
+	if registry != nil {
+		registry.ClearAll()
+	}
+	lastPeersHash = ""
+	procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+
+	if vpnConnected && engineCtx != nil {
+		go func() {
+			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, target.MQTTBroker, target.MQTTTopic)
+		}()
+	}
+
+	refreshProfilesUI()
+	addLog(fmt.Sprintf("🟢 Активный профиль переключен на «%s» (Топик: %s)", target.Name, target.MQTTTopic))
+}
+
+func handleProfileCreate() {
+	if cfg == nil {
+		return
+	}
+	newProf := config.Profile{
+		ID:         "p-" + config.GenerateRandomHex(4),
+		Name:       fmt.Sprintf("Сеть #%d", len(cfg.Profiles)+1),
+		NetworkKey: config.GenerateRandomHex(16),
+		MQTTBroker: "tcp://broker.emqx.io:1883",
+		MQTTTopic:  "natbypass/mesh/" + config.GenerateRandomHex(8),
+		AWGPreset:  "dpi",
+		IsActive:   true,
+		CreatedAt:  time.Now(),
+	}
+	saved := cfg.AddOrUpdateProfile(newProf)
+	_ = config.Save(cfg, configPath, false)
+
+	if registry != nil {
+		registry.ClearAll()
+	}
+	lastPeersHash = ""
+	procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+
+	if vpnConnected && engineCtx != nil {
+		go func() {
+			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, saved.MQTTBroker, saved.MQTTTopic)
+		}()
+	}
+
+	refreshProfilesUI()
+	addLog(fmt.Sprintf("✅ Создан и подключен новый профиль сети «%s»", saved.Name))
+}
+
+func handleProfileSave() {
+	if cfg == nil || len(cfg.Profiles) == 0 {
+		return
+	}
+	sel, _, _ := procSendMessageW.Call(hListProfiles, 0x0188 /* LB_GETCURSEL */, 0, 0)
+	idx := int(int32(sel))
+	if idx < 0 || idx >= len(cfg.Profiles) {
+		return
+	}
+	p := &cfg.Profiles[idx]
+	name := strings.TrimSpace(getControlText(hEditProfName))
+	topic := strings.TrimSpace(getControlText(hEditProfTopic))
+	broker := strings.TrimSpace(getControlText(hEditProfBroker))
+
+	if name != "" {
+		p.Name = name
+	}
+	if topic != "" {
+		p.MQTTTopic = topic
+	}
+	if broker != "" {
+		p.MQTTBroker = broker
+	}
+
+	_ = config.Save(cfg, configPath, false)
+
+	if p.ID == cfg.ActiveProfileID {
+		setControlText(hEditMqttBr, p.MQTTBroker)
+		setControlText(hEditMqttTp, p.MQTTTopic)
+		if registry != nil {
+			registry.ClearAll()
+		}
+		lastPeersHash = ""
+		procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+		if vpnConnected && engineCtx != nil {
+			go func() {
+				tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+				tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+				rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, p.MQTTBroker, p.MQTTTopic)
+			}()
+		}
+	}
+
+	refreshProfilesUI()
+	addLog(fmt.Sprintf("💾 Настройки профиля «%s» сохранены", p.Name))
+}
+
+func handleProfileDelete() {
+	if cfg == nil || len(cfg.Profiles) <= 1 {
+		procMessageBoxW.Call(hMainWnd,
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Нельзя удалить единственный профиль сети."))),
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Удаление профиля"))),
+			0x00000030 /* MB_ICONWARNING */)
+		return
+	}
+	sel, _, _ := procSendMessageW.Call(hListProfiles, 0x0188 /* LB_GETCURSEL */, 0, 0)
+	idx := int(int32(sel))
+	if idx < 0 || idx >= len(cfg.Profiles) {
+		return
+	}
+	p := cfg.Profiles[idx]
+
+	ret, _, _ := procMessageBoxW.Call(hMainWnd,
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(fmt.Sprintf("Удалить профиль «%s»? Связь с участниками этой сети будет разорвана.", p.Name)))),
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Подтверждение удаления"))),
+		0x00000004 /* MB_YESNO */|0x00000030 /* MB_ICONWARNING */)
+	if ret != 6 /* IDYES */ {
+		return
+	}
+
+	wasActive := (p.ID == cfg.ActiveProfileID)
+	_ = cfg.DeleteProfile(p.ID)
+	_ = config.Save(cfg, configPath, false)
+
+	if wasActive {
+		active := cfg.GetActiveProfile()
+		if active != nil {
+			setControlText(hEditMqttBr, active.MQTTBroker)
+			setControlText(hEditMqttTp, active.MQTTTopic)
+			if registry != nil {
+				registry.ClearAll()
+			}
+			lastPeersHash = ""
+			procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+			if vpnConnected && engineCtx != nil {
+				go func() {
+					tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+					tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+					rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, active.MQTTBroker, active.MQTTTopic)
+				}()
+			}
+		}
+	}
+
+	refreshProfilesUI()
+	addLog(fmt.Sprintf("🗑️ Профиль «%s» успешно удален", p.Name))
+}
+
+func handleProfileExport() {
+	if cfg == nil || len(cfg.Profiles) == 0 {
+		return
+	}
+	sel, _, _ := procSendMessageW.Call(hListProfiles, 0x0188 /* LB_GETCURSEL */, 0, 0)
+	idx := int(int32(sel))
+	if idx < 0 || idx >= len(cfg.Profiles) {
+		return
+	}
+	p := cfg.Profiles[idx]
+	uri := config.ExportProfileURI(p)
+	copyToClipboard(uri)
+	addLog(fmt.Sprintf("✓ Ссылка на сеть «%s» скопирована в буфер обмена: %s", p.Name, uri))
+	buttonLabels[ID_BTN_PROF_EXPORT] = "✓ СКОПИРОВАНО!"
+	procInvalidateRect.Call(hBtnProfExport, 0, 1)
+	time.AfterFunc(2*time.Second, func() {
+		buttonLabels[ID_BTN_PROF_EXPORT] = "🔗 Скопировать ссылку"
+		procInvalidateRect.Call(hBtnProfExport, 0, 1)
+	})
+}
+
+func handleProfileImport() {
+	uri, ok := showProfileImportDialog()
+	if !ok || strings.TrimSpace(uri) == "" {
+		return
+	}
+	parsed, err := config.ImportProfileURI(strings.TrimSpace(uri))
+	if err != nil {
+		procMessageBoxW.Call(hMainWnd,
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Некорректная ссылка профиля: "+err.Error()))),
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Ошибка импорта"))),
+			0x00000010 /* MB_ICONERROR */)
+		return
+	}
+
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	parsed.IsActive = true
+	saved := cfg.AddOrUpdateProfile(*parsed)
+	_ = config.Save(cfg, configPath, false)
+
+	if registry != nil {
+		registry.ClearAll()
+	}
+	lastPeersHash = ""
+	procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+
+	if vpnConnected && engineCtx != nil {
+		go func() {
+			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, saved.MQTTBroker, saved.MQTTTopic)
+		}()
+	}
+
+	refreshProfilesUI()
+	addLog(fmt.Sprintf("📥 Успешно импортирован и активирован профиль «%s» (Топик: %s)", saved.Name, saved.MQTTTopic))
+}
+
+func showProfileImportDialog() (string, bool) {
+	hInstance, _, _ := procGetModuleHandleW.Call(0)
+	dlgClassName, _ := windows.UTF16PtrFromString("NatBypassImportDlgClass")
+	dlgTitle, _ := windows.UTF16PtrFromString("Импорт профиля P2P сети")
+
+	dlgWc := WNDCLASSEXW{
+		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),
+		Style:         3,
+		LpfnWndProc:   windows.NewCallback(bookmarkDlgProc),
+		HInstance:     hInstance,
+		HIcon:         hAppIcon,
+		HCursor:       hCursor,
+		HbrBackground: hBrushBg,
+		LpszClassName: dlgClassName,
+		HIconSm:       hAppIcon,
+	}
+	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&dlgWc)))
+
+	var parentRc RECT
+	procGetWindowRect.Call(hMainWnd, uintptr(unsafe.Pointer(&parentRc)))
+	dlgW := int32(520)
+	dlgH := int32(230)
+	dlgX := parentRc.Left + (parentRc.Right-parentRc.Left-dlgW)/2
+	dlgY := parentRc.Top + (parentRc.Bottom-parentRc.Top-dlgH)/2
+	if dlgX < 0 {
+		dlgX = 100
+	}
+	if dlgY < 0 {
+		dlgY = 100
+	}
+
+	dlgResultText = ""
+	dlgResultOK = false
+	dlgFinished = false
+
+	hDlg, _, _ := procCreateWindowExW.Call(
+		0x0008|0x00010000,
+		uintptr(unsafe.Pointer(dlgClassName)),
+		uintptr(unsafe.Pointer(dlgTitle)),
+		WS_FIXEDWINDOW|WS_VISIBLE|WS_CLIPCHILDREN,
+		uintptr(dlgX), uintptr(dlgY), uintptr(dlgW), uintptr(dlgH),
+		hMainWnd, 0, hInstance, 0,
+	)
+
+	darkMode := int32(1)
+	procDwmSetWindowAttribute.Call(hDlg, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
+
+	_ = createLabelOn(hDlg, hInstance, "📥 Импорт P2P сети NatBypass", 20, 16, 480, 22, hFontBold)
+	_ = createLabelOn(hDlg, hInstance, "Вставьте ссылку natbypass://profile?... полученную с другого устройства:", 20, 44, 480, 20, hFontNormal)
+	hDlgEdit = createEditOn(hDlg, hInstance, "", 20, 72, 465, 30, false, false, hFontNormal)
+
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "📥 Импортировать", 20, 126, 160, 38, 5001, "primary")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "🗑 Очистить", 190, 126, 130, 38, 5002, "normal")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "Отмена", 330, 126, 155, 38, 5003, "normal")
+
+	procShowWindow.Call(hDlg, SW_SHOW)
+	procSetForegroundWindow.Call(hDlg)
+	procSetFocus.Call(hDlgEdit)
+
+	procEnableWindow.Call(hMainWnd, 0)
+
+	var msg MSG
+	for !dlgFinished {
+		ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		if int32(ret) <= 0 {
+			break
+		}
+		if msg.Message == 0x0100 {
+			if msg.WParam == 0x0D {
+				dlgResultText = getControlText(hDlgEdit)
+				dlgResultOK = true
+				dlgFinished = true
+				break
+			} else if msg.WParam == 0x1B {
+				dlgResultOK = false
+				dlgFinished = true
+				break
+			}
+		}
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+
+	procEnableWindow.Call(hMainWnd, 1)
+	procSetForegroundWindow.Call(hMainWnd)
+	procDestroyWindow.Call(hDlg)
+
+	return dlgResultText, dlgResultOK
+}
+
 func applyDiagnosticsVisibility() {
 	if showDiagnostics {
-		procShowWindow.Call(navButtons[3], uintptr(SW_SHOW))
+		procShowWindow.Call(navButtons[4], uintptr(SW_SHOW))
 		buttonLabels[ID_BTN_TOGGLE_DIAG] = "🩺 Вкладка Диагностика: ВКЛ"
 		buttonTypes[ID_BTN_TOGGLE_DIAG] = "green"
 	} else {
-		procShowWindow.Call(navButtons[3], uintptr(SW_HIDE))
+		procShowWindow.Call(navButtons[4], uintptr(SW_HIDE))
 		buttonLabels[ID_BTN_TOGGLE_DIAG] = "🩺 Вкладка Диагностика: ВЫКЛ"
 		buttonTypes[ID_BTN_TOGGLE_DIAG] = "normal"
-		if currentTab == 3 {
+		if currentTab == 4 {
 			selectTab(0)
 		}
 	}
 	if hBtnToggleDiag != 0 {
 		procInvalidateRect.Call(hBtnToggleDiag, 0, 1)
 	}
-	if navButtons[3] != 0 {
-		procInvalidateRect.Call(navButtons[3], 0, 1)
+	if navButtons[4] != 0 {
+		procInvalidateRect.Call(navButtons[4], 0, 1)
 	}
 	procInvalidateRect.Call(hMainWnd, 0, 1)
 }
@@ -1940,18 +2356,19 @@ func buildModernUI(hInstance uintptr) {
 
 	navTitles := []string{
 		"🚀  Обзор и Сеть",
+		"🌐  Сети & Профили",
 		"🛡️  AmneziaWG 2.0",
 		"⚙️  Настройки",
 		"🩺  Диагностика",
 		"📋  Журнал событий",
 	}
-	navIDs := []uint32{ID_NAV_DASHBOARD, ID_NAV_AWG, ID_NAV_SETTINGS, ID_NAV_DIAG, ID_NAV_LOGS}
+	navIDs := []uint32{ID_NAV_DASHBOARD, ID_NAV_PROFILES, ID_NAV_AWG, ID_NAV_SETTINGS, ID_NAV_DIAG, ID_NAV_LOGS}
 
 	for i, t := range navTitles {
-		navButtons[i] = createOwnerDrawButton(hInstance, t, 16, 100+(i*46), 188, 38, navIDs[i], "nav")
+		navButtons[i] = createOwnerDrawButton(hInstance, t, 16, 96+(i*44), 188, 36, navIDs[i], "nav")
 	}
 	if !showDiagnostics {
-		procShowWindow.Call(navButtons[3], uintptr(SW_HIDE))
+		procShowWindow.Call(navButtons[4], uintptr(SW_HIDE))
 	}
 
 	allControls = append(allControls, lblLogo, lblVer)
@@ -1965,8 +2382,9 @@ func buildModernUI(hInstance uintptr) {
 	hLblChannels = createLabel(hInstance, "📡 Сигнальный канал: Инициализация...", cx, 74, cw, 20, hFontNormal)
 
 	hBtnVpn = createOwnerDrawButton(hInstance, "🔴 ОЖИДАНИЕ СВЯЗИ (Поиск устройств в сети...)", cx, 98, 330, 38, ID_BTN_VPN, "red")
-	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить IP", cx+340, 98, 140, 38, ID_BTN_REFRESH, "normal")
-	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ Задать имя / В закладки", cx+490, 98, 278, 38, ID_BTN_BOOKMARK_PEER, "normal")
+	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить IP", cx+340, 98, 125, 38, ID_BTN_REFRESH, "normal")
+	hBtnManageProfiles = createOwnerDrawButton(hInstance, "🌐 Профили сети...", cx+472, 98, 140, 38, ID_BTN_MANAGE_PROFILES, "normal")
+	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ В закладки", cx+620, 98, 148, 38, ID_BTN_BOOKMARK_PEER, "normal")
 
 	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "🌐 Выход в интернет: Локальный (Отключен)", cx, 142, 380, 40, ID_BTN_EXIT_NODE_SELECT, "normal")
 	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+390, 142, 378, 40, ID_BTN_TOGGLE_SUBNET, "normal")
@@ -1974,10 +2392,45 @@ func buildModernUI(hInstance uintptr) {
 	lblPeersTitle := createLabel(hInstance, "👥 Устройства в вашей сети (Прямой P2P статус и адресная книга):", cx, 190, cw, 22, hFontHeader)
 	hListPeers = createListBox(hInstance, cx, 216, cw, 440, hFontNormal)
 
-	tabPages[0] = []uintptr{hLblStatus, hLblIpInfo, hLblChannels, hBtnVpn, hBtnRefresh, hBtnBookmarkPeer, hBtnExitNodeSelect, hBtnToggleSubnetRoute, lblPeersTitle, hListPeers}
+	tabPages[0] = []uintptr{hLblStatus, hLblIpInfo, hLblChannels, hBtnVpn, hBtnRefresh, hBtnManageProfiles, hBtnBookmarkPeer, hBtnExitNodeSelect, hBtnToggleSubnetRoute, lblPeersTitle, hListPeers}
 	writeDebug("buildModernUI: страница 0 создана")
 
-	// СТРАНИЦА 1: AMNEZIAWG 2.0
+	// СТРАНИЦА 1: УПРАВЛЕНИЕ ПРОФИЛЯМИ P2P СЕТЕЙ
+	lblProfTitle := createLabel(hInstance, "🌐 Управление профилями P2P сетей (Mesh Profiles)", cx, 24, cw, 28, hFontTitle)
+	lblProfDesc := createLabel(hInstance, "Каждый профиль — это отдельная изолированная сеть. Выбирайте сеть или создавайте новые.", cx, 54, cw, 20, hFontNormal)
+
+	hListProfiles = createListBox(hInstance, cx, 80, cw, 200, hFontNormal)
+
+	hBtnProfSwitch = createOwnerDrawButton(hInstance, "⚡ Подключить выбранную сеть", cx, 290, 248, 36, ID_BTN_PROF_SWITCH, "green")
+	hBtnProfCreate = createOwnerDrawButton(hInstance, "➕ Создать новую сеть", cx+258, 290, 240, 36, ID_BTN_PROF_CREATE, "primary")
+	hBtnProfImport = createOwnerDrawButton(hInstance, "📥 Импорт по ссылке", cx+508, 290, 260, 36, ID_BTN_PROF_IMPORT, "normal")
+
+	lblProfEditHead := createLabel(hInstance, "⚙️ Параметры выбранной сети (Редактирование):", cx, 336, cw, 22, hFontHeader)
+
+	lblProfName := createLabel(hInstance, "Название сети:", cx, 368, 160, 20, hFontBold)
+	hEditProfName = createEdit(hInstance, "", cx+170, 364, 320, 28, false, false, hFontNormal)
+
+	hBtnProfExport = createOwnerDrawButton(hInstance, "🔗 Скопировать ссылку", cx+508, 364, 260, 28, ID_BTN_PROF_EXPORT, "normal")
+
+	lblProfTopic := createLabel(hInstance, "MQTT Топик (секрет):", cx, 404, 160, 20, hFontBold)
+	hEditProfTopic = createEdit(hInstance, "", cx+170, 400, 598, 28, false, false, hFontNormal)
+
+	lblProfBroker := createLabel(hInstance, "MQTT Брокер:", cx, 440, 160, 20, hFontBold)
+	hEditProfBroker = createEdit(hInstance, "", cx+170, 436, 598, 28, false, false, hFontNormal)
+
+	hBtnProfSave = createOwnerDrawButton(hInstance, "💾 Сохранить изменения профиля", cx+170, 476, 330, 38, ID_BTN_PROF_SAVE, "primary")
+	hBtnProfDelete = createOwnerDrawButton(hInstance, "🗑️ Удалить эту сеть", cx+510, 476, 258, 38, ID_BTN_PROF_DELETE, "red")
+
+	tabPages[1] = []uintptr{
+		lblProfTitle, lblProfDesc, hListProfiles,
+		hBtnProfSwitch, hBtnProfCreate, hBtnProfImport,
+		lblProfEditHead, lblProfName, hEditProfName, hBtnProfExport,
+		lblProfTopic, hEditProfTopic, lblProfBroker, hEditProfBroker,
+		hBtnProfSave, hBtnProfDelete,
+	}
+	writeDebug("buildModernUI: страница 1 создана")
+
+	// СТРАНИЦА 2: AMNEZIAWG 2.0
 	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 2.0 — Защита от блокировок DPI", cx, 36, cw, 28, hFontTitle)
 	lblAwgDesc := createLabel(hInstance, "Маскирует протокол WireGuard мусорными пакетами и заголовками (ТСПУ / РКН).", cx, 66, cw, 20, hFontNormal)
 
@@ -2024,15 +2477,15 @@ func buildModernUI(hInstance uintptr) {
 	hBtnSaveAwg = createOwnerDrawButton(hInstance, "💾 Сохранить в natbypass.conf", cx+240, 612, 270, 40, ID_BTN_SAVE_AWG, "normal")
 	hBtnOpenAwgClient = createOwnerDrawButton(hInstance, "🚀 Открыть Amnezia", cx+520, 612, 248, 40, ID_BTN_OPEN_AWG_CLIENT, "normal")
 
-	tabPages[1] = []uintptr{
+	tabPages[2] = []uintptr{
 		lblAwgTitle, lblAwgDesc, hBtnAwgStd, hBtnAwgDpi, hBtnAwgStealth, hBtnRandomAwg,
 		lblJc, hEditAwgJc, lblJmin, hEditAwgJmin, lblJmax, hEditAwgJmax, lblS1, hEditAwgS1, lblS2, hEditAwgS2,
 		lblH1, hEditAwgH1, lblH2, hEditAwgH2, lblH3, hEditAwgH3, lblH4, hEditAwgH4,
 		lblConfTitle, hEditAwgConf, hBtnCopyAwg, hBtnSaveAwg, hBtnOpenAwgClient,
 	}
-	writeDebug("buildModernUI: страница 1 создана")
+	writeDebug("buildModernUI: страница 2 создана")
 
-	// СТРАНИЦА 2: НАСТРОЙКИ
+	// СТРАНИЦА 3: НАСТРОЙКИ
 	lblSetTitle := createLabel(hInstance, "⚙️ Сигнальные каналы & Настройки приложения", cx, 24, cw, 28, hFontTitle)
 
 	lblNick := createLabel(hInstance, "🏷️ Ваше имя / Никнейм:", cx, 58, 200, 20, hFontBold)
@@ -2107,32 +2560,32 @@ func buildModernUI(hInstance uintptr) {
 	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx+140, 554, 480, 42, ID_BTN_SAVE_CFG, "primary")
 	hBtnCheckUpdate := createOwnerDrawButton(hInstance, "🚀 Проверить и обновить NatBypass с GitHub", cx+140, 604, 480, 38, ID_BTN_CHECK_UPDATE, "green")
 
-	tabPages[2] = []uintptr{
+	tabPages[3] = []uintptr{
 		lblSetTitle, lblNick, hEditMyNick, lblNickHint, lblMode, hBtnModeParallel, hBtnModeMQTT, hBtnModeTG,
 		lblMqHead, lblMqBr, hEditMqttBr, hBtnTestMqtt, lblMqPresets, hBtnMqEMQX, hBtnMqHive, hBtnMqMosq, hBtnMqEcl, lblMqTp, hEditMqttTp, lblMqTopicHint,
 		lblTgHead, lblTgToken, hEditTgToken, hBtnTestTg, lblTgChat, hEditTgChat, lblTgHint,
 		lblExitHead, hBtnAllowExit, hBtnAddLocalSubnet, lblAdvSubnets, hEditAdvSubnets,
 		lblSysHead, hBtnToggleLogs, hBtnToggleDiag, hBtnSaveCfg, hBtnCheckUpdate,
 	}
-	writeDebug("buildModernUI: страница 2 создана")
+	writeDebug("buildModernUI: страница 3 создана")
 
-	// СТРАНИЦА 3: ДИАГНОСТИКА
+	// СТРАНИЦА 4: ДИАГНОСТИКА
 	lblDiagTitle := createLabel(hInstance, "🩺 Диагностика связности & Дебаггер памяти", cx, 36, cw, 28, hFontTitle)
 	hBtnRunDiag = createOwnerDrawButton(hInstance, "🔄 Комплексный тест сети", cx, 75, 240, 40, ID_BTN_RUN_DIAG, "primary")
 	hBtnDumpStack = createOwnerDrawButton(hInstance, "⚡ Снимок памяти и потоков", cx+250, 75, 240, 40, ID_BTN_DUMP_STACK, "normal")
 	hEditDiagLog = createEdit(hInstance, "Нажмите кнопку выше для комплексной проверки сети и доступности пиров...", cx, 130, cw, 520, true, true, hFontMono)
 
-	tabPages[3] = []uintptr{lblDiagTitle, hBtnRunDiag, hBtnDumpStack, hEditDiagLog}
-	writeDebug("buildModernUI: страница 3 создана")
+	tabPages[4] = []uintptr{lblDiagTitle, hBtnRunDiag, hBtnDumpStack, hEditDiagLog}
+	writeDebug("buildModernUI: страница 4 создана")
 
-	// СТРАНИЦА 4: ЖУРНАЛ СОБЫТИЙ
+	// СТРАНИЦА 5: ЖУРНАЛ СОБЫТИЙ
 	lblLogTitle := createLabel(hInstance, "📋 Журнал событий в реальном времени", cx, 36, cw-260, 28, hFontTitle)
 	hBtnSaveLogs = createOwnerDrawButton(hInstance, "💾 Экспорт лога", cx+cw-250, 36, 120, 32, ID_BTN_SAVE_LOGS, "primary")
 	hBtnClrLogs = createOwnerDrawButton(hInstance, "🗑 Очистить", cx+cw-120, 36, 120, 32, ID_BTN_CLR_LOGS, "normal")
 	hEditLogs = createEdit(hInstance, "", cx, 75, cw, 575, true, true, hFontMono)
 
-	tabPages[4] = []uintptr{lblLogTitle, hBtnSaveLogs, hBtnClrLogs, hEditLogs}
-	writeDebug("buildModernUI: страница 4 создана")
+	tabPages[5] = []uintptr{lblLogTitle, hBtnSaveLogs, hBtnClrLogs, hEditLogs}
+	writeDebug("buildModernUI: страница 5 создана")
 
 	// СТАРТОВЫЙ ЭКРАН (STARTUP / SPLASH OVERLAY)
 	hSplashTitle = createLabel(hInstance, "🛸 NatBypass P2P Mesh Engine", cx+40, 50, cw-80, 36, hFontTitle)
@@ -2171,7 +2624,7 @@ func showSplashScreen() {
 	}
 	for _, btn := range navButtons {
 		if btn != 0 {
-			if btn == navButtons[3] && !showDiagnostics {
+			if btn == navButtons[4] && !showDiagnostics {
 				procShowWindow.Call(btn, uintptr(SW_HIDE))
 				continue
 			}
@@ -2211,7 +2664,7 @@ func selectTab(index int) {
 			}
 		}
 	}
-	if index == 1 && syncAWGPeerParams != nil && hBtnSyncAwg != 0 {
+	if index == 2 && syncAWGPeerParams != nil && hBtnSyncAwg != 0 {
 		procShowWindow.Call(hBtnSyncAwg, uintptr(SW_SHOW))
 		procInvalidateRect.Call(hBtnSyncAwg, 0, 1)
 	} else if hBtnSyncAwg != 0 {
@@ -2219,7 +2672,7 @@ func selectTab(index int) {
 	}
 	for _, btn := range navButtons {
 		if btn != 0 {
-			if btn == navButtons[3] && !showDiagnostics {
+			if btn == navButtons[4] && !showDiagnostics {
 				procShowWindow.Call(btn, uintptr(SW_HIDE))
 			} else {
 				procShowWindow.Call(btn, uintptr(SW_SHOW))
@@ -2228,9 +2681,12 @@ func selectTab(index int) {
 		}
 	}
 	if index == 1 {
+		refreshProfilesUI()
+	}
+	if index == 2 {
 		renderAWGTextFromUI()
 	}
-	if index == 4 {
+	if index == 5 {
 		flushLogsToUI()
 	}
 	procInvalidateRect.Call(hMainWnd, 0, 1)
@@ -3410,7 +3866,14 @@ func updateData() {
 	if myNick != "" {
 		devTitle = fmt.Sprintf("%s (%s)", myNick, myDevID)
 	}
-	infoText := fmt.Sprintf("Устройство: %s | 🌐 Мой IP в сети (VIP): %s | Внешний: %s | STUN: %s", devTitle, myVirtualIP, ipStr, stunStr)
+	activeProfName := "Основная сеть"
+	if cfg != nil {
+		active := cfg.EnsureActiveProfile()
+		if active != nil {
+			activeProfName = active.Name
+		}
+	}
+	infoText := fmt.Sprintf("Сеть: 🟢 [%s] | %s | VIP: %s | Внешний IP: %s", activeProfName, devTitle, myVirtualIP, ipStr)
 	setControlText(hLblIpInfo, infoText)
 
 	chText := fmt.Sprintf("📡 Активный режим: %s", activeChannelStr)

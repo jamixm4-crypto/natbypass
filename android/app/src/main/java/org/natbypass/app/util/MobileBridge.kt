@@ -163,6 +163,24 @@ object MobileBridge {
         }
     }
 
+    fun updateProfile(profileId: String, name: String, broker: String, topic: String, user: String, pass: String, tgToken: String, tgChat: Long, tgProxy: String, awgPreset: String): String {
+        val method = getMethod("updateProfile") ?: return ""
+        return try {
+            method.invoke(null, profileId, name, broker, topic, user, pass, tgToken, tgChat, tgProxy, awgPreset) as? String ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun getConfigYAML(): String {
+        val method = getMethod("getConfigYAML") ?: return "{}"
+        return try {
+            method.invoke(null) as? String ?: "{}"
+        } catch (e: Exception) {
+            "{}"
+        }
+    }
+
     fun switchProfile(profileId: String): Boolean {
         val method = getMethod("switchProfile") ?: return false
         return try {

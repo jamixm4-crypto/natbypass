@@ -920,6 +920,60 @@ func CreateProfile(name, broker, topic, user, pass, tgToken string, tgChat int64
 	return string(data)
 }
 
+// UpdateProfile обновляет существующий профиль (название, топик, брокер, AWG пресет, TG)
+func UpdateProfile(profileID, name, broker, topic, user, pass, tgToken string, tgChat int64, tgProxy, awgPreset string) string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if globalConfig == nil {
+		globalConfig = &config.Config{}
+	}
+
+	for i := range globalConfig.Profiles {
+		if globalConfig.Profiles[i].ID == profileID {
+			if name != "" {
+				globalConfig.Profiles[i].Name = name
+			}
+			if broker != "" {
+				globalConfig.Profiles[i].MQTTBroker = broker
+			}
+			if topic != "" {
+				globalConfig.Profiles[i].MQTTTopic = topic
+			}
+			globalConfig.Profiles[i].MQTTUser = user
+			globalConfig.Profiles[i].MQTTPass = pass
+			globalConfig.Profiles[i].TGToken = tgToken
+			globalConfig.Profiles[i].TGChatID = tgChat
+			globalConfig.Profiles[i].TGProxy = tgProxy
+			if awgPreset != "" {
+				globalConfig.Profiles[i].AWGPreset = awgPreset
+			}
+
+			if globalConfig.Profiles[i].IsActive || globalConfig.ActiveProfileID == profileID {
+				rebuildSignalingInternal(&globalConfig.Profiles[i])
+			}
+
+			data, _ := json.Marshal(globalConfig.Profiles[i])
+			return string(data)
+		}
+	}
+	return `{"error":"профиль не найден"}`
+}
+
+// GetConfigYAML возвращает текущий полный конфиг в формате YAML для сохранения
+func GetConfigYAML() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalConfig == nil {
+		return "{}"
+	}
+	data, err := yaml.Marshal(globalConfig)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
 // SwitchProfile переключает активный профиль по ID
 func SwitchProfile(profileID string) bool {
 	engineMu.Lock()

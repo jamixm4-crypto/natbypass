@@ -97,15 +97,27 @@
             android:orientation="horizontal">
 
             <Button
+                android:id="@+id/btnEditActiveProfile"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="✏️ Изменить"
+                android:textSize="11sp" />
+
+            <Button
                 android:id="@+id/btnShareActiveProfileQR"
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="0dp"
                 android:layout_height="36dp"
-                android:layout_marginEnd="6dp"
+                android:layout_marginEnd="4dp"
                 android:layout_weight="1"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
-                android:text="QR-код сети"
+                android:text="📱 QR-код"
                 android:textSize="11sp" />
 
             <Button
@@ -116,7 +128,7 @@
                 android:layout_weight="1"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
-                android:text="Копировать ссылку"
+                android:text="🔗 Ссылка"
                 android:textSize="11sp" />
         </LinearLayout>
     </LinearLayout>

@@ -67,6 +67,16 @@
         android:orientation="horizontal">
 
         <Button
+            android:id="@+id/btnProfileEdit"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="✏️ Изменить"
+            android:textSize="11sp" />
+
+        <Button
             android:id="@+id/btnProfileQR"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
