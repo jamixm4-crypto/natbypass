@@ -226,8 +226,17 @@ func StartEngine(configYAML string, tunFd int) string {
 				if lanIP != "" {
 					localAddr = fmt.Sprintf("%s:%d", lanIP, cfg.WireGuard.ListenPort)
 				}
+				activeProf := cfg.EnsureActiveProfile()
+				activeKey := ""
+				activeTopic := ""
+				if activeProf != nil {
+					activeKey = activeProf.NetworkKey
+					activeTopic = activeProf.MQTTTopic
+				}
 				payload := &signaling.Payload{
 					DeviceID:         devID,
+					Nickname:         globalDevName,
+					DeviceName:       globalDevName,
 					PublicKey:        crypto.KeyToHex(pubKey),
 					PublicIP:         globalPublicIP,
 					LocalAddr:        localAddr,
@@ -239,6 +248,8 @@ func StartEngine(configYAML string, tunFd int) string {
 					AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 					Timestamp:        time.Now(),
 					AWG:              awgParams,
+					NetworkKey:       activeKey,
+					Topic:            activeTopic,
 				}
 				_ = globalSigMgr.Send(ctx, payload)
 			}
@@ -260,6 +271,15 @@ func StartEngine(configYAML string, tunFd int) string {
 					return
 				}
 				if p != nil && p.DeviceID != devID {
+					activeProf := cfg.EnsureActiveProfile()
+					if activeProf != nil {
+						if activeProf.NetworkKey != "" && p.NetworkKey != "" && p.NetworkKey != activeProf.NetworkKey {
+							continue
+						}
+						if activeProf.MQTTTopic != "" && p.Topic != "" && p.Topic != activeProf.MQTTTopic {
+							continue
+						}
+					}
 					globalRegistry.Upsert(&peer.Peer{
 						DeviceID:         p.DeviceID,
 						Nickname:         p.Nickname,

@@ -3273,6 +3273,22 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 				jsonData := strings.TrimPrefix(raw, "NATBYPASS:LAN:")
 				var p signaling.Payload
 				if err := json.Unmarshal([]byte(jsonData), &p); err == nil && p.DeviceID != "" && p.DeviceID != myDevID {
+					activeKey := ""
+					activeTopic := ""
+					if cfg != nil {
+						active := cfg.EnsureActiveProfile()
+						if active != nil {
+							activeKey = active.NetworkKey
+							activeTopic = active.MQTTTopic
+						}
+					}
+					if activeKey != "" && p.NetworkKey != "" && p.NetworkKey != activeKey {
+						continue
+					}
+					if activeTopic != "" && p.Topic != "" && p.Topic != activeTopic {
+						continue
+					}
+
 					atomic.AddUint64(&packetsRecvCount, 1)
 
 					peerVIP := p.VirtualIP
@@ -3403,6 +3419,15 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						H4:   fmt.Sprintf("%d", cachedAWGParams.H4),
 					}
 				}
+				activeKey := ""
+				activeTopic := ""
+				if cfg != nil {
+					active := cfg.EnsureActiveProfile()
+					if active != nil {
+						activeKey = active.NetworkKey
+						activeTopic = active.MQTTTopic
+					}
+				}
 				payload := &signaling.Payload{
 					DeviceID:         myDevID,
 					Nickname:         myNick,
@@ -3418,6 +3443,8 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					IsExitNode:       allowExitNode,
 					AdvertisedRoutes: advSubnets,
 					AWG:              awgParams,
+					NetworkKey:       activeKey,
+					Topic:            activeTopic,
 				}
 				data, _ := json.Marshal(payload)
 				msg := "NATBYPASS:LAN:" + string(data)
@@ -3598,6 +3625,22 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					return
 				}
 				if p == nil || p.DeviceID == "" || p.DeviceID == myDevID {
+					continue
+				}
+
+				activeKey := ""
+				activeTopic := ""
+				if cfg != nil {
+					active := cfg.EnsureActiveProfile()
+					if active != nil {
+						activeKey = active.NetworkKey
+						activeTopic = active.MQTTTopic
+					}
+				}
+				if activeKey != "" && p.NetworkKey != "" && p.NetworkKey != activeKey {
+					continue
+				}
+				if activeTopic != "" && p.Topic != "" && p.Topic != activeTopic {
 					continue
 				}
 
@@ -3897,6 +3940,16 @@ func publishCurrentState(ctx context.Context) {
 		}
 	}
 
+	activeKey := ""
+	activeTopic := ""
+	if cfg != nil {
+		active := cfg.EnsureActiveProfile()
+		if active != nil {
+			activeKey = active.NetworkKey
+			activeTopic = active.MQTTTopic
+		}
+	}
+
 	payload := &signaling.Payload{
 		DeviceID:         myDevID,
 		Nickname:         myNick,
@@ -3915,6 +3968,8 @@ func publishCurrentState(ctx context.Context) {
 		OS:               "windows",
 		Platform:         "🪟 Windows",
 		CountryFlag:      network.LookupCountryFlag(ctx, ipStr),
+		NetworkKey:       activeKey,
+		Topic:            activeTopic,
 	}
 
 	if uiServer != nil {

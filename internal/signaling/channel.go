@@ -120,6 +120,9 @@ type Payload struct {
 	Platform         string     `json:"platform,omitempty"`
 	CountryFlag      string     `json:"country_flag,omitempty"`
 	Channel          string     `json:"channel,omitempty"`
+	NetworkKey       string     `json:"network_key,omitempty"`
+	NetworkID        string     `json:"network_id,omitempty"`
+	Topic            string     `json:"topic,omitempty"`
 }
 
 func (p *Payload) UnmarshalJSON(data []byte) error {
@@ -144,6 +147,9 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		UpperOS               string     `json:"OS"`
 		UpperPlatform         string     `json:"Platform"`
 		UpperCountryFlag      string     `json:"CountryFlag"`
+		UpperNetworkKey       string     `json:"NetworkKey"`
+		UpperNetworkID        string     `json:"NetworkID"`
+		UpperTopic            string     `json:"Topic"`
 		*Alias
 	}{
 		Alias: (*Alias)(p),
@@ -182,6 +188,15 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 	}
 	if p.WGPort == 0 && aux.UpperWGPort != 0 {
 		p.WGPort = aux.UpperWGPort
+	}
+	if p.NetworkKey == "" && aux.UpperNetworkKey != "" {
+		p.NetworkKey = aux.UpperNetworkKey
+	}
+	if p.NetworkID == "" && aux.UpperNetworkID != "" {
+		p.NetworkID = aux.UpperNetworkID
+	}
+	if p.Topic == "" && aux.UpperTopic != "" {
+		p.Topic = aux.UpperTopic
 	}
 	if !p.IsExitNode && aux.UpperIsExitNode {
 		p.IsExitNode = aux.UpperIsExitNode

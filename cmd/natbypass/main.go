@@ -790,6 +790,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if lanIP != "" {
 					localAddr = fmt.Sprintf("%s:%d", lanIP, wgPort)
 				}
+				activeProf := cfg.EnsureActiveProfile()
+				activeKey := ""
+				activeTopic := ""
+				if activeProf != nil {
+					activeKey = activeProf.NetworkKey
+					activeTopic = activeProf.MQTTTopic
+				}
 				payload := &signaling.Payload{
 					DeviceID:         deviceID,
 					Nickname:         nick,
@@ -808,6 +815,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					OS:               rawOS,
 					Platform:         osEmoji + " " + platformName,
 					CountryFlag:      flag,
+					NetworkKey:       activeKey,
+					Topic:            activeTopic,
 				}
 				_ = sigMgr.Send(engineCtx, payload)
 
@@ -843,6 +852,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					}
 					if p.DeviceID == "" || p.DeviceID == deviceID {
 						continue
+					}
+
+					activeProf := cfg.EnsureActiveProfile()
+					if activeProf != nil {
+						if activeProf.NetworkKey != "" && p.NetworkKey != "" && p.NetworkKey != activeProf.NetworkKey {
+							continue
+						}
+						if activeProf.MQTTTopic != "" && p.Topic != "" && p.Topic != activeProf.MQTTTopic {
+							continue
+						}
 					}
 
 					if p.Offline || p.Leave {
