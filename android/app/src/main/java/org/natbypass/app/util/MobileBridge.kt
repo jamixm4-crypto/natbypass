@@ -63,6 +63,15 @@ object MobileBridge {
         } catch (e: Exception) {}
     }
 
+    fun getVirtualIP(): String {
+        val method = getMethod("getVirtualIP") ?: return "10.200.0.10"
+        return try {
+            method.invoke(null) as? String ?: "10.200.0.10"
+        } catch (e: Exception) {
+            "10.200.0.10"
+        }
+    }
+
     fun getStatusJSON(): String {
         val method = getMethod("getStatusJSON") ?: return "{}"
         return try {

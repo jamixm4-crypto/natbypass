@@ -75,6 +75,7 @@ var (
 	globalDevName   string
 	globalPublicIP  string
 	globalSTUN      string
+	globalVirtualIP string = ""
 	globalStarted   time.Time
 	globalExitNode  string
 	globalAWGPreset string = "dpi"
@@ -84,6 +85,43 @@ var (
 	globalRxBytes   uint64
 	logger          zerolog.Logger
 )
+
+func deriveInitialVirtualIP(devID string) string {
+	if devID == "" {
+		return "10.200.0.10"
+	}
+	var sum uint32
+	for i := 0; i < len(devID); i++ {
+		sum = (sum * 31) + uint32(devID[i])
+	}
+	octet := 10 + int(sum%240) // range 10..249
+	return fmt.Sprintf("10.200.0.%d", octet)
+}
+
+func negotiateVirtualIP() {
+	if globalRegistry == nil {
+		return
+	}
+	peers := globalRegistry.List()
+	usedIPs := make(map[string]string)
+	for _, p := range peers {
+		if p.Online && p.VirtualIP != "" {
+			usedIPs[p.VirtualIP] = p.DeviceID
+		}
+	}
+	conflictDev, hasConflict := usedIPs[globalVirtualIP]
+	if hasConflict && conflictDev != "" {
+		if globalDevID > conflictDev {
+			for i := 10; i <= 250; i++ {
+				cand := fmt.Sprintf("10.200.0.%d", i)
+				if _, used := usedIPs[cand]; !used {
+					globalVirtualIP = cand
+					break
+				}
+			}
+		}
+	}
+}
 
 func init() {
 	multiWriter := io.MultiWriter(os.Stdout, globalLogs)
@@ -126,6 +164,9 @@ func StartEngine(configYAML string, tunFd int) string {
 		devID = "Android-" + crypto.KeyToHex(pubKey)[:8]
 	}
 	globalDevID = devID
+	if globalVirtualIP == "" {
+		globalVirtualIP = deriveInitialVirtualIP(devID)
+	}
 	if cfg.App.DeviceName != "" {
 		globalDevName = cfg.App.DeviceName
 	} else if globalDevName == "" {
@@ -243,7 +284,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					STUNAddr:         globalSTUN,
 					WGPubKey:         wgKey.PublicKey,
 					WGPort:           cfg.WireGuard.ListenPort,
-					VirtualIP:        "10.200.0.100",
+					VirtualIP:        globalVirtualIP,
 					IsExitNode:       cfg.Network.AllowExitNode,
 					AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 					Timestamp:        time.Now(),
@@ -301,6 +342,7 @@ func StartEngine(configYAML string, tunFd int) string {
 						Online:           true,
 						AWG:              p.AWG,
 					})
+					negotiateVirtualIP()
 
 					// Немедленно посылаем UDP Hole Punch пробу по всем 3 векторам
 					if puncher != nil {
@@ -537,6 +579,19 @@ func TestMQTT(broker, topic, user, pass string) string {
 	return fmt.Sprintf("✓ Успешное подключение к брокеру %s (топик: %s)!", broker, topic)
 }
 
+// GetVirtualIP возвращает текущий виртуальный IP устройства в P2P сети
+func GetVirtualIP() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalVirtualIP != "" {
+		return globalVirtualIP
+	}
+	if globalDevID != "" {
+		return deriveInitialVirtualIP(globalDevID)
+	}
+	return "10.200.0.10"
+}
+
 // GetPublicIP возвращает текущий публичный IP
 func GetPublicIP() string {
 	engineMu.Lock()
@@ -679,7 +734,7 @@ func GetFullTelemetryJSON() string {
 		"device_name":     globalDevName,
 		"public_ip":       globalPublicIP,
 		"stun_addr":       globalSTUN,
-		"virtual_ip":      "10.200.0.100",
+		"virtual_ip":      globalVirtualIP,
 		"peers_count":     peersCount,
 		"direct_p2p":      directCount > 0,
 		"direct_count":    directCount,

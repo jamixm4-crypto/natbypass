@@ -175,6 +175,9 @@ class MainActivity : AppCompatActivity() {
                     val aName = activeProfile.optString("name", "Основная сеть")
                     val aTopic = activeProfile.optString("mqtt_topic", "")
                     val aBroker = activeProfile.optString("mqtt_broker", "tcp://broker.emqx.io:1883")
+                    val aTgToken = activeProfile.optString("tg_token", "")
+                    val aTgChat = activeProfile.optLong("tg_chat_id", 0L)
+                    val aTgProxy = activeProfile.optString("tg_proxy", "")
                     val activeId = activeProfile.optString("id", "")
 
                     tvActiveName.text = aName
@@ -182,7 +185,7 @@ class MainActivity : AppCompatActivity() {
                     binding.tvCurrentProfileName.text = aName
 
                     btnEditActive.setOnClickListener {
-                        showEditProfileDialog(activeId, aName, aTopic, aBroker) {
+                        showEditProfileDialog(activeId, aName, aTopic, aBroker, aTgToken, aTgChat, aTgProxy) {
                             reloadProfiles()
                             pollPeers()
                         }
@@ -206,6 +209,9 @@ class MainActivity : AppCompatActivity() {
                     val pName = p.optString("name", "")
                     val pTopic = p.optString("mqtt_topic", "")
                     val pBroker = p.optString("mqtt_broker", "tcp://broker.emqx.io:1883")
+                    val pTgToken = p.optString("tg_token", "")
+                    val pTgChat = p.optLong("tg_chat_id", 0L)
+                    val pTgProxy = p.optString("tg_proxy", "")
                     val isActive = p.optBoolean("is_active", false)
 
                     if (isActive) continue
@@ -236,7 +242,7 @@ class MainActivity : AppCompatActivity() {
                     btnSwitch.setOnClickListener { switchAction() }
 
                     btnEdit.setOnClickListener {
-                        showEditProfileDialog(pId, pName, pTopic, pBroker) {
+                        showEditProfileDialog(pId, pName, pTopic, pBroker, pTgToken, pTgChat, pTgProxy) {
                             reloadProfiles()
                             pollPeers()
                         }
@@ -300,6 +306,9 @@ class MainActivity : AppCompatActivity() {
         currentName: String,
         currentTopic: String,
         currentBroker: String,
+        currentTgToken: String = "",
+        currentTgChat: Long = 0L,
+        currentTgProxy: String = "",
         onDone: () -> Unit
     ) {
         val dialog = Dialog(this)
@@ -315,21 +324,30 @@ class MainActivity : AppCompatActivity() {
         val etName = view.findViewById<EditText>(R.id.etEditProfileName)
         val etTopic = view.findViewById<EditText>(R.id.etEditProfileTopic)
         val etBroker = view.findViewById<EditText>(R.id.etEditProfileBroker)
+        val etTgToken = view.findViewById<EditText>(R.id.etEditProfileTgToken)
+        val etTgChat = view.findViewById<EditText>(R.id.etEditProfileTgChat)
+        val etTgProxy = view.findViewById<EditText>(R.id.etEditProfileTgProxy)
         val btnCancel = view.findViewById<Button>(R.id.btnCancelEditProfile)
         val btnSave = view.findViewById<Button>(R.id.btnSaveEditProfile)
 
         etName.setText(currentName)
         etTopic.setText(currentTopic)
         etBroker.setText(currentBroker)
+        if (currentTgToken.isNotEmpty()) etTgToken?.setText(currentTgToken)
+        if (currentTgChat != 0L) etTgChat?.setText(currentTgChat.toString())
+        if (currentTgProxy.isNotEmpty()) etTgProxy?.setText(currentTgProxy)
 
         btnCancel.setOnClickListener { dialog.dismiss() }
         btnSave.setOnClickListener {
             val name = etName.text.toString().trim()
             val topic = etTopic.text.toString().trim()
             val broker = etBroker.text.toString().trim()
+            val tgToken = etTgToken?.text?.toString()?.trim() ?: ""
+            val tgChat = etTgChat?.text?.toString()?.trim()?.toLongOrNull() ?: 0L
+            val tgProxy = etTgProxy?.text?.toString()?.trim() ?: ""
 
             org.natbypass.app.util.MobileBridge.updateProfile(
-                profileId, name, broker, topic, "", "", "", 0L, "", "dpi"
+                profileId, name, broker, topic, "", "", tgToken, tgChat, tgProxy, "dpi"
             )
             try {
                 val yaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
@@ -359,6 +377,9 @@ class MainActivity : AppCompatActivity() {
         val etName = view.findViewById<EditText>(R.id.etNewProfileName)
         val etTopic = view.findViewById<EditText>(R.id.etNewProfileTopic)
         val etBroker = view.findViewById<EditText>(R.id.etNewProfileBroker)
+        val etTgToken = view.findViewById<EditText>(R.id.etNewProfileTgToken)
+        val etTgChat = view.findViewById<EditText>(R.id.etNewProfileTgChat)
+        val etTgProxy = view.findViewById<EditText>(R.id.etNewProfileTgProxy)
         val btnCancel = view.findViewById<Button>(R.id.btnCancelCreateProfile)
         val btnSubmit = view.findViewById<Button>(R.id.btnSubmitCreateProfile)
 
@@ -367,9 +388,12 @@ class MainActivity : AppCompatActivity() {
             val name = etName.text.toString().trim()
             val topic = etTopic.text.toString().trim()
             val broker = etBroker.text.toString().trim()
+            val tgToken = etTgToken?.text?.toString()?.trim() ?: ""
+            val tgChat = etTgChat?.text?.toString()?.trim()?.toLongOrNull() ?: 0L
+            val tgProxy = etTgProxy?.text?.toString()?.trim() ?: ""
 
             org.natbypass.app.util.MobileBridge.createProfile(
-                name, broker, topic, "", "", "", 0L, "", "dpi", true
+                name, broker, topic, "", "", tgToken, tgChat, tgProxy, "dpi", true
             )
             try {
                 val yaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
@@ -634,7 +658,7 @@ class MainActivity : AppCompatActivity() {
     private fun pollStatus() {
         var pubIp = ""
         var stun = ""
-        var vip = "10.200.0.100"
+        var vip = org.natbypass.app.util.MobileBridge.getVirtualIP().ifEmpty { "10.200.0.10" }
         var curChannel = "MQTT"
         var isRunning = false
 
@@ -644,7 +668,7 @@ class MainActivity : AppCompatActivity() {
             isRunning = obj.optBoolean("running", false)
             pubIp = obj.optString("public_ip", "")
             stun = obj.optString("stun_addr", "")
-            vip = obj.optString("virtual_ip", "10.200.0.100")
+            vip = obj.optString("virtual_ip", vip)
             curChannel = obj.optString("channel", "MQTT")
         } catch (e: Exception) {
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
