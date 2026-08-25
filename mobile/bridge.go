@@ -1269,8 +1269,18 @@ func PingPeer(deviceID string) int64 {
 	if peerObj.STUNAddr != "" && peerObj.STUNAddr != peerObj.ActiveEndpoint {
 		_ = p.SendHolePunchProbe(peerObj.STUNAddr)
 	}
+	if peerObj.IPv6Addr != "" && peerObj.IPv6Addr != peerObj.ActiveEndpoint {
+		_ = p.SendHolePunchProbe(peerObj.IPv6Addr)
+	}
 	if peerObj.LocalAddr != "" {
 		_ = p.SendHolePunchProbe(peerObj.LocalAddr)
+	}
+	if peerObj.PublicIP != "" {
+		_ = p.SendHolePunchProbe(fmt.Sprintf("%s:47832", peerObj.PublicIP))
+		_ = p.SendHolePunchProbe(fmt.Sprintf("%s:51820", peerObj.PublicIP))
+		if peerObj.WGPort > 0 && peerObj.WGPort != 47832 && peerObj.WGPort != 51820 {
+			_ = p.SendHolePunchProbe(fmt.Sprintf("%s:%d", peerObj.PublicIP, peerObj.WGPort))
+		}
 	}
 
 	// Ждем до 400мс реального эхо-ответа

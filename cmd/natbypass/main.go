@@ -802,10 +802,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 
 		if cfg.Network.UpnpEnabled {
-			upnpClient := network.NewUPnPClient()
-			if upnpClient.IsAvailable() {
-				log.Info().Msg("UPnP доступен")
-			}
+			go func() {
+				upnpClient := network.NewUPnPClient()
+				if err := upnpClient.AddPortMapping(engineCtx, 47832, 47832, "UDP", "NatBypass P2P Puncher", 3600); err == nil {
+					log.Info().Int("port", 47832).Msg("✅ [UPnP] Порт 47832 UDP успешно открыт на роутере (Full Cone P2P активен)")
+				}
+				if cfg.WireGuard.ListenPort > 0 {
+					_ = upnpClient.AddPortMapping(engineCtx, cfg.WireGuard.ListenPort, cfg.WireGuard.ListenPort, "UDP", "NatBypass WireGuard", 3600)
+				}
+			}()
 		}
 
 		if uiServer != nil {
