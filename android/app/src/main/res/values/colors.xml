@@ -21,6 +21,9 @@
     <color name="accent_blue">#3B82F6</color>
     <color name="accent_indigo">#6366F1</color>
     <color name="accent_purple">#818CF8</color>
+    <color name="accent_neon">#3B82F6</color>
+    <color name="cyan_glow">#38BDF8</color>
+    <color name="purple_glow">#818CF8</color>
     
     <!-- Clean Functional Status Indicators ONLY -->
     <color name="green_online">#10B981</color>
