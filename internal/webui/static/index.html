@@ -1229,44 +1229,37 @@
   </div>
 
     <!-- QR Code Modal -->
-  <div id="qrModal" class="modal-overlay">
-    <div class="modal-box" style="width: 500px; text-align: center;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
-        <h3 style="font-size: 1.15rem; font-weight: 800; display:flex; align-items:center; gap:8px;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-          QR-код для Android и WireGuard
+  <div id="qrModal" class="modal-overlay" style="z-index: 1200 !important;">
+    <div class="modal-box" style="width: 430px; max-width: 94%; max-height: 90vh; overflow-y: auto; text-align: center; padding: 18px 20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+        <h3 style="font-size: 1.05rem; font-weight: 800; display:flex; align-items:center; gap:6px; margin:0;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          QR-код для подключения
         </h3>
-        <button onclick="closeQRModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;">✕</button>
+        <button onclick="closeQRModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem; line-height:1;">✕</button>
       </div>
 
       <!-- QR Mode Selector -->
-      <div class="segmented-group" style="width:100%; justify-content:center; margin-bottom: 16px; gap:2px;">
-        <button id="btnQrModeProfile" onclick="switchQRMode('profile')" class="seg-btn" style="flex:1; padding:5px 6px; font-size:0.74rem;">🔒 Профиль сети</button>
-        <button id="btnQrModeSync" onclick="switchQRMode('sync')" class="seg-btn active" style="flex:1; padding:5px 6px; font-size:0.74rem;">⚡ Android Sync</button>
-        <button id="btnQrModeAwg" onclick="switchQRMode('awg')" class="seg-btn" style="flex:1; padding:5px 6px; font-size:0.74rem;">🛡️ AWG .conf</button>
-        <button id="btnQrModeInvite" onclick="switchQRMode('invite')" class="seg-btn" style="flex:1; padding:5px 6px; font-size:0.74rem;">🔗 Инвайт</button>
+      <div class="segmented-group" style="width:100%; justify-content:center; margin-bottom: 12px; gap:2px; padding:3px;">
+        <button id="btnQrModeProfile" onclick="switchQRMode('profile')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">🔒 Профиль</button>
+        <button id="btnQrModeSync" onclick="switchQRMode('sync')" class="seg-btn active" style="flex:1; padding:4px 4px; font-size:0.72rem;">⚡ Sync</button>
+        <button id="btnQrModeAwg" onclick="switchQRMode('awg')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">🛡️ AWG</button>
+        <button id="btnQrModeInvite" onclick="switchQRMode('invite')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">🔗 Инвайт</button>
       </div>
 
       <!-- QR Canvas Card with high contrast border -->
-      <div style="display:inline-block; padding: 16px; background: #ffffff; border-radius: 16px; box-shadow: 0 0 35px rgba(168, 85, 247, 0.4); margin-bottom: 16px;">
-        <div id="qrContainer" style="width:230px; height:230px; display:flex; align-items:center; justify-content:center;"></div>
+      <div style="display:inline-block; padding: 10px; background: #ffffff; border-radius: 14px; box-shadow: 0 0 25px rgba(168, 85, 247, 0.35); margin-bottom: 10px;">
+        <div id="qrContainer" style="width:170px; height:170px; display:flex; align-items:center; justify-content:center;"></div>
       </div>
 
-      <p id="qrDescText" style="color: var(--text-muted); font-size: 0.84rem; line-height: 1.5; margin-bottom: 16px;">
-        Откройте камеру в приложении <b>NatBypass Android</b> и отсканируйте код для мгновенной синхронизации всех параметров сети.
+      <p id="qrDescText" style="color: var(--text-muted); font-size: 0.78rem; line-height: 1.35; margin: 0 0 12px 0;">
+        Отсканируйте камерой в приложении <b>NatBypass Android</b>.
       </p>
 
-      <div class="form-group" style="text-align: left; margin-bottom: 16px;">
-        <label class="form-label" style="display:flex; justify-content:space-between;">
-          <span>Текст / Данные QR-кода:</span>
-          <a href="javascript:void(0)" onclick="copyQRText()" style="color:#38bdf8; text-decoration:none; font-size:0.75rem;">📋 Скопировать</a>
-        </label>
-        <textarea id="qrRawText" class="form-input mono" rows="3" readonly style="font-size:0.78rem; line-height:1.3; resize:none;"></textarea>
-      </div>
-
-      <div style="display:flex; justify-content:flex-end; gap: 10px;">
-        <button onclick="closeQRModal()" class="btn btn-glass">Закрыть</button>
-        <button onclick="copyQRText()" class="btn btn-neon">📋 Скопировать данные</button>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <input type="text" id="qrRawText" class="form-input mono" readonly style="font-size:0.74rem; height:34px; padding:4px 10px; flex:1;" />
+        <button onclick="copyQRText()" class="btn btn-neon" style="padding:4px 12px; height:34px; font-size:0.76rem; flex-shrink:0;">📋 Скопировать</button>
+        <button onclick="closeQRModal()" class="btn btn-glass" style="padding:4px 12px; height:34px; font-size:0.76rem; flex-shrink:0;">Закрыть</button>
       </div>
     </div>
   </div>
@@ -1427,11 +1420,12 @@
         let currentQRMode = 'sync';
     let qrInstance = null;
 
-    function openQRModal(mode) {
+    async function openQRModal(mode) {
       if (mode) currentQRMode = mode;
-      document.getElementById('qrModal').classList.add('active');
-      document.getElementById('qrModal').style.display = 'flex';
-      switchQRMode(currentQRMode);
+      const modal = document.getElementById('qrModal');
+      modal.classList.add('active');
+      modal.style.display = 'flex';
+      await switchQRMode(currentQRMode);
     }
 
     function closeQRModal() {
@@ -1451,8 +1445,11 @@
       const descEl = document.getElementById('qrDescText');
 
       if (mode === 'profile') {
+        if (!currentActiveProfile) {
+          await loadProfiles();
+        }
         const profName = currentActiveProfile ? currentActiveProfile.name : 'Сеть';
-        descEl.innerHTML = 'Отсканируйте камерой в приложении <b>NatBypass Android</b> для мгновенного подключения к сети «' + escapeHtml(profName) + '».';
+        descEl.innerHTML = 'Отсканируйте камерой в приложении <b>NatBypass Android</b> для подключения к сети «' + escapeHtml(profName) + '».';
         if (currentActiveProfile) {
           try {
             const res = await fetch('/api/profiles/export?id=' + currentActiveProfile.id);
@@ -1494,14 +1491,16 @@
       }
 
       document.getElementById('qrRawText').value = qrPayload;
-      renderQR(qrPayload);
+      requestAnimationFrame(() => {
+        renderQR(qrPayload);
+      });
     }
 
     function renderQR(text) {
       const container = document.getElementById('qrContainer');
       container.innerHTML = '';
       if (!text) {
-        container.innerHTML = '<span style="color:#666; font-size:0.8rem;">Нет данных</span>';
+        container.innerHTML = '<span style="color:#888; font-size:0.78rem;">Загрузка QR...</span>';
         return;
       }
 
@@ -1509,11 +1508,11 @@
         try {
           qrInstance = new QRCode(container, {
             text: text,
-            width: 230,
-            height: 230,
+            width: 170,
+            height: 170,
             colorDark: "#000000",
             colorLight: "#ffffff",
-            correctLevel: (text.length > 250) ? QRCode.CorrectLevel.L : QRCode.CorrectLevel.M
+            correctLevel: (text.length > 200) ? QRCode.CorrectLevel.L : QRCode.CorrectLevel.M
           });
           return;
         } catch(e) {
@@ -1523,11 +1522,11 @@
 
       // Offline Fallback using online/offline Google Chart or canvas message
       const img = document.createElement('img');
-      img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=230x230&data=' + encodeURIComponent(text);
-      img.style.width = '230px';
-      img.style.height = '230px';
+      img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=170x170&data=' + encodeURIComponent(text);
+      img.style.width = '170px';
+      img.style.height = '170px';
       img.onerror = () => {
-        container.innerHTML = '<div style="color:#000; font-size:0.75rem; word-break:break-all; padding:10px;"><b>Скопируйте текст вручную:</b><br>' + text.substring(0, 100) + '...</div>';
+        container.innerHTML = '<div style="color:#000; font-size:0.75rem; word-break:break-all; padding:6px;"><b>Данные QR-кода:</b><br>' + text.substring(0, 80) + '...</div>';
       };
       container.appendChild(img);
     }
