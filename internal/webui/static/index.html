@@ -188,7 +188,7 @@
       flex: 1;
       display: flex;
       flex-direction: column;
-      padding: 12px 18px;
+      padding: 0 18px 18px 18px;
       position: relative;
       overflow-y: auto;
       min-width: 0;
@@ -202,15 +202,15 @@
       justify-content: space-between;
       align-items: center;
       gap: 8px;
-      margin-bottom: 12px;
-      padding: 0 0 8px 0;
+      margin-bottom: 16px;
+      padding: 12px 0 10px 0;
       position: sticky;
       top: 0;
-      background: rgba(11, 15, 25, 0.92);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
+      background: rgba(11, 15, 25, 0.96);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       z-index: 50;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       overflow-x: auto;
       scrollbar-width: none;
     }
@@ -1325,8 +1325,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
           <h4 id="activeProfileName" style="font-size:1.2rem; font-weight:800; color:#ffffff; margin:0;">Основная сеть</h4>
           <div style="display:flex; gap:6px;">
-            <button onclick="shareActiveProfileQR()" class="btn-pill" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;">📱 QR-код</button>
-            <button onclick="copyActiveProfileURI()" class="btn-pill" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#ffffff; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;">🔗 Ссылка</button>
+            <button onclick="editActiveProfile()" class="btn-pill" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;" title="Изменить параметры этой сети">✏️ Изменить</button>
+            <button onclick="shareActiveProfileQR()" class="btn-pill" style="background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); color:#c084fc; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;" title="Показать QR-код">📱 QR-код</button>
+            <button onclick="copyActiveProfileURI()" class="btn-pill" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#ffffff; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;" title="Скопировать ссылку">🔗 Ссылка</button>
           </div>
         </div>
         <div style="font-size:0.78rem; color:var(--text-muted); font-family:monospace; line-height:1.4;">
@@ -1489,6 +1490,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const modal = document.getElementById('qrModal');
       modal.classList.add('active');
       modal.style.display = 'flex';
+      if (!currentProfiles || currentProfiles.length === 0 || !currentActiveProfile) {
+        try {
+          await loadProfiles();
+        } catch(e) {}
+      }
       await switchQRMode(currentQRMode);
     }
 
@@ -1515,17 +1521,22 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const found = currentProfiles.find(p => p.id === selectedQRProfileId);
           if (found) prof = found;
         }
+        if (!prof && currentProfiles && currentProfiles.length > 0) {
+          prof = currentProfiles[0];
+        }
         if (!prof) {
           try {
-            await loadProfiles();
-            prof = currentActiveProfile;
-            if (selectedQRProfileId && currentProfiles) {
-              const found = currentProfiles.find(p => p.id === selectedQRProfileId);
-              if (found) prof = found;
+            const res = await fetch('/api/profiles');
+            const json = await res.json();
+            if (json.ok && json.data) {
+              currentProfiles = json.data.profiles || [];
+              currentActiveProfile = json.data.active_profile || (currentProfiles.length > 0 ? currentProfiles[0] : null);
+              prof = currentActiveProfile;
             }
           } catch(e) {}
         }
-        const profName = prof ? prof.name : 'Сеть';
+
+        const profName = prof ? prof.name : 'Сеть #1';
         descEl.innerHTML = 'Отсканируйте камерой в приложении <b>NatBypass Android</b> для подключения к сети «' + escapeHtml(profName) + '».';
         
         if (prof) {
@@ -1538,8 +1549,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           } catch(e) {}
 
           if (!qrPayload) {
-            qrPayload = `natbypass://profile?id=${encodeURIComponent(prof.id)}&name=${encodeURIComponent(prof.name)}&topic=${encodeURIComponent(prof.mqtt_topic)}&broker=${encodeURIComponent(prof.mqtt_broker || 'tcp://broker.emqx.io:1883')}${prof.network_key ? '&key=' + encodeURIComponent(prof.network_key) : ''}${prof.awg_preset ? '&awg=' + encodeURIComponent(prof.awg_preset) : ''}`;
+            qrPayload = `natbypass://profile?id=${encodeURIComponent(prof.id)}&name=${encodeURIComponent(prof.name)}&topic=${encodeURIComponent(prof.mqtt_topic || 'natbypass/mesh/default')}&broker=${encodeURIComponent(prof.mqtt_broker || 'tcp://broker.emqx.io:1883')}${prof.network_key ? '&key=' + encodeURIComponent(prof.network_key) : ''}${prof.awg_preset ? '&awg=' + encodeURIComponent(prof.awg_preset) : ''}`;
           }
+        } else {
+          const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'natbypass/mesh/default';
+          const cfgBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim() || 'tcp://broker.emqx.io:1883';
+          qrPayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
         }
       } else if (mode === 'sync') {
         descEl.innerHTML = 'Откройте сканер в приложении <b>NatBypass Android</b>. Приложение автоматически скопирует токен бота, чат и сетевые настройки.';
@@ -1586,27 +1601,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         return;
       }
 
-      try {
-        if (typeof QRCode !== 'undefined') {
-          new QRCode(container, {
-            text: text,
-            width: 170,
-            height: 170,
-            colorDark: "#000000",
-            colorLight: "#ffffff",
-            correctLevel: 1 // L
-          });
-          // Check if SVG was actually rendered inside container
-          if (container.querySelector('svg') || container.querySelector('canvas')) {
-            return;
-          }
-        }
-      } catch(e) {
-        console.warn('QRCode JS render error, using backend generator:', e);
-      }
-
-      // Fast, 100% reliable local backend QR generator (zero external network requests)
-      container.innerHTML = '';
       const img = document.createElement('img');
       img.src = '/api/qr/image?data=' + encodeURIComponent(text);
       img.style.width = '170px';
@@ -1614,8 +1608,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       img.style.borderRadius = '8px';
       img.style.display = 'block';
       img.style.margin = '0 auto';
+      img.alt = 'QR-код для подключения';
       img.onerror = () => {
-        container.innerHTML = '<div style="color:#000; font-size:0.75rem; word-break:break-all; padding:6px;"><b>Данные:</b><br>' + escapeHtml(text.substring(0, 80)) + '...</div>';
+        container.innerHTML = '<div style="color:#000; font-size:0.75rem; word-break:break-all; padding:6px; line-height:1.3;"><b>Данные:</b><br>' + escapeHtml(text.substring(0, 100)) + '...</div>';
       };
       container.appendChild(img);
     }
@@ -2990,6 +2985,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       } else {
         closeProfileModal();
         openQRModal('profile');
+      }
+    }
+
+    async function editActiveProfile() {
+      if (currentActiveProfile) {
+        closeProfileModal();
+        openEditProfileModal(currentActiveProfile.id, currentActiveProfile.name, currentActiveProfile.mqtt_topic, currentActiveProfile.mqtt_broker || 'tcp://broker.emqx.io:1883');
       }
     }
 

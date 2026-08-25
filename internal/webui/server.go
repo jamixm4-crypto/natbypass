@@ -269,7 +269,7 @@ func (s *Server) Start(ctx context.Context) error {
 // authMiddleware — HTTP Basic Auth защита (активна только если задан пароль)
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.password == "" {
+		if s.password == "" || r.URL.Path == "/api/qr/image" {
 			next.ServeHTTP(w, r)
 			return
 		}
