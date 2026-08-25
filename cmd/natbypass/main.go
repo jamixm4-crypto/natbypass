@@ -856,10 +856,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 					activeProf := cfg.EnsureActiveProfile()
 					if activeProf != nil {
-						if activeProf.NetworkKey != "" && p.NetworkKey != "" && p.NetworkKey != activeProf.NetworkKey {
-							continue
+						match := false
+						if activeProf.NetworkKey != "" && p.NetworkKey == activeProf.NetworkKey {
+							match = true
+						} else if activeProf.MQTTTopic != "" && p.Topic == activeProf.MQTTTopic {
+							match = true
+						} else if activeProf.NetworkKey == "" && activeProf.MQTTTopic == "" {
+							match = true
 						}
-						if activeProf.MQTTTopic != "" && p.Topic != "" && p.Topic != activeProf.MQTTTopic {
+						if !match {
 							continue
 						}
 					}

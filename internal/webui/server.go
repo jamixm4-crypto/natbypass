@@ -210,6 +210,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Профили сети (Multi-Profile Mesh Networks)
 	mux.HandleFunc("/api/profiles", s.handleProfilesList)
 	mux.HandleFunc("/api/profiles/create", s.handleProfileCreate)
+	mux.HandleFunc("/api/profiles/update", s.handleProfileUpdate)
 	mux.HandleFunc("/api/profiles/switch", s.handleProfileSwitch)
 	mux.HandleFunc("/api/profiles/delete", s.handleProfileDelete)
 	mux.HandleFunc("/api/profiles/export", s.handleProfileExport)
@@ -1776,6 +1777,85 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"profile": saved,
 		"uri":     config.ExportProfileURI(*saved),
+	}, "")
+}
+
+// handleProfileUpdate — POST /api/profiles/update — редактирование существующего профиля
+func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		MQTTBroker string `json:"mqtt_broker"`
+		MQTTTopic  string `json:"mqtt_topic"`
+		MQTTUser   string `json:"mqtt_user"`
+		MQTTPass   string `json:"mqtt_pass"`
+		TGToken    string `json:"tg_token"`
+		TGChatID   int64  `json:"tg_chat_id"`
+		TGProxy    string `json:"tg_proxy"`
+		AWGPreset  string `json:"awg_preset"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан ID профиля или ошибка JSON")
+		return
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка загрузки конфига")
+		return
+	}
+
+	var target *config.Profile
+	for i := range cfg.Profiles {
+		if cfg.Profiles[i].ID == req.ID {
+			if req.Name != "" {
+				cfg.Profiles[i].Name = req.Name
+			}
+			if req.MQTTBroker != "" {
+				cfg.Profiles[i].MQTTBroker = req.MQTTBroker
+			}
+			if req.MQTTTopic != "" {
+				cfg.Profiles[i].MQTTTopic = req.MQTTTopic
+			}
+			cfg.Profiles[i].MQTTUser = req.MQTTUser
+			cfg.Profiles[i].MQTTPass = req.MQTTPass
+			cfg.Profiles[i].TGToken = req.TGToken
+			cfg.Profiles[i].TGChatID = req.TGChatID
+			cfg.Profiles[i].TGProxy = req.TGProxy
+			if req.AWGPreset != "" {
+				cfg.Profiles[i].AWGPreset = req.AWGPreset
+			}
+			target = &cfg.Profiles[i]
+			break
+		}
+	}
+
+	if target == nil {
+		s.jsonResponse(w, http.StatusNotFound, nil, "профиль не найден")
+		return
+	}
+
+	if target.ID == cfg.ActiveProfileID {
+		cfg.SyncSignalingWithProfile(target)
+		if s.onProfileSwitch != nil {
+			_ = s.onProfileSwitch(target)
+		}
+		if s.registry != nil {
+			s.registry.ClearAll()
+		}
+	}
+
+	_ = config.Save(cfg, s.configPath, false)
+	s.AddEvent("info", "Обновлен профиль сети: "+target.Name, "Топик: "+target.MQTTTopic)
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":      true,
+		"profile": target,
+		"uri":     config.ExportProfileURI(*target),
 	}, "")
 }
 

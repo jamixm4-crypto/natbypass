@@ -1377,6 +1377,33 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     </div>
   </div>
 
+  <!-- Edit Profile Modal -->
+  <div id="editProfileModal" class="modal-overlay">
+    <div class="modal-box" style="width: 480px; max-width: 95%;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+        <h3 style="font-size: 1.15rem; font-weight: 800;">Редактирование профиля</h3>
+        <button onclick="closeEditProfileModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;">✕</button>
+      </div>
+      <input type="hidden" id="editProfId">
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="form-label">Имя профиля:</label>
+        <input type="text" id="editProfName" class="form-input" placeholder="Имя профиля сети">
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="form-label">MQTT Топик (секрет сети):</label>
+        <input type="text" id="editProfTopic" class="form-input mono" placeholder="natbypass/mesh/...">
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label class="form-label">MQTT Брокер:</label>
+        <input type="text" id="editProfBroker" class="form-input mono" value="tcp://broker.emqx.io:1883">
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:10px;">
+        <button onclick="closeEditProfileModal()" class="btn btn-glass">Отмена</button>
+        <button onclick="submitEditProfile()" class="btn btn-neon">Сохранить изменения</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Import Profile Modal -->
   <div id="importProfileModal" class="modal-overlay">
     <div class="modal-box" style="width: 480px; max-width: 95%;">
@@ -2722,6 +2749,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
             <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; border-top:1px solid rgba(255,255,255,0.06); padding-top:12px;">
               <div style="display:flex; gap:6px;">
+                <button onclick="openEditProfileModal('${p.id}', '${escapeHtml(p.name)}', '${escapeHtml(p.mqtt_topic)}', '${escapeHtml(p.mqtt_broker || 'tcp://broker.emqx.io:1883')}')" class="btn btn-glass" style="padding:5px 10px; font-size:0.76rem;" title="Редактировать параметры сети">
+                  ✏️ Изменить
+                </button>
                 <button onclick="shareProfileQR('${p.id}', '${escapeHtml(p.name)}')" class="btn btn-glass" style="padding:5px 10px; font-size:0.76rem;" title="Показать QR-код для мобильного приложения">
                   📱 QR-код
                 </button>
@@ -2765,6 +2795,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <div style="font-size:0.75rem; color:var(--text-muted); font-family:monospace;">${escapeHtml(p.mqtt_topic)}</div>
           </div>
           <div style="display:flex; gap:6px;">
+            <button onclick="openEditProfileModal('${p.id}', '${escapeHtml(p.name)}', '${escapeHtml(p.mqtt_topic)}', '${escapeHtml(p.mqtt_broker || 'tcp://broker.emqx.io:1883')}')" class="btn-pill" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); color:#38bdf8; padding:4px 8px; font-size:0.76rem; border-radius:10px; cursor:pointer;" title="Изменить">✏️</button>
             <button onclick="shareProfileQR('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.35); color:#c084fc; padding:4px 8px; font-size:0.76rem; border-radius:10px; cursor:pointer;" title="Показать QR-код">📱 QR</button>
             <button onclick="switchProfile('${p.id}')" class="btn-pill" style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#4ade80; padding:4px 10px; font-size:0.78rem; font-weight:700; border-radius:10px; cursor:pointer;">Подключить</button>
             <button onclick="deleteProfile('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#ef4444; padding:4px 8px; font-size:0.78rem; border-radius:10px; cursor:pointer;" title="Удалить профиль">🗑️</button>
@@ -2783,6 +2814,47 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     function closeProfileModal() {
       document.getElementById('profileModal').classList.remove('active');
       document.getElementById('profileModal').style.display = 'none';
+    }
+
+    function openEditProfileModal(id, name, topic, broker) {
+      document.getElementById('editProfId').value = id;
+      document.getElementById('editProfName').value = name;
+      document.getElementById('editProfTopic').value = topic;
+      document.getElementById('editProfBroker').value = broker;
+      document.getElementById('editProfileModal').classList.add('active');
+      document.getElementById('editProfileModal').style.display = 'flex';
+    }
+
+    function closeEditProfileModal() {
+      document.getElementById('editProfileModal').classList.remove('active');
+      document.getElementById('editProfileModal').style.display = 'none';
+    }
+
+    async function submitEditProfile() {
+      const id = document.getElementById('editProfId').value.trim();
+      const name = document.getElementById('editProfName').value.trim();
+      const mqtt_topic = document.getElementById('editProfTopic').value.trim();
+      const mqtt_broker = document.getElementById('editProfBroker').value.trim();
+
+      if (!id) return;
+      try {
+        const res = await fetch('/api/profiles/update', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id, name, mqtt_topic, mqtt_broker})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✅ Профиль сети «' + name + '» успешно обновлен!');
+          closeEditProfileModal();
+          loadProfiles();
+          refreshData();
+        } else {
+          showToast('❌ Ошибка: ' + json.error);
+        }
+      } catch (e) {
+        showToast('❌ Ошибка сохранения');
+      }
     }
 
     async function switchProfile(id) {

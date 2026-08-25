@@ -75,9 +75,12 @@
             android:id="@+id/btnCancelEditProfile"
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="42dp"
+            android:layout_height="wrap_content"
+            android:minHeight="42dp"
             android:layout_marginEnd="8dp"
             android:layout_weight="1"
+            android:singleLine="true"
+            android:maxLines="1"
             android:text="Отмена"
             android:textSize="12sp" />
 
@@ -85,8 +88,11 @@
             android:id="@+id/btnSaveEditProfile"
             style="@style/Widget.Material3.Button"
             android:layout_width="0dp"
-            android:layout_height="42dp"
+            android:layout_height="wrap_content"
+            android:minHeight="42dp"
             android:layout_weight="1"
+            android:singleLine="true"
+            android:maxLines="1"
             android:text="Сохранить"
             android:textSize="12sp" />
     </LinearLayout>

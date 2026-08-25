@@ -38,11 +38,14 @@
             android:id="@+id/btnProfileSwitch"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
+            android:layout_height="wrap_content"
+            android:minHeight="32dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:singleLine="true"
+            android:maxLines="1"
             android:text="Подключить"
             android:textSize="11sp" />
     </LinearLayout>
@@ -55,6 +58,7 @@
         android:layout_marginTop="2dp"
         android:ellipsize="middle"
         android:maxLines="1"
+        android:singleLine="true"
         android:text="Топик: natbypass/mesh/..."
         android:textColor="@color/text_muted"
         android:textSize="10sp" />
@@ -62,7 +66,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="4dp"
         android:gravity="end"
         android:orientation="horizontal">
 
@@ -70,9 +74,15 @@
             android:id="@+id/btnProfileEdit"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
-            android:layout_height="30dp"
+            android:layout_height="wrap_content"
+            android:minHeight="32dp"
+            android:minWidth="0dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:singleLine="true"
+            android:maxLines="1"
             android:text="✏️ Изменить"
             android:textSize="11sp" />
 
@@ -80,9 +90,15 @@
             android:id="@+id/btnProfileQR"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
-            android:layout_height="30dp"
+            android:layout_height="wrap_content"
+            android:minHeight="32dp"
+            android:minWidth="0dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:singleLine="true"
+            android:maxLines="1"
             android:text="📱 QR"
             android:textSize="11sp" />
 
@@ -90,9 +106,15 @@
             android:id="@+id/btnProfileShare"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
-            android:layout_height="30dp"
+            android:layout_height="wrap_content"
+            android:minHeight="32dp"
+            android:minWidth="0dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:singleLine="true"
+            android:maxLines="1"
             android:text="🔗 Ссылка"
             android:textSize="11sp" />
 
@@ -100,9 +122,15 @@
             android:id="@+id/btnProfileDelete"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
-            android:layout_height="30dp"
+            android:layout_height="wrap_content"
+            android:minHeight="32dp"
+            android:minWidth="0dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:singleLine="true"
+            android:maxLines="1"
             android:text="🗑️ Удалить"
             android:textColor="@color/red_bright"
             android:textSize="11sp" />

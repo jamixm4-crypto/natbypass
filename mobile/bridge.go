@@ -273,10 +273,15 @@ func StartEngine(configYAML string, tunFd int) string {
 				if p != nil && p.DeviceID != devID {
 					activeProf := cfg.EnsureActiveProfile()
 					if activeProf != nil {
-						if activeProf.NetworkKey != "" && p.NetworkKey != "" && p.NetworkKey != activeProf.NetworkKey {
-							continue
+						match := false
+						if activeProf.NetworkKey != "" && p.NetworkKey == activeProf.NetworkKey {
+							match = true
+						} else if activeProf.MQTTTopic != "" && p.Topic == activeProf.MQTTTopic {
+							match = true
+						} else if activeProf.NetworkKey == "" && activeProf.MQTTTopic == "" {
+							match = true
 						}
-						if activeProf.MQTTTopic != "" && p.Topic != "" && p.Topic != activeProf.MQTTTopic {
+						if !match {
 							continue
 						}
 					}
@@ -987,6 +992,10 @@ func UpdateProfile(profileID, name, broker, topic, user, pass, tgToken string, t
 			}
 
 			if globalConfig.Profiles[i].IsActive || globalConfig.ActiveProfileID == profileID {
+				globalConfig.SyncSignalingWithProfile(&globalConfig.Profiles[i])
+				if globalRegistry != nil {
+					globalRegistry.ClearAll()
+				}
 				rebuildSignalingInternal(&globalConfig.Profiles[i])
 			}
 
@@ -1026,6 +1035,10 @@ func SwitchProfile(profileID string) bool {
 		return false
 	}
 
+	if globalRegistry != nil {
+		globalRegistry.ClearAll()
+	}
+
 	rebuildSignalingInternal(target)
 	return true
 }
@@ -1046,6 +1059,9 @@ func DeleteProfile(profileID string) bool {
 
 	if wasActive {
 		active := globalConfig.GetActiveProfile()
+		if globalRegistry != nil {
+			globalRegistry.ClearAll()
+		}
 		rebuildSignalingInternal(active)
 	}
 	return true

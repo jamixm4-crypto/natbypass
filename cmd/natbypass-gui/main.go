@@ -3284,10 +3284,15 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 							activeTopic = active.MQTTTopic
 						}
 					}
-					if activeKey != "" && p.NetworkKey != "" && p.NetworkKey != activeKey {
-						continue
+					match := false
+					if activeKey != "" && p.NetworkKey == activeKey {
+						match = true
+					} else if activeTopic != "" && p.Topic == activeTopic {
+						match = true
+					} else if activeKey == "" && activeTopic == "" {
+						match = true
 					}
-					if activeTopic != "" && p.Topic != "" && p.Topic != activeTopic {
+					if !match {
 						continue
 					}
 
@@ -3639,10 +3644,15 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						activeTopic = active.MQTTTopic
 					}
 				}
-				if activeKey != "" && p.NetworkKey != "" && p.NetworkKey != activeKey {
-					continue
+				match := false
+				if activeKey != "" && p.NetworkKey == activeKey {
+					match = true
+				} else if activeTopic != "" && p.Topic == activeTopic {
+					match = true
+				} else if activeKey == "" && activeTopic == "" {
+					match = true
 				}
-				if activeTopic != "" && p.Topic != "" && p.Topic != activeTopic {
+				if !match {
 					continue
 				}
 
