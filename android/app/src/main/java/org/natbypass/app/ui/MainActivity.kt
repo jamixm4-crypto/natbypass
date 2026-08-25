@@ -185,20 +185,18 @@ class MainActivity : AppCompatActivity() {
 
                     if (isActive) continue
 
-                    val itemView = layoutInflater.inflate(R.layout.item_peer, container, false)
-                    val tvName = itemView.findViewById<TextView>(R.id.tvPeerName)
-                    val tvIp = itemView.findViewById<TextView>(R.id.tvPeerIp)
-                    val tvPing = itemView.findViewById<TextView>(R.id.tvPeerPing)
-                    val tvStatus = itemView.findViewById<TextView>(R.id.tvPeerStatus)
+                    val itemView = layoutInflater.inflate(R.layout.item_profile, container, false)
+                    val tvName = itemView.findViewById<TextView>(R.id.tvProfileName)
+                    val tvTopic = itemView.findViewById<TextView>(R.id.tvProfileTopic)
+                    val btnSwitch = itemView.findViewById<Button>(R.id.btnProfileSwitch)
+                    val btnQR = itemView.findViewById<Button>(R.id.btnProfileQR)
+                    val btnShare = itemView.findViewById<Button>(R.id.btnProfileShare)
+                    val btnDelete = itemView.findViewById<Button>(R.id.btnProfileDelete)
 
-                    tvStatus.text = "⚪"
                     tvName.text = pName
-                    tvIp.text = "Топик: $pTopic"
-                    tvPing.text = "Переключить"
-                    tvPing.background = ContextCompat.getDrawable(this, R.drawable.bg_chip_blue)
-                    tvPing.setTextColor(ContextCompat.getColor(this, R.color.text_primary))
+                    tvTopic.text = "Топик: $pTopic"
 
-                    itemView.setOnClickListener {
+                    val switchAction = {
                         val switched = org.natbypass.app.util.MobileBridge.switchProfile(pId)
                         if (switched) {
                             Toast.makeText(this, "✓ Переключено на сеть «$pName»", Toast.LENGTH_SHORT).show()
@@ -206,18 +204,35 @@ class MainActivity : AppCompatActivity() {
                             pollPeers()
                         }
                     }
-                    itemView.setOnLongClickListener {
+
+                    itemView.setOnClickListener { switchAction() }
+                    btnSwitch.setOnClickListener { switchAction() }
+
+                    btnQR.setOnClickListener {
+                        val uri = org.natbypass.app.util.MobileBridge.exportProfileURI(pId)
+                        showQRForPayload(uri, "QR-код профиля «$pName»")
+                    }
+
+                    btnShare.setOnClickListener {
+                        val uri = org.natbypass.app.util.MobileBridge.exportProfileURI(pId)
+                        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("NatBypass Profile", uri))
+                        Toast.makeText(this, "✓ Ссылка на сеть скопирована!", Toast.LENGTH_SHORT).show()
+                    }
+
+                    btnDelete.setOnClickListener {
                         AlertDialog.Builder(this)
                             .setTitle("Удалить профиль «$pName»?")
-                            .setMessage("Устройства в этой сети больше не будут синхронизироваться.")
+                            .setMessage("Вы потеряете связь с устройствами из этой сети.")
                             .setPositiveButton("Удалить") { _, _ ->
                                 org.natbypass.app.util.MobileBridge.deleteProfile(pId)
+                                Toast.makeText(this, "✓ Профиль «$pName» удален", Toast.LENGTH_SHORT).show()
                                 reloadProfiles()
                             }
                             .setNegativeButton("Отмена", null)
                             .show()
-                        true
                     }
+
                     container.addView(itemView)
                 }
             } catch (e: Exception) {}

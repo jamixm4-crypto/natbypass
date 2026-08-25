@@ -683,6 +683,9 @@
       <li id="nav-devices" class="nav-item" data-tooltip="Устройства" onclick="switchTab('devices')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
       </li>
+      <li id="nav-profiles" class="nav-item" data-tooltip="Сети & Профили" onclick="switchTab('profiles')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+      </li>
       <li id="nav-channels" class="nav-item" data-tooltip="Каналы связи" onclick="switchTab('channels')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"></path><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"></path><circle cx="12" cy="12" r="2"></circle><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"></path><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"></path></svg>
       </li>
@@ -1198,6 +1201,37 @@
         </div>
       </div>
     </div>
+
+    <!-- Tab 8: Profiles & Mesh Networks Manager -->
+    <div id="tab-profiles" class="tab-pane" style="display:none; flex-direction:column; gap:16px;">
+      <!-- Header Banner with Clear Explanation -->
+      <div class="glass-card" style="background: linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(168,85,247,0.06) 100%); border-color: rgba(99,102,241,0.3);">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <h2 style="font-size: 1.25rem; font-weight: 800; display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              Управление профилями P2P сетей (Mesh Profiles)
+            </h2>
+            <p style="font-size: 0.84rem; color: var(--text-dim); max-width: 680px; line-height:1.4; margin:0;">
+              💡 <b>Как это устроено:</b> Каждый профиль — это отдельная изолированная P2P-сеть. Устройства связываются друг с другом, только если у них выбран один и тот же профиль. Вы можете мгновенно переключаться между своими сетями, делиться ими через QR-код или подключаться к чужим сетям.
+            </p>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button onclick="openCreateProfileModal()" class="btn btn-neon" style="padding:9px 16px; font-size:0.84rem;">
+              ➕ Создать новую сеть
+            </button>
+            <button onclick="openImportProfileModal()" class="btn btn-glass" style="padding:9px 16px; font-size:0.84rem; border-color:rgba(56,189,248,0.4); color:#38bdf8;">
+              📥 Подключиться по ссылке / QR
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Profiles Grid Container -->
+      <div id="tabProfilesCardsGrid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap:16px;">
+        <!-- Filled dynamically by renderProfilesCards() -->
+      </div>
+    </div>
   </main>
 
   <!-- Node Info Modal -->
@@ -1562,6 +1596,7 @@
       if (navBtn) navBtn.classList.add('active');
 
       try {
+        if (tabName === 'profiles' && typeof loadProfiles === 'function') loadProfiles();
         if (tabName === 'awg' && typeof loadAWG === 'function') loadAWG();
         if (tabName === 'timeline' && typeof refreshEvents === 'function') refreshEvents();
         if (tabName === 'settings' && typeof loadConfig === 'function') loadConfig();
@@ -2602,15 +2637,84 @@
 
           if (currentActiveProfile) {
             document.getElementById('topProfileLabel').innerText = currentActiveProfile.name || 'Основная сеть';
-            document.getElementById('activeProfileName').innerText = currentActiveProfile.name || 'Основная сеть';
-            document.getElementById('activeProfileTopic').innerText = currentActiveProfile.mqtt_topic || '';
-            document.getElementById('activeProfileBroker').innerText = currentActiveProfile.mqtt_broker || '';
-            document.getElementById('activeProfileBadge').innerText = (currentActiveProfile.awg_preset || 'dpi').toUpperCase() + ' защита';
+            const apName = document.getElementById('activeProfileName');
+            if (apName) apName.innerText = currentActiveProfile.name || 'Основная сеть';
+            const apTopic = document.getElementById('activeProfileTopic');
+            if (apTopic) apTopic.innerText = currentActiveProfile.mqtt_topic || '';
+            const apBroker = document.getElementById('activeProfileBroker');
+            if (apBroker) apBroker.innerText = currentActiveProfile.mqtt_broker || '';
+            const apBadge = document.getElementById('activeProfileBadge');
+            if (apBadge) apBadge.innerText = (currentActiveProfile.awg_preset || 'dpi').toUpperCase() + ' защита';
           }
 
-          renderProfilesList();
+          renderProfilesCards();
         }
       } catch (e) {}
+    }
+
+    function renderProfilesCards() {
+      // 1. Render in full Tab (tabProfilesCardsGrid)
+      const tabGrid = document.getElementById('tabProfilesCardsGrid');
+      if (tabGrid) {
+        tabGrid.innerHTML = '';
+        currentProfiles.forEach(p => {
+          const isActive = p.is_active || (currentActiveProfile && p.id === currentActiveProfile.id);
+          const card = document.createElement('div');
+          card.className = 'glass-card';
+          card.style = isActive 
+            ? 'background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(6, 182, 212, 0.05) 100%); border: 1px solid rgba(34, 197, 94, 0.45); box-shadow: 0 0 25px rgba(34, 197, 94, 0.15); display: flex; flex-direction: column; justify-content: space-between;' 
+            : 'background: rgba(22, 27, 34, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; justify-content: space-between;';
+
+          card.innerHTML = `
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+                <div>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:1.2rem;">${isActive ? '🟢' : '⚪'}</span>
+                    <span style="font-size:1.05rem; font-weight:800; color:#ffffff;">${escapeHtml(p.name)}</span>
+                  </div>
+                  <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">ID сети: <span class="mono">${escapeHtml(p.id)}</span></div>
+                </div>
+                <span class="badge ${isActive ? 'badge-success' : 'badge-neutral'}" style="font-size:0.75rem; font-weight:700;">
+                  ${isActive ? '✓ АКТИВНАЯ' : 'Неактивна'}
+                </span>
+              </div>
+
+              <div style="background:rgba(0,0,0,0.3); border-radius:10px; padding:10px 12px; margin-bottom:14px; font-size:0.78rem;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                  <span style="color:var(--text-dim);">Топик MQTT:</span>
+                  <span class="mono" style="color:#38bdf8; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.mqtt_topic)}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color:var(--text-dim);">Брокер:</span>
+                  <span class="mono" style="color:var(--text-muted);">${escapeHtml(p.mqtt_broker || 'tcp://mqtt.eclipseprojects.io:1883')}</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; border-top:1px solid rgba(255,255,255,0.06); padding-top:12px;">
+              <div style="display:flex; gap:6px;">
+                <button onclick="shareProfileQR('${p.id}', '${escapeHtml(p.name)}')" class="btn btn-glass" style="padding:5px 10px; font-size:0.76rem;" title="Показать QR-код для мобильного приложения">
+                  📱 QR-код
+                </button>
+                <button onclick="copyProfileURI('${p.id}')" class="btn btn-glass" style="padding:5px 10px; font-size:0.76rem;" title="Скопировать ссылку для отправки на другое устройство">
+                  🔗 Ссылка
+                </button>
+                ${!isActive ? `<button onclick="deleteProfile('${p.id}', '${escapeHtml(p.name)}')" class="btn btn-glass" style="padding:5px 8px; font-size:0.76rem; border-color:rgba(239,68,68,0.3); color:#ef4444;" title="Удалить эту сеть">🗑️</button>` : ''}
+              </div>
+              <div>
+                ${isActive 
+                  ? `<button disabled class="btn btn-neon" style="opacity:0.9; padding:6px 14px; font-size:0.78rem; cursor:default; background:rgba(34,197,94,0.2); border-color:rgba(34,197,94,0.5); color:#4ade80;">✓ Подключено</button>` 
+                  : `<button onclick="switchProfile('${p.id}')" class="btn btn-neon" style="padding:6px 14px; font-size:0.78rem;">⚡ Подключить</button>`}
+              </div>
+            </div>
+          `;
+          tabGrid.appendChild(card);
+        });
+      }
+
+      // 2. Render in modal (profilesListContainer)
+      renderProfilesList();
     }
 
     function renderProfilesList() {
@@ -2620,7 +2724,7 @@
 
       const otherProfiles = currentProfiles.filter(p => !p.is_active);
       if (otherProfiles.length === 0) {
-        container.innerHTML = '<div style="color:var(--text-dim); font-size:0.8rem; font-style:italic; padding:6px 0;">Других профилей пока нет. Создайте второй профиль для изоляции сети.</div>';
+        container.innerHTML = '<div style="color:var(--text-dim); font-size:0.8rem; font-style:italic; padding:6px 0;">Других профилей пока нет. Нажмите «➕ Новый профиль» чтобы создать вторую изолированную сеть.</div>';
         return;
       }
 
@@ -2633,7 +2737,8 @@
             <div style="font-size:0.75rem; color:var(--text-muted); font-family:monospace;">${escapeHtml(p.mqtt_topic)}</div>
           </div>
           <div style="display:flex; gap:6px;">
-            <button onclick="switchProfile('${p.id}')" class="btn-pill" style="background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); color:#c084fc; padding:4px 10px; font-size:0.78rem; font-weight:700; border-radius:10px; cursor:pointer;">Переключить</button>
+            <button onclick="shareProfileQR('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.35); color:#c084fc; padding:4px 8px; font-size:0.76rem; border-radius:10px; cursor:pointer;" title="Показать QR-код">📱 QR</button>
+            <button onclick="switchProfile('${p.id}')" class="btn-pill" style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#4ade80; padding:4px 10px; font-size:0.78rem; font-weight:700; border-radius:10px; cursor:pointer;">Подключить</button>
             <button onclick="deleteProfile('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#ef4444; padding:4px 8px; font-size:0.78rem; border-radius:10px; cursor:pointer;" title="Удалить профиль">🗑️</button>
           </div>
         `;
@@ -2674,7 +2779,7 @@
     }
 
     async function deleteProfile(id, name) {
-      if (!confirm(`Удалить профиль «${name}»?`)) return;
+      if (!confirm(`Удалить профиль «${name}»? Вы потеряете связь с устройствами из этой сети.`)) return;
       try {
         const res = await fetch('/api/profiles/delete', {
           method: 'POST',
@@ -2683,8 +2788,9 @@
         });
         const json = await res.json();
         if (json.ok) {
-          showToast('✓ Профиль удален');
+          showToast('✓ Профиль «' + name + '» удален');
           loadProfiles();
+          refreshData();
         } else {
           showToast('❌ Ошибка: ' + json.error);
         }
@@ -2740,7 +2846,7 @@
     async function submitImportProfile() {
       const uri = document.getElementById('importProfileRaw').value.trim();
       if (!uri) {
-        showToast('⚠️ Вставьте ссылку на профиль');
+        showToast('⚠️ Вставьте ссылку на профиль (natbypass://profile?...)');
         return;
       }
       try {
@@ -2761,21 +2867,46 @@
       } catch (e) {}
     }
 
-    async function shareActiveProfileQR() {
+    async function shareProfileQR(id, name) {
       closeProfileModal();
-      openQRModal('profile');
+      try {
+        const res = await fetch('/api/profiles/export?id=' + id);
+        const json = await res.json();
+        if (json.ok && json.data.uri) {
+          await openQRModal('profile');
+          document.getElementById('qrRawText').value = json.data.uri;
+          requestAnimationFrame(() => {
+            renderQR(json.data.uri);
+          });
+          document.getElementById('qrDescText').innerHTML = 'Отсканируйте камерой в приложении <b>NatBypass Android</b> для подключения к сети «' + escapeHtml(name) + '».';
+        }
+      } catch (e) {}
     }
 
-    async function copyActiveProfileURI() {
-      if (!currentActiveProfile) return;
+    async function copyProfileURI(id) {
       try {
-        const res = await fetch('/api/profiles/export?id=' + currentActiveProfile.id);
+        const res = await fetch('/api/profiles/export?id=' + id);
         const json = await res.json();
         if (json.ok && json.data.uri) {
           copyText(json.data.uri);
-          showToast('✓ Ссылка на профиль сети скопирована!');
+          showToast('✓ Ссылка на сеть скопирована в буфер обмена!');
         }
       } catch (e) {}
+    }
+
+    async function shareActiveProfileQR() {
+      if (currentActiveProfile) {
+        shareProfileQR(currentActiveProfile.id, currentActiveProfile.name);
+      } else {
+        closeProfileModal();
+        openQRModal('profile');
+      }
+    }
+
+    async function copyActiveProfileURI() {
+      if (currentActiveProfile) {
+        copyProfileURI(currentActiveProfile.id);
+      }
     }
 
     setInterval(refreshData, 2000);
