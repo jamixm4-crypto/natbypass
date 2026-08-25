@@ -851,7 +851,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				lanIP := network.GetLocalLANIP()
 				localAddr := ""
 				if lanIP != "" {
-					localAddr = fmt.Sprintf("%s:%d", lanIP, wgPort)
+					// Используем порт puncher (47832), а не wgPort — wgPort=0 если WireGuard выключен,
+					// а дырявить NAT надо именно через порт, на котором слушает puncher
+					puncherPort := 47832
+					if puncher != nil {
+						puncherPort = puncher.LocalPort()
+					}
+					localAddr = fmt.Sprintf("%s:%d", lanIP, puncherPort)
 				}
 				activeProf := cfg.EnsureActiveProfile()
 				activeKey := ""
@@ -1001,11 +1007,21 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					// Немедленный burst hole-punch к пиру + встречная публикация нашего маяка
 					if puncher != nil {
 						go func(peer *signaling.Payload) {
-							// Посылаем 5 серий проб с интервалом 200мс для надёжного пробития NAT
+							// Строим список адресов для пробивки:
+							// 1. STUNAddr — STUN-mapped адрес порта puncher (самый точный)
+							// 2. LocalAddr — LAN IP пира (уже с puncher-портом 47832 после нашего фикса)
+							// 3. PublicIP:47832 — всегда, независимо от WGPort
+							// 4. PublicIP:WGPort — если WireGuard включен у пира
 							addrs := []string{peer.STUNAddr, peer.LocalAddr}
-							if peer.PublicIP != "" && peer.WGPort > 0 {
-								addrs = append(addrs, fmt.Sprintf("%s:%d", peer.PublicIP, peer.WGPort))
+							if peer.PublicIP != "" {
+								// Всегда пробуем puncher port 47832
+								addrs = append(addrs, fmt.Sprintf("%s:%d", peer.PublicIP, 47832))
+								// Если у пира включён WireGuard — пробуем и его порт
+								if peer.WGPort > 0 && peer.WGPort != 47832 {
+									addrs = append(addrs, fmt.Sprintf("%s:%d", peer.PublicIP, peer.WGPort))
+								}
 							}
+							// 5 серий с интервалом 200мс = 1 секунда активной пробивки
 							for burst := 0; burst < 5; burst++ {
 								for _, addr := range addrs {
 									if addr != "" {
