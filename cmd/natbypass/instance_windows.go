@@ -100,7 +100,7 @@ func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d", port)
+	url := fmt.Sprintf("http://127.0.0.1:%d/?v=%d", port, time.Now().Unix())
 
 	// 1. Запуск нативного окна WebView2 напрямую в процессе NatBypass.exe
 	// Это дает 100% фирменную иконку на панели задач и в заголовке окна без значка Edge!
