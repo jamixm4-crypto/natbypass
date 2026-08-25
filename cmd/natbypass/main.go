@@ -748,17 +748,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	}
 
-	// Фоновое определение IP и STUN
+	// Фоновое определение IP и STUN — после успеха сразу публикуем маяк со свежим STUN-адресом
 	go func() {
 		if ip, err := ipDisc.GetPublicIPCached(engineCtx, 5*time.Minute); err == nil {
 			publicIP = ip
 			log.Info().Str("ip", publicIP.String()).Msg("Публичный IP определён")
+			triggerPublish() // сразу публикуем с реальным IP
 		}
 
 		if puncher != nil {
 			if sIP, sPort, sErr := puncher.DiscoverMappedAddress(engineCtx); sErr == nil && sIP != nil {
 				stunAddr = fmt.Sprintf("%s:%d", sIP.String(), sPort)
 				log.Info().Str("stun_addr", stunAddr).Msg("STUN сокет определён через UDPPuncher")
+				triggerPublish() // сразу публикуем со STUN-адресом — критически важно для hole punch!
 			}
 		}
 		if stunAddr == "" {
@@ -766,6 +768,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if stunIP, stunPort, stunErr := stunClient.GetMappedAddress(engineCtx); stunErr == nil {
 				stunAddr = fmt.Sprintf("%s:%d", stunIP.String(), stunPort)
 				log.Info().Str("stun_addr", stunAddr).Msg("STUN адрес определён")
+				triggerPublish() // публикуем и по резервному STUN
 			}
 		}
 
@@ -992,17 +995,27 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						uiServer.AddEvent("peer_online", "Обнаружен узел: "+p.DeviceID, "VIP: "+peerVIP)
 					}
 
-					// Немедленный прямой UDP пробив до пира
+					// Немедленный burst hole-punch к пиру + встречная публикация нашего маяка
 					if puncher != nil {
-						if p.STUNAddr != "" {
-							go puncher.SendHolePunchProbe(p.STUNAddr)
-						}
-						if p.LocalAddr != "" {
-							go puncher.SendHolePunchProbe(p.LocalAddr)
-						}
-						if p.PublicIP != "" && p.WGPort > 0 {
-							go puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
-						}
+						go func(peer *signaling.Payload) {
+							// Посылаем 5 серий проб с интервалом 200мс для надёжного пробития NAT
+							addrs := []string{peer.STUNAddr, peer.LocalAddr}
+							if peer.PublicIP != "" && peer.WGPort > 0 {
+								addrs = append(addrs, fmt.Sprintf("%s:%d", peer.PublicIP, peer.WGPort))
+							}
+							for burst := 0; burst < 5; burst++ {
+								for _, addr := range addrs {
+									if addr != "" {
+										_ = puncher.SendHolePunchProbe(addr)
+									}
+								}
+								if burst < 4 {
+									time.Sleep(200 * time.Millisecond)
+								}
+							}
+						}(p)
+						// Публикуем наш свежий маяк — пир получит наш STUN и сможет пробиться к нам
+						triggerPublish()
 					}
 				}
 			}
