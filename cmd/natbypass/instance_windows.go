@@ -100,29 +100,69 @@ func releaseSingleInstanceMutex() {
 	}
 }
 
-// openAppWindow открывает интерфейс NatBypass в виде нативного окна с правильным размером и родной иконкой
+// isWindowsServer возвращает true если ОС является серверной редакцией Windows
+// (ProductType != VER_NT_WORKSTATION=1). На Server 2016/2019/2022 WebView2 может
+// вести себя непредсказуемо (открывать и окно и браузер одновременно).
+func isWindowsServer() bool {
+	type OSVERSIONINFOEXW struct {
+		dwOSVersionInfoSize uint32
+		dwMajorVersion      uint32
+		dwMinorVersion      uint32
+		dwBuildNumber       uint32
+		dwPlatformId        uint32
+		szCSDVersion        [128]uint16
+		wServicePackMajor   uint16
+		wServicePackMinor   uint16
+		wSuiteMask          uint16
+		wProductType        uint8
+		wReserved           uint8
+	}
+	var info OSVERSIONINFOEXW
+	info.dwOSVersionInfoSize = uint32(unsafe.Sizeof(info))
+	ntdll := windows.NewLazySystemDLL("ntdll.dll")
+	rtlGetVersion := ntdll.NewProc("RtlGetVersion")
+	ret, _, _ := rtlGetVersion.Call(uintptr(unsafe.Pointer(&info)))
+	if ret != 0 {
+		return false
+	}
+	// wProductType: 1 = Workstation, 2 = Domain Controller, 3 = Server
+	return info.wProductType != 1
+}
+
+// openAppWindow открывает интерфейс NatBypass в виде нативного окна с правильным размером и родной иконкой.
+// На серверных редакциях Windows (Server 2016/2019/2022) использует только браузер.
 func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/?v=%d", port, time.Now().Unix())
 
-	// 1. Запуск нативного окна WebView2 напрямую в процессе NatBypass.exe
-	// Это дает 100% фирменную иконку на панели задач и в заголовке окна без значка Edge!
+	// На Windows Server — только браузер (WebView2 на Server может открыть и окно и браузер одновременно)
+	if isWindowsServer() {
+		openBrowserFallback(url)
+		return
+	}
+
+	// На Windows Desktop — нативное окно WebView2
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 
+		// browserOpened — флаг что браузер уже открыли, не открываем повторно
+		var browserOpened bool
 		defer func() {
 			if r := recover(); r != nil {
-				openBrowserFallback(url)
+				if !browserOpened {
+					browserOpened = true
+					openBrowserFallback(url)
+				}
 			}
 		}()
 
-		// Включаем Per-Monitor DPI Awareness для четкого отображения на 1080p/2K/4K и ноутбуках с масштабированием 125%-175%
+		// Включаем Per-Monitor DPI Awareness
 		procSetProcessDpiAwarenessContext := moduser32Instance.NewProc("SetProcessDpiAwarenessContext")
 		if procSetProcessDpiAwarenessContext.Find() == nil {
-			_, _, _ = procSetProcessDpiAwarenessContext.Call(^uintptr(3)) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+			_, _, _ = procSetProcessDpiAwarenessContext.Call(^uintptr(3))
 		} else {
 			procSetProcessDPIAware := moduser32Instance.NewProc("SetProcessDPIAware")
 			if procSetProcessDPIAware.Find() == nil {
@@ -130,8 +170,8 @@ func openAppWindow(port int) {
 			}
 		}
 
-		screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0 /* SM_CXSCREEN */)
-		screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1 /* SM_CYSCREEN */)
+		screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0)
+		screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1)
 
 		winWidth := 1180
 		winHeight := 750
@@ -152,67 +192,64 @@ func openAppWindow(port int) {
 				Center: true,
 			},
 		})
-		if w != nil {
-			defer func() {
-				w.Destroy()
-				os.Exit(0)
-			}()
-
-			hwnd := uintptr(w.Window())
-
-			// 1. Включаем нативный Immersive Dark Mode для рамки и заголовка окна
-			procDwmSetWindowAttribute := moddwmapiInstance.NewProc("DwmSetWindowAttribute")
-			if procDwmSetWindowAttribute.Find() == nil {
-				darkMode := int32(1)
-				_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, uintptr(unsafe.Pointer(&darkMode)), 4)
-				_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 19 /* DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 */, uintptr(unsafe.Pointer(&darkMode)), 4)
-			}
-
-			// 2. Устанавливаем нативную иконку из PE ресурсов бинарника
-			execPath, _ := os.Executable()
-			if execPath != "" {
-				execPathPtr, _ := windows.UTF16PtrFromString(execPath)
-				hIcon, _, _ := modshell32Instance.NewProc("ExtractIconW").Call(0, uintptr(unsafe.Pointer(execPathPtr)), 0)
-				if hIcon != 0 {
-					procSendMessageW := moduser32Instance.NewProc("SendMessageW")
-					_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, hIcon)
-					_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, hIcon)
-				}
-			}
-
-			// 3. Отключаем контекстное меню браузера и горячие клавиши перезагрузки страницы
-			w.Init(`
-				window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
-				window.addEventListener('keydown', function(e) {
-					if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R' || e.key === 'f' || e.key === 'F' || e.key === 'u' || e.key === 'U' || e.key === 'p' || e.key === 'P'))) {
-						e.preventDefault();
-					}
-				});
-			`)
-
-			// 4. Задаем комфортные размеры и позиционирование окна
-			w.SetSize(880, 560, webview2.HintMin)
-			w.SetSize(winWidth, winHeight, webview2.HintNone)
-
-			if screenWidth > 0 && screenHeight > 0 {
-				x := (int(screenWidth) - winWidth) / 2
-				y := (int(screenHeight) - winHeight) / 2
-				if x < 0 {
-					x = 10
-				}
-				if y < 0 {
-					y = 10
-				}
-				procSetWindowPos := moduser32Instance.NewProc("SetWindowPos")
-				_, _, _ = procSetWindowPos.Call(hwnd, 0, uintptr(x), uintptr(y), uintptr(winWidth), uintptr(winHeight), 0x0040 /* SWP_SHOWWINDOW */)
-			}
-
-			w.Navigate(url)
-			w.Run()
+		if w == nil {
+			// WebView2 Runtime не установлен — открываем в браузере
+			browserOpened = true
+			openBrowserFallback(url)
 			return
 		}
 
-		openBrowserFallback(url)
+		defer func() {
+			w.Destroy()
+			os.Exit(0)
+		}()
+
+		hwnd := uintptr(w.Window())
+
+		// Dark Mode для рамки и заголовка
+		procDwmSetWindowAttribute := moddwmapiInstance.NewProc("DwmSetWindowAttribute")
+		if procDwmSetWindowAttribute.Find() == nil {
+			darkMode := int32(1)
+			_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
+			_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 19, uintptr(unsafe.Pointer(&darkMode)), 4)
+		}
+
+		// Нативная иконка из PE ресурсов
+		execPath, _ := os.Executable()
+		if execPath != "" {
+			execPathPtr, _ := windows.UTF16PtrFromString(execPath)
+			hIcon, _, _ := modshell32Instance.NewProc("ExtractIconW").Call(0, uintptr(unsafe.Pointer(execPathPtr)), 0)
+			if hIcon != 0 {
+				procSendMessageW := moduser32Instance.NewProc("SendMessageW")
+				_, _, _ = procSendMessageW.Call(hwnd, 0x0080, 1, hIcon)
+				_, _, _ = procSendMessageW.Call(hwnd, 0x0080, 0, hIcon)
+			}
+		}
+
+		// Отключаем контекстное меню и горячие клавиши браузера
+		w.Init(`
+			window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+			window.addEventListener('keydown', function(e) {
+				if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R' || e.key === 'f' || e.key === 'F' || e.key === 'u' || e.key === 'U' || e.key === 'p' || e.key === 'P'))) {
+					e.preventDefault();
+				}
+			});
+		`)
+
+		w.SetSize(880, 560, webview2.HintMin)
+		w.SetSize(winWidth, winHeight, webview2.HintNone)
+
+		if screenWidth > 0 && screenHeight > 0 {
+			x := (int(screenWidth) - winWidth) / 2
+			y := (int(screenHeight) - winHeight) / 2
+			if x < 0 { x = 10 }
+			if y < 0 { y = 10 }
+			procSetWindowPos := moduser32Instance.NewProc("SetWindowPos")
+			_, _, _ = procSetWindowPos.Call(hwnd, 0, uintptr(x), uintptr(y), uintptr(winWidth), uintptr(winHeight), 0x0040)
+		}
+
+		w.Navigate(url)
+		w.Run()
 	}()
 }
 

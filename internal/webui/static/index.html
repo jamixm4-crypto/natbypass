@@ -647,9 +647,9 @@
       position: fixed;
       bottom: 24px;
       right: 24px;
-      background: #151b2b;
-      border: 1px solid rgba(168, 85, 247, 0.6);
-      box-shadow: 0 0 25px rgba(168, 85, 247, 0.4);
+      background: rgba(15, 20, 35, 0.98);
+      border: 1px solid rgba(168, 85, 247, 0.7);
+      box-shadow: 0 0 30px rgba(168, 85, 247, 0.5), 0 8px 32px rgba(0,0,0,0.6);
       color: #ffffff;
       padding: 12px 20px;
       border-radius: 12px;
@@ -658,7 +658,13 @@
       display: none;
       align-items: center;
       gap: 10px;
-      z-index: 200;
+      /* Поднимаем ВЫШЕ модальных окон (z-index: 1000) и их backdrop-filter blur */
+      z-index: 99999;
+      /* Изолируем от родительских filter/backdrop-filter чтобы не размываться */
+      isolation: isolate;
+      transform: translateZ(0);
+      -webkit-transform: translateZ(0);
+      will-change: opacity, transform;
     }
   </style>
 <script>
