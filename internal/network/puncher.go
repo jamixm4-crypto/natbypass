@@ -221,6 +221,9 @@ func (p *UDPPuncher) readLoop() {
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
+				// Уведомляем о прямом UDP-контакте — fromAddr = РЕАЛЬНЫЙ адрес пира за NAT
+				// Это важно: STUNAddr пира из маяка может быть неверным (symmetric NAT),
+				// а вот реальный src-адрес входящего пакета — всегда правильный.
 				if p.onPingResult != nil {
 					p.onPingResult(senderID, 0, remoteAddr.String())
 				}

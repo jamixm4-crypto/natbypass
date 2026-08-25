@@ -129,21 +129,15 @@ func isWindowsServer() bool {
 	return info.wProductType != 1
 }
 
-// openAppWindow открывает интерфейс NatBypass в виде нативного окна с правильным размером и родной иконкой.
-// На серверных редакциях Windows (Server 2016/2019/2022) использует только браузер.
+// openAppWindow открывает интерфейс NatBypass в виде нативного окна WebView2.
+// Работает на Windows Desktop и Windows Server (2019/2022).
+// Если WebView2 Runtime не установлен — открывает системный браузер.
 func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/?v=%d", port, time.Now().Unix())
 
-	// На Windows Server — только браузер (WebView2 на Server может открыть и окно и браузер одновременно)
-	if isWindowsServer() {
-		openBrowserFallback(url)
-		return
-	}
-
-	// На Windows Desktop — нативное окно WebView2
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
@@ -226,7 +220,8 @@ func openAppWindow(port int) {
 			}
 		}
 
-		// Отключаем контекстное меню и горячие клавиши браузера
+		// Отключаем контекстное меню, горячие клавиши и открытие ссылок во внешнем браузере
+		// window.open() перехватываем — это главная причина двойного открытия на Server
 		w.Init(`
 			window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 			window.addEventListener('keydown', function(e) {
@@ -234,6 +229,8 @@ func openAppWindow(port int) {
 					e.preventDefault();
 				}
 			});
+			// Блокируем window.open чтобы WebView2 не открывал ссылки во внешнем браузере
+			window.open = function(url) { return null; };
 		`)
 
 		w.SetSize(880, 560, webview2.HintMin)
