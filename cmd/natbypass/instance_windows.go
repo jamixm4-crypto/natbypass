@@ -129,9 +129,40 @@ func isWindowsServer() bool {
 	return info.wProductType != 1
 }
 
-// openAppWindow открывает интерфейс NatBypass в виде нативного окна WebView2.
-// Работает на Windows Desktop и Windows Server (2019/2022).
-// Если WebView2 Runtime не установлен — открывает системный браузер.
+// tryOpenAppMode пытается запустить Microsoft Edge или Google Chrome в режиме
+// отдельного изолированного оконного приложения (--app=URL).
+// Это создаёт настоящее отдельное окно программы без вкладок и адресной строки,
+// что идеально для Windows Server и систем без установленного WebView2 Runtime.
+func tryOpenAppMode(url string, winWidth, winHeight int) bool {
+	candidates := []string{
+		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Microsoft", "Edge", "Application", "msedge.exe"),
+		filepath.Join(os.Getenv("ProgramFiles"), "Microsoft", "Edge", "Application", "msedge.exe"),
+		filepath.Join(os.Getenv("LocalAppData"), "Microsoft", "Edge", "Application", "msedge.exe"),
+		filepath.Join(os.Getenv("ProgramFiles"), "Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join(os.Getenv("LocalAppData"), "Google", "Chrome", "Application", "chrome.exe"),
+	}
+
+	for _, exe := range candidates {
+		if exe == "" {
+			continue
+		}
+		if _, err := os.Stat(exe); err == nil {
+			appArg := fmt.Sprintf("--app=%s", url)
+			sizeArg := fmt.Sprintf("--window-size=%d,%d", winWidth, winHeight)
+			cmd := exec.Command(exe, appArg, sizeArg, "--disable-plugins", "--disable-extensions", "--no-first-run", "--no-default-browser-check")
+			if err := cmd.Start(); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// openAppWindow открывает интерфейс NatBypass в виде окна:
+// 1. Сначала пробует нативное окно WebView2
+// 2. Если WebView2 нет (например Windows Server) — запускает Edge/Chrome в режиме standalone окна (--app)
+// 3. Если и их нет — открывает системный браузер
 func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
@@ -142,14 +173,33 @@ func openAppWindow(port int) {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 
-		// browserOpened — флаг что браузер уже открыли, не открываем повторно
+		screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0)
+		screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1)
+
+		winWidth := 1180
+		winHeight := 750
+		if screenWidth > 0 && int(screenWidth) < winWidth+60 {
+			winWidth = int(screenWidth) - 60
+		}
+		if screenHeight > 0 && int(screenHeight) < winHeight+60 {
+			winHeight = int(screenHeight) - 60
+		}
+
+		// browserOpened — флаг защиты от повторного открытия
 		var browserOpened bool
+		fallbackOpen := func() {
+			if browserOpened {
+				return
+			}
+			browserOpened = true
+			if !tryOpenAppMode(url, winWidth, winHeight) {
+				openBrowserFallback(url)
+			}
+		}
+
 		defer func() {
 			if r := recover(); r != nil {
-				if !browserOpened {
-					browserOpened = true
-					openBrowserFallback(url)
-				}
+				fallbackOpen()
 			}
 		}()
 
@@ -164,18 +214,6 @@ func openAppWindow(port int) {
 			}
 		}
 
-		screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0)
-		screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1)
-
-		winWidth := 1180
-		winHeight := 750
-		if screenWidth > 0 && int(screenWidth) < winWidth+60 {
-			winWidth = int(screenWidth) - 60
-		}
-		if screenHeight > 0 && int(screenHeight) < winHeight+60 {
-			winHeight = int(screenHeight) - 60
-		}
-
 		w := webview2.NewWithOptions(webview2.WebViewOptions{
 			Debug:     false,
 			AutoFocus: true,
@@ -187,9 +225,8 @@ func openAppWindow(port int) {
 			},
 		})
 		if w == nil {
-			// WebView2 Runtime не установлен — открываем в браузере
-			browserOpened = true
-			openBrowserFallback(url)
+			// WebView2 Runtime не установлен — запускаем в виде автономного окна (--app)
+			fallbackOpen()
 			return
 		}
 
@@ -283,4 +320,25 @@ func applyWindowIcon(execPath string) {
 			}
 		}
 	}()
+}
+
+// showServerNotification показывает MessageBox с адресом WebUI на Windows Server.
+// Это единственный UI на сервере — никаких автоматических браузеров.
+func showServerNotification(port int) {
+	msg := fmt.Sprintf(
+		"NatBypass запущен в фоновом режиме.\r\n\r\n"+
+			"WebUI доступен по адресу:\r\n"+
+			"http://127.0.0.1:%d\r\n\r\n"+
+			"Откройте этот адрес в браузере для управления.\r\n"+
+			"Нажмите OK чтобы закрыть это окно.",
+		port)
+
+	msgPtr, _ := windows.UTF16PtrFromString(msg)
+	titlePtr, _ := windows.UTF16PtrFromString("NatBypass — Windows Server Mode")
+	moduser32Instance.NewProc("MessageBoxW").Call(
+		0,
+		uintptr(unsafe.Pointer(msgPtr)),
+		uintptr(unsafe.Pointer(titlePtr)),
+		0x00000040, // MB_ICONINFORMATION | MB_OK
+	)
 }

@@ -203,6 +203,8 @@ func StartEngine(configYAML string, tunFd int) string {
 	puncher, _ := network.NewUDPPuncher(51820, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		if p, ok := globalRegistry.Get(remoteDevID); ok {
 			p.DirectP2P = true
+			p.ActiveEndpoint = fromAddr
+			p.STUNAddr = fromAddr
 			if rtt > 0 && rtt < 10*time.Second {
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
@@ -212,7 +214,6 @@ func StartEngine(configYAML string, tunFd int) string {
 				p.PingMs = p.Latency.Milliseconds()
 			}
 			p.Online = true
-			p.ActiveEndpoint = fromAddr
 			p.LastSeen = time.Now()
 			globalRegistry.Upsert(p)
 			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("⚡ Android P2P сокет пробит!")
@@ -265,7 +266,11 @@ func StartEngine(configYAML string, tunFd int) string {
 				lanIP := network.GetLocalLANIP()
 				localAddr := ""
 				if lanIP != "" {
-					localAddr = fmt.Sprintf("%s:%d", lanIP, cfg.WireGuard.ListenPort)
+					pPort := 51820
+					if puncher != nil {
+						pPort = puncher.LocalPort()
+					}
+					localAddr = fmt.Sprintf("%s:%d", lanIP, pPort)
 				}
 				activeProf := cfg.EnsureActiveProfile()
 				activeKey := ""
@@ -346,21 +351,28 @@ func StartEngine(configYAML string, tunFd int) string {
 					})
 					negotiateVirtualIP()
 
-					// Немедленно посылаем UDP Hole Punch пробу по всем 3 векторам
+					// Немедленно посылаем UDP Hole Punch пробу по всем векторам (burst 5)
 					if puncher != nil {
-						if p.STUNAddr != "" {
-							_ = puncher.SendHolePunchProbe(p.STUNAddr)
-						}
-						if p.LocalAddr != "" {
-							_ = puncher.SendHolePunchProbe(p.LocalAddr)
-						}
-						if p.PublicIP != "" {
-							port := p.WGPort
-							if port <= 0 {
-								port = 51820
+						go func(target *signaling.Payload) {
+							addrs := []string{target.STUNAddr, target.LocalAddr}
+							if target.PublicIP != "" {
+								addrs = append(addrs, fmt.Sprintf("%s:47832", target.PublicIP))
+								addrs = append(addrs, fmt.Sprintf("%s:51820", target.PublicIP))
+								if target.WGPort > 0 && target.WGPort != 47832 && target.WGPort != 51820 {
+									addrs = append(addrs, fmt.Sprintf("%s:%d", target.PublicIP, target.WGPort))
+								}
 							}
-							_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
-						}
+							for b := 0; b < 5; b++ {
+								for _, addr := range addrs {
+									if addr != "" {
+										_ = puncher.SendHolePunchProbe(addr)
+									}
+								}
+								if b < 4 {
+									time.Sleep(200 * time.Millisecond)
+								}
+							}
+						}(p)
 					}
 				}
 			}
@@ -385,15 +397,15 @@ func StartEngine(configYAML string, tunFd int) string {
 							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
 								_ = puncher.SendHolePunchProbe(p.STUNAddr)
 							}
-							if p.LocalAddr != "" {
+							if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
 								_ = puncher.SendHolePunchProbe(p.LocalAddr)
 							}
 							if p.PublicIP != "" {
-								port := p.WGPort
-								if port <= 0 {
-									port = 51820
+								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:47832", p.PublicIP))
+								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:51820", p.PublicIP))
+								if p.WGPort > 0 && p.WGPort != 47832 && p.WGPort != 51820 {
+									_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
 								}
-								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
 							}
 						}
 					}

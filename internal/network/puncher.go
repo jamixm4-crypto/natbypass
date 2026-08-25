@@ -124,13 +124,14 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	probeData := []byte(fmt.Sprintf("NATBYPASS:PING:%s:%d", p.myDevID, nowNano))
 
 	// 1. Отправка серии пакетов на точный сокет для открытия Stateful NAT
-	_, err = p.conn.WriteToUDP(probeData, rAddr)
-	_, _ = p.conn.WriteToUDP(probeData, rAddr)
+	for i := 0; i < 3; i++ {
+		_, _ = p.conn.WriteToUDP(probeData, rAddr)
+	}
 
-	// 2. Multi-Port Symmetric NAT Port Prediction (±8 портов вокруг STUN адреса)
+	// 2. Multi-Port Symmetric NAT Port Prediction (±16 портов вокруг STUN адреса)
 	basePort := rAddr.Port
 	ip := rAddr.IP
-	for delta := 1; delta <= 8; delta++ {
+	for delta := 1; delta <= 16; delta++ {
 		if basePort+delta <= 65535 {
 			_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort + delta})
 		}
@@ -139,7 +140,7 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 		}
 	}
 
-	return err
+	return nil
 }
 
 func (p *UDPPuncher) SetDataCallback(cb DirectDataCallback) {
@@ -188,7 +189,7 @@ func (p *UDPPuncher) readLoop() {
 			continue
 		}
 
-		// 1. STUN Ответ
+		// 1. STUN Ответ (поддерживаем как XOR-MAPPED-ADDRESS так и MAPPED-ADDRESS)
 		if stun.IsMessage(buf[:n]) {
 			var stunResp stun.Message
 			stunResp.Raw = make([]byte, n)
@@ -202,6 +203,16 @@ func (p *UDPPuncher) readLoop() {
 					case p.stunRespCh <- struct{}{}:
 					default:
 					}
+				} else {
+					var mappedAddr stun.MappedAddress
+					if err := mappedAddr.GetFrom(&stunResp); err == nil {
+						p.mappedIP = mappedAddr.IP
+						p.mappedPort = mappedAddr.Port
+						select {
+						case p.stunRespCh <- struct{}{}:
+						default:
+						}
+					}
 				}
 			}
 			continue
@@ -213,17 +224,17 @@ func (p *UDPPuncher) readLoop() {
 		if strings.HasPrefix(data, "NATBYPASS:PING:") {
 			parts := strings.Split(data, ":")
 			if len(parts) >= 4 {
-				senderID := parts[2]
+				senderID := strings.Join(parts[2:len(parts)-1], ":")
 				if senderID == p.myDevID {
 					continue
 				}
-				sentTs := parts[3]
+				sentTs := parts[len(parts)-1]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
+				// Отправляем 2 PONG пакета для гарантии доставки
+				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
 				// Уведомляем о прямом UDP-контакте — fromAddr = РЕАЛЬНЫЙ адрес пира за NAT
-				// Это важно: STUNAddr пира из маяка может быть неверным (symmetric NAT),
-				// а вот реальный src-адрес входящего пакета — всегда правильный.
 				if p.onPingResult != nil {
 					p.onPingResult(senderID, 0, remoteAddr.String())
 				}
@@ -235,11 +246,11 @@ func (p *UDPPuncher) readLoop() {
 		if strings.HasPrefix(data, "NATBYPASS:PONG:") {
 			parts := strings.Split(data, ":")
 			if len(parts) >= 4 {
-				senderID := parts[2]
+				senderID := strings.Join(parts[2:len(parts)-1], ":")
 				if senderID == p.myDevID {
 					continue
 				}
-				sentNano, err := strconv.ParseInt(parts[3], 10, 64)
+				sentNano, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
 				if err == nil {
 					rtt := time.Since(time.Unix(0, sentNano))
 					if p.onPingResult != nil {

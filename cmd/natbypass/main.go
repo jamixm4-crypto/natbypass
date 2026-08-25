@@ -694,19 +694,21 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					for _, p := range registry.List() {
 						if p.Online && p.DeviceID != deviceID {
 							go func(peer *peer.Peer) {
-								probe3(peer.ActiveEndpoint)
+								if peer.ActiveEndpoint != "" {
+									probe3(peer.ActiveEndpoint)
+								}
 								if peer.STUNAddr != "" && peer.STUNAddr != peer.ActiveEndpoint {
 									probe3(peer.STUNAddr)
 								}
-								if peer.PublicIP != "" {
-									port := peer.WGPort
-									if port <= 0 {
-										port = 47832
-									}
-									probe3(fmt.Sprintf("%s:%d", peer.PublicIP, port))
-								}
 								if peer.LocalAddr != "" && peer.LocalAddr != peer.ActiveEndpoint {
 									probe3(peer.LocalAddr)
+								}
+								if peer.PublicIP != "" {
+									probe3(fmt.Sprintf("%s:47832", peer.PublicIP))
+									probe3(fmt.Sprintf("%s:51820", peer.PublicIP))
+									if peer.WGPort > 0 && peer.WGPort != 47832 && peer.WGPort != 51820 {
+										probe3(fmt.Sprintf("%s:%d", peer.PublicIP, peer.WGPort))
+									}
 								}
 							}(p)
 						}
