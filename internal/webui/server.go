@@ -306,6 +306,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 // jsonResponse отправляет стандартный JSON-ответ
 func (s *Server) jsonResponse(w http.ResponseWriter, status int, data interface{}, errStr string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(status)
 	resp := Response{
 		Ok:    status >= 200 && status < 300,
@@ -329,6 +330,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(http.StatusOK)
 	w.Write(content)
 }
