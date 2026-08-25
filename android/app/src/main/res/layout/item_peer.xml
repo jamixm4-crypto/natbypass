@@ -20,7 +20,7 @@
         android:layout_height="wrap_content"
         android:layout_marginEnd="10dp"
         android:text="🟢"
-        android:textSize="12sp" />
+        android:textSize="10sp" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -58,7 +58,7 @@
                 android:paddingBottom="2dp"
                 android:singleLine="true"
                 android:text="Шлюз"
-                android:textColor="@color/accent_purple"
+                android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:visibility="gone" />
@@ -82,14 +82,14 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
-        android:background="@drawable/bg_chip_green"
+        android:background="@drawable/bg_chip_blue"
         android:paddingStart="8dp"
         android:paddingTop="4dp"
         android:paddingEnd="8dp"
         android:paddingBottom="4dp"
         android:singleLine="true"
         android:text="14 ms"
-        android:textColor="@color/green_bright"
+        android:textColor="@color/text_secondary"
         android:textSize="12sp"
         android:textStyle="bold" />
 </LinearLayout>

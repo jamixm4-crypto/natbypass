@@ -471,8 +471,8 @@ class MainActivity : AppCompatActivity() {
             holder.tvExitNodeBadge.visibility = if (item.isExitNode) View.VISIBLE else View.GONE
 
             if (item.online) {
-                holder.tvPing.background = ContextCompat.getDrawable(holder.itemView.context, R.drawable.bg_chip_green)
-                holder.tvPing.setTextColor(ContextCompat.getColor(holder.itemView.context, R.color.green_bright))
+                holder.tvPing.background = ContextCompat.getDrawable(holder.itemView.context, R.drawable.bg_chip_blue)
+                holder.tvPing.setTextColor(ContextCompat.getColor(holder.itemView.context, R.color.text_secondary))
             } else {
                 holder.tvPing.background = ContextCompat.getDrawable(holder.itemView.context, R.drawable.bg_card)
                 holder.tvPing.setTextColor(ContextCompat.getColor(holder.itemView.context, R.color.text_muted))

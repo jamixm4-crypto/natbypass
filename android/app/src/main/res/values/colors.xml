@@ -1,26 +1,32 @@
 <resources>
-    <color name="bg_dark">#0B0F19</color>
-    <color name="bg_workspace">#0F172A</color>
-    <color name="panel_dark">#131B2E</color>
-    <color name="card_bg">#131B2E</color>
-    <color name="card_bg_elevated">#1E293B</color>
-    <color name="border_dark">#243048</color>
+    <!-- Deep Solid Dark Backgrounds -->
+    <color name="bg_dark">#0B0E14</color>
+    <color name="bg_workspace">#0E131D</color>
+    <color name="panel_dark">#141923</color>
+    <color name="card_bg">#141923</color>
+    <color name="card_bg_elevated">#1A2130</color>
+    
+    <!-- Hairline Professional Borders -->
+    <color name="border_dark">#222C3D</color>
     <color name="border_subtle">#1AFFFFFF</color>
     
-    <color name="text_primary">#F1F5F9</color>
+    <!-- High-Contrast Clean Typography -->
+    <color name="text_primary">#FFFFFF</color>
     <color name="text_secondary">#94A3B8</color>
     <color name="text_muted">#64748B</color>
     <color name="text_dim">#475569</color>
     
-    <color name="accent_primary">#38BDF8</color>
-    <color name="accent_blue">#38BDF8</color>
+    <!-- Unified Brand & Accent Colors -->
+    <color name="accent_primary">#3B82F6</color>
+    <color name="accent_blue">#3B82F6</color>
     <color name="accent_indigo">#6366F1</color>
     <color name="accent_purple">#818CF8</color>
     
+    <!-- Clean Functional Status Indicators ONLY -->
     <color name="green_online">#10B981</color>
-    <color name="green_bright">#34D399</color>
+    <color name="green_bright">#10B981</color>
     <color name="red_offline">#EF4444</color>
-    <color name="red_bright">#F87171</color>
+    <color name="red_bright">#EF4444</color>
     <color name="yellow_warn">#F59E0B</color>
     
     <color name="white">#FFFFFF</color>

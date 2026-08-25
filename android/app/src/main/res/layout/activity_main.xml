@@ -37,7 +37,7 @@
             android:paddingEnd="6dp"
             android:paddingBottom="2dp"
             android:text="v1.2.5"
-            android:textColor="@color/accent_blue"
+            android:textColor="@color/text_secondary"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -54,7 +54,7 @@
             android:background="@drawable/bg_action_btn"
             android:contentDescription="Сканировать QR"
             app:srcCompat="@drawable/ic_qr_code"
-            app:tint="@color/text_primary" />
+            app:tint="@color/text_secondary" />
 
         <ImageButton
             android:id="@+id/btnDiagnostics"
@@ -64,7 +64,7 @@
             android:background="@drawable/bg_action_btn"
             android:contentDescription="@string/title_diagnostics"
             app:srcCompat="@drawable/ic_diagnostics"
-            app:tint="@color/text_primary" />
+            app:tint="@color/text_secondary" />
 
         <ImageButton
             android:id="@+id/btnSettings"
@@ -73,7 +73,7 @@
             android:background="@drawable/bg_action_btn"
             android:contentDescription="@string/title_settings"
             app:srcCompat="@drawable/ic_settings"
-            app:tint="@color/text_primary" />
+            app:tint="@color/text_secondary" />
     </LinearLayout>
 
     <!-- 2. Hero VPN Connection Card -->
@@ -142,7 +142,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="@drawable/bg_chip_green"
+            android:background="@drawable/bg_chip_blue"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingStart="10dp"
@@ -154,8 +154,8 @@
                 android:id="@+id/tvAwgTunnelStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="AmneziaWG 2.0 • Готов к работе"
-                android:textColor="@color/green_bright"
+                android:text="AmneziaWG 2.0 • Защищенный туннель"
+                android:textColor="@color/text_secondary"
                 android:textSize="11sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -190,8 +190,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
                 android:text="0 онлайн"
-                android:textColor="@color/green_bright"
-                android:textSize="13sp"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -215,8 +215,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
                 android:text="0 ms"
-                android:textColor="@color/accent_blue"
-                android:textSize="13sp"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -239,8 +239,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
                 android:text="MQTT"
-                android:textColor="@color/accent_purple"
-                android:textSize="13sp"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
@@ -271,7 +271,7 @@
                 android:layout_width="16dp"
                 android:layout_height="16dp"
                 app:srcCompat="@drawable/ic_cloud_download"
-                app:tint="@color/accent_blue" />
+                app:tint="@color/text_secondary" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -300,7 +300,7 @@
                 android:layout_width="16dp"
                 android:layout_height="16dp"
                 app:srcCompat="@drawable/ic_clean"
-                app:tint="@color/red_bright" />
+                app:tint="@color/text_secondary" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -328,7 +328,7 @@
                 android:layout_width="16dp"
                 android:layout_height="16dp"
                 app:srcCompat="@drawable/ic_share"
-                app:tint="@color/accent_purple" />
+                app:tint="@color/text_secondary" />
 
             <TextView
                 android:layout_width="wrap_content"

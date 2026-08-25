@@ -45,7 +45,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="Внешний IP: Определяется..."
-                android:textColor="@color/accent_blue"
+                android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
             <TextView
@@ -54,7 +54,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
                 android:text="STUN-сокет: Определяется..."
-                android:textColor="@color/accent_purple"
+                android:textColor="@color/text_muted"
                 android:textSize="12sp" />
 
             <com.google.android.material.textfield.TextInputLayout
