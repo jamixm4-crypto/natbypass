@@ -108,10 +108,15 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// По умолчанию при запуске без аргументов (двойной клик по .exe) запускаем сервис
 			cfg, err := config.Load(configFile)
-			if err != nil || cfg == nil {
+			firstLaunch := (err != nil || cfg == nil)
+			if firstLaunch {
 				cfg = buildDefaultConfig()
 			}
 			applyBuiltinDefaults(cfg)
+			// При первом запуске сразу сохраняем конфиг — чтобы WebUI мог редактировать профиль
+			if firstLaunch {
+				_ = config.Save(cfg, configFile, runtime.GOOS == "windows")
+			}
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()

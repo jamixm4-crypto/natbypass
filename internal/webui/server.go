@@ -1696,10 +1696,17 @@ func (s *Server) handleProfilesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg, err := config.Load(s.configPath)
-	if err != nil || cfg == nil {
+	firstLaunch := (err != nil || cfg == nil)
+	if firstLaunch {
 		cfg = &config.Config{}
 	}
 	active := cfg.EnsureActiveProfile()
+
+	// При первом запуске (нет файла конфига) — сразу сохраняем профиль на диск,
+	// иначе попытка редактировать/сохранить его вернёт «профиль не найден»
+	if firstLaunch && active != nil {
+		_ = config.Save(cfg, s.configPath, false)
+	}
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"profiles":       cfg.Profiles,
@@ -1807,8 +1814,10 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 
 	cfg, _ := config.Load(s.configPath)
 	if cfg == nil {
-		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка загрузки конфига")
-		return
+		// Файл конфига ещё не существует — создаём дефолтный профиль и сохраняем
+		cfg = &config.Config{}
+		cfg.EnsureActiveProfile()
+		_ = config.Save(cfg, s.configPath, false)
 	}
 
 	var target *config.Profile
