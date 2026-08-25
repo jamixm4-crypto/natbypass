@@ -201,7 +201,8 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 10px;
+      gap: 8px;
+      margin-bottom: 12px;
       padding: 0 0 8px 0;
       position: sticky;
       top: 0;
@@ -210,28 +211,33 @@
       -webkit-backdrop-filter: blur(16px);
       z-index: 50;
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      overflow-x: auto;
+      scrollbar-width: none;
     }
+    .topbar::-webkit-scrollbar { display: none; }
 
     .glow-pill {
       background: rgba(168, 85, 247, 0.12);
       border: 1px solid rgba(168, 85, 247, 0.35);
-      border-radius: 20px;
-      padding: 6px 14px;
+      border-radius: 16px;
+      padding: 5px 11px;
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      font-size: 0.78rem;
+      gap: 6px;
+      font-size: 0.76rem;
       font-weight: 600;
       color: var(--text-main);
-      box-shadow: 0 0 20px rgba(168, 85, 247, 0.15);
+      box-shadow: 0 0 15px rgba(168, 85, 247, 0.15);
       cursor: pointer;
       backdrop-filter: blur(12px);
       transition: all 0.2s ease;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .glow-pill:hover {
       border-color: rgba(168, 85, 247, 0.7);
-      box-shadow: 0 0 25px rgba(168, 85, 247, 0.35);
+      box-shadow: 0 0 20px rgba(168, 85, 247, 0.35);
     }
 
     .segmented-group {
@@ -600,15 +606,19 @@
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.8);
-      backdrop-filter: blur(8px);
-      z-index: 100;
+      background: rgba(0, 0, 0, 0.82);
+      backdrop-filter: blur(10px);
+      z-index: 1000;
       display: none;
       align-items: center;
       justify-content: center;
     }
 
     .modal-overlay.active { display: flex; }
+
+    #qrModal {
+      z-index: 1200 !important;
+    }
 
     .modal-box {
       width: 460px;
@@ -700,43 +710,42 @@
 
     <!-- Top Bar -->
     <div class="topbar">
-      <!-- Left: Network ID & STUN -->
-      <div style="display:flex; align-items:center; gap:10px;">
-        <div class="glow-pill" onclick="copyText(document.getElementById('topVipLabel').innerText)" title="Ваш виртуальный IP в P2P сети (нажмите чтобы скопировать)" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; cursor: pointer; padding: 6px 14px; border-radius: 20px;">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
-          <span style="font-size:0.8rem; font-weight:700; opacity:0.85;">VIP:</span>
-          <span id="topVipLabel" class="mono" style="font-weight:700; color:#ffffff; font-size:0.85rem;">10.200.0.1</span>
-          <span style="font-size:0.75rem; opacity:0.6;">📋</span>
+      <!-- Left: Network IP, STUN & Profile -->
+      <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+        <div class="glow-pill" onclick="copyText(document.getElementById('topVipLabel').innerText)" title="Ваш виртуальный IP в P2P сети (нажмите чтобы скопировать)" style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; cursor: pointer; padding: 4px 10px; border-radius: 14px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+          <span style="font-size:0.75rem; font-weight:700; opacity:0.85;">VIP:</span>
+          <span id="topVipLabel" class="mono" style="font-weight:700; color:#ffffff; font-size:0.8rem;">10.200.0.1</span>
         </div>
 
-        <div class="glow-pill" onclick="openRenameModal()" title="Текущий внешний сокет NAT Hole Punching" style="padding: 6px 14px; border-radius: 20px; font-size:0.82rem;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6Z"></path></svg>
-          <span id="topStunLabel" style="font-size:0.82rem;">STUN: Определение...</span>
+        <div class="glow-pill" onclick="openRenameModal()" title="Текущий внешний сокет NAT Hole Punching" style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); padding: 4px 10px; border-radius: 14px; font-size:0.76rem;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6Z"></path></svg>
+          <span id="topStunLabel" style="font-size:0.76rem; max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">STUN: Определение...</span>
         </div>
 
-        <div class="glow-pill" onclick="openProfileModal()" title="Управление профилями сети (нажмите для переключения или создания)" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; cursor: pointer; padding: 6px 14px; border-radius: 20px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-          <span style="font-size:0.8rem; font-weight:700; opacity:0.85;">Сеть:</span>
-          <span id="topProfileLabel" style="font-weight:700; color:#ffffff; font-size:0.85rem; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Основная сеть</span>
-          <span style="font-size:0.75rem; opacity:0.7;">▾</span>
+        <div class="glow-pill" onclick="openProfileModal()" title="Управление профилями сети (нажмите для переключения или создания)" style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.35); color: #818cf8; cursor: pointer; padding: 4px 10px; border-radius: 14px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <span style="font-size:0.75rem; font-weight:700; opacity:0.85;">Сеть:</span>
+          <span id="topProfileLabel" style="font-weight:700; color:#ffffff; font-size:0.8rem; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Основная сеть</span>
+          <span style="font-size:0.7rem; opacity:0.7;">▾</span>
         </div>
       </div>
 
       <!-- Right: Action Buttons & User Profile -->
-      <div style="display:flex; align-items:center; gap:8px;">
-        <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 6px 12px; border-radius: 18px; font-weight: 700; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s;" title="Проверить обновления NatBypass">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.1.6</span>
+      <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+        <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          <span id="topUpdateLabel">v1.2.7</span>
         </button>
 
-        <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 6px 12px; border-radius: 18px; font-weight: 700; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s;" title="Показать QR-код для Android / WireGuard">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-          <span>📱 QR-код</span>
+        <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <span>📱 QR</span>
         </button>
 
-        <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 4px 12px 4px 5px;">
-          <div class="user-avatar" id="userAvatar" style="width:26px; height:26px; font-size:0.75rem;">N</div>
-          <span id="userNameLabel" style="font-size:0.82rem; font-weight:700; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
+        <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
+          <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
+          <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
           <div class="online-dot"></div>
         </div>
       </div>
@@ -1231,10 +1240,11 @@
       </div>
 
       <!-- QR Mode Selector -->
-      <div class="segmented-group" style="width:100%; justify-content:center; margin-bottom: 18px;">
-        <button id="btnQrModeSync" onclick="switchQRMode('sync')" class="seg-btn active" style="flex:1;">⚡ Настройки Android</button>
-        <button id="btnQrModeAwg" onclick="switchQRMode('awg')" class="seg-btn" style="flex:1;">🛡️ AmneziaWG .conf</button>
-        <button id="btnQrModeInvite" onclick="switchQRMode('invite')" class="seg-btn" style="flex:1;">🔗 Invite Link</button>
+      <div class="segmented-group" style="width:100%; justify-content:center; margin-bottom: 16px; gap:2px;">
+        <button id="btnQrModeProfile" onclick="switchQRMode('profile')" class="seg-btn" style="flex:1; padding:5px 6px; font-size:0.74rem;">🔒 Профиль сети</button>
+        <button id="btnQrModeSync" onclick="switchQRMode('sync')" class="seg-btn active" style="flex:1; padding:5px 6px; font-size:0.74rem;">⚡ Android Sync</button>
+        <button id="btnQrModeAwg" onclick="switchQRMode('awg')" class="seg-btn" style="flex:1; padding:5px 6px; font-size:0.74rem;">🛡️ AWG .conf</button>
+        <button id="btnQrModeInvite" onclick="switchQRMode('invite')" class="seg-btn" style="flex:1; padding:5px 6px; font-size:0.74rem;">🔗 Инвайт</button>
       </div>
 
       <!-- QR Canvas Card with high contrast border -->
@@ -1420,15 +1430,19 @@
     function openQRModal(mode) {
       if (mode) currentQRMode = mode;
       document.getElementById('qrModal').classList.add('active');
+      document.getElementById('qrModal').style.display = 'flex';
       switchQRMode(currentQRMode);
     }
 
     function closeQRModal() {
       document.getElementById('qrModal').classList.remove('active');
+      document.getElementById('qrModal').style.display = 'none';
     }
 
     async function switchQRMode(mode) {
       currentQRMode = mode;
+      const btnProf = document.getElementById('btnQrModeProfile');
+      if (btnProf) btnProf.classList.toggle('active', mode === 'profile');
       document.getElementById('btnQrModeSync').classList.toggle('active', mode === 'sync');
       document.getElementById('btnQrModeAwg').classList.toggle('active', mode === 'awg');
       document.getElementById('btnQrModeInvite').classList.toggle('active', mode === 'invite');
@@ -1436,7 +1450,19 @@
       let qrPayload = '';
       const descEl = document.getElementById('qrDescText');
 
-      if (mode === 'sync') {
+      if (mode === 'profile') {
+        const profName = currentActiveProfile ? currentActiveProfile.name : 'Сеть';
+        descEl.innerHTML = 'Отсканируйте камерой в приложении <b>NatBypass Android</b> для мгновенного подключения к сети «' + escapeHtml(profName) + '».';
+        if (currentActiveProfile) {
+          try {
+            const res = await fetch('/api/profiles/export?id=' + currentActiveProfile.id);
+            const json = await res.json();
+            if (json.ok && json.data.uri) {
+              qrPayload = json.data.uri;
+            }
+          } catch(e) {}
+        }
+      } else if (mode === 'sync') {
         descEl.innerHTML = 'Откройте сканер в приложении <b>NatBypass Android</b>. Приложение автоматически скопирует токен бота, чат и сетевые настройки.';
         const devId = document.getElementById('userNameLabel').innerText || 'Device';
         const tgToken = document.getElementById('cfgTgToken').value.trim();
@@ -2618,10 +2644,12 @@
 
     function openProfileModal() {
       loadProfiles();
+      document.getElementById('profileModal').classList.add('active');
       document.getElementById('profileModal').style.display = 'flex';
     }
 
     function closeProfileModal() {
+      document.getElementById('profileModal').classList.remove('active');
       document.getElementById('profileModal').style.display = 'none';
     }
 
@@ -2667,10 +2695,12 @@
     function openCreateProfileModal() {
       document.getElementById('newProfName').value = 'Сеть #' + (currentProfiles.length + 1);
       document.getElementById('newProfTopic').value = '';
+      document.getElementById('createProfileModal').classList.add('active');
       document.getElementById('createProfileModal').style.display = 'flex';
     }
 
     function closeCreateProfileModal() {
+      document.getElementById('createProfileModal').classList.remove('active');
       document.getElementById('createProfileModal').style.display = 'none';
     }
 
@@ -2699,10 +2729,12 @@
 
     function openImportProfileModal() {
       document.getElementById('importProfileRaw').value = '';
+      document.getElementById('importProfileModal').classList.add('active');
       document.getElementById('importProfileModal').style.display = 'flex';
     }
 
     function closeImportProfileModal() {
+      document.getElementById('importProfileModal').classList.remove('active');
       document.getElementById('importProfileModal').style.display = 'none';
     }
 
@@ -2731,17 +2763,8 @@
     }
 
     async function shareActiveProfileQR() {
-      if (!currentActiveProfile) return;
-      try {
-        const res = await fetch('/api/profiles/export?id=' + currentActiveProfile.id);
-        const json = await res.json();
-        if (json.ok && json.data.uri) {
-          openQRModal();
-          document.getElementById('qrRawText').value = json.data.uri;
-          renderQR(json.data.uri);
-          document.getElementById('qrDescText').innerHTML = 'Отсканируйте камерой смартфона в приложении <b>NatBypass Android</b> для мгновенного импорта сети «' + escapeHtml(currentActiveProfile.name) + '».';
-        }
-      } catch (e) {}
+      closeProfileModal();
+      openQRModal('profile');
     }
 
     async function copyActiveProfileURI() {
