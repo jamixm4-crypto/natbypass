@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -211,7 +212,9 @@ func openAppWindow(port int) {
 }
 
 func openBrowserFallback(url string) {
-	_ = exec.Command("cmd", "/c", "start", url).Start()
+	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = cmd.Start()
 }
 
 // applyWindowIcon находит окно NatBypass и устанавливает иконку через WM_SETICON

@@ -188,7 +188,7 @@
       flex: 1;
       display: flex;
       flex-direction: column;
-      padding: 16px 20px 20px 20px;
+      padding: 16px 20px 24px 20px;
       position: relative;
       overflow-y: auto;
       min-width: 0;
@@ -203,14 +203,9 @@
       align-items: center;
       gap: 8px;
       margin-bottom: 18px;
-      padding: 4px 0 12px 0;
-      position: sticky;
-      top: -16px;
-      margin-top: -16px;
-      padding-top: 16px;
-      background: rgba(11, 15, 25, 0.98);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      padding: 0 0 12px 0;
+      position: relative;
+      background: transparent;
       z-index: 50;
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       overflow-x: auto;
@@ -1492,6 +1487,19 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const modal = document.getElementById('qrModal');
       modal.classList.add('active');
       modal.style.display = 'flex';
+
+      // Immediate payload so it's NEVER blank
+      let immediatePayload = '';
+      if (currentActiveProfile) {
+        immediatePayload = `natbypass://profile?id=${encodeURIComponent(currentActiveProfile.id)}&name=${encodeURIComponent(currentActiveProfile.name)}&topic=${encodeURIComponent(currentActiveProfile.mqtt_topic || 'natbypass/mesh/default')}&broker=${encodeURIComponent(currentActiveProfile.mqtt_broker || 'tcp://broker.emqx.io:1883')}${currentActiveProfile.network_key ? '&key=' + encodeURIComponent(currentActiveProfile.network_key) : ''}&awg=${encodeURIComponent(currentActiveProfile.awg_preset || 'dpi')}`;
+      } else {
+        const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'natbypass/mesh/default';
+        const cfgBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim() || 'tcp://broker.emqx.io:1883';
+        immediatePayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
+      }
+      document.getElementById('qrRawText').value = immediatePayload;
+      renderQR(immediatePayload);
+
       if (!currentProfiles || currentProfiles.length === 0 || !currentActiveProfile) {
         try {
           await loadProfiles();
@@ -1525,17 +1533,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
         if (!prof && currentProfiles && currentProfiles.length > 0) {
           prof = currentProfiles[0];
-        }
-        if (!prof) {
-          try {
-            const res = await fetch('/api/profiles');
-            const json = await res.json();
-            if (json.ok && json.data) {
-              currentProfiles = json.data.profiles || [];
-              currentActiveProfile = json.data.active_profile || (currentProfiles.length > 0 ? currentProfiles[0] : null);
-              prof = currentActiveProfile;
-            }
-          } catch(e) {}
         }
 
         const profName = prof ? prof.name : 'Сеть #1';
@@ -1583,6 +1580,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             qrPayload = await res.text();
           } catch(e) {}
         }
+        if (!qrPayload) {
+          qrPayload = '[Interface]\nPrivateKey = ...\nAddress = 10.200.0.1/24\n';
+        }
       } else {
         descEl.innerHTML = 'Универсальное приглашение в P2P сеть NatBypass для других компьютеров и серверов.';
         const devId = document.getElementById('userNameLabel').innerText || 'Device';
@@ -1599,10 +1599,29 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (!container) return;
       container.innerHTML = '';
       if (!text || text.trim() === '') {
-        container.innerHTML = '<span style="color:#888; font-size:0.78rem;">Генерация QR...</span>';
-        return;
+        text = 'natbypass://mesh/default';
       }
 
+      // 1. Try pure offline client-side SVG QR code generator
+      try {
+        if (typeof QRCode !== 'undefined') {
+          new QRCode(container, {
+            text: text,
+            width: 170,
+            height: 170,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: 1
+          });
+          if (container.querySelector('svg') || container.querySelector('canvas')) {
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Client QR error, fallback to image:", err);
+      }
+
+      // 2. Fallback to local server image
       const img = document.createElement('img');
       img.src = '/api/qr/image?data=' + encodeURIComponent(text);
       img.style.width = '170px';
