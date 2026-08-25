@@ -97,7 +97,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.2.5"
+            [ -z "$TAG" ] && TAG="v1.2.7"
           fi
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-${TAG}.apk \;
           ls -lh ../release_apk/
@@ -115,7 +115,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.2.5"
+            [ -z "$TAG" ] && TAG="v1.2.7"
           fi
           echo "Attaching Android APK to release $TAG..."
           gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --target main || true

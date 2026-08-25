@@ -11,8 +11,8 @@ android {
         applicationId = "org.natbypass.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 125
-        versionName = "1.2.5"
+        versionCode = 127
+        versionName = "1.2.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

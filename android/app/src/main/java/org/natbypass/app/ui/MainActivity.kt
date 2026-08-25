@@ -688,9 +688,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkForUpdates(manual: Boolean) {
         val currentVer = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2.5"
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.2.7"
         } catch (e: Exception) {
-            "1.2.5"
+            "1.2.7"
         }
 
         if (manual) {
