@@ -124,6 +124,9 @@ type Payload struct {
 	NetworkKey       string     `json:"network_key,omitempty"`
 	NetworkID        string     `json:"network_id,omitempty"`
 	Topic            string     `json:"topic,omitempty"`
+	DirectP2P        bool       `json:"direct_p2p,omitempty"`
+	ActiveEndpoint   string     `json:"active_endpoint,omitempty"`
+	PingMs           int64      `json:"ping_ms,omitempty"`
 }
 
 func (p *Payload) UnmarshalJSON(data []byte) error {
@@ -152,6 +155,9 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		UpperNetworkKey       string     `json:"NetworkKey"`
 		UpperNetworkID        string     `json:"NetworkID"`
 		UpperTopic            string     `json:"Topic"`
+		UpperDirectP2P        bool       `json:"DirectP2P"`
+		UpperActiveEndpoint   string     `json:"ActiveEndpoint"`
+		UpperPingMs           int64      `json:"PingMs"`
 		*Alias
 	}{
 		Alias: (*Alias)(p),
@@ -161,6 +167,15 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 	}
 	if p.DeviceID == "" && aux.UpperDeviceID != "" {
 		p.DeviceID = aux.UpperDeviceID
+	}
+	if !p.DirectP2P && aux.UpperDirectP2P {
+		p.DirectP2P = true
+	}
+	if p.ActiveEndpoint == "" && aux.UpperActiveEndpoint != "" {
+		p.ActiveEndpoint = aux.UpperActiveEndpoint
+	}
+	if p.PingMs == 0 && aux.UpperPingMs != 0 {
+		p.PingMs = aux.UpperPingMs
 	}
 	if p.IPv6Addr == "" && aux.UpperIPv6Addr != "" {
 		p.IPv6Addr = aux.UpperIPv6Addr

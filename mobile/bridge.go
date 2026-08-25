@@ -201,7 +201,8 @@ func StartEngine(configYAML string, tunFd int) string {
 	globalSigMgr = signaling.NewFallbackManager(channels)
 
 	// UDP Puncher для P2P сокетов
-	puncher, _ := network.NewUDPPuncher(51820, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+	var puncher *network.UDPPuncher
+	puncher, _ = network.NewUDPPuncher(51820, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		if p, ok := globalRegistry.Get(remoteDevID); ok {
 			p.DirectP2P = true
 			p.ActiveEndpoint = fromAddr
@@ -218,6 +219,16 @@ func StartEngine(configYAML string, tunFd int) string {
 			p.LastSeen = time.Now()
 			globalRegistry.Upsert(p)
 			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("⚡ Android P2P сокет пробит!")
+
+			// Встречный зонд на обнаруженный сокет для гарантированного подтверждения со стороны ПК/роутера
+			if puncher != nil {
+				go func(targetAddr string) {
+					for i := 0; i < 3; i++ {
+						_ = puncher.SendHolePunchProbe(targetAddr)
+						time.Sleep(50 * time.Millisecond)
+					}
+				}(fromAddr)
+			}
 		}
 	})
 	globalPuncher = puncher
@@ -288,6 +299,15 @@ func StartEngine(configYAML string, tunFd int) string {
 					activeKey = activeProf.NetworkKey
 					activeTopic = activeProf.MQTTTopic
 				}
+				hasDirect := false
+				if globalRegistry != nil {
+					for _, p := range globalRegistry.List() {
+						if p.DirectP2P {
+							hasDirect = true
+							break
+						}
+					}
+				}
 				payload := &signaling.Payload{
 					DeviceID:         devID,
 					Nickname:         globalDevName,
@@ -300,6 +320,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					WGPubKey:         wgKey.PublicKey,
 					WGPort:           cfg.WireGuard.ListenPort,
 					VirtualIP:        globalVirtualIP,
+					DirectP2P:        hasDirect,
 					IsExitNode:       cfg.Network.AllowExitNode,
 					AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 					Timestamp:        time.Now(),
@@ -354,6 +375,9 @@ func StartEngine(configYAML string, tunFd int) string {
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
 						VirtualIP:        p.VirtualIP,
+						DirectP2P:        p.DirectP2P,
+						ActiveEndpoint:   p.ActiveEndpoint,
+						PingMs:           p.PingMs,
 						IsExitNode:       p.IsExitNode,
 						AdvertisedRoutes: p.AdvertisedRoutes,
 						LastSeen:         time.Now(),

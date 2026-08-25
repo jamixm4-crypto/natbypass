@@ -587,6 +587,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			p.Online = true
 			p.LastSeen = time.Now()
 			registry.Upsert(p)
+
+			// Встречный зонд на обнаруженный сокет для гарантированного подтверждения со стороны смартфона/клиента
+			if puncher != nil {
+				go func(targetAddr string) {
+					for i := 0; i < 3; i++ {
+						_ = puncher.SendHolePunchProbe(targetAddr)
+						time.Sleep(50 * time.Millisecond)
+					}
+				}(fromAddr)
+			}
 		}
 	})
 	if err == nil {
@@ -1006,6 +1016,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						IPv6Addr:         p.IPv6Addr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
+						DirectP2P:        p.DirectP2P,
+						ActiveEndpoint:   p.ActiveEndpoint,
+						PingMs:           p.PingMs,
 						IsExitNode:       p.IsExitNode,
 						AdvertisedRoutes: p.AdvertisedRoutes,
 						LastSeen:         time.Now(),
