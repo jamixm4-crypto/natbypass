@@ -315,11 +315,13 @@ func StartEngine(configYAML string, tunFd int) string {
 					activeProf := cfg.EnsureActiveProfile()
 					if activeProf != nil {
 						match := false
-						if activeProf.NetworkKey != "" && p.NetworkKey == activeProf.NetworkKey {
+						if activeProf.MQTTTopic != "" && p.Topic == activeProf.MQTTTopic {
 							match = true
-						} else if activeProf.MQTTTopic != "" && p.Topic == activeProf.MQTTTopic {
+						} else if activeProf.NetworkKey != "" && p.NetworkKey == activeProf.NetworkKey {
 							match = true
-						} else if activeProf.NetworkKey == "" && activeProf.MQTTTopic == "" {
+						} else if p.Topic == "" && p.NetworkKey == "" {
+							match = true
+						} else if activeProf.MQTTTopic == "" && activeProf.NetworkKey == "" {
 							match = true
 						}
 						if !match {

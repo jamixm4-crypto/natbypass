@@ -497,6 +497,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		uiServer.SetDeviceName(deviceID)
 		uiServer.SetVersion(Version)
 		uiServer.AddEvent("info", "NatBypass запущен", "version="+Version)
+
+		uiServer.SetOnProfileSwitch(func(p *config.Profile) error {
+			if p == nil {
+				return nil
+			}
+			log.Info().Str("profile", p.Name).Str("topic", p.MQTTTopic).Msg("⚡ Динамическое переключение профиля сети")
+			if sigMgr != nil && p.MQTTTopic != "" {
+				sigMgr.UpdateMQTTTopic(p.MQTTTopic)
+			}
+			registry.ClearAll()
+			return nil
+		})
+
 		go func() {
 			if err := uiServer.Start(engineCtx); err != nil {
 				log.Error().Err(err).Msg("Web UI остановлен")
@@ -857,11 +870,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					activeProf := cfg.EnsureActiveProfile()
 					if activeProf != nil {
 						match := false
-						if activeProf.NetworkKey != "" && p.NetworkKey == activeProf.NetworkKey {
+						if activeProf.MQTTTopic != "" && p.Topic == activeProf.MQTTTopic {
 							match = true
-						} else if activeProf.MQTTTopic != "" && p.Topic == activeProf.MQTTTopic {
+						} else if activeProf.NetworkKey != "" && p.NetworkKey == activeProf.NetworkKey {
 							match = true
-						} else if activeProf.NetworkKey == "" && activeProf.MQTTTopic == "" {
+						} else if p.Topic == "" && p.NetworkKey == "" {
+							match = true
+						} else if activeProf.MQTTTopic == "" && activeProf.NetworkKey == "" {
 							match = true
 						}
 						if !match {
