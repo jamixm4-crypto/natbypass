@@ -823,7 +823,7 @@ func main() {
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowTitle)),
 		WS_FIXEDWINDOW|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
-		60, 40, 960, 620,
+		60, 40, 1060, 720,
 		0, 0, hInstance, 0,
 	)
 	hMainWnd = hwnd
@@ -906,7 +906,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		procMoveToEx.Call(hdc, 220, 0, uintptr(unsafe.Pointer(&pt)))
 		procLineTo.Call(hdc, 220, uintptr(clientRect.Bottom))
 
-		cardRect := RECT{Left: 236, Top: 16, Right: clientRect.Right - 16, Bottom: clientRect.Bottom - 16}
+		cardRect := RECT{Left: 232, Top: 10, Right: clientRect.Right - 10, Bottom: clientRect.Bottom - 10}
 		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&cardRect)), hBrushCard)
 
 		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
@@ -962,9 +962,14 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 
 	case WM_COMMAND:
 		id := LOWORD(wParam)
-		if lParam == hListProfiles && HIWORD(wParam) == 1 /* LBN_SELCHANGE */ {
-			onProfileSelectionChange()
-			return 0
+		if lParam == hListProfiles {
+			if HIWORD(wParam) == 1 /* LBN_SELCHANGE */ {
+				onProfileSelectionChange()
+				return 0
+			} else if HIWORD(wParam) == 2 /* LBN_DBLCLK */ {
+				handleProfileSwitch()
+				return 0
+			}
 		}
 		handleCommand(id)
 		return 0
@@ -1125,10 +1130,11 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 	isActiveNav := false
 	if isNav {
 		if (id == ID_NAV_DASHBOARD && currentTab == 0) ||
-			(id == ID_NAV_AWG && currentTab == 1) ||
-			(id == ID_NAV_SETTINGS && currentTab == 2) ||
-			(id == ID_NAV_DIAG && currentTab == 3) ||
-			(id == ID_NAV_LOGS && currentTab == 4) {
+			(id == ID_NAV_PROFILES && currentTab == 1) ||
+			(id == ID_NAV_AWG && currentTab == 2) ||
+			(id == ID_NAV_SETTINGS && currentTab == 3) ||
+			(id == ID_NAV_DIAG && currentTab == 4) ||
+			(id == ID_NAV_LOGS && currentTab == 5) {
 			isActiveNav = true
 		}
 	}
@@ -2564,54 +2570,54 @@ func buildModernUI(hInstance uintptr) {
 
 	allControls = append(allControls, lblLogo, lblVer)
 
-	cx := 256
-	cw := 768
+	cx := 244
+	cw := 790
 
 	// СТРАНИЦА 0: ОБЗОР
-	hLblStatus = createLabel(hInstance, "🟡 ПОИСК УСТРОЙСТВ В СЕТИ...", cx, 24, cw, 26, hFontTitle)
-	hLblIpInfo = createLabel(hInstance, "Устройство: Определение... | Внешний IP: — | STUN: —", cx, 52, cw, 20, hFontNormal)
-	hLblChannels = createLabel(hInstance, "📡 Сигнальный канал: Инициализация...", cx, 74, cw, 20, hFontNormal)
+	hLblStatus = createLabel(hInstance, "🟡 ПОИСК УСТРОЙСТВ В СЕТИ...", cx, 20, cw, 26, hFontTitle)
+	hLblIpInfo = createLabel(hInstance, "Устройство: Определение... | Внешний IP: — | STUN: —", cx, 48, cw, 20, hFontNormal)
+	hLblChannels = createLabel(hInstance, "📡 Сигнальный канал: Инициализация...", cx, 70, cw, 20, hFontNormal)
 
-	hBtnVpn = createOwnerDrawButton(hInstance, "🔴 ОЖИДАНИЕ СВЯЗИ (Поиск устройств в сети...)", cx, 98, 330, 38, ID_BTN_VPN, "red")
-	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить IP", cx+340, 98, 125, 38, ID_BTN_REFRESH, "normal")
-	hBtnManageProfiles = createOwnerDrawButton(hInstance, "🌐 Профили сети...", cx+472, 98, 140, 38, ID_BTN_MANAGE_PROFILES, "normal")
-	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ В закладки", cx+620, 98, 148, 38, ID_BTN_BOOKMARK_PEER, "normal")
+	hBtnVpn = createOwnerDrawButton(hInstance, "🔴 ОЖИДАНИЕ СВЯЗИ (Поиск устройств в сети...)", cx, 96, 330, 38, ID_BTN_VPN, "red")
+	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить IP", cx+340, 96, 130, 38, ID_BTN_REFRESH, "normal")
+	hBtnManageProfiles = createOwnerDrawButton(hInstance, "🌐 Профили сети...", cx+478, 96, 150, 38, ID_BTN_MANAGE_PROFILES, "normal")
+	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ В закладки", cx+636, 96, 154, 38, ID_BTN_BOOKMARK_PEER, "normal")
 
-	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "🌐 Выход в интернет: Локальный (Отключен)", cx, 142, 380, 40, ID_BTN_EXIT_NODE_SELECT, "normal")
-	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+390, 142, 378, 40, ID_BTN_TOGGLE_SUBNET, "normal")
+	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "🌐 Выход в интернет: Локальный (Отключен)", cx, 140, 385, 40, ID_BTN_EXIT_NODE_SELECT, "normal")
+	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+395, 140, 395, 40, ID_BTN_TOGGLE_SUBNET, "normal")
 
-	lblPeersTitle := createLabel(hInstance, "👥 Устройства в вашей сети (Прямой P2P статус и адресная книга):", cx, 190, cw, 22, hFontHeader)
-	hListPeers = createListBox(hInstance, cx, 216, cw, 440, hFontNormal)
+	lblPeersTitle := createLabel(hInstance, "👥 Устройства в вашей сети (Прямой P2P статус и адресная книга):", cx, 188, cw, 22, hFontHeader)
+	hListPeers = createListBox(hInstance, cx, 214, cw, 460, hFontNormal)
 
 	tabPages[0] = []uintptr{hLblStatus, hLblIpInfo, hLblChannels, hBtnVpn, hBtnRefresh, hBtnManageProfiles, hBtnBookmarkPeer, hBtnExitNodeSelect, hBtnToggleSubnetRoute, lblPeersTitle, hListPeers}
 	writeDebug("buildModernUI: страница 0 создана")
 
 	// СТРАНИЦА 1: УПРАВЛЕНИЕ ПРОФИЛЯМИ P2P СЕТЕЙ
-	lblProfTitle := createLabel(hInstance, "🌐 Управление профилями P2P сетей (Mesh Profiles)", cx, 24, cw, 28, hFontTitle)
-	lblProfDesc := createLabel(hInstance, "Каждый профиль — это отдельная изолированная сеть. Выбирайте сеть или создавайте новые.", cx, 54, cw, 20, hFontNormal)
+	lblProfTitle := createLabel(hInstance, "🌐 Управление профилями P2P сетей (Mesh Profiles)", cx, 20, cw, 28, hFontTitle)
+	lblProfDesc := createLabel(hInstance, "Каждый профиль — это отдельная изолированная сеть. Выбирайте сеть или создавайте новые.", cx, 48, cw, 20, hFontNormal)
 
-	hListProfiles = createListBox(hInstance, cx, 80, cw, 200, hFontNormal)
+	hListProfiles = createListBox(hInstance, cx, 74, cw, 220, hFontNormal)
 
-	hBtnProfSwitch = createOwnerDrawButton(hInstance, "⚡ Подключить сеть", cx, 290, 185, 36, ID_BTN_PROF_SWITCH, "green")
-	hBtnProfQR = createOwnerDrawButton(hInstance, "📱 QR-код", cx+195, 290, 150, 36, ID_BTN_PROF_QR, "primary")
-	hBtnProfCreate = createOwnerDrawButton(hInstance, "➕ Новая сеть", cx+355, 290, 180, 36, ID_BTN_PROF_CREATE, "normal")
-	hBtnProfImport = createOwnerDrawButton(hInstance, "📥 Импорт", cx+545, 290, 223, 36, ID_BTN_PROF_IMPORT, "normal")
+	hBtnProfSwitch = createOwnerDrawButton(hInstance, "⚡ Подключить сеть", cx, 304, 185, 36, ID_BTN_PROF_SWITCH, "green")
+	hBtnProfQR = createOwnerDrawButton(hInstance, "📱 QR-код", cx+195, 304, 150, 36, ID_BTN_PROF_QR, "primary")
+	hBtnProfCreate = createOwnerDrawButton(hInstance, "➕ Новая сеть", cx+355, 304, 180, 36, ID_BTN_PROF_CREATE, "normal")
+	hBtnProfImport = createOwnerDrawButton(hInstance, "📥 Импорт", cx+545, 304, 245, 36, ID_BTN_PROF_IMPORT, "normal")
 
-	lblProfEditHead := createLabel(hInstance, "⚙️ Параметры выбранной сети (Редактирование):", cx, 336, cw, 22, hFontHeader)
+	lblProfEditHead := createLabel(hInstance, "⚙️ Параметры выбранной сети (Редактирование):", cx, 350, cw, 22, hFontHeader)
 
-	lblProfName := createLabel(hInstance, "Название сети:", cx, 368, 160, 20, hFontBold)
-	hEditProfName = createEdit(hInstance, "", cx+170, 364, 320, 28, false, false, hFontNormal)
+	lblProfName := createLabel(hInstance, "Название сети:", cx, 380, 160, 20, hFontBold)
+	hEditProfName = createEdit(hInstance, "", cx+170, 376, 340, 28, false, false, hFontNormal)
 
-	hBtnProfExport = createOwnerDrawButton(hInstance, "🔗 Скопировать ссылку", cx+508, 364, 260, 28, ID_BTN_PROF_EXPORT, "normal")
+	hBtnProfExport = createOwnerDrawButton(hInstance, "🔗 Скопировать ссылку", cx+520, 376, 270, 28, ID_BTN_PROF_EXPORT, "normal")
 
-	lblProfTopic := createLabel(hInstance, "MQTT Топик (секрет):", cx, 404, 160, 20, hFontBold)
-	hEditProfTopic = createEdit(hInstance, "", cx+170, 400, 598, 28, false, false, hFontNormal)
+	lblProfTopic := createLabel(hInstance, "MQTT Топик (секрет):", cx, 416, 160, 20, hFontBold)
+	hEditProfTopic = createEdit(hInstance, "", cx+170, 412, 620, 28, false, false, hFontNormal)
 
-	lblProfBroker := createLabel(hInstance, "MQTT Брокер:", cx, 440, 160, 20, hFontBold)
-	hEditProfBroker = createEdit(hInstance, "", cx+170, 436, 598, 28, false, false, hFontNormal)
+	lblProfBroker := createLabel(hInstance, "MQTT Брокер:", cx, 452, 160, 20, hFontBold)
+	hEditProfBroker = createEdit(hInstance, "", cx+170, 448, 620, 28, false, false, hFontNormal)
 
-	hBtnProfSave = createOwnerDrawButton(hInstance, "💾 Сохранить изменения профиля", cx+170, 476, 330, 38, ID_BTN_PROF_SAVE, "primary")
-	hBtnProfDelete = createOwnerDrawButton(hInstance, "🗑️ Удалить эту сеть", cx+510, 476, 258, 38, ID_BTN_PROF_DELETE, "red")
+	hBtnProfSave = createOwnerDrawButton(hInstance, "💾 Сохранить изменения профиля", cx+170, 492, 340, 38, ID_BTN_PROF_SAVE, "primary")
+	hBtnProfDelete = createOwnerDrawButton(hInstance, "🗑️ Удалить эту сеть", cx+520, 492, 270, 38, ID_BTN_PROF_DELETE, "red")
 
 	tabPages[1] = []uintptr{
 		lblProfTitle, lblProfDesc, hListProfiles,
@@ -2623,51 +2629,47 @@ func buildModernUI(hInstance uintptr) {
 	writeDebug("buildModernUI: страница 1 создана")
 
 	// СТРАНИЦА 2: AMNEZIAWG 2.0
-	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 2.0 — Защита от блокировок DPI", cx, 36, cw, 28, hFontTitle)
-	lblAwgDesc := createLabel(hInstance, "Маскирует протокол WireGuard мусорными пакетами и заголовками (ТСПУ / РКН).", cx, 66, cw, 20, hFontNormal)
+	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 2.0 — Защита от блокировок DPI", cx, 20, cw, 28, hFontTitle)
+	lblAwgDesc := createLabel(hInstance, "Маскирует протокол WireGuard мусорными пакетами и заголовками (ТСПУ / РКН).", cx, 48, cw, 20, hFontNormal)
 
-	hBtnAwgStd = createOwnerDrawButton(hInstance, "🟢 Стандартный WG", cx, 100, 180, 36, ID_BTN_AWG_STD, "normal")
-	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🟡 Обход DPI (AWG)", cx+192, 100, 180, 36, ID_BTN_AWG_DPI, "primary")
-	hBtnAwgStealth = createOwnerDrawButton(hInstance, "🔴 Скрытный режим", cx+384, 100, 180, 36, ID_BTN_AWG_STEALTH, "normal")
-	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайные ключи", cx+576, 100, 180, 36, ID_BTN_RAND_AWG, "normal")
+	hBtnAwgStd = createOwnerDrawButton(hInstance, "🟢 Стандартный WG", cx, 78, 190, 36, ID_BTN_AWG_STD, "normal")
+	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🟡 Обход DPI (AWG)", cx+200, 78, 190, 36, ID_BTN_AWG_DPI, "primary")
+	hBtnAwgStealth = createOwnerDrawButton(hInstance, "🔴 Скрытный режим", cx+400, 78, 190, 36, ID_BTN_AWG_STEALTH, "normal")
+	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайные ключи", cx+600, 78, 190, 36, ID_BTN_RAND_AWG, "normal")
 
-	lblJc := createLabel(hInstance, "Jc (мусор):", cx, 150, 75, 20, hFontNormal)
-	hEditAwgJc = createEdit(hInstance, "4", cx+80, 146, 55, 28, false, false, hFontNormal)
+	lblJc := createLabel(hInstance, "Jc (мусор):", cx, 128, 75, 20, hFontNormal)
+	hEditAwgJc = createEdit(hInstance, "4", cx+80, 124, 55, 28, false, false, hFontNormal)
 
-	lblJmin := createLabel(hInstance, "Jmin:", cx+150, 150, 45, 20, hFontNormal)
-	hEditAwgJmin = createEdit(hInstance, "40", cx+198, 146, 55, 28, false, false, hFontNormal)
+	lblJmin := createLabel(hInstance, "Jmin:", cx+150, 128, 45, 20, hFontNormal)
+	hEditAwgJmin = createEdit(hInstance, "40", cx+198, 124, 55, 28, false, false, hFontNormal)
 
-	lblJmax := createLabel(hInstance, "Jmax:", cx+268, 150, 45, 20, hFontNormal)
-	hEditAwgJmax = createEdit(hInstance, "70", cx+318, 146, 55, 28, false, false, hFontNormal)
+	lblJmax := createLabel(hInstance, "Jmax:", cx+268, 128, 45, 20, hFontNormal)
+	hEditAwgJmax = createEdit(hInstance, "70", cx+318, 124, 55, 28, false, false, hFontNormal)
 
-	lblS1 := createLabel(hInstance, "S1:", cx+388, 150, 30, 20, hFontNormal)
-	hEditAwgS1 = createEdit(hInstance, "48", cx+422, 146, 55, 28, false, false, hFontNormal)
+	lblS1 := createLabel(hInstance, "S1:", cx+388, 128, 30, 20, hFontNormal)
+	hEditAwgS1 = createEdit(hInstance, "48", cx+422, 124, 55, 28, false, false, hFontNormal)
 
-	lblS2 := createLabel(hInstance, "S2:", cx+492, 150, 30, 20, hFontNormal)
-	hEditAwgS2 = createEdit(hInstance, "32", cx+526, 146, 55, 28, false, false, hFontNormal)
+	lblS2 := createLabel(hInstance, "S2:", cx+492, 128, 30, 20, hFontNormal)
+	hEditAwgS2 = createEdit(hInstance, "32", cx+526, 124, 55, 28, false, false, hFontNormal)
 
-	lblH1 := createLabel(hInstance, "H1 (Init):", cx, 188, 65, 20, hFontNormal)
-	hEditAwgH1 = createEdit(hInstance, "1428571428", cx+70, 184, 110, 28, false, false, hFontNormal)
+	lblH1 := createLabel(hInstance, "H1 (Init):", cx, 166, 65, 20, hFontNormal)
+	hEditAwgH1 = createEdit(hInstance, "1428571428", cx+70, 162, 110, 28, false, false, hFontNormal)
 
-	lblH2 := createLabel(hInstance, "H2 (Resp):", cx+195, 188, 70, 20, hFontNormal)
-	hEditAwgH2 = createEdit(hInstance, "2147483647", cx+270, 184, 110, 28, false, false, hFontNormal)
+	lblH2 := createLabel(hInstance, "H2 (Resp):", cx+195, 166, 75, 20, hFontNormal)
+	hEditAwgH2 = createEdit(hInstance, "2147483647", cx+275, 162, 110, 28, false, false, hFontNormal)
 
-	lblH3 := createLabel(hInstance, "H3 (Cookie):", cx+395, 188, 80, 20, hFontNormal)
-	hEditAwgH3 = createEdit(hInstance, "857142857", cx+480, 184, 110, 28, false, false, hFontNormal)
+	lblH3 := createLabel(hInstance, "H3 (Cookie):", cx+400, 166, 85, 20, hFontNormal)
+	hEditAwgH3 = createEdit(hInstance, "857142857", cx+490, 162, 110, 28, false, false, hFontNormal)
 
-	lblH4 := createLabel(hInstance, "H4 (Data):", cx+605, 188, 70, 20, hFontNormal)
-	hEditAwgH4 = createEdit(hInstance, "1122334455", cx+680, 184, 88, 28, false, false, hFontNormal)
+	lblH4 := createLabel(hInstance, "H4 (Data):", cx+615, 166, 70, 20, hFontNormal)
+	hEditAwgH4 = createEdit(hInstance, "1122334455", cx+690, 162, 100, 28, false, false, hFontNormal)
 
-	hBtnSyncAwg = createOwnerDrawButton(hInstance, "🔄 Применить настройки AmneziaWG с узла", cx, 218, cw, 34, ID_BTN_SYNC_AWG, "yellow")
-	procShowWindow.Call(hBtnSyncAwg, uintptr(SW_HIDE))
-	buttonTypes[ID_BTN_SYNC_AWG] = "yellow"
-	buttonLabels[ID_BTN_SYNC_AWG] = "🔄 Применить настройки AmneziaWG с узла"
+	lblConfTitle := createLabel(hInstance, "📄 Готовый конфиг AmneziaWG (Скопируйте в Amnezia VPN или на роутер):", cx, 200, cw, 22, hFontHeader)
+	hEditAwgConf = createEdit(hInstance, "", cx, 226, cw, 390, true, true, hFontMono)
 
-	lblConfTitle := createLabel(hInstance, "Конфигурация AmneziaWG (.conf):", cx, 256, cw, 22, hFontHeader)
-	hEditAwgConf = createEdit(hInstance, "", cx, 282, cw, 318, true, true, hFontMono)
-	hBtnCopyAwg = createOwnerDrawButton(hInstance, "📋 Скопировать конфиг", cx, 612, 230, 40, ID_BTN_COPY_AWG, "primary")
-	hBtnSaveAwg = createOwnerDrawButton(hInstance, "💾 Сохранить в natbypass.conf", cx+240, 612, 270, 40, ID_BTN_SAVE_AWG, "normal")
-	hBtnOpenAwgClient = createOwnerDrawButton(hInstance, "🚀 Открыть Amnezia", cx+520, 612, 248, 40, ID_BTN_OPEN_AWG_CLIENT, "normal")
+	hBtnCopyAwg = createOwnerDrawButton(hInstance, "📋 Скопировать конфиг", cx, 626, 240, 40, ID_BTN_COPY_AWG, "primary")
+	hBtnSaveAwg = createOwnerDrawButton(hInstance, "💾 Сохранить в natbypass.conf", cx+250, 626, 270, 40, ID_BTN_SAVE_AWG, "normal")
+	hBtnOpenAwgClient = createOwnerDrawButton(hInstance, "🚀 Открыть Amnezia", cx+530, 626, 260, 40, ID_BTN_OPEN_AWG_CLIENT, "normal")
 
 	tabPages[2] = []uintptr{
 		lblAwgTitle, lblAwgDesc, hBtnAwgStd, hBtnAwgDpi, hBtnAwgStealth, hBtnRandomAwg,
@@ -2678,68 +2680,68 @@ func buildModernUI(hInstance uintptr) {
 	writeDebug("buildModernUI: страница 2 создана")
 
 	// СТРАНИЦА 3: НАСТРОЙКИ
-	lblSetTitle := createLabel(hInstance, "⚙️ Сигнальные каналы & Настройки приложения", cx, 24, cw, 28, hFontTitle)
+	lblSetTitle := createLabel(hInstance, "⚙️ Сигнальные каналы & Настройки приложения", cx, 20, cw, 28, hFontTitle)
 
-	lblNick := createLabel(hInstance, "🏷️ Ваше имя / Никнейм:", cx, 58, 200, 20, hFontBold)
-	hEditMyNick = createEdit(hInstance, myNick, cx+210, 54, 380, 28, false, false, hFontNormal)
-	lblNickHint := createLabel(hInstance, "💡 Имя, которое увидят другие участники сети (например: Домашний ПК, Ноутбук)", cx+210, 84, 550, 18, hFontNormal)
+	lblNick := createLabel(hInstance, "🏷️ Ваше имя / Никнейм:", cx, 52, 200, 20, hFontBold)
+	hEditMyNick = createEdit(hInstance, myNick, cx+210, 48, 400, 28, false, false, hFontNormal)
+	lblNickHint := createLabel(hInstance, "💡 Имя, которое увидят другие участники сети (например: Домашний ПК, Ноутбук)", cx+210, 78, 570, 18, hFontNormal)
 
-	lblMode := createLabel(hInstance, "🎯 Режим работы каналов:", cx, 108, 200, 20, hFontBold)
-	hBtnModeParallel = createOwnerDrawButton(hInstance, "🔄 Параллельно (MQTT+TG)", cx+210, 104, 245, 32, ID_BTN_MODE_PARALLEL, "primary")
-	hBtnModeMQTT = createOwnerDrawButton(hInstance, "⚡ Только MQTT", cx+465, 104, 150, 32, ID_BTN_MODE_MQTT, "normal")
-	hBtnModeTG = createOwnerDrawButton(hInstance, "💬 Только Telegram", cx+625, 104, 150, 32, ID_BTN_MODE_TG, "normal")
+	lblMode := createLabel(hInstance, "🎯 Режим работы каналов:", cx, 100, 200, 20, hFontBold)
+	hBtnModeParallel = createOwnerDrawButton(hInstance, "🔄 Параллельно (MQTT+TG)", cx+210, 96, 255, 32, ID_BTN_MODE_PARALLEL, "primary")
+	hBtnModeMQTT = createOwnerDrawButton(hInstance, "⚡ Только MQTT", cx+475, 96, 150, 32, ID_BTN_MODE_MQTT, "normal")
+	hBtnModeTG = createOwnerDrawButton(hInstance, "💬 Только Telegram", cx+635, 96, 155, 32, ID_BTN_MODE_TG, "normal")
 
-	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", cx, 142, cw, 22, hFontHeader)
-	lblMqBr := createLabel(hInstance, "URL Брокера:", cx, 170, 200, 20, hFontNormal)
-	hEditMqttBr = createEdit(hInstance, "tcp://broker.emqx.io:1883", cx+210, 166, 380, 28, false, false, hFontNormal)
-	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+600, 164, 160, 32, ID_BTN_TEST_MQTT, "normal")
+	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", cx, 134, cw, 22, hFontHeader)
+	lblMqBr := createLabel(hInstance, "URL Брокера:", cx, 158, 200, 20, hFontNormal)
+	hEditMqttBr = createEdit(hInstance, "tcp://broker.emqx.io:1883", cx+210, 154, 400, 28, false, false, hFontNormal)
+	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+620, 152, 170, 32, ID_BTN_TEST_MQTT, "normal")
 
-	lblMqPresets := createLabel(hInstance, "Пресеты:", cx+210, 198, 65, 18, hFontNormal)
-	hBtnMqEMQX := createOwnerDrawButton(hInstance, "⚡ EMQX", cx+280, 196, 85, 22, ID_BTN_MQ_EMQX, "normal")
-	hBtnMqHive := createOwnerDrawButton(hInstance, "⚡ HiveMQ", cx+370, 196, 95, 22, ID_BTN_MQ_HIVE, "normal")
-	hBtnMqMosq := createOwnerDrawButton(hInstance, "⚡ Mosquitto", cx+470, 196, 110, 22, ID_BTN_MQ_MOSQ, "normal")
-	hBtnMqEcl := createOwnerDrawButton(hInstance, "⚡ Eclipse", cx+585, 196, 90, 22, ID_BTN_MQ_ECL, "normal")
+	lblMqPresets := createLabel(hInstance, "Пресеты:", cx+210, 186, 65, 18, hFontNormal)
+	hBtnMqEMQX := createOwnerDrawButton(hInstance, "⚡ EMQX", cx+280, 184, 85, 22, ID_BTN_MQ_EMQX, "normal")
+	hBtnMqHive := createOwnerDrawButton(hInstance, "⚡ HiveMQ", cx+370, 184, 95, 22, ID_BTN_MQ_HIVE, "normal")
+	hBtnMqMosq := createOwnerDrawButton(hInstance, "⚡ Mosquitto", cx+470, 184, 110, 22, ID_BTN_MQ_MOSQ, "normal")
+	hBtnMqEcl := createOwnerDrawButton(hInstance, "⚡ Eclipse", cx+585, 184, 90, 22, ID_BTN_MQ_ECL, "normal")
 
-	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 224, 200, 20, hFontNormal)
-	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 220, 380, 28, false, false, hFontNormal)
-	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: mynet/supersecret/2029", cx+210, 250, 550, 18, hFontNormal)
+	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 212, 200, 20, hFontNormal)
+	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 208, 400, 28, false, false, hFontNormal)
+	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: mynet/supersecret/2029", cx+210, 238, 570, 18, hFontNormal)
 
-	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 270, cw, 22, hFontHeader)
-	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 298, 200, 20, hFontNormal)
-	hEditTgToken = createEdit(hInstance, "", cx+210, 294, 380, 28, false, false, hFontNormal)
-	hBtnTestTg = createOwnerDrawButton(hInstance, "🧪 Проверить бот", cx+600, 292, 160, 32, ID_BTN_TEST_TG, "normal")
+	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 260, cw, 22, hFontHeader)
+	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 284, 200, 20, hFontNormal)
+	hEditTgToken = createEdit(hInstance, "", cx+210, 280, 400, 28, false, false, hFontNormal)
+	hBtnTestTg = createOwnerDrawButton(hInstance, "🧪 Проверить бот", cx+620, 278, 170, 32, ID_BTN_TEST_TG, "normal")
 
-	lblTgChat := createLabel(hInstance, "Chat ID (ЛС или Группа):", cx, 330, 200, 20, hFontNormal)
-	hEditTgChat = createEdit(hInstance, "", cx+210, 326, 380, 28, false, false, hFontNormal)
-	lblTgHint := createLabel(hInstance, "💡 Настройка: 1) Создайте бота в @BotFather  2) Узнайте Chat ID через @userinfobot  3) Добавьте ботов всех ПК в одну группу!", cx, 358, cw, 18, hFontNormal)
+	lblTgChat := createLabel(hInstance, "Chat ID (ЛС или Группа):", cx, 314, 200, 20, hFontNormal)
+	hEditTgChat = createEdit(hInstance, "", cx+210, 310, 400, 28, false, false, hFontNormal)
+	lblTgHint := createLabel(hInstance, "💡 Настройка: 1) Создайте бота в @BotFather  2) Узнайте Chat ID через @userinfobot  3) Добавьте ботов всех ПК в одну группу!", cx, 340, cw, 18, hFontNormal)
 
-	lblExitHead := createLabel(hInstance, "🌐 Маршрутизация & Шлюз (Exit Node & Локальные подсети):", cx, 384, cw, 22, hFontHeader)
+	lblExitHead := createLabel(hInstance, "🌐 Маршрутизация & Шлюз (Exit Node & Локальные подсети):", cx, 366, cw, 22, hFontHeader)
 	exitText := "🌐 Разрешить выход в интернет через меня: ВЫКЛ"
 	exitType := "normal"
 	if allowExitNode {
 		exitText = "🌐 Разрешить выход в интернет через меня: ВКЛ"
 		exitType = "green"
 	}
-	hBtnAllowExit = createOwnerDrawButton(hInstance, exitText, cx, 410, 370, 34, ID_BTN_ALLOW_EXIT, exitType)
+	hBtnAllowExit = createOwnerDrawButton(hInstance, exitText, cx, 390, 385, 34, ID_BTN_ALLOW_EXIT, exitType)
 
 	localSubnets := network.GetLocalSubnets()
 	addSubnetBtnText := "➕ Добавить мою сеть"
 	if len(localSubnets) > 0 {
 		addSubnetBtnText = fmt.Sprintf("➕ Добавить мою сеть: %s", localSubnets[0])
 	}
-	hBtnAddLocalSubnet = createOwnerDrawButton(hInstance, addSubnetBtnText, cx+380, 410, 388, 34, ID_BTN_ADD_LOCAL_SUBNET, "normal")
+	hBtnAddLocalSubnet = createOwnerDrawButton(hInstance, addSubnetBtnText, cx+395, 390, 395, 34, ID_BTN_ADD_LOCAL_SUBNET, "normal")
 
-	lblAdvSubnets := createLabel(hInstance, "🏠 Локальные подсети для общего доступа (напр. 192.168.1.0/24):", cx, 452, 470, 20, hFontNormal)
-	hEditAdvSubnets = createEdit(hInstance, "", cx+480, 448, 288, 28, false, false, hFontNormal)
+	lblAdvSubnets := createLabel(hInstance, "🏠 Локальные подсети для общего доступа (напр. 192.168.1.0/24):", cx, 432, 470, 20, hFontNormal)
+	hEditAdvSubnets = createEdit(hInstance, "", cx+480, 428, 310, 28, false, false, hFontNormal)
 
-	lblSysHead := createLabel(hInstance, "🛠️ Системные функции & Интерфейс:", cx, 484, cw, 22, hFontHeader)
+	lblSysHead := createLabel(hInstance, "🛠️ Системные функции & Интерфейс:", cx, 464, cw, 22, hFontHeader)
 	logsText := "💾 Запись логов на диск: ВЫКЛ"
 	logsType := "normal"
 	if saveLogsToDisk {
 		logsText = "💾 Запись логов на диск: ВКЛ"
 		logsType = "green"
 	}
-	hBtnToggleLogs = createOwnerDrawButton(hInstance, logsText, cx, 510, 370, 34, ID_BTN_TOGGLE_LOGS, logsType)
+	hBtnToggleLogs = createOwnerDrawButton(hInstance, logsText, cx, 488, 385, 34, ID_BTN_TOGGLE_LOGS, logsType)
 
 	diagText := "🩺 Вкладка Диагностика: ВКЛ"
 	diagType := "green"
@@ -2747,10 +2749,10 @@ func buildModernUI(hInstance uintptr) {
 		diagText = "🩺 Вкладка Диагностика: ВЫКЛ"
 		diagType = "normal"
 	}
-	hBtnToggleDiag = createOwnerDrawButton(hInstance, diagText, cx+380, 510, 388, 34, ID_BTN_TOGGLE_DIAG, diagType)
+	hBtnToggleDiag = createOwnerDrawButton(hInstance, diagText, cx+395, 488, 395, 34, ID_BTN_TOGGLE_DIAG, diagType)
 
-	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx+140, 554, 480, 42, ID_BTN_SAVE_CFG, "primary")
-	hBtnCheckUpdate := createOwnerDrawButton(hInstance, "🚀 Проверить и обновить NatBypass с GitHub", cx+140, 604, 480, 38, ID_BTN_CHECK_UPDATE, "green")
+	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx+145, 536, 500, 42, ID_BTN_SAVE_CFG, "primary")
+	hBtnCheckUpdate := createOwnerDrawButton(hInstance, "🚀 Проверить и обновить NatBypass с GitHub", cx+145, 588, 500, 38, ID_BTN_CHECK_UPDATE, "green")
 
 	tabPages[3] = []uintptr{
 		lblSetTitle, lblNick, hEditMyNick, lblNickHint, lblMode, hBtnModeParallel, hBtnModeMQTT, hBtnModeTG,
@@ -4679,15 +4681,27 @@ func saveConfigFromUI() {
 		}()
 	}
 
-	if err := config.Save(cfg, configPath, true); err != nil {
+	active := cfg.EnsureActiveProfile()
+	if active != nil {
+		active.MQTTBroker = mqBroker
+		active.MQTTTopic = mqTopic
+		active.TGToken = tgToken
+		if cid, err := strconv.ParseInt(tgChat, 10, 64); err == nil {
+			active.TGChatID = cid
+		}
+	}
+
+	if err := config.Save(cfg, configPath, false); err != nil {
 		msg := fmt.Sprintf("⚠️ Ошибка сохранения конфига: %v", err)
 		addLog(msg)
 		writeDebug(msg)
 	} else {
-		msg := "🔒 Настройки сохранены и защищены DPAPI в " + configPath
+		msg := "💾 Настройки сохранены в " + configPath
 		addLog(msg)
 		writeDebug(msg)
 	}
+
+	refreshProfilesUI()
 
 	// Очистка устаревших пиров при смене конфигурации / топика
 	if registry != nil {

@@ -203,6 +203,7 @@ func Load(path string) (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, err
 	}
+	cfg.EnsureActiveProfile()
 
 	return &cfg, nil
 }

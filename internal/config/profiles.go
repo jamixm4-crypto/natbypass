@@ -58,6 +58,32 @@ func GenerateDefaultProfile(name string) Profile {
 func (c *Config) EnsureActiveProfile() *Profile {
 	if len(c.Profiles) == 0 {
 		defaultProf := GenerateDefaultProfile("Основная сеть")
+		for _, ch := range c.Signaling.Channels {
+			if ch.Type == "mqtt" {
+				if b, ok := ch.Params["broker"]; ok && b != "" {
+					defaultProf.MQTTBroker = b
+				} else if b, ok := ch.Params["broker_url"]; ok && b != "" {
+					defaultProf.MQTTBroker = b
+				}
+				if t, ok := ch.Params["topic"]; ok && t != "" {
+					defaultProf.MQTTTopic = t
+				}
+				if k, ok := ch.Params["network_key"]; ok && k != "" {
+					defaultProf.NetworkKey = k
+				}
+			} else if ch.Type == "telegram" {
+				if tok, ok := ch.Params["token"]; ok && tok != "" {
+					defaultProf.TGToken = tok
+				} else if tok, ok := ch.Params["bot_token"]; ok && tok != "" {
+					defaultProf.TGToken = tok
+				}
+				if cidStr, ok := ch.Params["chat_id"]; ok && cidStr != "" {
+					if cid, err := strconv.ParseInt(cidStr, 10, 64); err == nil {
+						defaultProf.TGChatID = cid
+					}
+				}
+			}
+		}
 		c.Profiles = append(c.Profiles, defaultProf)
 		c.ActiveProfileID = defaultProf.ID
 	}
