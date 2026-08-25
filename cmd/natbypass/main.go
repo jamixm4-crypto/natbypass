@@ -700,6 +700,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								if peer.STUNAddr != "" && peer.STUNAddr != peer.ActiveEndpoint {
 									probe3(peer.STUNAddr)
 								}
+								if peer.IPv6Addr != "" && peer.IPv6Addr != peer.ActiveEndpoint {
+									probe3(peer.IPv6Addr)
+								}
 								if peer.LocalAddr != "" && peer.LocalAddr != peer.ActiveEndpoint {
 									probe3(peer.LocalAddr)
 								}
@@ -742,6 +745,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	}()
 
 	var stunAddr string
+	var ipv6Addr string
 	var publicIP net.IP = net.IPv4(0, 0, 0, 0)
 	ipDisc := network.NewDiscoverer(cfg.Network.IPApis, time.Duration(cfg.Network.IPTimeout)*time.Second)
 
@@ -759,6 +763,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			publicIP = ip
 			log.Info().Str("ip", publicIP.String()).Msg("Публичный IP определён")
 			triggerPublish() // сразу публикуем с реальным IP
+		}
+
+		if v6 := network.GetPublicIPv6(engineCtx); v6 != "" {
+			puncherPort := 47832
+			if puncher != nil {
+				puncherPort = puncher.LocalPort()
+			}
+			ipv6Addr = fmt.Sprintf("[%s]:%d", v6, puncherPort)
+			log.Info().Str("ipv6", ipv6Addr).Msg("Глобальный IPv6 адрес определён (P2P без CGNAT для мобильных сетей)")
+			triggerPublish()
 		}
 
 		if puncher != nil {
@@ -877,6 +891,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					PublicIP:         ip.String(),
 					LocalAddr:        localAddr,
 					STUNAddr:         stunAddr,
+					IPv6Addr:         ipv6Addr,
 					WGPubKey:         wgPubKey,
 					WGPort:           wgPort,
 					IsExitNode:       cfg.Network.AllowExitNode,
@@ -988,6 +1003,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						PublicIP:         p.PublicIP,
 						LocalAddr:        p.LocalAddr,
 						STUNAddr:         p.STUNAddr,
+						IPv6Addr:         p.IPv6Addr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
 						IsExitNode:       p.IsExitNode,
@@ -1010,16 +1026,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					if puncher != nil {
 						go func(peer *signaling.Payload) {
 							// Строим список адресов для пробивки:
-							// 1. STUNAddr — STUN-mapped адрес порта puncher (самый точный)
-							// 2. LocalAddr — LAN IP пира (уже с puncher-портом 47832 после нашего фикса)
-							// 3. PublicIP:47832 — всегда, независимо от WGPort
-							// 4. PublicIP:WGPort — если WireGuard включен у пира
+							// 1. STUNAddr — STUN-mapped адрес порта puncher
+							// 2. IPv6Addr — прямой глобальный IPv6 адрес (без CGNAT)
+							// 3. LocalAddr — LAN IP пира
+							// 4. PublicIP:47832 (Windows default) и PublicIP:51820 (Mobile/Linux default)
+							// 5. PublicIP:WGPort — если WireGuard включен у пира
 							addrs := []string{peer.STUNAddr, peer.LocalAddr}
+							if peer.IPv6Addr != "" {
+								addrs = append(addrs, peer.IPv6Addr)
+							}
 							if peer.PublicIP != "" {
-								// Всегда пробуем puncher port 47832
-								addrs = append(addrs, fmt.Sprintf("%s:%d", peer.PublicIP, 47832))
-								// Если у пира включён WireGuard — пробуем и его порт
-								if peer.WGPort > 0 && peer.WGPort != 47832 {
+								addrs = append(addrs, fmt.Sprintf("%s:47832", peer.PublicIP))
+								addrs = append(addrs, fmt.Sprintf("%s:51820", peer.PublicIP))
+								if peer.WGPort > 0 && peer.WGPort != 47832 && peer.WGPort != 51820 {
 									addrs = append(addrs, fmt.Sprintf("%s:%d", peer.PublicIP, peer.WGPort))
 								}
 							}

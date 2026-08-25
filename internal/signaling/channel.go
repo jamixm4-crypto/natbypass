@@ -106,6 +106,7 @@ type Payload struct {
 	PublicIP         string     `json:"public_ip"`
 	LocalAddr        string     `json:"local_addr"`
 	STUNAddr         string     `json:"stun_addr"`
+	IPv6Addr         string     `json:"ipv6_addr,omitempty"`
 	WGPubKey         string     `json:"wg_pub_key"`
 	WGPort           int        `json:"wg_port"`
 	Timestamp        time.Time  `json:"timestamp"`
@@ -135,6 +136,7 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		UpperPublicIP         string     `json:"PublicIP"`
 		UpperLocalAddr        string     `json:"LocalAddr"`
 		UpperSTUNAddr         string     `json:"STUNAddr"`
+		UpperIPv6Addr         string     `json:"IPv6Addr"`
 		UpperWGPubKey         string     `json:"WGPubKey"`
 		UpperWGPort           int        `json:"WGPort"`
 		UpperIsExitNode       bool       `json:"IsExitNode"`
@@ -159,6 +161,9 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 	}
 	if p.DeviceID == "" && aux.UpperDeviceID != "" {
 		p.DeviceID = aux.UpperDeviceID
+	}
+	if p.IPv6Addr == "" && aux.UpperIPv6Addr != "" {
+		p.IPv6Addr = aux.UpperIPv6Addr
 	}
 	if p.Nickname == "" && aux.UpperNickname != "" {
 		p.Nickname = aux.UpperNickname

@@ -18,6 +18,7 @@ type Peer struct {
 	PublicIP         string               `json:"public_ip"`
 	LocalAddr        string               `json:"local_addr"`
 	STUNAddr         string               `json:"stun_addr"`
+	IPv6Addr         string               `json:"ipv6_addr,omitempty"`
 	WGPubKey         string               `json:"wg_pub_key"`
 	WGPort           int                  `json:"wg_port"`
 	ActiveEndpoint   string               `json:"active_endpoint"`

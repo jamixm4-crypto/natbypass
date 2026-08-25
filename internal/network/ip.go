@@ -224,3 +224,58 @@ func GetLocalLANIP() string {
 	}
 	return ""
 }
+
+var defaultIPv6APIs = []string{
+	"https://api6.ipify.org",
+	"https://ifconfig.co/ip",
+	"https://icanhazip.com",
+	"https://ident.me",
+}
+
+// GetPublicIPv6 возвращает глобальный IPv6-адрес устройства (без NAT, 100% прямой P2P на мобильных сетях LTE/5G)
+func GetPublicIPv6(ctx context.Context) string {
+	// Сначала проверяем глобальные одноадресные IPv6-адреса на интерфейсах (без обращения к внешним API)
+	if ip := GetLocalIPv6(); ip != "" {
+		return ip
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	for _, api := range defaultIPv6APIs {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, api, nil)
+		if err != nil {
+			continue
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+		ipStr := strings.TrimSpace(string(body))
+		parsed := net.ParseIP(ipStr)
+		if parsed != nil && parsed.To4() == nil && !parsed.IsLoopback() && !parsed.IsLinkLocalUnicast() && !parsed.IsPrivate() {
+			return parsed.String()
+		}
+	}
+	return ""
+}
+
+// GetLocalIPv6 возвращает глобальный IPv6-адрес из сетевых адаптеров устройства
+func GetLocalIPv6() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok {
+			ip := ipNet.IP
+			if ip.To4() == nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsPrivate() {
+				return ip.String()
+			}
+		}
+	}
+	return ""
+}

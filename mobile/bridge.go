@@ -74,6 +74,7 @@ var (
 	globalDevID     string
 	globalDevName   string
 	globalPublicIP  string
+	globalIPv6      string
 	globalSTUN      string
 	globalVirtualIP string = ""
 	globalStarted   time.Time
@@ -227,6 +228,14 @@ func StartEngine(configYAML string, tunFd int) string {
 		if ip, err := ipDisc.GetPublicIPCached(ctx, 5*time.Minute); err == nil {
 			globalPublicIP = ip.String()
 		}
+		if v6 := network.GetPublicIPv6(ctx); v6 != "" {
+			pPort := 51820
+			if puncher != nil {
+				pPort = puncher.LocalPort()
+			}
+			globalIPv6 = fmt.Sprintf("[%s]:%d", v6, pPort)
+			logger.Info().Str("ipv6", globalIPv6).Msg("Глобальный IPv6 адрес мобильного устройства определён (P2P без CGNAT)")
+		}
 		if puncher != nil {
 			if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil {
 				globalSTUN = fmt.Sprintf("%s:%d", extIP.String(), port)
@@ -287,6 +296,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					PublicIP:         globalPublicIP,
 					LocalAddr:        localAddr,
 					STUNAddr:         globalSTUN,
+					IPv6Addr:         globalIPv6,
 					WGPubKey:         wgKey.PublicKey,
 					WGPort:           cfg.WireGuard.ListenPort,
 					VirtualIP:        globalVirtualIP,
@@ -340,6 +350,7 @@ func StartEngine(configYAML string, tunFd int) string {
 						PublicIP:         p.PublicIP,
 						LocalAddr:        p.LocalAddr,
 						STUNAddr:         p.STUNAddr,
+						IPv6Addr:         p.IPv6Addr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
 						VirtualIP:        p.VirtualIP,
@@ -355,6 +366,9 @@ func StartEngine(configYAML string, tunFd int) string {
 					if puncher != nil {
 						go func(target *signaling.Payload) {
 							addrs := []string{target.STUNAddr, target.LocalAddr}
+							if target.IPv6Addr != "" {
+								addrs = append(addrs, target.IPv6Addr)
+							}
 							if target.PublicIP != "" {
 								addrs = append(addrs, fmt.Sprintf("%s:47832", target.PublicIP))
 								addrs = append(addrs, fmt.Sprintf("%s:51820", target.PublicIP))
@@ -396,6 +410,9 @@ func StartEngine(configYAML string, tunFd int) string {
 							}
 							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
 								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							}
+							if p.IPv6Addr != "" && p.IPv6Addr != p.ActiveEndpoint {
+								_ = puncher.SendHolePunchProbe(p.IPv6Addr)
 							}
 							if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
 								_ = puncher.SendHolePunchProbe(p.LocalAddr)

@@ -39,16 +39,22 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	var err error
 	var lAddr *net.UDPAddr
 
+	// Используем сеть "udp" (dual-stack: IPv4 + IPv6) для полноценной работы на мобильных сетях
 	if preferredPort > 0 {
-		lAddr, _ = net.ResolveUDPAddr("udp4", fmt.Sprintf("0.0.0.0:%d", preferredPort))
-		conn, err = net.ListenUDP("udp4", lAddr)
+		lAddr, _ = net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", preferredPort))
+		conn, err = net.ListenUDP("udp", lAddr)
 	}
 
 	if err != nil || conn == nil {
-		lAddr, _ = net.ResolveUDPAddr("udp4", "0.0.0.0:0")
-		conn, err = net.ListenUDP("udp4", lAddr)
+		lAddr, _ = net.ResolveUDPAddr("udp", ":0")
+		conn, err = net.ListenUDP("udp", lAddr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to bind UDP socket: %w", err)
+			// Fallback на udp4 если dual-stack сокет не поддерживается ядром
+			lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
+			conn, err = net.ListenUDP("udp4", lAddr4)
+			if err != nil {
+				return nil, fmt.Errorf("failed to bind UDP socket: %w", err)
+			}
 		}
 	}
 
@@ -61,7 +67,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		myDevID:      myDevID,
 		stunServers:  stunServers,
 		onPingResult: onPing,
-		stunRespCh:   make(chan struct{}, 4),
+		stunRespCh:   make(chan struct{}, 8),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -82,9 +88,12 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 	defer p.mu.Unlock()
 
 	for _, srv := range p.stunServers {
-		srvAddr, err := net.ResolveUDPAddr("udp4", srv)
+		srvAddr, err := net.ResolveUDPAddr("udp", srv)
 		if err != nil {
-			continue
+			srvAddr, err = net.ResolveUDPAddr("udp4", srv)
+			if err != nil {
+				continue
+			}
 		}
 
 		msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
@@ -97,7 +106,7 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 			if p.mappedIP != nil && p.mappedPort > 0 {
 				return p.mappedIP, p.mappedPort, nil
 			}
-		case <-time.After(1 * time.Second):
+		case <-time.After(800 * time.Millisecond):
 		case <-ctx.Done():
 			return nil, 0, ctx.Err()
 		}
@@ -109,15 +118,19 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 	return nil, 0, fmt.Errorf("STUN discovery timeout")
 }
 
-// SendHolePunchProbe отправляет прямой UDP пакет второму компьютеру
-// Включает Symmetric NAT Multi-Port Prediction (пробивку диапазона портов для обхода мобильного интернета и CGNAT)
+// SendHolePunchProbe отправляет прямой UDP пакет второму компьютеру или мобильному устройству.
+// Включает Symmetric NAT Multi-Port Prediction (пробивку диапазона ±32 портов для обхода CGNAT мобильных операторов)
+// и прямую отправку по IPv6 при наличии.
 func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
 	}
-	rAddr, err := net.ResolveUDPAddr("udp4", targetAddr)
+	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
 	if err != nil {
-		return err
+		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
+		if err != nil {
+			return err
+		}
 	}
 
 	nowNano := time.Now().UnixNano()
@@ -128,15 +141,17 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 		_, _ = p.conn.WriteToUDP(probeData, rAddr)
 	}
 
-	// 2. Multi-Port Symmetric NAT Port Prediction (±16 портов вокруг STUN адреса)
-	basePort := rAddr.Port
-	ip := rAddr.IP
-	for delta := 1; delta <= 16; delta++ {
-		if basePort+delta <= 65535 {
-			_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort + delta})
-		}
-		if basePort-delta > 1024 {
-			_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort - delta})
+	// 2. Для IPv4: Multi-Port Symmetric NAT Port Prediction (±32 порта вокруг STUN адреса для мобильного интернета / CGNAT)
+	if rAddr.IP.To4() != nil {
+		basePort := rAddr.Port
+		ip := rAddr.IP
+		for delta := 1; delta <= 32; delta++ {
+			if basePort+delta <= 65535 {
+				_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort + delta})
+			}
+			if basePort-delta > 1024 {
+				_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort - delta})
+			}
 		}
 	}
 
