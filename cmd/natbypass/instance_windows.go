@@ -40,10 +40,12 @@ func acquireSingleInstanceMutex(port int) bool {
 		return true
 	}
 
-	mutexName, _ := windows.UTF16PtrFromString("Global\\NatBypass_SingleInstance_App_Mutex")
+	// Используем Local\ (не Global\) — Global\ требует SeCreateGlobalPrivilege,
+	// которой нет у обычных пользователей даже с отключённым UAC.
+	mutexName, _ := windows.UTF16PtrFromString("Local\\NatBypass_SingleInstance_App_Mutex")
 	hMutex, err := windows.CreateMutex(nil, true, mutexName)
 	if err != nil {
-		if errors.Is(err, windows.ERROR_ALREADY_EXISTS) || err == windows.ERROR_ALREADY_EXISTS || errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		if errors.Is(err, windows.ERROR_ALREADY_EXISTS) || err == windows.ERROR_ALREADY_EXISTS {
 			if hMutex != 0 {
 				_ = windows.CloseHandle(hMutex)
 			}
@@ -51,6 +53,9 @@ func acquireSingleInstanceMutex(port int) bool {
 			activateExistingWindow()
 			return false
 		}
+		// ERROR_ACCESS_DENIED или любая другая ошибка — разрешаем запуск
+		// (лучше запустить два экземпляра, чем не запустить ни одного)
+		return true
 	}
 	if hMutex == 0 {
 		return true

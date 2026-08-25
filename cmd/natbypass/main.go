@@ -61,12 +61,21 @@ var (
 )
 
 func main() {
-	// Устанавливаем рабочую директорию на папку с исполняемым файлом (важно для Windows UAC)
+	// Устанавливаем рабочую директорию на папку с исполняемым файлом (важно для Windows)
 	if exe, err := os.Executable(); err == nil {
 		_ = os.Chdir(filepath.Dir(exe))
 	}
 
-	// Инициализируем логирование сразу, чтобы natbypass.log всегда создавался в папке программы
+	// Перехватываем любую панику и пишем в лог-файл — важно для windowsgui где консоли нет
+	defer func() {
+		if r := recover(); r != nil {
+			_ = os.WriteFile("natbypass-crash.log",
+				[]byte(fmt.Sprintf("PANIC: %v\nTime: %s\n", r, time.Now().Format(time.RFC3339))),
+				0644)
+		}
+	}()
+
+	// Инициализируем логирование — на Windows автоматически пишет в natbypass.log рядом с exe
 	setupLogging("info", "")
 
 	// Автоматический запрос прав Администратора через UAC на Windows при обычном запуске
