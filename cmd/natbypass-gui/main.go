@@ -32,6 +32,7 @@ import (
 	"github.com/natbypass/natbypass/internal/updater"
 	"github.com/natbypass/natbypass/internal/webui"
 	"github.com/natbypass/natbypass/internal/wireguard"
+	"github.com/skip2/go-qrcode"
 )
 
 var (
@@ -70,6 +71,7 @@ var (
 	procRtlMoveMemory         = modkernel32.NewProc("RtlMoveMemory")
 	procCreateFontW           = modgdi32.NewProc("CreateFontW")
 	procCreateSolidBrush      = modgdi32.NewProc("CreateSolidBrush")
+	procDeleteObject          = modgdi32.NewProc("DeleteObject")
 	procSetBkMode             = modgdi32.NewProc("SetBkMode")
 	procSetTextColor          = modgdi32.NewProc("SetTextColor")
 	procSetBkColor            = modgdi32.NewProc("SetBkColor")
@@ -321,6 +323,7 @@ var (
 	// Вкладка 1: Профили сетей
 	hListProfiles   uintptr
 	hBtnProfSwitch  uintptr
+	hBtnProfQR      uintptr
 	hBtnProfCreate  uintptr
 	hBtnProfImport  uintptr
 	hEditProfName   uintptr
@@ -330,6 +333,8 @@ var (
 	hBtnProfSave    uintptr
 	hBtnProfDelete  uintptr
 	selectedProfID  string
+	activeQRBitmap  [][]bool
+	activeQRText    string
 
 	// Вкладка 2: AmneziaWG
 	hBtnAwgStd        uintptr
@@ -503,6 +508,7 @@ const (
 	ID_BTN_PROF_DELETE = 4063
 	ID_BTN_PROF_EXPORT = 4064
 	ID_BTN_PROF_IMPORT = 4065
+	ID_BTN_PROF_QR     = 4066
 )
 
 func initDebugLog() {
@@ -1236,6 +1242,9 @@ func handleCommand(id uint16) {
 
 	case ID_BTN_PROF_EXPORT:
 		handleProfileExport()
+
+	case ID_BTN_PROF_QR:
+		handleProfileQR()
 
 	case ID_BTN_PROF_IMPORT:
 		handleProfileImport()
@@ -2288,6 +2297,188 @@ func showProfileImportDialog() (string, bool) {
 	return dlgResultText, dlgResultOK
 }
 
+func handleProfileQR() {
+	if cfg == nil || len(cfg.Profiles) == 0 {
+		return
+	}
+	sel, _, _ := procSendMessageW.Call(hListProfiles, 0x0188 /* LB_GETCURSEL */, 0, 0)
+	idx := int(int32(sel))
+	var target *config.Profile
+	if idx >= 0 && idx < len(cfg.Profiles) {
+		target = &cfg.Profiles[idx]
+	} else {
+		target = cfg.EnsureActiveProfile()
+	}
+	if target == nil {
+		return
+	}
+	uri := config.ExportProfileURI(*target)
+	showQRCodeModal("QR-код сети: "+target.Name, uri)
+}
+
+func showQRCodeModal(title, qrText string) {
+	qr, err := qrcode.New(qrText, qrcode.Medium)
+	if err != nil {
+		copyToClipboard(qrText)
+		procMessageBoxW.Call(hMainWnd,
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Ссылка скопирована в буфер обмена:\n"+qrText))),
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(title))),
+			0x00000040 /* MB_ICONINFORMATION */)
+		return
+	}
+
+	activeQRBitmap = qr.Bitmap()
+	activeQRText = qrText
+	dlgFinished = false
+
+	hInstance, _, _ := procGetModuleHandleW.Call(0)
+	dlgClassName, _ := windows.UTF16PtrFromString("NatBypassQRDlgClass")
+	dlgTitle, _ := windows.UTF16PtrFromString(title)
+
+	dlgWc := WNDCLASSEXW{
+		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),
+		Style:         3,
+		LpfnWndProc:   windows.NewCallback(qrDlgProc),
+		HInstance:     hInstance,
+		HIcon:         hAppIcon,
+		HCursor:       hCursor,
+		HbrBackground: hBrushBg,
+		LpszClassName: dlgClassName,
+		HIconSm:       hAppIcon,
+	}
+	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&dlgWc)))
+
+	var parentRc RECT
+	procGetWindowRect.Call(hMainWnd, uintptr(unsafe.Pointer(&parentRc)))
+	dlgW := int32(400)
+	dlgH := int32(490)
+	dlgX := parentRc.Left + (parentRc.Right-parentRc.Left-dlgW)/2
+	dlgY := parentRc.Top + (parentRc.Bottom-parentRc.Top-dlgH)/2
+	if dlgX < 0 {
+		dlgX = 100
+	}
+	if dlgY < 0 {
+		dlgY = 100
+	}
+
+	hDlg, _, _ := procCreateWindowExW.Call(
+		0x0008|0x00010000,
+		uintptr(unsafe.Pointer(dlgClassName)),
+		uintptr(unsafe.Pointer(dlgTitle)),
+		WS_FIXEDWINDOW|WS_VISIBLE|WS_CLIPCHILDREN,
+		uintptr(dlgX), uintptr(dlgY), uintptr(dlgW), uintptr(dlgH),
+		hMainWnd, 0, hInstance, 0,
+	)
+
+	darkMode := int32(1)
+	procDwmSetWindowAttribute.Call(hDlg, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
+
+	_ = createLabelOn(hDlg, hInstance, title, 20, 16, 360, 22, hFontBold)
+	_ = createLabelOn(hDlg, hInstance, "Отсканируйте камерой в приложении NatBypass на телефоне:", 20, 42, 360, 18, hFontNormal)
+
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "📋 Скопировать ссылку", 30, 390, 190, 36, 5001, "primary")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "Закрыть", 230, 390, 135, 36, 5002, "normal")
+
+	procShowWindow.Call(hDlg, SW_SHOW)
+	procSetForegroundWindow.Call(hDlg)
+	procEnableWindow.Call(hMainWnd, 0)
+
+	var msg MSG
+	for !dlgFinished {
+		ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		if int32(ret) <= 0 {
+			break
+		}
+		if msg.Message == 0x0100 {
+			if msg.WParam == 0x1B || msg.WParam == 0x0D {
+				dlgFinished = true
+				break
+			}
+		}
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+
+	procEnableWindow.Call(hMainWnd, 1)
+	procSetForegroundWindow.Call(hMainWnd)
+	procDestroyWindow.Call(hDlg)
+}
+
+func qrDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
+	switch msg {
+	case WM_ERASEBKGND:
+		return 1
+	case WM_PAINT:
+		var ps PAINTSTRUCT
+		hdc, _, _ := procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+		var rc RECT
+		procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
+		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&rc)), hBrushBg)
+
+		// Белая карточка под QR-код
+		qrCardRc := RECT{Left: 55, Top: 70, Right: 345, Bottom: 360}
+		hBrushWhite, _, _ := procCreateSolidBrush.Call(0x00FFFFFF)
+		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&qrCardRc)), hBrushWhite)
+
+		// Отрисовка QR матрицы
+		if len(activeQRBitmap) > 0 {
+			hBrushBlack, _, _ := procCreateSolidBrush.Call(0x00000000)
+			modCount := len(activeQRBitmap)
+			qrSize := float64(260)
+			modSize := qrSize / float64(modCount)
+			startX := float64(70)
+			startY := float64(85)
+
+			for y := 0; y < modCount; y++ {
+				for x := 0; x < modCount; x++ {
+					if activeQRBitmap[y][x] {
+						modRc := RECT{
+							Left:   int32(startX + float64(x)*modSize),
+							Top:    int32(startY + float64(y)*modSize),
+							Right:  int32(startX + float64(x+1)*modSize + 0.9),
+							Bottom: int32(startY + float64(y+1)*modSize + 0.9),
+						}
+						procFillRect.Call(hdc, uintptr(unsafe.Pointer(&modRc)), hBrushBlack)
+					}
+				}
+			}
+			procDeleteObject.Call(hBrushBlack)
+		}
+		procDeleteObject.Call(hBrushWhite)
+		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+		return 0
+
+	case WM_DRAWITEM:
+		var dis DRAWITEMSTRUCT
+		procRtlMoveMemory.Call(uintptr(unsafe.Pointer(&dis)), lParam, unsafe.Sizeof(dis))
+		drawCustomButton(&dis)
+		return 1
+
+	case WM_CTLCOLORSTATIC:
+		hdc := wParam
+		procSetBkMode.Call(hdc, 1)
+		procSetTextColor.Call(hdc, COLOR_TEXT)
+		return hBrushBg
+
+	case WM_COMMAND:
+		id := LOWORD(wParam)
+		if id == 5001 { // Скопировать
+			copyToClipboard(activeQRText)
+			dlgFinished = true
+			return 0
+		} else if id == 5002 { // Закрыть
+			dlgFinished = true
+			return 0
+		}
+
+	case WM_CLOSE:
+		dlgFinished = true
+		return 0
+	}
+	ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
+	return ret
+}
+
 func applyDiagnosticsVisibility() {
 	if showDiagnostics {
 		procShowWindow.Call(navButtons[4], uintptr(SW_SHOW))
@@ -2401,9 +2592,10 @@ func buildModernUI(hInstance uintptr) {
 
 	hListProfiles = createListBox(hInstance, cx, 80, cw, 200, hFontNormal)
 
-	hBtnProfSwitch = createOwnerDrawButton(hInstance, "⚡ Подключить выбранную сеть", cx, 290, 248, 36, ID_BTN_PROF_SWITCH, "green")
-	hBtnProfCreate = createOwnerDrawButton(hInstance, "➕ Создать новую сеть", cx+258, 290, 240, 36, ID_BTN_PROF_CREATE, "primary")
-	hBtnProfImport = createOwnerDrawButton(hInstance, "📥 Импорт по ссылке", cx+508, 290, 260, 36, ID_BTN_PROF_IMPORT, "normal")
+	hBtnProfSwitch = createOwnerDrawButton(hInstance, "⚡ Подключить сеть", cx, 290, 185, 36, ID_BTN_PROF_SWITCH, "green")
+	hBtnProfQR = createOwnerDrawButton(hInstance, "📱 QR-код", cx+195, 290, 150, 36, ID_BTN_PROF_QR, "primary")
+	hBtnProfCreate = createOwnerDrawButton(hInstance, "➕ Новая сеть", cx+355, 290, 180, 36, ID_BTN_PROF_CREATE, "normal")
+	hBtnProfImport = createOwnerDrawButton(hInstance, "📥 Импорт", cx+545, 290, 223, 36, ID_BTN_PROF_IMPORT, "normal")
 
 	lblProfEditHead := createLabel(hInstance, "⚙️ Параметры выбранной сети (Редактирование):", cx, 336, cw, 22, hFontHeader)
 
@@ -2423,7 +2615,7 @@ func buildModernUI(hInstance uintptr) {
 
 	tabPages[1] = []uintptr{
 		lblProfTitle, lblProfDesc, hListProfiles,
-		hBtnProfSwitch, hBtnProfCreate, hBtnProfImport,
+		hBtnProfSwitch, hBtnProfQR, hBtnProfCreate, hBtnProfImport,
 		lblProfEditHead, lblProfName, hEditProfName, hBtnProfExport,
 		lblProfTopic, hEditProfTopic, lblProfBroker, hEditProfBroker,
 		hBtnProfSave, hBtnProfDelete,

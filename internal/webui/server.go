@@ -26,6 +26,7 @@ import (
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/updater"
 	"github.com/natbypass/natbypass/internal/wireguard"
+	"github.com/skip2/go-qrcode"
 	"golang.org/x/net/proxy"
 )
 
@@ -192,6 +193,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/device/rename", s.handleDeviceRename)
 	mux.HandleFunc("/api/qr/invite", s.handleQRInvite)
+	mux.HandleFunc("/api/qr/image", s.handleQRImage)
 	mux.HandleFunc("/api/peer/bookmark", s.handlePeerBookmark)
 	mux.HandleFunc("/api/peer/ping", s.handlePeerPing)
 	mux.HandleFunc("/api/routing/exit-node", s.handleRoutingExitNode)
@@ -1035,6 +1037,24 @@ func (s *Server) handleQRInvite(w http.ResponseWriter, r *http.Request) {
 		"stun_addr":   stun,
 		"qr_text":     fmt.Sprintf("NatBypass|%s|%s|%s", devName, ip, inviteURL),
 	}, "")
+}
+
+// handleQRImage — GET /api/qr/image?data=... — возвращает PNG QR-код (100% офлайн генерация)
+func (s *Server) handleQRImage(w http.ResponseWriter, r *http.Request) {
+	data := r.URL.Query().Get("data")
+	if data == "" {
+		http.Error(w, "missing data query param", http.StatusBadRequest)
+		return
+	}
+	png, err := qrcode.Encode(data, qrcode.Medium, 256)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(png)
 }
 
 // handleDashboard — GET /api/dashboard — возвращает реальные агрегированные метрики для дашборда

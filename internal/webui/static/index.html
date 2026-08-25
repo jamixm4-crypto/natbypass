@@ -1511,7 +1511,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           } catch(e) {}
 
           if (!qrPayload) {
-            qrPayload = `natbypass://profile?id=${encodeURIComponent(prof.id)}&name=${encodeURIComponent(prof.name)}&topic=${encodeURIComponent(prof.mqtt_topic)}&broker=${encodeURIComponent(prof.mqtt_broker || 'tcp://mqtt.eclipseprojects.io:1883')}`;
+            qrPayload = `natbypass://profile?id=${encodeURIComponent(prof.id)}&name=${encodeURIComponent(prof.name)}&topic=${encodeURIComponent(prof.mqtt_topic)}&broker=${encodeURIComponent(prof.mqtt_broker || 'tcp://broker.emqx.io:1883')}${prof.network_key ? '&key=' + encodeURIComponent(prof.network_key) : ''}${prof.awg_preset ? '&awg=' + encodeURIComponent(prof.awg_preset) : ''}`;
           }
         }
       } else if (mode === 'sync') {
@@ -1569,17 +1569,24 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             colorLight: "#ffffff",
             correctLevel: 1 // L
           });
-          return;
+          // Check if SVG was actually rendered inside container
+          if (container.querySelector('svg') || container.querySelector('canvas')) {
+            return;
+          }
         }
       } catch(e) {
-        console.warn('QRCode JS render error:', e);
+        console.warn('QRCode JS render error, using backend generator:', e);
       }
 
-      // Offline fallback
+      // Fast, 100% reliable local backend QR generator (zero external network requests)
+      container.innerHTML = '';
       const img = document.createElement('img');
-      img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=170x170&data=' + encodeURIComponent(text);
+      img.src = '/api/qr/image?data=' + encodeURIComponent(text);
       img.style.width = '170px';
       img.style.height = '170px';
+      img.style.borderRadius = '8px';
+      img.style.display = 'block';
+      img.style.margin = '0 auto';
       img.onerror = () => {
         container.innerHTML = '<div style="color:#000; font-size:0.75rem; word-break:break-all; padding:6px;"><b>Данные:</b><br>' + escapeHtml(text.substring(0, 80)) + '...</div>';
       };

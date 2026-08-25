@@ -86,11 +86,15 @@ class QRScannerActivity : AppCompatActivity() {
 
         try {
             when {
-                qrText.startsWith("natbypass://profile") -> {
+                qrText.startsWith("natbypass://profile") || qrText.contains("topic=") || qrText.contains("mqtt_topic") -> {
                     val res = org.natbypass.app.util.MobileBridge.importProfileURI(qrText)
                     if (res.startsWith("ERR:")) {
                         Toast.makeText(this, "Ошибка импорта: $res", Toast.LENGTH_LONG).show()
                     } else {
+                        val yaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
+                        if (yaml.isNotEmpty() && yaml != "{}") {
+                            File(filesDir, "config.yaml").writeText(yaml)
+                        }
                         Toast.makeText(this, "✓ Профиль сети успешно импортирован и активирован!", Toast.LENGTH_LONG).show()
                     }
                     finish()

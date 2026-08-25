@@ -137,12 +137,23 @@ func StartEngine(configYAML string, tunFd int) string {
 	globalRegistry.StartMonitor(ctx, 2*time.Minute)
 
 	// Сигнальные каналы
+	activeProf := cfg.EnsureActiveProfile()
+	if activeProf.AWGPreset != "" {
+		globalAWGPreset = activeProf.AWGPreset
+	}
+
 	channels, err := buildChannels(cfg, devID)
 	if err != nil || len(channels) == 0 {
+		broker := activeProf.MQTTBroker
+		if broker == "" {
+			broker = "tcp://broker.emqx.io:1883"
+		}
 		channels = append(channels, signaling.NewMQTTChannel(
-			"tcp://broker.emqx.io:1883",
-			"natbypass/mynet/peers",
-			devID, "", "",
+			broker,
+			activeProf.MQTTTopic,
+			devID,
+			activeProf.MQTTUser,
+			activeProf.MQTTPass,
 		))
 	}
 	globalSigMgr = signaling.NewFallbackManager(channels)
@@ -806,6 +817,12 @@ func parseConfigFromString(data string) (*config.Config, error) {
 		_ = json.Unmarshal([]byte(trimmed), cfg)
 	} else if trimmed != "" {
 		_ = yaml.Unmarshal([]byte(trimmed), cfg)
+	}
+
+	activeProf := cfg.EnsureActiveProfile()
+	if activeProf.MQTTTopic == "" || activeProf.MQTTTopic == "natbypass/mynet/peers" {
+		activeProf.MQTTTopic = "natbypass/mesh/" + config.GenerateRandomHex(8)
+		cfg.SyncSignalingWithProfile(activeProf)
 	}
 	return cfg, nil
 }

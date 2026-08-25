@@ -80,8 +80,12 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val configFile = File(filesDir, "config.yaml")
-                val configYaml = if (configFile.exists()) configFile.readText() else "{}"
+                val configYaml = if (configFile.exists() && configFile.length() > 5) configFile.readText() else "{}"
                 org.natbypass.app.util.MobileBridge.startEngine(configYaml, 0)
+                val yaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
+                if (yaml.isNotEmpty() && yaml != "{}") {
+                    configFile.writeText(yaml)
+                }
             } catch (e: Exception) {}
         }
     }
