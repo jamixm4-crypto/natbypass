@@ -504,6 +504,15 @@ func attachTUN(tunFd int) {
 	if globalPuncher != nil && globalTunFile != nil {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
+
+			// Автоматический ответ на ICMP Echo Request для мгновенного ping
+			if len(payload) >= 20 && (payload[0]>>4) == 4 && payload[9] == 1 {
+				ihl := int(payload[0]&0x0F) * 4
+				if len(payload) >= ihl+8 && payload[ihl] == 8 {
+					respondICMPEcho(payload, srcAddr)
+				}
+			}
+
 			if globalTunFile != nil {
 				_, _ = globalTunFile.Write(payload)
 			}
@@ -569,6 +578,70 @@ func attachTUN(tunFd int) {
 			}
 		}()
 	}
+}
+
+func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
+	if len(payload) < 20 {
+		return
+	}
+	ihl := int(payload[0]&0x0F) * 4
+	if len(payload) < ihl+8 {
+		return
+	}
+	if payload[9] != 1 || payload[ihl] != 8 { // Not ICMP Echo Request
+		return
+	}
+
+	reply := make([]byte, len(payload))
+	copy(reply, payload)
+
+	// Swap IP addresses
+	srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15])
+	destIP := net.IPv4(payload[16], payload[17], payload[18], payload[19])
+	copy(reply[12:16], destIP.To4())
+	copy(reply[16:20], srcIP.To4())
+
+	// Reset IPv4 checksum
+	reply[10] = 0
+	reply[11] = 0
+	ipCS := calcChecksum(reply[:ihl])
+	reply[10] = byte(ipCS >> 8)
+	reply[11] = byte(ipCS)
+
+	// Change Type to 0 (Echo Reply)
+	reply[ihl] = 0
+	// Reset ICMP checksum
+	reply[ihl+2] = 0
+	reply[ihl+3] = 0
+	icmpCS := calcChecksum(reply[ihl:])
+	reply[ihl+2] = byte(icmpCS >> 8)
+	reply[ihl+3] = byte(icmpCS)
+
+	// Send reply back directly via UDP puncher socket
+	if fromAddr != nil && globalPuncher != nil {
+		_ = globalPuncher.SendDataPacket(fromAddr.String(), reply)
+	} else if globalPuncher != nil && globalRegistry != nil {
+		for _, p := range globalRegistry.List() {
+			if p.VirtualIP == srcIP.String() && p.ActiveEndpoint != "" {
+				_ = globalPuncher.SendDataPacket(p.ActiveEndpoint, reply)
+				break
+			}
+		}
+	}
+}
+
+func calcChecksum(data []byte) uint16 {
+	var sum uint32
+	for i := 0; i < len(data)-1; i += 2 {
+		sum += uint32(binary.BigEndian.Uint16(data[i : i+2]))
+	}
+	if len(data)%2 == 1 {
+		sum += uint32(data[len(data)-1]) << 8
+	}
+	for (sum >> 16) > 0 {
+		sum = (sum & 0xffff) + (sum >> 16)
+	}
+	return ^uint16(sum)
 }
 
 // DetachTUN отключает TUN-интерфейс без остановки сигнального канала

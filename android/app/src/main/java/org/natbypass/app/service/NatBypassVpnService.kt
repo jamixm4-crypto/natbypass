@@ -133,6 +133,13 @@ class NatBypassVpnService : VpnService() {
                 .setBlocking(false)
                 .allowBypass()
 
+            // Исключаем само приложение NatBypass из VPN для прямого доступа к STUN, MQTT и UDP-сокетам без петель
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (e: Exception) {
+                Log.w(TAG, "addDisallowedApplication error: ${e.message}")
+            }
+
             try {
                 builder.allowFamily(android.system.OsConstants.AF_INET)
             } catch (_: Throwable) {}
@@ -143,11 +150,17 @@ class NatBypassVpnService : VpnService() {
                 } catch (_: Throwable) {}
             }
 
+            // Резервные DNS-серверы чтобы Android Private DNS / DnsResolver никогда не блокировал резолвинг
+            try {
+                builder.addDnsServer("1.1.1.1")
+                builder.addDnsServer("8.8.8.8")
+            } catch (e: Exception) {
+                Log.w(TAG, "addDnsServer error: ${e.message}")
+            }
+
             if (useExitNode) {
                 // Exit Node режим: перенаправление всего интернет-трафика
                 builder.addRoute("0.0.0.0", 0)
-                builder.addDnsServer("1.1.1.1")
-                builder.addDnsServer("8.8.8.8")
             } else {
                 // Mesh P2P режим: ТОЛЬКО виртуальная подсеть 10.200.0.0/24 (Интернет и DNS остаются на Wi-Fi/LTE!)
                 builder.addRoute("10.200.0.0", 24)
