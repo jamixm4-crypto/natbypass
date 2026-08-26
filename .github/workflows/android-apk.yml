@@ -68,6 +68,7 @@ jobs:
       - name: Build Go Mobile Core (AAR)
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
+          go get golang.org/x/mobile@latest
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
           export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$NDK_PATH}"
@@ -90,7 +91,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.3.1"
+            [ -z "$TAG" ] && TAG="v1.3.2"
           fi
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-${TAG}.apk \;
           ls -lh ../release_apk/
@@ -109,7 +110,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.3.1"
+            [ -z "$TAG" ] && TAG="v1.3.2"
           fi
           echo "Attaching Android APK to release $TAG..."
           gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --draft=false --latest || true

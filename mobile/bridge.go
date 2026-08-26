@@ -22,6 +22,7 @@ import (
 	"github.com/natbypass/natbypass/internal/wireguard"
 	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v3"
+	_ "golang.org/x/mobile/bind"
 )
 
 type logRing struct {
