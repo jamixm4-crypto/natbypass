@@ -19,15 +19,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.natbypass.app.ui.ConnectionState
 import org.natbypass.app.ui.MainUiState
-import org.natbypass.app.ui.MainViewModel
 import org.natbypass.app.ui.PeerUiModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,6 +41,8 @@ fun MainScreen(
     onOpenSettings: () -> Unit,
     onOpenQRScanner: () -> Unit,
     onShareQR: () -> Unit,
+    onSync: () -> Unit,
+    onClearCache: () -> Unit,
 ) {
     var speedDialExpanded by remember { mutableStateOf(false) }
 
@@ -59,6 +58,15 @@ fun MainScreen(
                     )
                 },
                 actions = {
+                    IconButton(onClick = onOpenDiagnostics) {
+                        Icon(Icons.Outlined.Analytics, contentDescription = "Диагностика")
+                    }
+                    IconButton(onClick = onSync) {
+                        Icon(Icons.Outlined.Sync, contentDescription = "Синхронизация")
+                    }
+                    IconButton(onClick = onClearCache) {
+                        Icon(Icons.Outlined.CleaningServices, contentDescription = "Очистить кэш")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Outlined.Settings, contentDescription = "Настройки")
                     }
@@ -100,8 +108,41 @@ fun MainScreen(
                     onlinePeers = uiState.onlinePeers,
                     totalPeers  = uiState.totalPeers,
                     onChangeProfile = onOpenProfiles,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
+            }
+
+            // ── Quick Actions Row ────────────────────────────────────────────
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AssistChip(
+                        onClick = onSync,
+                        label = { Text("Синхронизация", fontSize = 12.sp) },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    )
+                    AssistChip(
+                        onClick = onClearCache,
+                        label = { Text("Очистить кэш", fontSize = 12.sp) },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.CleaningServices, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    )
+                    AssistChip(
+                        onClick = onOpenDiagnostics,
+                        label = { Text("Диагностика", fontSize = 12.sp) },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Analytics, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    )
+                }
             }
 
             // ── Peers section header ─────────────────────────────────────────
@@ -114,11 +155,18 @@ fun MainScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "Устройства",
+                        text = "Устройства в сети",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    AnimatedVisibility(visible = uiState.peers.isEmpty()) {
+                    if (uiState.peers.isNotEmpty()) {
+                        Text(
+                            text = "${uiState.onlinePeers} онлайн",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.natColors.success,
+                            fontWeight = FontWeight.Medium
+                        )
+                    } else {
                         Text(
                             text = "Ожидание...",
                             style = MaterialTheme.typography.bodySmall,
@@ -169,12 +217,12 @@ private fun ConnectSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 24.dp),
+            .padding(vertical = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ConnectToggle(state = state, onClick = onToggle)
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(18.dp))
 
         // Status text
         val (statusText, statusColor) = when (state) {
@@ -191,7 +239,7 @@ private fun ConnectSection(
             color = statusColor,
         )
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
         // RTT line
         Text(
@@ -208,7 +256,6 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
     val isConnected = state == ConnectionState.CONNECTED_P2P || state == ConnectionState.CONNECTED_RELAY
     val isConnecting = state == ConnectionState.CONNECTING
 
-    // Spring scale on press
     val interactionSource = remember { MutableInteractionSource() }
     val scale by animateFloatAsState(
         targetValue = 1f,
@@ -219,7 +266,6 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
         label = "btn_scale"
     )
 
-    // Pulsation ring for connecting state
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseAlpha by infiniteTransition.animateFloat(
         initialValue = 0.6f, targetValue = 0f,
@@ -242,7 +288,6 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
         modifier = Modifier.size(200.dp)
     ) {
-        // Pulse ring
         if (isConnecting) {
             Box(
                 modifier = Modifier
@@ -253,7 +298,6 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
             )
         }
 
-        // Main circle button
         val buttonColor by animateColorAsState(
             targetValue = when (state) {
                 ConnectionState.CONNECTED_P2P   -> MaterialTheme.natColors.successContainer

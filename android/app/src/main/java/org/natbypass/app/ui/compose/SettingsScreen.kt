@@ -5,6 +5,7 @@ import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -21,6 +22,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import org.json.JSONObject
 import org.natbypass.app.ui.compose.AppTheme
 import org.natbypass.app.util.MobileBridge
 import java.io.File
@@ -37,28 +39,63 @@ fun SettingsScreen(
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
 
-    // Device
-    var deviceName   by remember { mutableStateOf(prefs.getString("device_name", Build.MODEL) ?: Build.MODEL) }
+    // Load active profile data from MobileBridge
+    var activeProfileId   by remember { mutableStateOf("") }
+    var activeProfileName by remember { mutableStateOf("Основная сеть") }
+
+    // Device / App settings (stored in SharedPreferences)
+    var deviceName      by remember { mutableStateOf(prefs.getString("device_name", Build.MODEL) ?: Build.MODEL) }
     var publishInterval by remember { mutableStateOf(prefs.getInt("publish_interval", 8).toString()) }
-    var autoStart    by remember { mutableStateOf(prefs.getBoolean("auto_start_on_boot", false)) }
-    var saveLogs     by remember { mutableStateOf(prefs.getBoolean("save_logs", false)) }
+    var autoStart       by remember { mutableStateOf(prefs.getBoolean("auto_start_on_boot", false)) }
+    var saveLogs        by remember { mutableStateOf(prefs.getBoolean("save_logs", false)) }
 
-    // Network
-    var awgPreset    by remember { mutableStateOf(prefs.getString("awg_preset", "dpi") ?: "dpi") }
-
-    // MQTT
-    var mqttBroker   by remember { mutableStateOf(prefs.getString("mqtt_broker", "tcp://broker.emqx.io:1883") ?: "") }
-    var mqttTopic    by remember { mutableStateOf(prefs.getString("mqtt_topic", "natbypass/mynet/peers") ?: "") }
-    var mqttUser     by remember { mutableStateOf(prefs.getString("mqtt_user", "") ?: "") }
-    var mqttPass     by remember { mutableStateOf(prefs.getString("mqtt_pass", "") ?: "") }
+    // Network / Profile settings (loaded from Active Profile)
+    var awgPreset       by remember { mutableStateOf("dpi") }
+    var mqttBroker      by remember { mutableStateOf("tcp://broker.emqx.io:1883") }
+    var mqttTopic       by remember { mutableStateOf("natbypass/mynet/peers") }
+    var mqttUser        by remember { mutableStateOf("") }
+    var mqttPass        by remember { mutableStateOf("") }
     var mqttPassVisible by remember { mutableStateOf(false) }
 
     // Telegram
-    var tgToken      by remember { mutableStateOf(prefs.getString("tg_token", "") ?: "") }
-    var tgChat       by remember { mutableStateOf(prefs.getString("tg_chat", "") ?: "") }
-    var tgProxy      by remember { mutableStateOf(prefs.getString("tg_proxy", "") ?: "") }
+    var tgToken         by remember { mutableStateOf("") }
+    var tgChat          by remember { mutableStateOf("") }
+    var tgProxy         by remember { mutableStateOf("") }
+
+    // Initialize from Active Profile in MobileBridge
+    LaunchedEffect(Unit) {
+        try {
+            val profJson = MobileBridge.getProfilesJSON()
+            val pObj = JSONObject(profJson)
+            val active = pObj.optJSONObject("active_profile")
+            if (active != null) {
+                activeProfileId   = active.optString("id", "")
+                activeProfileName = active.optString("name", "Основная сеть")
+                mqttBroker        = active.optString("mqtt_broker", "tcp://broker.emqx.io:1883")
+                mqttTopic         = active.optString("mqtt_topic", "")
+                mqttUser          = active.optString("mqtt_user", "")
+                mqttPass          = active.optString("mqtt_pass", "")
+                tgToken           = active.optString("tg_token", "")
+                val chatVal       = active.optLong("tg_chat_id", 0L)
+                tgChat            = if (chatVal != 0L) chatVal.toString() else ""
+                tgProxy           = active.optString("tg_proxy", "")
+                awgPreset         = active.optString("awg_preset", prefs.getString("awg_preset", "dpi") ?: "dpi")
+            } else {
+                // Fallback to prefs if no profiles system active
+                mqttBroker  = prefs.getString("mqtt_broker", "tcp://broker.emqx.io:1883") ?: ""
+                mqttTopic   = prefs.getString("mqtt_topic", "natbypass/mynet/peers") ?: ""
+                mqttUser    = prefs.getString("mqtt_user", "") ?: ""
+                mqttPass    = prefs.getString("mqtt_pass", "") ?: ""
+                tgToken     = prefs.getString("tg_token", "") ?: ""
+                tgChat      = prefs.getString("tg_chat", "") ?: ""
+                tgProxy     = prefs.getString("tg_proxy", "") ?: ""
+                awgPreset   = prefs.getString("awg_preset", "dpi") ?: "dpi"
+            }
+        } catch (_: Exception) {}
+    }
 
     fun save() {
+        // 1. Save general app prefs
         prefs.edit().apply {
             putString("device_name", deviceName.trim())
             putInt("publish_interval", publishInterval.toIntOrNull() ?: 8)
@@ -74,40 +111,88 @@ fun SettingsScreen(
             putString("tg_proxy", tgProxy.trim())
             apply()
         }
+
+        // 2. Update active profile in MobileBridge
+        if (activeProfileId.isNotEmpty()) {
+            MobileBridge.updateProfile(
+                activeProfileId,
+                activeProfileName,
+                mqttBroker.trim(),
+                mqttTopic.trim(),
+                mqttUser.trim(),
+                mqttPass,
+                tgToken.trim(),
+                tgChat.trim().toLongOrNull() ?: 0L,
+                tgProxy.trim(),
+                awgPreset
+            )
+        }
+
+        // 3. Set AWG preset
         MobileBridge.setAWGPreset(awgPreset)
+
+        // 4. Persist updated config.yaml to disk
         try {
             val yaml = MobileBridge.getConfigYAML()
             if (yaml.isNotEmpty() && yaml != "{}") {
                 File(context.filesDir, "config.yaml").writeText(yaml)
             }
         } catch (_: Exception) {}
-        Toast.makeText(context, "Настройки сохранены", Toast.LENGTH_SHORT).show()
+
+        Toast.makeText(context, "✓ Настройки сети «$activeProfileName» сохранены", Toast.LENGTH_SHORT).show()
     }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Настройки", fontWeight = FontWeight.Bold) },
+                title = {
+                    Column {
+                        Text("Настройки", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        if (activeProfileName.isNotEmpty()) {
+                            Text(
+                                text = "Профиль: $activeProfileName",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Filled.ArrowBack, "Назад")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = ::save) {
+                        Icon(Icons.Filled.Check, contentDescription = "Сохранить", tint = MaterialTheme.colorScheme.primary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
         bottomBar = {
-            Surface(shadowElevation = 8.dp) {
-                Button(
-                    onClick = ::save,
+            Surface(
+                shadowElevation = 8.dp,
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    Icon(Icons.Filled.Save, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Сохранить")
+                    Button(
+                        onClick = ::save,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Filled.Save, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Сохранить настройки", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    }
                 }
             }
         }
@@ -117,18 +202,17 @@ fun SettingsScreen(
                 .padding(pad)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // ── Appearance ─────────────────────────────────────────────────
             SettingsSection(title = "Внешний вид", icon = Icons.Outlined.Palette) {
-                // Theme picker
                 Text(
                     text = "Тема оформления",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     listOf(AppTheme.SYSTEM to "Авто", AppTheme.LIGHT to "Светлая", AppTheme.DARK to "Тёмная")
                         .forEachIndexed { idx, (theme, label) ->
@@ -142,7 +226,7 @@ fun SettingsScreen(
 
                 // Dynamic color (Android 12+ only)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(8.dp))
                     SettingsSwitch(
                         title = "Dynamic Color",
                         subtitle = "Использовать цвета обоев (Material You)",
@@ -163,6 +247,7 @@ fun SettingsScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = publishInterval,
                     onValueChange = { publishInterval = it },
@@ -172,6 +257,7 @@ fun SettingsScreen(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
                 SettingsSwitch(
                     title = "Автозапуск при загрузке",
                     subtitle = "Запускать VPN при включении телефона",
@@ -181,14 +267,14 @@ fun SettingsScreen(
                 )
             }
 
-            // ── Network ───────────────────────────────────────────────────
-            SettingsSection(title = "Сеть", icon = Icons.Outlined.Tune) {
+            // ── Network / Protocol ────────────────────────────────────────
+            SettingsSection(title = "Сеть и протокол", icon = Icons.Outlined.Tune) {
                 Text(
-                    text = "Протокол туннеля",
+                    text = "Пресет AmneziaWG 2.0",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
                 val presets = listOf("standard" to "Стандарт", "dpi" to "Обход DPI", "stealth" to "Скрытность")
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     presets.forEachIndexed { idx, (key, label) ->
@@ -202,7 +288,7 @@ fun SettingsScreen(
             }
 
             // ── MQTT ──────────────────────────────────────────────────────
-            SettingsSection(title = "MQTT Брокер", icon = Icons.Outlined.Cloud) {
+            SettingsSection(title = "MQTT Брокер ($activeProfileName)", icon = Icons.Outlined.Cloud) {
                 val brokerPresets = listOf(
                     "tcp://broker.emqx.io:1883",
                     "tcp://broker.hivemq.com:1883",
@@ -216,6 +302,7 @@ fun SettingsScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     brokerPresets.take(2).forEach { preset ->
                         AssistChip(
@@ -224,14 +311,16 @@ fun SettingsScreen(
                         )
                     }
                 }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = mqttTopic,
                     onValueChange = { mqttTopic = it },
-                    label = { Text("Топик") },
+                    label = { Text("Топик сети") },
                     leadingIcon = { Icon(Icons.Outlined.Tag, null) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = mqttUser,
                     onValueChange = { mqttUser = it },
@@ -240,6 +329,7 @@ fun SettingsScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = mqttPass,
                     onValueChange = { mqttPass = it },
@@ -257,7 +347,7 @@ fun SettingsScreen(
             }
 
             // ── Telegram ──────────────────────────────────────────────────
-            SettingsSection(title = "Telegram (резервный канал)", icon = Icons.Outlined.Send) {
+            SettingsSection(title = "Telegram ($activeProfileName)", icon = Icons.Outlined.Send) {
                 OutlinedTextField(
                     value = tgToken,
                     onValueChange = { tgToken = it },
@@ -266,6 +356,7 @@ fun SettingsScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = tgChat,
                     onValueChange = { tgChat = it },
@@ -275,6 +366,7 @@ fun SettingsScreen(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = tgProxy,
                     onValueChange = { tgProxy = it },
@@ -285,7 +377,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(80.dp))
+            Spacer(Modifier.height(40.dp))
         }
     }
 }

@@ -162,6 +162,14 @@ private fun NatBypassApp(
                 context.startActivity(Intent(context, QRScannerActivity::class.java))
             },
             onShareQR = onShareQR,
+            onSync = {
+                viewModel.syncNetwork()
+                Toast.makeText(context, "🔄 Синхронизация сети...", Toast.LENGTH_SHORT).show()
+            },
+            onClearCache = {
+                viewModel.clearPeers(context)
+                Toast.makeText(context, "🧹 Кэш устройств очищен!", Toast.LENGTH_SHORT).show()
+            },
         )
         Screen.Diagnostics -> DiagnosticsScreen(onBack = { currentScreen = Screen.Main })
         Screen.Settings -> SettingsScreen(

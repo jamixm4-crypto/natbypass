@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui
+package org.natbypass.app.ui
 
 import android.app.Activity
 import android.app.Application
@@ -368,6 +368,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun clearPeers(context: Context) {
         MobileBridge.clearPeers()
         viewModelScope.launch { refreshStatus() }
+    }
+
+    fun syncNetwork() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                MobileBridge.refreshPublicIP()
+            }
+            delay(500)
+            refreshStatus()
+        }
     }
 
     private fun saveConfigToDisk(context: Context) {
