@@ -602,6 +602,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	if err == nil {
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDPPuncher Р°РєС‚РёРІРµРЅ")
 		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+			if len(payload) >= 20 && (payload[0]>>4) == 4 && payload[9] == 1 {
+				ihl := int(payload[0]&0x0F) * 4
+				if len(payload) >= ihl+8 && payload[ihl] == 8 {
+					respondICMPEcho(puncher, payload, srcAddr)
+				}
+			}
 			if tunDev != nil {
 				_ = tunDev.WritePacket(payload)
 			}
@@ -661,7 +667,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									if p.ActiveEndpoint != "" {
 										_ = puncher.SendDataPacket(p.ActiveEndpoint, packet)
 									}
-									if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+									if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
+										_ = puncher.SendDataPacket(p.LocalAddr, packet)
+									}
+									if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint && p.STUNAddr != p.LocalAddr {
 										_ = puncher.SendDataPacket(p.STUNAddr, packet)
 									}
 								}
@@ -1731,5 +1740,43 @@ wireguard:
   listen_port: 51820
 `
 		_ = os.WriteFile(path, []byte(sample), 0644)
+	}
+}
+
+func respondICMPEcho(puncher *network.UDPPuncher, payload []byte, fromAddr *net.UDPAddr) {
+	if len(payload) < 20 {
+		return
+	}
+	ihl := int(payload[0]&0x0F) * 4
+	if len(payload) < ihl+8 {
+		return
+	}
+	if payload[9] != 1 || payload[ihl] != 8 {
+		return
+	}
+
+	reply := make([]byte, len(payload))
+	copy(reply, payload)
+
+	srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15])
+	destIP := net.IPv4(payload[16], payload[17], payload[18], payload[19])
+	copy(reply[12:16], destIP.To4())
+	copy(reply[16:20], srcIP.To4())
+
+	reply[10] = 0
+	reply[11] = 0
+	ipCS := tunnel.CalculateChecksum(reply[:ihl])
+	reply[10] = byte(ipCS >> 8)
+	reply[11] = byte(ipCS)
+
+	reply[ihl] = 0
+	reply[ihl+2] = 0
+	reply[ihl+3] = 0
+	icmpCS := tunnel.CalculateChecksum(reply[ihl:])
+	reply[ihl+2] = byte(icmpCS >> 8)
+	reply[ihl+3] = byte(icmpCS)
+
+	if fromAddr != nil && puncher != nil {
+		_ = puncher.SendDataPacket(fromAddr.String(), reply)
 	}
 }

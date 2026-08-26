@@ -41,7 +41,7 @@ jobs:
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $allTags = git tag -l "v*"
               $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
-              if (!$latestTag) { $latestTag = "v1.3.1" }
+              if (!$latestTag) { $latestTag = "v1.3.3" }
               $tag = $latestTag
           }
           Write-Host "Building release for tag: $tag"
@@ -56,11 +56,11 @@ jobs:
               & $rsrcPath -manifest "cmd\natbypass\natbypass.manifest" -ico "app.ico" -o "cmd\natbypass-gui\rsrc_windows_amd64.syso"
           }
 
-          Write-Host "==> 2. Building Windows Native GUI (NatBypass-GUI.exe)..."
+          Write-Host "==> 2. Building Windows Stylish Desktop App (NatBypass.exe)..."
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
-          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-GUI-$tag-windows-amd64.exe" ./cmd/natbypass-gui
-          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass-gui
+          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
+          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-Classic-GUI-$tag-windows-amd64.exe" ./cmd/natbypass-gui
           & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-cli-$tag-windows-amd64.exe" ./cmd/natbypass-cli
 
           Write-Host "==> 3. Building Windows Router Builder GUI..."
@@ -82,6 +82,7 @@ jobs:
 
           Write-Host "==> 7. Building Router MIPSLE..."
           $env:GOARCH = "mipsle"
+          $env:GOMIPS = "softfloat"
           & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mipsle" ./cmd/natbypass-cli
 
           Write-Host "==> 8. Copying config..."
@@ -99,7 +100,7 @@ jobs:
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $allTags = git tag -l "v*"
               $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
-              if (!$latestTag) { $latestTag = "v1.3.1" }
+              if (!$latestTag) { $latestTag = "v1.3.3" }
               $tag = $latestTag
           }
           
