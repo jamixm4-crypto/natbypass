@@ -151,6 +151,14 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 			}
 		}
 
+		// КРИТИЧНО: выставляем очень высокий metric чтобы Wintun НИКОГДА не перебивал маршруты
+		// физических адаптеров (Wi-Fi, Ethernet, LAN 192.168.x.x, 10.x.x.x)
+		// Metric 9000 = самый низкий приоритет, физические адаптеры обычно metric 25-50
+		_ = runNetsh("interface", "ipv4", "set", "interface",
+			fmt.Sprintf("name=%s", adapterName),
+			"metric=9000",
+		)
+
 		// Разрешаем входящий ICMP ping и пакеты в Брандмауэре Windows
 		_ = runNetsh("advfirewall", "firewall", "add", "rule", "name=NatBypass ICMP", "dir=in", "action=allow", "protocol=icmpv4:8,any", "interface=NatBypass")
 		_ = runNetsh("advfirewall", "firewall", "add", "rule", "name=NatBypass Allow All", "dir=in", "action=allow", "interface=NatBypass")

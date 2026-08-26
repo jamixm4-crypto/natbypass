@@ -150,19 +150,19 @@ class NatBypassVpnService : VpnService() {
                 } catch (_: Throwable) {}
             }
 
-            // Резервные DNS-серверы чтобы Android Private DNS / DnsResolver никогда не блокировал резолвинг
-            try {
-                builder.addDnsServer("1.1.1.1")
-                builder.addDnsServer("8.8.8.8")
-            } catch (e: Exception) {
-                Log.w(TAG, "addDnsServer error: ${e.message}")
-            }
-
             if (useExitNode) {
-                // Exit Node режим: перенаправление всего интернет-трафика
+                // Exit Node режим: весь интернет-трафик + DNS через VPN
                 builder.addRoute("0.0.0.0", 0)
+                try {
+                    builder.addDnsServer("1.1.1.1")
+                    builder.addDnsServer("8.8.8.8")
+                } catch (e: Exception) {
+                    Log.w(TAG, "addDnsServer error: ${e.message}")
+                }
             } else {
-                // Mesh P2P режим: ТОЛЬКО виртуальная подсеть 10.200.0.0/24 (Интернет и DNS остаются на Wi-Fi/LTE!)
+                // Mesh P2P режим: ТОЛЬКО подсеть 10.200.0.0/24
+                // НЕ добавляем DNS серверы — Android автоматически маршрутизирует DNS через VPN
+                // если указать addDnsServer(), что убивает интернет в split-tunnel режиме
                 builder.addRoute("10.200.0.0", 24)
             }
 
