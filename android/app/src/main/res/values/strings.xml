@@ -1,23 +1,104 @@
 <resources>
     <string name="app_name">NatBypass</string>
+
+    <!-- VPN status -->
+    <string name="status_disconnected">Не подключено</string>
+    <string name="status_connecting">Подключение…</string>
+    <string name="status_connected_p2p">Защищено</string>
+    <string name="status_connected_relay">Резервный канал</string>
+
+    <!-- VPN button (legacy, still used by tile service) -->
     <string name="vpn_status_disconnected">ОТКЛЮЧЕНО</string>
     <string name="vpn_status_connecting">ПОДКЛЮЧЕНИЕ...</string>
     <string name="vpn_status_connected">ПОДКЛЮЧЕНО</string>
     <string name="vpn_btn_connect">ВКЛЮЧИТЬ VPN</string>
     <string name="vpn_btn_disconnect">ОТКЛЮЧИТЬ</string>
+    <string name="vpn_permission_denied">Разрешение на VPN отклонено</string>
 
-    <string name="title_peers">Устройства в сети</string>
+    <!-- Peers -->
+    <string name="title_peers">Устройства</string>
+    <string name="peers_online">Пиров онлайн: %1$d из %2$d</string>
+    <string name="peers_empty">Устройства не обнаружены</string>
+    <string name="peers_empty_hint">Добавьте устройство через QR или подождите автоматического обнаружения</string>
+    <string name="peer_action_ping">Ping</string>
+    <string name="peer_action_copy_ip">Скопировать IP</string>
+    <string name="peer_action_exit_node">Использовать как Exit Node</string>
+    <string name="peer_action_delete">Удалить из списка</string>
+    <string name="peer_ip_copied">IP %1$s скопирован</string>
+    <string name="peer_exit_node_set">Exit Node: %1$s</string>
+    <string name="peer_ping_result">RTT: %1$d мс</string>
+    <string name="peer_ping_timeout">Узел не ответил</string>
+
+    <!-- RTT -->
+    <string name="rtt_label">RTT: %1$d мс</string>
+    <string name="rtt_empty">RTT: —</string>
+
+    <!-- Network card -->
+    <string name="network_default_name">Основная сеть</string>
+
+    <!-- Channel types -->
+    <string name="channel_p2p">P2P</string>
+    <string name="channel_relay">Relay</string>
+    <string name="channel_offline">Offline</string>
+
+    <!-- Screens -->
     <string name="title_settings">Настройки</string>
     <string name="title_diagnostics">Диагностика</string>
     <string name="title_qr_scanner">Сканировать QR с экрана ПК</string>
     <string name="qr_hint">Наведите камеру на QR-код в веб-панели ПК</string>
 
-    <string name="preset_standard">Стандартный WG</string>
-    <string name="preset_dpi">Обход DPI (AWG 2.0)</string>
-    <string name="preset_stealth">Макс. скрытность</string>
+    <!-- Settings sections -->
+    <string name="settings_section_appearance">Внешний вид</string>
+    <string name="settings_section_device">Устройство</string>
+    <string name="settings_section_network">Сеть</string>
+    <string name="settings_section_mqtt">MQTT Брокер</string>
+    <string name="settings_section_telegram">Telegram (резервный канал)</string>
+    <string name="settings_theme_label">Тема оформления</string>
+    <string name="settings_theme_auto">Авто</string>
+    <string name="settings_theme_light">Светлая</string>
+    <string name="settings_theme_dark">Тёмная</string>
+    <string name="settings_dynamic_color">Dynamic Color</string>
+    <string name="settings_dynamic_color_desc">Использовать цвета обоев (Material You)</string>
+    <string name="settings_autostart">Автозапуск при загрузке</string>
+    <string name="settings_autostart_desc">Запускать VPN при включении телефона</string>
+    <string name="settings_saved">Настройки сохранены</string>
 
+    <!-- Presets -->
+    <string name="preset_standard">Стандарт</string>
+    <string name="preset_dpi">Обход DPI</string>
+    <string name="preset_stealth">Скрытность</string>
+
+    <!-- Profiles -->
+    <string name="profile_create_title">Новая сеть</string>
+    <string name="profile_edit_title">Редактировать сеть</string>
+    <string name="profile_import_title">Импорт профиля</string>
+    <string name="profile_created">Профиль «%1$s» создан</string>
+    <string name="profile_updated">Профиль «%1$s» обновлён</string>
+    <string name="profile_deleted">Профиль удалён</string>
+    <string name="profile_switched">Переключено на сеть «%1$s»</string>
+    <string name="profile_imported">Профиль импортирован</string>
+    <string name="profile_import_error">Ошибка импорта</string>
+
+    <!-- Diagnostics -->
+    <string name="diag_internet">Интернет</string>
+    <string name="diag_public_ip">Публичный IP</string>
+    <string name="diag_stun">STUN-эндпоинт (NAT)</string>
+    <string name="diag_channel">Активный канал</string>
+    <string name="diag_peers">Узлы в сети</string>
+    <string name="diag_nat_type">Тип NAT</string>
+    <string name="diag_rtt_chart">История RTT</string>
+    <string name="diag_logs">Журнал ядра</string>
+    <string name="diag_no_data">Недостаточно данных</string>
+    <string name="diag_logs_empty">Логи пусты</string>
+
+    <!-- FAB Speed dial -->
+    <string name="fab_scan_qr">Сканировать QR</string>
+    <string name="fab_share_qr">Поделиться QR</string>
+    <string name="fab_diagnostics">Диагностика</string>
+
+    <!-- Notifications -->
     <string name="notif_channel_name">Служба NatBypass VPN</string>
-    <string name="notif_channel_desc">Показывает статус подключения к защищенной P2P mesh-сети</string>
-    <string name="notif_title_connected">NatBypass: Защищенный туннель активен</string>
+    <string name="notif_channel_desc">Показывает статус подключения к защищённой P2P mesh-сети</string>
+    <string name="notif_title_connected">NatBypass: Защищённый туннель активен</string>
     <string name="notif_title_disconnected">NatBypass: Отключено</string>
 </resources>

@@ -1,10 +1,11 @@
 <resources>
-    <style name="Theme.NatBypass" parent="Theme.Material3.Dark.NoActionBar">
-        <item name="android:windowBackground">@color/bg_dark</item>
-        <item name="android:statusBarColor">@color/bg_dark</item>
-        <item name="android:navigationBarColor">@color/bg_dark</item>
-        <item name="colorPrimary">@color/accent_blue</item>
-        <item name="colorSecondary">@color/green_online</item>
-        <item name="colorSurface">@color/panel_dark</item>
+    <!-- Base theme: DayNight so system + Compose handles dark/light.
+         NoActionBar because Compose TopAppBar is used.
+         Edge-to-edge: transparent status/nav bars, Compose uses WindowInsets. -->
+    <style name="Theme.NatBypass" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>
