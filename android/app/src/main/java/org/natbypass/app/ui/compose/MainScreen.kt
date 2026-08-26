@@ -1,5 +1,6 @@
-﻿package org.natbypass.app.ui.compose
+package org.natbypass.app.ui.compose
 
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -20,6 +21,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -105,6 +110,18 @@ fun MainScreen(
                 )
             }
 
+            // ── My Device Card (VIP + STUN) ──────────────────────────────────
+            item {
+                MyDeviceInfoCard(
+                    virtualIp = uiState.virtualIp,
+                    stunAddr = uiState.stunAddr,
+                    publicIp = uiState.publicIp,
+                    natType = uiState.natType,
+                    activeChannel = uiState.activeChannel,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
             // ── Network profile card ─────────────────────────────────────────
             item {
                 NetworkCard(
@@ -112,7 +129,7 @@ fun MainScreen(
                     onlinePeers = uiState.onlinePeers,
                     totalPeers  = uiState.totalPeers,
                     onChangeProfile = onOpenProfiles,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
 
@@ -158,12 +175,13 @@ fun MainScreen(
                         onCopyIp      = { onPeerCopyIp(peer) },
                         onSetExitNode = { onPeerSetExitNode(peer) },
                         onDelete      = { onPeerDelete(peer) },
+                        modifier      = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
                 }
             }
         }
 
-        // Scrim for speed dial
+        // Dim overlay when speed dial is open
         if (speedDialExpanded) {
             Box(
                 modifier = Modifier
@@ -188,12 +206,12 @@ private fun ConnectSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp),
+            .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ConnectToggle(state = state, onClick = onToggle)
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
 
         // Status text
         val (statusText, statusColor) = when (state) {
@@ -303,6 +321,184 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
                 tint = iconColor,
                 modifier = Modifier.size(50.dp)
             )
+        }
+    }
+}
+
+// ── My device info card (Virtual IP + STUN Socket) ────────────────────────────
+@Composable
+private fun MyDeviceInfoCard(
+    virtualIp: String,
+    stunAddr: String,
+    publicIp: String,
+    natType: String,
+    activeChannel: String,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val clipboardManager: ClipboardManager = LocalClipboardManager.current
+
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            // Header: Мое устройство + статус
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.Smartphone,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Мое устройство",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.natColors.success.copy(alpha = 0.15f),
+                ) {
+                    Text(
+                        text = if (activeChannel.isNotEmpty()) activeChannel else "Mesh P2P",
+                        color = MaterialTheme.natColors.success,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // Row 1: Виртуальный IP в сети (Mesh IP)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                    .clickable {
+                        val ipToCopy = virtualIp.ifEmpty { "100.64.200.10" }
+                        clipboardManager.setText(AnnotatedString(ipToCopy))
+                        Toast.makeText(context, "IP $ipToCopy скопирован", Toast.LENGTH_SHORT).show()
+                    }
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text(
+                        text = "Виртуальный IP (Mesh)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = virtualIp.ifEmpty { "100.64.200.10" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "VIP",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        imageVector = Icons.Outlined.ContentCopy,
+                        contentDescription = "Копировать IP",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Row 2: STUN сокет (P2P Hole Punching сокет)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                    .clickable {
+                        if (stunAddr.isNotEmpty()) {
+                            clipboardManager.setText(AnnotatedString(stunAddr))
+                            Toast.makeText(context, "STUN $stunAddr скопирован", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text(
+                        text = "STUN P2P Сокет",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = stunAddr.ifEmpty { "Определение..." },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (stunAddr.isNotEmpty()) MaterialTheme.natColors.success else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Outlined.Bolt,
+                    contentDescription = "STUN сокет",
+                    tint = if (stunAddr.isNotEmpty()) MaterialTheme.natColors.success else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Дополнительная строка: Публичный IP или NAT тип (если есть)
+            if (publicIp.isNotEmpty() || natType.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    if (publicIp.isNotEmpty()) {
+                        Text(
+                            text = "Внешний IP: $publicIp",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (natType.isNotEmpty()) {
+                        Text(
+                            text = "NAT: $natType",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
     }
 }
