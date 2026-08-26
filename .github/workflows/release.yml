@@ -120,19 +120,11 @@ jobs:
           }
           
           # Создаем релиз если еще не существует
-          $rel = gh release view $tag 2>$null
-          if (!$rel) {
+          $null = gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
               Write-Host "==> Creating clean release $tag..."
               gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --target main
           }
-
-          # Удаляем устаревшие файлы если они присутствовали в релизе
-          gh release delete-asset $tag "NatBypass-$tag-Setup.exe" -y 2>$null
-          gh release delete-asset $tag "NatBypass-Setup-$tag.exe" -y 2>$null
-          gh release delete-asset $tag "natbypass-diag-$tag-windows-amd64.exe" -y 2>$null
-          gh release delete-asset $tag "natbypass-diag-v1.2.5-windows-amd64.exe" -y 2>$null
-          gh release delete-asset $tag "diagnostic-tool-$tag-windows.exe" -y 2>$null
-          gh release delete-asset $tag "diagnostic-tool-v1.2.5-windows.exe" -y 2>$null
 
           $files = Get-ChildItem -Path release -File
           foreach ($f in $files) {
@@ -141,5 +133,7 @@ jobs:
           }
           
           # Устанавливаем статус Latest
-          gh release edit $tag --latest --title "NatBypass $tag" 2>$null
+          $null = gh release edit $tag --latest --title "NatBypass $tag" 2>$null
           Write-Host "==> All fresh release files successfully uploaded for $tag!"
+          $global:LASTEXITCODE = 0
+          exit 0
