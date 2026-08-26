@@ -36,9 +36,9 @@ func TestExtractIPv4Subnet(t *testing.T) {
 			expected: "10.0.0.0/8",
 		},
 		{
-			name: "Ignore Mesh IP 10.200.x.x",
+			name: "Ignore Mesh IP 100.64.x.x",
 			addr: &net.IPNet{
-				IP:   net.ParseIP("10.200.0.5").To4(),
+				IP:   net.ParseIP("100.64.200.5").To4(),
 				Mask: net.CIDRMask(24, 32),
 			},
 			expected: "",

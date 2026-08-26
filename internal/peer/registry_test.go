@@ -1,4 +1,4 @@
-package peer
+﻿package peer
 
 import (
 	"reflect"
@@ -26,7 +26,7 @@ func TestRegistryUpsert_AWGPreservationAndUpdate(t *testing.T) {
 	p1 := &Peer{
 		DeviceID:       "dev-1",
 		Nickname:       "Peer1",
-		VirtualIP:      "10.200.0.2",
+		VirtualIP:      "100.64.200.2",
 		PublicKey:      "pub1",
 		PublicIP:       "1.1.1.1",
 		STUNAddr:       "1.1.1.1:51820",
@@ -55,7 +55,7 @@ func TestRegistryUpsert_AWGPreservationAndUpdate(t *testing.T) {
 	// 2. Upsert with nil AWG - must PRESERVE existing AWG
 	p2 := &Peer{
 		DeviceID:  "dev-1",
-		VirtualIP: "10.200.0.2",
+		VirtualIP: "100.64.200.2",
 		PublicKey: "pub1",
 		PublicIP:  "1.1.1.1",
 		STUNAddr:  "1.1.1.1:51820",
@@ -104,7 +104,7 @@ func TestRegistryUpsert_AWGPreservationAndUpdate(t *testing.T) {
 
 	p3 := &Peer{
 		DeviceID:  "dev-1",
-		VirtualIP: "10.200.0.2",
+		VirtualIP: "100.64.200.2",
 		PublicKey: "pub1",
 		PublicIP:  "1.1.1.1",
 		STUNAddr:  "1.1.1.1:51820",
@@ -126,3 +126,4 @@ func TestRegistryUpsert_AWGPreservationAndUpdate(t *testing.T) {
 		t.Errorf("Updated AWG mismatch: got %+v, want %+v", got3.AWG, awg2)
 	}
 }
+

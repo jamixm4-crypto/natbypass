@@ -1,4 +1,4 @@
-package signaling
+﻿package signaling
 
 import (
 	"encoding/json"
@@ -26,7 +26,7 @@ func TestPayloadMarshalUnmarshal_AWG(t *testing.T) {
 		DeviceID:         "device-123",
 		Nickname:         "node-alpha",
 		DeviceName:       "node-alpha",
-		VirtualIP:        "10.200.0.2",
+		VirtualIP:        "100.64.200.2",
 		PublicKey:        "abcdef123456",
 		PublicIP:         "1.2.3.4",
 		LocalAddr:        "192.168.1.100:51820",
@@ -66,7 +66,7 @@ func TestPayloadUnmarshal_PascalCase_CamelCase_AWG(t *testing.T) {
 	pascalJSON := `{
 		"DeviceID": "dev-pascal",
 		"Nickname": "PascalNode",
-		"VirtualIP": "10.200.0.5",
+		"VirtualIP": "100.64.200.5",
 		"PublicIP": "203.0.113.1",
 		"LocalAddr": "192.168.0.5:51820",
 		"STUNAddr": "203.0.113.1:51820",
@@ -165,7 +165,7 @@ func TestPayloadEncryptDecrypt_AWG(t *testing.T) {
 
 	origPayload := &Payload{
 		DeviceID:  "dev-secure",
-		VirtualIP: "10.200.0.10",
+		VirtualIP: "100.64.200.10",
 		AWG: &AWGParams{
 			Jc:   5,
 			Jmin: 42,
@@ -199,3 +199,4 @@ func TestPayloadEncryptDecrypt_AWG(t *testing.T) {
 		t.Errorf("Decrypted AWG mismatch: got %+v, want %+v", decrypted.AWG, origPayload.AWG)
 	}
 }
+
