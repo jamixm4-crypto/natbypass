@@ -12,10 +12,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: android-pipeline
-  cancel-in-progress: false
-
 jobs:
   build-android:
     name: Build Android APK
@@ -39,29 +35,23 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Configure Android NDK & Licenses
+      - name: Configure Android NDK
         run: |
-          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ -f "$SDKM" ]; then
-            yes | "$SDKM" --licenses || true
-          else
-            yes | sdkmanager --licenses || true
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -f "$SDKM" ]; then
+            SDKM="sdkmanager"
           fi
+          yes | $SDKM --licenses || true
           
-          if [ -d "$ANDROID_HOME/ndk" ] && [ "$(ls -A $ANDROID_HOME/ndk)" ]; then
-            NDK_PATH=$(ls -d $ANDROID_HOME/ndk/* | sort -V | tail -n 1)
+          # Install NDK 26.1 if not present
+          if [ -d "$ANDROID_SDK_ROOT/ndk/26.1.10909125" ]; then
+            NDK_PATH="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
           elif [ -d "$ANDROID_SDK_ROOT/ndk" ] && [ "$(ls -A $ANDROID_SDK_ROOT/ndk)" ]; then
             NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
           else
-            if [ -f "$SDKM" ]; then
-              yes | "$SDKM" --install "ndk;26.1.10909125" "platforms;android-34" "build-tools;34.0.0"
-            else
-              yes | sdkmanager --install "ndk;26.1.10909125" "platforms;android-34" "build-tools;34.0.0"
-            fi
-            NDK_PATH="$ANDROID_HOME/ndk/26.1.10909125"
+            yes | $SDKM --install "ndk;26.1.10909125" "platforms;android-34" "build-tools;34.0.0" || true
+            NDK_PATH="$ANDROID_SDK_ROOT/ndk/26.1.10909125"
           fi
           echo "Selected NDK path: $NDK_PATH"
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
@@ -74,7 +64,6 @@ jobs:
       - name: Build Go Mobile Core (AAR)
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
-          go get golang.org/x/mobile@latest
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
           export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$NDK_PATH}"
@@ -88,7 +77,7 @@ jobs:
       - name: Build Android APK
         run: |
           cd android
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
           echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace --no-daemon
@@ -97,7 +86,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.2.7"
+            [ -z "$TAG" ] && TAG="v1.3.1"
           fi
           find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-${TAG}.apk \;
           ls -lh ../release_apk/
@@ -109,13 +98,14 @@ jobs:
           path: release_apk/*.apk
 
       - name: Attach APK to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.2.7"
+            [ -z "$TAG" ] && TAG="v1.3.1"
           fi
           echo "Attaching Android APK to release $TAG..."
           gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --draft=false --latest || true

@@ -11,10 +11,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: release-pipeline
-  cancel-in-progress: false
-
 jobs:
   build-and-release:
     name: Build & Upload All Platform Binaries
@@ -41,7 +37,7 @@ jobs:
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $allTags = git tag -l "v*"
               $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
-              if (!$latestTag) { $latestTag = "v1.1.6" }
+              if (!$latestTag) { $latestTag = "v1.3.1" }
               $tag = $latestTag
           }
           Write-Host "Building release for tag: $tag"
@@ -53,55 +49,39 @@ jobs:
           $rsrcPath = Join-Path (go env GOPATH) "bin\rsrc.exe"
           if (Test-Path $rsrcPath) {
               & $rsrcPath -manifest "cmd\natbypass\natbypass.manifest" -ico "app.ico" -o "cmd\natbypass\rsrc_windows_amd64.syso"
+              & $rsrcPath -manifest "cmd\natbypass\natbypass.manifest" -ico "app.ico" -o "cmd\natbypass-gui\rsrc_windows_amd64.syso"
           }
 
-          Write-Host "==> 2. Building Windows Desktop GUI (NatBypass.exe - Stylish WebView2 Desktop App)..."
+          Write-Host "==> 2. Building Windows Native GUI (NatBypass-GUI.exe)..."
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
-          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
-          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-cli-$tag-windows-amd64.exe" ./cmd/natbypass
+          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-GUI-$tag-windows-amd64.exe" ./cmd/natbypass-gui
+          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass-gui
+          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-cli-$tag-windows-amd64.exe" ./cmd/natbypass-cli
 
           Write-Host "==> 3. Building Windows Router Builder GUI..."
           & go build -trimpath -ldflags="-w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
 
-          Write-Host "==> 3. Building Linux x64..."
+          Write-Host "==> 4. Building Linux x64..."
           $env:GOOS = "linux"
           $env:GOARCH = "amd64"
-          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-linux-amd64" ./cmd/natbypass
+          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-linux-amd64" ./cmd/natbypass-cli
 
-          Write-Host "==> 4. Building Linux ARM64..."
+          Write-Host "==> 5. Building Linux ARM64..."
           $env:GOARCH = "arm64"
-          & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-linux-arm64" ./cmd/natbypass
+          & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-linux-arm64" ./cmd/natbypass-cli
 
-          Write-Host "==> 5. Building Router MIPS..."
+          Write-Host "==> 6. Building Router MIPS..."
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"
-          & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mips" ./cmd/natbypass
+          & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mips" ./cmd/natbypass-cli
 
-          Write-Host "==> 6. Building Router MIPSLE..."
+          Write-Host "==> 7. Building Router MIPSLE..."
           $env:GOARCH = "mipsle"
-          & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mipsle" ./cmd/natbypass
-
-          Write-Host "==> 7. Building Android ARM64 CLI..."
-          $env:GOOS = "android"
-          $env:GOARCH = "arm64"
-          & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-android-arm64" ./cmd/natbypass
+          & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mipsle" ./cmd/natbypass-cli
 
           Write-Host "==> 8. Copying config..."
           Copy-Item config.yaml.example release\config.yaml.example -Force
-
-          Write-Host "==> 9. Packaging Toolkit with source..."
-          New-Item -ItemType Directory -Force -Path toolkit\natbypass-builder | Out-Null
-          Copy-Item "release\NatBypass-Builder-$tag.exe" toolkit\natbypass-builder\NatBypass-Builder.exe -Force
-          Copy-Item config.yaml.example toolkit\natbypass-builder\config.yaml.example -Force
-          Copy-Item README.md toolkit\natbypass-builder\README.md -Force
-          Copy-Item go.mod toolkit\natbypass-builder\go.mod -Force
-          Copy-Item go.sum toolkit\natbypass-builder\go.sum -Force
-          Copy-Item -Recurse -Force cmd toolkit\natbypass-builder\
-          Copy-Item -Recurse -Force internal toolkit\natbypass-builder\
-          
-          python -c "import shutil; shutil.make_archive('release/NatBypass-Builder-Toolkit-$tag-windows', 'zip', 'toolkit')"
-          Remove-Item -Recurse -Force toolkit
 
           Write-Host "==> All Files in release/:"
           Get-ChildItem -Path release -File | Select-Object Name, Length | Format-Table -AutoSize
@@ -115,7 +95,7 @@ jobs:
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $allTags = git tag -l "v*"
               $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
-              if (!$latestTag) { $latestTag = "v1.1.6" }
+              if (!$latestTag) { $latestTag = "v1.3.1" }
               $tag = $latestTag
           }
           
