@@ -1,5 +1,10 @@
 ﻿package org.natbypass.app.ui.compose
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -16,6 +21,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,6 +45,7 @@ data class DiagItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiagnosticsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
     var diagItems   by remember { mutableStateOf<List<DiagItem>>(emptyList()) }
     var logsText    by remember { mutableStateOf("") }
     var rttHistory  by remember { mutableStateOf<List<Float>>(emptyList()) }
@@ -77,6 +84,37 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
         isRefreshing = false
     }
 
+    fun buildFullReport(): String {
+        val sb = StringBuilder()
+        sb.append("=== 🩺 ДИАГНОСТИКА СЕТИ NATBYPASS ===\n")
+        diagItems.forEach { item ->
+            val mark = if (item.ok) "✅" else "⚠️"
+            sb.append("$mark ${item.label}: ${item.detail}")
+            if (item.extra.isNotEmpty()) sb.append(" (${item.extra})")
+            sb.append("\n")
+        }
+        sb.append("\n=== 📋 ЖУРНАЛ ЯДРА ===\n")
+        sb.append(logsText.ifEmpty { "(логи пусты)" })
+        return sb.toString()
+    }
+
+    fun copyToClipboard() {
+        val report = buildFullReport()
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("NatBypass Diagnostics", report))
+        Toast.makeText(context, "📋 Отчет и логи скопированы в буфер!", Toast.LENGTH_SHORT).show()
+    }
+
+    fun shareReport() {
+        val report = buildFullReport()
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "NatBypass Диагностика и логи")
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        context.startActivity(Intent.createChooser(sendIntent, "Поделиться диагностикой"))
+    }
+
     // Initial load + auto-poll RTT
     LaunchedEffect(Unit) {
         loadOnce()
@@ -84,9 +122,6 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
             delay(3000)
             withContext(Dispatchers.IO) {
                 try {
-                    val jsonStr = MobileBridge.getStatusJSON()
-                    val obj     = JSONObject(jsonStr)
-                    // collect avg RTT from status if available
                     val peerStr = MobileBridge.getPeersJSON()
                     val arr = org.json.JSONArray(peerStr)
                     var total = 0L; var cnt = 0
@@ -113,6 +148,12 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = ::copyToClipboard) {
+                        Icon(Icons.Outlined.ContentCopy, "Скопировать")
+                    }
+                    IconButton(onClick = ::shareReport) {
+                        Icon(Icons.Outlined.Share, "Поделиться")
+                    }
                     if (isRefreshing) {
                         CircularProgressIndicator(
                             modifier = Modifier
@@ -150,7 +191,7 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
                 )
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
 
             // ── RTT history chart ────────────────────────────────────────────
             SectionTitle("История RTT")
@@ -159,14 +200,32 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
                 values   = rttHistory,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(140.dp)
+                    .height(130.dp)
             )
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
 
             // ── Logs ─────────────────────────────────────────────────────────
-            SectionTitle("Журнал ядра")
-            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SectionTitle("Журнал ядра")
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AssistChip(
+                        onClick = ::copyToClipboard,
+                        label = { Text("Копировать", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Outlined.ContentCopy, null, modifier = Modifier.size(14.dp)) }
+                    )
+                    AssistChip(
+                        onClick = ::shareReport,
+                        label = { Text("Поделиться", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Outlined.Share, null, modifier = Modifier.size(14.dp)) }
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
             Surface(
                 shape  = RoundedCornerShape(12.dp),
                 color  = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
@@ -194,7 +253,7 @@ private fun SectionTitle(text: String) {
         text       = text,
         style      = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.SemiBold,
-        modifier   = Modifier.padding(bottom = 4.dp),
+        modifier   = Modifier.padding(bottom = 2.dp),
     )
 }
 
@@ -203,7 +262,7 @@ private fun DiagRow(item: DiagItem) {
     Row(
         modifier  = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 5.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Icon(

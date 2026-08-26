@@ -90,7 +90,7 @@ fun MainScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues),
-            contentPadding = PaddingValues(bottom = 100.dp),
+            contentPadding = PaddingValues(bottom = 90.dp),
         ) {
             // ── Connect toggle + status ──────────────────────────────────────
             item {
@@ -108,7 +108,7 @@ fun MainScreen(
                     onlinePeers = uiState.onlinePeers,
                     totalPeers  = uiState.totalPeers,
                     onChangeProfile = onOpenProfiles,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
                 )
             }
 
@@ -117,7 +117,7 @@ fun MainScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -149,7 +149,7 @@ fun MainScreen(
             item {
                 Row(
                     modifier = Modifier
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                        .padding(horizontal = 20.dp, vertical = 6.dp)
                         .fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
@@ -217,12 +217,12 @@ private fun ConnectSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 20.dp),
+            .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ConnectToggle(state = state, onClick = onToggle)
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(10.dp))
 
         // Status text
         val (statusText, statusColor) = when (state) {
@@ -234,23 +234,23 @@ private fun ConnectSection(
 
         Text(
             text = statusText,
-            fontSize = 22.sp,
+            fontSize = 20.sp,
             fontWeight = FontWeight.SemiBold,
             color = statusColor,
         )
 
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
 
         // RTT line
         Text(
             text = if (avgRttMs > 0) "RTT: $avgRttMs мс" else "RTT: —",
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
-// ── Big round toggle button ────────────────────────────────────────────────────
+// ── Compact round toggle button (130dp container / 116dp button) ───────────────
 @Composable
 private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
     val isConnected = state == ConnectionState.CONNECTED_P2P || state == ConnectionState.CONNECTED_RELAY
@@ -276,7 +276,7 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
         label = "pulse_alpha"
     )
     val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f, targetValue = 1.35f,
+        initialValue = 1f, targetValue = 1.30f,
         animationSpec = infiniteRepeatable(
             animation = tween(1200, easing = EaseOut),
             repeatMode = RepeatMode.Restart
@@ -286,12 +286,12 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
 
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier.size(200.dp)
+        modifier = Modifier.size(136.dp)
     ) {
         if (isConnecting) {
             Box(
                 modifier = Modifier
-                    .size(200.dp)
+                    .size(136.dp)
                     .scale(pulseScale)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha))
@@ -311,7 +311,7 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
 
         Box(
             modifier = Modifier
-                .size(184.dp)
+                .size(118.dp)
                 .scale(scale)
                 .clip(CircleShape)
                 .background(buttonColor)
@@ -330,7 +330,7 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
                 imageVector = if (isConnected) Icons.Filled.Check else Icons.Filled.PowerSettingsNew,
                 contentDescription = "Переключить VPN",
                 tint = iconColor,
-                modifier = Modifier.size(72.dp)
+                modifier = Modifier.size(50.dp)
             )
         }
     }
@@ -347,24 +347,24 @@ private fun NetworkCard(
 ) {
     ElevatedCard(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         onClick = onChangeProfile,
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = profileName,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
+                    fontSize = 16.sp,
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
                 Text(
                     text = "Пиров онлайн: $onlinePeers из $totalPeers",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -383,20 +383,20 @@ private fun EmptyPeersPlaceholder() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 48.dp),
+            .padding(vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
             imageVector = Icons.Outlined.DevicesOther,
             contentDescription = null,
-            modifier = Modifier.size(64.dp),
+            modifier = Modifier.size(52.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             text = "Устройства не обнаружены",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(4.dp))
         Text(
