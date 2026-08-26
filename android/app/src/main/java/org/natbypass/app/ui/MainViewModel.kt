@@ -1,4 +1,4 @@
-package org.natbypass.app.ui
+﻿package org.natbypass.app.ui
 
 import android.app.Activity
 import android.app.Application
@@ -22,7 +22,7 @@ import org.natbypass.app.service.NatBypassVpnService
 import org.natbypass.app.util.MobileBridge
 import java.io.File
 
-// ── UI State ─────────────────────────────────────────────────────────────────
+// в”Ђв”Ђ UI State в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 enum class ConnectionState {
     DISCONNECTED, CONNECTING, CONNECTED_P2P, CONNECTED_RELAY
@@ -68,7 +68,7 @@ data class MainUiState(
     val isRefreshing: Boolean = false,
 )
 
-// ── ViewModel ─────────────────────────────────────────────────────────────────
+// в”Ђв”Ђ ViewModel в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -117,7 +117,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // --- Status ---
         var publicIp = ""
         var stunAddr = ""
-        var virtualIp = MobileBridge.getVirtualIP().ifEmpty { "10.200.0.10" }
+        var virtualIp = MobileBridge.getVirtualIP().ifEmpty { "100.64.200.10" }
         var activeChannel = ""
         var natType = ""
         var isEngineRunning = false
@@ -202,7 +202,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val pObj = JSONObject(profilesJson)
             val activeProf = pObj.optJSONObject("active_profile")
             if (activeProf != null) {
-                activeProfileName = activeProf.optString("name", "Основная сеть")
+                activeProfileName = activeProf.optString("name", "РћСЃРЅРѕРІРЅР°СЏ СЃРµС‚СЊ")
                 profilesList.add(ProfileUiModel(
                     id         = activeProf.optString("id", ""),
                     name       = activeProfileName,
@@ -260,7 +260,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ── VPN control ───────────────────────────────────────────────────────────
+    // в”Ђв”Ђ VPN control в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
     fun onVpnToggleClick(activity: Activity, permissionLauncher: (Intent) -> Unit) {
         val isRunning = prefs.getBoolean("vpn_running", false) || NatBypassVpnService.isRunning
@@ -294,7 +294,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _uiState.update { it.copy(connectionState = ConnectionState.DISCONNECTED) }
     }
 
-    // ── Peer actions ──────────────────────────────────────────────────────────
+    // в”Ђв”Ђ Peer actions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
     fun pingPeer(peerId: String, onResult: (Long) -> Unit) {
         viewModelScope.launch {
@@ -310,7 +310,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("selected_exit_node", newTarget).apply()
         MobileBridge.selectExitNode(newTarget)
 
-        // Если VPN активен — перезапускаем его для перестройки таблицы маршрутов (0.0.0.0/0 vs 10.200.0.0/24)
+        // Р•СЃР»Рё VPN Р°РєС‚РёРІРµРЅ вЂ” РїРµСЂРµР·Р°РїСѓСЃРєР°РµРј РµРіРѕ РґР»СЏ РїРµСЂРµСЃС‚СЂРѕР№РєРё С‚Р°Р±Р»РёС†С‹ РјР°СЂС€СЂСѓС‚РѕРІ (0.0.0.0/0 vs 10.200.0.0/24)
         if (NatBypassVpnService.isRunning) {
             val intent = Intent(context, NatBypassVpnService::class.java).apply {
                 action = NatBypassVpnService.ACTION_CONNECT
@@ -331,7 +331,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { refreshStatus() }
     }
 
-    // ── Profile actions ───────────────────────────────────────────────────────
+    // в”Ђв”Ђ Profile actions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
     fun switchProfile(profileId: String, context: Context) {
         if (MobileBridge.switchProfile(profileId)) {
@@ -401,3 +401,4 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } catch (_: Exception) {}
     }
 }
+

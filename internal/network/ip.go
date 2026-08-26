@@ -1,4 +1,4 @@
-package network
+﻿package network
 
 import (
 	"context"
@@ -181,8 +181,8 @@ func extractIPv4Subnet(addr net.Addr) string {
 		return ""
 	}
 
-	// Filter out typical virtual mesh 10.200.x.x addresses
-	if strings.HasPrefix(ip4.String(), "10.200.") {
+	// Filter out typical virtual mesh 100.64.x.x addresses
+	if strings.HasPrefix(ip4.String(), "100.64.") {
 		return ""
 	}
 
@@ -203,7 +203,7 @@ func extractIPv4Subnet(addr net.Addr) string {
 	return fmt.Sprintf("%s/%d", networkIP.String(), ones)
 }
 
-// GetLocalLANIP возвращает основной локальный IPv4-адрес устройства
+// GetLocalLANIP РІРѕР·РІСЂР°С‰Р°РµС‚ РѕСЃРЅРѕРІРЅРѕР№ Р»РѕРєР°Р»СЊРЅС‹Р№ IPv4-Р°РґСЂРµСЃ СѓСЃС‚СЂРѕР№СЃС‚РІР°
 func GetLocalLANIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -213,7 +213,7 @@ func GetLocalLANIP() string {
 		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
 			if ip4 := ipNet.IP.To4(); ip4 != nil {
 				ipStr := ip4.String()
-				if strings.HasPrefix(ipStr, "10.200.") {
+				if strings.HasPrefix(ipStr, "100.64.") {
 					continue
 				}
 				if strings.HasPrefix(ipStr, "192.168.") || strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "172.") {
@@ -232,9 +232,9 @@ var defaultIPv6APIs = []string{
 	"https://ident.me",
 }
 
-// GetPublicIPv6 возвращает глобальный IPv6-адрес устройства (без NAT, 100% прямой P2P на мобильных сетях LTE/5G)
+// GetPublicIPv6 РІРѕР·РІСЂР°С‰Р°РµС‚ РіР»РѕР±Р°Р»СЊРЅС‹Р№ IPv6-Р°РґСЂРµСЃ СѓСЃС‚СЂРѕР№СЃС‚РІР° (Р±РµР· NAT, 100% РїСЂСЏРјРѕР№ P2P РЅР° РјРѕР±РёР»СЊРЅС‹С… СЃРµС‚СЏС… LTE/5G)
 func GetPublicIPv6(ctx context.Context) string {
-	// Сначала проверяем глобальные одноадресные IPv6-адреса на интерфейсах (без обращения к внешним API)
+	// РЎРЅР°С‡Р°Р»Р° РїСЂРѕРІРµСЂСЏРµРј РіР»РѕР±Р°Р»СЊРЅС‹Рµ РѕРґРЅРѕР°РґСЂРµСЃРЅС‹Рµ IPv6-Р°РґСЂРµСЃР° РЅР° РёРЅС‚РµСЂС„РµР№СЃР°С… (Р±РµР· РѕР±СЂР°С‰РµРЅРёСЏ Рє РІРЅРµС€РЅРёРј API)
 	if ip := GetLocalIPv6(); ip != "" {
 		return ip
 	}
@@ -263,7 +263,7 @@ func GetPublicIPv6(ctx context.Context) string {
 	return ""
 }
 
-// GetLocalIPv6 возвращает глобальный IPv6-адрес из сетевых адаптеров устройства
+// GetLocalIPv6 РІРѕР·РІСЂР°С‰Р°РµС‚ РіР»РѕР±Р°Р»СЊРЅС‹Р№ IPv6-Р°РґСЂРµСЃ РёР· СЃРµС‚РµРІС‹С… Р°РґР°РїС‚РµСЂРѕРІ СѓСЃС‚СЂРѕР№СЃС‚РІР°
 func GetLocalIPv6() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -279,3 +279,4 @@ func GetLocalIPv6() string {
 	}
 	return ""
 }
+

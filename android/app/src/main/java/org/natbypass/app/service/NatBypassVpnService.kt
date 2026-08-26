@@ -1,4 +1,4 @@
-package org.natbypass.app.service
+﻿package org.natbypass.app.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -71,9 +71,9 @@ class NatBypassVpnService : VpnService() {
         try {
             var rawVip = org.natbypass.app.util.MobileBridge.getVirtualIP().trim()
             if (rawVip.contains("/")) rawVip = rawVip.substringBefore("/")
-            val currentVip = if (rawVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))) rawVip else "10.200.0.10"
+            val currentVip = if (rawVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))) rawVip else "100.64.200.10"
 
-            val notif = buildNotification("Подключено к P2P сети ($currentVip)")
+            val notif = buildNotification("РџРѕРґРєР»СЋС‡РµРЅРѕ Рє P2P СЃРµС‚Рё ($currentVip)")
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(
@@ -89,7 +89,7 @@ class NatBypassVpnService : VpnService() {
                 try { startForeground(NOTIFICATION_ID, notif) } catch (_: Throwable) {}
             }
 
-            // ── WakeLock: PARTIAL_WAKE_LOCK удерживает CPU в активном состоянии в фоне
+            // в”Ђв”Ђ WakeLock: PARTIAL_WAKE_LOCK СѓРґРµСЂР¶РёРІР°РµС‚ CPU РІ Р°РєС‚РёРІРЅРѕРј СЃРѕСЃС‚РѕСЏРЅРёРё РІ С„РѕРЅРµ
             try {
                 val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
                 wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NatBypass::P2PWakeLock").also { lock ->
@@ -99,7 +99,7 @@ class NatBypassVpnService : VpnService() {
                 Log.w(TAG, "WakeLock acquire error: ${e.message}")
             }
 
-            // ── WifiLock: HIGH_PERF режим для предотвращения энергосберегающего сна Wi-Fi
+            // в”Ђв”Ђ WifiLock: HIGH_PERF СЂРµР¶РёРј РґР»СЏ РїСЂРµРґРѕС‚РІСЂР°С‰РµРЅРёСЏ СЌРЅРµСЂРіРѕСЃР±РµСЂРµРіР°СЋС‰РµРіРѕ СЃРЅР° Wi-Fi
             try {
                 val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
                 @Suppress("DEPRECATION")
@@ -125,7 +125,7 @@ class NatBypassVpnService : VpnService() {
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
             val useExitNode = selectedExitNode.isNotEmpty()
 
-            // Создаем системный виртуальный TUN интерфейс (Split-Tunneling)
+            // РЎРѕР·РґР°РµРј СЃРёСЃС‚РµРјРЅС‹Р№ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ TUN РёРЅС‚РµСЂС„РµР№СЃ (Split-Tunneling)
             val builder = Builder()
                 .setSession("NatBypass")
                 .addAddress(currentVip, 24)
@@ -133,7 +133,7 @@ class NatBypassVpnService : VpnService() {
                 .setBlocking(false)
                 .allowBypass()
 
-            // Исключаем само приложение NatBypass из VPN для прямого доступа к STUN, MQTT и UDP-сокетам без петель
+            // РСЃРєР»СЋС‡Р°РµРј СЃР°РјРѕ РїСЂРёР»РѕР¶РµРЅРёРµ NatBypass РёР· VPN РґР»СЏ РїСЂСЏРјРѕРіРѕ РґРѕСЃС‚СѓРїР° Рє STUN, MQTT Рё UDP-СЃРѕРєРµС‚Р°Рј Р±РµР· РїРµС‚РµР»СЊ
             try {
                 builder.addDisallowedApplication(packageName)
             } catch (e: Exception) {
@@ -151,7 +151,7 @@ class NatBypassVpnService : VpnService() {
             }
 
             if (useExitNode) {
-                // Exit Node режим: весь интернет-трафик + DNS через VPN
+                // Exit Node СЂРµР¶РёРј: РІРµСЃСЊ РёРЅС‚РµСЂРЅРµС‚-С‚СЂР°С„РёРє + DNS С‡РµСЂРµР· VPN
                 builder.addRoute("0.0.0.0", 0)
                 try {
                     builder.addDnsServer("1.1.1.1")
@@ -160,13 +160,13 @@ class NatBypassVpnService : VpnService() {
                     Log.w(TAG, "addDnsServer error: ${e.message}")
                 }
             } else {
-                // Mesh P2P режим: ТОЛЬКО подсеть 10.200.0.0/24
-                // НЕ добавляем DNS серверы — Android автоматически маршрутизирует DNS через VPN
-                // если указать addDnsServer(), что убивает интернет в split-tunnel режиме
-                builder.addRoute("10.200.0.0", 24)
+                // Mesh P2P СЂРµР¶РёРј: РўРћР›Р¬РљРћ РїРѕРґСЃРµС‚СЊ 100.64.200.0/24
+                // РќР• РґРѕР±Р°РІР»СЏРµРј DNS СЃРµСЂРІРµСЂС‹ вЂ” Android Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РјР°СЂС€СЂСѓС‚РёР·РёСЂСѓРµС‚ DNS С‡РµСЂРµР· VPN
+                // РµСЃР»Рё СѓРєР°Р·Р°С‚СЊ addDnsServer(), С‡С‚Рѕ СѓР±РёРІР°РµС‚ РёРЅС‚РµСЂРЅРµС‚ РІ split-tunnel СЂРµР¶РёРјРµ
+                builder.addRoute("100.64.200.0", 24)
             }
 
-            // Анонсированные подсети (например, 192.168.1.0/24)
+            // РђРЅРѕРЅСЃРёСЂРѕРІР°РЅРЅС‹Рµ РїРѕРґСЃРµС‚Рё (РЅР°РїСЂРёРјРµСЂ, 192.168.1.0/24)
             val advSubnets = prefs.getString("adv_subnets", "") ?: ""
             if (advSubnets.isNotEmpty()) {
                 for (subnet in advSubnets.split(",")) {
@@ -193,7 +193,7 @@ class NatBypassVpnService : VpnService() {
             val fd = vpnInterface?.fd ?: -1
             Log.i(TAG, "VPN TUN adapter established! fd=$fd, VIP=$currentVip")
 
-            // Загружаем конфиг и запускаем / привязываем Go-движок
+            // Р—Р°РіСЂСѓР¶Р°РµРј РєРѕРЅС„РёРі Рё Р·Р°РїСѓСЃРєР°РµРј / РїСЂРёРІСЏР·С‹РІР°РµРј Go-РґРІРёР¶РѕРє
             val configFile = File(filesDir, "config.yaml")
             val configYaml = if (configFile.exists()) configFile.readText() else "{}"
 
@@ -201,7 +201,7 @@ class NatBypassVpnService : VpnService() {
 
             isRunning = true
 
-            // Фоновый мониторинг состояния
+            // Р¤РѕРЅРѕРІС‹Р№ РјРѕРЅРёС‚РѕСЂРёРЅРі СЃРѕСЃС‚РѕСЏРЅРёСЏ
             serviceJob = scope.launch {
                 while (isActive) {
                     delay(3000)
@@ -315,8 +315,9 @@ class NatBypassVpnService : VpnService() {
             .setContentTitle("NatBypass Mesh VPN")
             .setContentText(statusText)
             .setContentIntent(pOpen)
-            .addAction(R.drawable.ic_vpn_lock, "Отключить", pDisconnect)
+            .addAction(R.drawable.ic_vpn_lock, "РћС‚РєР»СЋС‡РёС‚СЊ", pDisconnect)
             .setOngoing(true)
             .build()
     }
 }
+

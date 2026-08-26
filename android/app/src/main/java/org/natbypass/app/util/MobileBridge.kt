@@ -1,4 +1,4 @@
-package org.natbypass.app.util
+﻿package org.natbypass.app.util
 
 import java.lang.reflect.Method
 
@@ -64,11 +64,11 @@ object MobileBridge {
     }
 
     fun getVirtualIP(): String {
-        val method = getMethod("getVirtualIP") ?: return "10.200.0.10"
+        val method = getMethod("getVirtualIP") ?: return "100.64.200.10"
         return try {
-            method.invoke(null) as? String ?: "10.200.0.10"
+            method.invoke(null) as? String ?: "100.64.200.10"
         } catch (e: Exception) {
-            "10.200.0.10"
+            "100.64.200.10"
         }
     }
 
@@ -100,11 +100,11 @@ object MobileBridge {
     }
 
     fun getLogsText(): String {
-        val method = getMethod("getLogsText") ?: return "⚠️ Ядро GoMobile не загружено (библиотека mobile.aar)"
+        val method = getMethod("getLogsText") ?: return "вљ пёЏ РЇРґСЂРѕ GoMobile РЅРµ Р·Р°РіСЂСѓР¶РµРЅРѕ (Р±РёР±Р»РёРѕС‚РµРєР° mobile.aar)"
         return try {
-            method.invoke(null) as? String ?: "Лог пуст."
+            method.invoke(null) as? String ?: "Р›РѕРі РїСѓСЃС‚."
         } catch (e: Exception) {
-            "Ошибка чтения логов: ${e.message}"
+            "РћС€РёР±РєР° С‡С‚РµРЅРёСЏ Р»РѕРіРѕРІ: ${e.message}"
         }
     }
 
@@ -288,4 +288,5 @@ object MobileBridge {
         }
     }
 }
+
 

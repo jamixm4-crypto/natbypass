@@ -1,4 +1,4 @@
-package network
+﻿package network
 
 import (
 	"context"
@@ -16,9 +16,9 @@ type NATType int
 const (
 	NATTypeUnknown      NATType = iota
 	NATTypeFullCone             // All packets from same internal addr always use same external port
-	NATTypeRestricted           // Restricted Cone — port stable but restricted by remote IP
+	NATTypeRestricted           // Restricted Cone вЂ” port stable but restricted by remote IP
 	NATTypePortRestricted       // Port Restricted Cone
-	NATTypeSymmetric            // Each destination gets different external port — typical CGNAT on LTE
+	NATTypeSymmetric            // Each destination gets different external port вЂ” typical CGNAT on LTE
 )
 
 // String returns a short label for the NAT type.
@@ -43,7 +43,7 @@ func (n NATType) IsSymmetric() bool {
 	return n == NATTypeSymmetric
 }
 
-// defaultSTUNServers — diverse list across vendors so at least one works on any operator.
+// defaultSTUNServers вЂ” diverse list across vendors so at least one works on any operator.
 var defaultSTUNServers = []string{
 	"stun.l.google.com:19302",
 	"stun1.l.google.com:19302",
@@ -89,8 +89,8 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 		return nil, 0, err
 	}
 
-	// Привязываем к физическому LAN-IP чтобы STUN-запросы не уходили через AWG/VPN-тоннель.
-	// Выбираем первый non-loopback, non-virtual IPv4-адрес (пропускаем 10.200.x.x — NatBypass VIP).
+	// РџСЂРёРІСЏР·С‹РІР°РµРј Рє С„РёР·РёС‡РµСЃРєРѕРјСѓ LAN-IP С‡С‚РѕР±С‹ STUN-Р·Р°РїСЂРѕСЃС‹ РЅРµ СѓС…РѕРґРёР»Рё С‡РµСЂРµР· AWG/VPN-С‚РѕРЅРЅРµР»СЊ.
+	// Р’С‹Р±РёСЂР°РµРј РїРµСЂРІС‹Р№ non-loopback, non-virtual IPv4-Р°РґСЂРµСЃ (РїСЂРѕРїСѓСЃРєР°РµРј 100.64.x.x вЂ” NatBypass VIP).
 	var localAddr *net.UDPAddr
 	if ifaces, err := net.Interfaces(); err == nil {
 		for _, iface := range ifaces {
@@ -107,7 +107,7 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 				if ip4 == nil || ip4.IsLoopback() {
 					continue
 				}
-				// Пропускаем виртуальный IP NatBypass (10.200.x.x)
+				// РџСЂРѕРїСѓСЃРєР°РµРј РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ IP NatBypass (100.64.x.x)
 				if ip4[0] == 10 && ip4[1] == 200 {
 					continue
 				}
@@ -122,7 +122,7 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 
 	conn, err := net.DialUDP("udp4", localAddr, addr)
 	if err != nil {
-		// Fallback: без привязки к интерфейсу
+		// Fallback: Р±РµР· РїСЂРёРІСЏР·РєРё Рє РёРЅС‚РµСЂС„РµР№СЃСѓ
 		conn, err = net.DialUDP("udp4", nil, addr)
 		if err != nil {
 			return nil, 0, err
@@ -178,9 +178,9 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 // DetectNATType classifies the NAT type by querying two different STUN servers
 // from the EXACT SAME local socket.
 //
-//   - Same IP + Same Port  → Full Cone / Restricted NAT (P2P hole punching works)
-//   - Same IP + Diff Port  → Symmetric NAT (CGNAT assigns a different port per destination)
-//   - Diff IP              → Symmetric NAT / Multi-WAN
+//   - Same IP + Same Port  в†’ Full Cone / Restricted NAT (P2P hole punching works)
+//   - Same IP + Diff Port  в†’ Symmetric NAT (CGNAT assigns a different port per destination)
+//   - Diff IP              в†’ Symmetric NAT / Multi-WAN
 func DetectNATType(ctx context.Context, _ *net.UDPConn, servers []string) (NATType, error) {
 	if len(servers) == 0 {
 		servers = defaultSTUNServers
@@ -263,4 +263,5 @@ func DetectNATType(ctx context.Context, _ *net.UDPConn, servers []string) (NATTy
 	}
 	return NATTypeSymmetric, nil
 }
+
 
