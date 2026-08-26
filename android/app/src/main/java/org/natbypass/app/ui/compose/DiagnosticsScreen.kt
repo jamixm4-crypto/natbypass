@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui.compose
+package org.natbypass.app.ui.compose
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -52,10 +52,14 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
     var isRefreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    suspend fun loadOnce() {
+    suspend fun loadOnce(forceRefresh: Boolean = false) {
         isRefreshing = true
         withContext(Dispatchers.IO) {
             try {
+                if (forceRefresh) {
+                    MobileBridge.refreshPublicIP()
+                    delay(400)
+                }
                 val jsonStr = MobileBridge.getDiagnosticsJSON()
                 val obj = JSONObject(jsonStr)
                 val keys = listOf(
@@ -162,7 +166,7 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
                             strokeWidth = 2.dp,
                         )
                     } else {
-                        IconButton(onClick = { scope.launch { loadOnce() } }) {
+                        IconButton(onClick = { scope.launch { loadOnce(forceRefresh = true) } }) {
                             Icon(Icons.Outlined.Refresh, "Обновить")
                         }
                     }

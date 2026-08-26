@@ -606,35 +606,61 @@ func RestartEngine(configYAML string) string {
 	return StartEngine(configYAML, 0)
 }
 
-// RefreshPublicIP вызывается Android NetworkCallback при смене сети (Wi-Fi → LTE и обратно).
+// RefreshPublicIP вызывается Android NetworkCallback при смене сети (Wi-Fi → LTE и обратно)
+// или по нажатию кнопки «Синхронизация»/«Обновить» в интерфейсе.
 // Принудительно пересматривает публичный IP и STUN-mapped адрес, затем публикует обновлённый маяк.
-// Это критически важно: без пересмотра STUN-адреса после смены сети hole-punch летит на устаревший endpoint.
 func RefreshPublicIP() {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 
-	if !engineRunning || globalPuncher == nil {
+	if !engineRunning {
 		return
 	}
 	puncher := globalPuncher
-	logger.Info().Msg("🔄 Смена сети обнаружена — пересматриваю IP и STUN-адрес...")
+	logger.Info().Msg("🔄 Смена сети обнаружена — принудительно пересматриваю IP и STUN-адрес...")
 
-	// Сбрасываем текущий STUN и IP чтобы следующий маяк отправил свежие данные
+	// Сбрасываем текущий STUN и IP
 	globalSTUN = ""
 	globalPublicIP = ""
 	globalIPv6 = ""
 
-	// Асинхронно пересматриваем STUN с небольшой задержкой (даём сети подняться)
 	go func() {
-		time.Sleep(800 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		if sIP, sPort, err := puncher.DiscoverMappedAddress(ctx); err == nil && sIP != nil {
+		// 1. Опрос STUN через puncher сокет (наиболее точный UDP-маппинг)
+		if puncher != nil {
+			if sIP, sPort, err := puncher.DiscoverMappedAddress(ctx); err == nil && sIP != nil {
+				engineMu.Lock()
+				globalSTUN = fmt.Sprintf("%s:%d", sIP.String(), sPort)
+				globalPublicIP = sIP.String()
+				engineMu.Unlock()
+				logger.Info().Str("stun", globalSTUN).Str("ip", globalPublicIP).Msg("✅ STUN и внешний IP обновлены после смены сети")
+			}
+		}
+
+		// 2. Если STUN не определил IP, быстрый HTTP discoverer без кэша
+		if globalPublicIP == "" {
+			ipDisc := network.NewDiscoverer(nil, 3*time.Second)
+			if ip, err := ipDisc.GetPublicIP(ctx); err == nil && ip != nil {
+				engineMu.Lock()
+				globalPublicIP = ip.String()
+				engineMu.Unlock()
+				logger.Info().Str("public_ip", globalPublicIP).Msg("✅ Внешний IP обновлён через HTTP после смены сети")
+			}
+		}
+
+		// 3. Обновление IPv6
+		if v6 := network.GetPublicIPv6(ctx); v6 != "" {
+			pPort := 51820
+			if puncher != nil {
+				pPort = puncher.LocalPort()
+			}
 			engineMu.Lock()
-			globalSTUN = fmt.Sprintf("%s:%d", sIP.String(), sPort)
+			globalIPv6 = fmt.Sprintf("[%s]:%d", v6, pPort)
 			engineMu.Unlock()
-			logger.Info().Str("stun", globalSTUN).Msg("✅ STUN-адрес обновлён после смены сети")
+			logger.Info().Str("ipv6", globalIPv6).Msg("✅ IPv6-адрес обновлён после смены сети")
 		}
 	}()
 }
@@ -904,8 +930,25 @@ func GetDiagnosticsJSON() string {
 	}
 
 	// Публичный IP
-	if globalPublicIP != "" {
-		result["public_ip"] = check{Ok: true, Detail: "Внешний IP определён", Extra: globalPublicIP}
+	pubIP := globalPublicIP
+	if pubIP == "" && globalSTUN != "" {
+		if host, _, err := net.SplitHostPort(globalSTUN); err == nil && host != "" {
+			pubIP = host
+			globalPublicIP = host
+		}
+	}
+	if pubIP == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ipDisc := network.NewDiscoverer(nil, 2*time.Second)
+		if ip, err := ipDisc.GetPublicIP(ctx); err == nil && ip != nil {
+			pubIP = ip.String()
+			globalPublicIP = pubIP
+		}
+		cancel()
+	}
+
+	if pubIP != "" {
+		result["public_ip"] = check{Ok: true, Detail: "Внешний IP определён", Extra: pubIP}
 	} else {
 		result["public_ip"] = check{Ok: false, Detail: "IP определяется..."}
 	}
