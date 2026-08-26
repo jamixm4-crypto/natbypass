@@ -590,10 +590,12 @@ func attachTUN(tunFd int) {
 func DetachTUN() {
 	engineMu.Lock()
 	defer engineMu.Unlock()
-	if globalTunFile != nil {
-		_ = globalTunFile.Close()
-		globalTunFile = nil
+	if globalTunFile == nil {
+		// Already detached — do not log again to avoid duplicate messages
+		return
 	}
+	_ = globalTunFile.Close()
+	globalTunFile = nil
 	logger.Info().Msg("TUN интерфейс отключен (сигнальный канал продолжает работу)")
 }
 

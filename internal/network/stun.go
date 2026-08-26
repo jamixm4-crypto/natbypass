@@ -140,15 +140,25 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 	}
 }
 
-// DetectNATType classifies the NAT type by sending STUN Binding Requests from
-// the SAME pre-bound UDP socket to TWO different STUN servers and comparing results.
+// DetectNATType classifies the NAT type by comparing the external (reflexive) addresses
+// seen by two different STUN servers.
 //
-//   - Same IP + Same Port  → Full Cone / Restricted (hole-punching works)
-//   - Same IP + Diff Port  → Symmetric NAT (CGNAT on LTE — each destination gets different port)
+//   - Same IP + Same Port  → Full Cone / Restricted (UDP hole-punching works reliably)
+//   - Same IP + Diff Port  → Symmetric NAT (CGNAT on LTE — each destination gets a new port)
 //   - Diff IP              → Double NAT / Symmetric (treat as Symmetric)
 //
-// Requires a pre-bound *net.UDPConn so both probes originate from the same local port.
-func DetectNATType(ctx context.Context, conn *net.UDPConn, servers []string) (NATType, error) {
+// IMPORTANT: Each probe opens its own TEMPORARY UDP socket bound to the SAME local port
+// (not the shared puncher socket).  This avoids races with the puncher's readLoop goroutine
+// which also reads from the shared socket and would steal the STUN responses.
+//
+// localPort is the puncher's local port; pass 0 to let the OS choose a random port.
+func DetectNATType(ctx context.Context, _ *net.UDPConn, servers []string) (NATType, error) {
+	return DetectNATTypeFromPort(ctx, 0, servers)
+}
+
+// DetectNATTypeFromPort is the real implementation.  It creates two fresh UDP sockets,
+// each bound to a random OS-assigned port, and queries a different STUN server.
+func DetectNATTypeFromPort(ctx context.Context, _ int, servers []string) (NATType, error) {
 	if len(servers) == 0 {
 		servers = defaultSTUNServers
 	}
@@ -172,20 +182,34 @@ func DetectNATType(ctx context.Context, conn *net.UDPConn, servers []string) (NA
 		return NATTypeUnknown, errors.New("DetectNATType: need at least 2 distinct STUN servers")
 	}
 
+	// Each probe uses its own ephemeral socket — no contention with readLoop
 	probeOne := func(server string) mapped {
+		// Resolve STUN server
 		srvAddr, err := net.ResolveUDPAddr("udp4", server)
 		if err != nil {
 			return mapped{err: err}
 		}
+
+		// Fresh temporary socket
+		lAddr, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
+		sock, err := net.ListenUDP("udp4", lAddr)
+		if err != nil {
+			return mapped{err: err}
+		}
+		defer sock.Close()
+
 		msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
-		if _, err := conn.WriteToUDP(msg.Raw, srvAddr); err != nil {
+		if _, err := sock.WriteToUDP(msg.Raw, srvAddr); err != nil {
 			return mapped{err: err}
 		}
 
 		buf := make([]byte, 1024)
-		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-		n, _, err := conn.ReadFromUDP(buf)
-		_ = conn.SetReadDeadline(time.Time{})
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			deadline = time.Now().Add(2500 * time.Millisecond)
+		}
+		_ = sock.SetReadDeadline(deadline)
+		n, _, err := sock.ReadFromUDP(buf)
 		if err != nil {
 			return mapped{err: err}
 		}
@@ -205,14 +229,13 @@ func DetectNATType(ctx context.Context, conn *net.UDPConn, servers []string) (NA
 		if err4 := plain.GetFrom(&stunMsg); err4 == nil {
 			return mapped{ip: plain.IP, port: plain.Port}
 		}
-		return mapped{err: errors.New("no mapped address attribute in STUN response")}
+		return mapped{err: errors.New("no mapped address in STUN response")}
 	}
 
 	var r1, r2 mapped
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); r1 = probeOne(srv1) }()
-	time.Sleep(30 * time.Millisecond) // avoid racing on same read buffer
 	go func() { defer wg.Done(); r2 = probeOne(srv2) }()
 	wg.Wait()
 
@@ -221,9 +244,9 @@ func DetectNATType(ctx context.Context, conn *net.UDPConn, servers []string) (NA
 	}
 
 	if r1.ip.Equal(r2.ip) && r1.port == r2.port {
-		// Same external endpoint for both servers → Full Cone or Restricted
+		// Same external IP:Port seen by both servers → Full Cone / Restricted
 		return NATTypeFullCone, nil
 	}
-	// Different ports (even with same IP) → Symmetric (port-remapping CGNAT)
+	// Different external ports → Symmetric (port-remapping CGNAT)
 	return NATTypeSymmetric, nil
 }
