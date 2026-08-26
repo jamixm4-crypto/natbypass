@@ -2995,22 +2995,13 @@ func startEngineFromConfig(c *config.Config) {
 			if srcIP.String() == myVirtualIP {
 				return
 			}
-			// Принимаем пакеты для своего VIP или базового 10.200.0.1 во избежание сброса во время согласования
+			// Принимаем пакеты, адресованные нашему VIP или 10.200.0.1 (до согласования)
 			if destIP.String() != myVirtualIP && destIP.String() != "10.200.0.1" {
 				return
 			}
 
-			ihl := int(payload[0]&0x0F) * 4
-			if len(payload) >= ihl {
-				protocol := payload[9]
-				if protocol == 1 && len(payload) >= ihl+8 && payload[ihl] == 8 { // ICMP Echo Request
-					if destIP.String() == myVirtualIP || destIP.String() == "10.200.0.1" {
-						handleICMPEcho(payload)
-						return
-					}
-				}
-			}
-
+			// Записываем пакет в Wintun — Windows OS сама обрабатывает ICMP, TCP, UDP
+			// НЕ перехватываем ICMP вручную — ОС генерирует Echo Reply сама, он выходит через ReadPacket и отправляется пиру
 			atomic.AddUint64(&packetsRecvCount, 1)
 			if tunDev != nil {
 				_ = tunDev.WritePacket(payload)
@@ -3559,18 +3550,9 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 			if srcIP.String() == myVirtualIP {
 				return
 			}
+			_ = destIP
 
-			ihl := int(pkt[0]&0x0F) * 4
-			if len(pkt) >= ihl {
-				protocol := pkt[9]
-				if protocol == 1 && len(pkt) >= ihl+8 && pkt[ihl] == 8 { // ICMP Echo Request
-					if destIP.String() == myVirtualIP || destIP.String() == "10.200.0.1" {
-						handleICMPEcho(pkt)
-						return
-					}
-				}
-			}
-
+			// Все пакеты идут прямо в Wintun — OS сама обрабатывает ICMP, TCP, UDP
 			atomic.AddUint64(&packetsRecvCount, 1)
 			if tunDev != nil {
 				_ = tunDev.WritePacket(pkt)
