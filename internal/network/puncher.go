@@ -311,22 +311,14 @@ func (p *UDPPuncher) readLoop() {
 				}
 				sentTs := parts[len(parts)-1]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
-				// Отправляем 3 PONG пакета для гарантии доставки через CGNAT
+				// Отправляем 3 PONG пакета с исходной меткой времени отправителя
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
-				// FIX: вычисляем реальный RTT из метки времени внутри PING-пакета
-				// (ранее передавался rtt=0, из-за чего PingMs не обновлялся и DirectP2P не фиксировался)
-				var rttForCallback time.Duration = time.Millisecond // минимум 1ms — показатель что сокет живой
-				if sentNano, parseErr := strconv.ParseInt(sentTs, 10, 64); parseErr == nil {
-					if computed := time.Since(time.Unix(0, sentNano)); computed > 0 && computed < 10*time.Second {
-						rttForCallback = computed
-					}
-				}
-
+				// Подтверждаем активность сокета с rtt=0 (настоящий RTT вычисляется только на стороне отправителя при получении PONG)
 				if p.onPingResult != nil {
-					p.onPingResult(senderID, rttForCallback, remoteAddr.String())
+					p.onPingResult(senderID, 0, remoteAddr.String())
 				}
 			}
 			continue
