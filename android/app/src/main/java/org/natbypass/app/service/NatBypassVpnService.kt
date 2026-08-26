@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.service
+package org.natbypass.app.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -110,24 +110,46 @@ class NatBypassVpnService : VpnService() {
                 Log.w(TAG, "WifiLock acquire error: ${e.message}")
             }
 
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                try {
+                    cm.activeNetwork?.let { setUnderlyingNetworks(arrayOf(it)) }
+                } catch (e: Exception) {
+                    Log.w(TAG, "setUnderlyingNetworks error: ${e.message}")
+                }
+            }
+
             registerNetworkCallback()
 
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
             val useExitNode = selectedExitNode.isNotEmpty()
 
-            // Создаем системный виртуальный TUN интерфейс
+            // Создаем системный виртуальный TUN интерфейс (Split-Tunneling)
             val builder = Builder()
                 .setSession("NatBypass")
                 .addAddress(currentVip, 24)
                 .setMtu(1420)
                 .setBlocking(false)
+                .allowBypass()
+
+            try {
+                builder.allowFamily(android.system.OsConstants.AF_INET)
+            } catch (_: Throwable) {}
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    builder.setMetered(false)
+                } catch (_: Throwable) {}
+            }
 
             if (useExitNode) {
+                // Exit Node режим: перенаправление всего интернет-трафика
                 builder.addRoute("0.0.0.0", 0)
                 builder.addDnsServer("1.1.1.1")
                 builder.addDnsServer("8.8.8.8")
             } else {
+                // Mesh P2P режим: ТОЛЬКО виртуальная подсеть 10.200.0.0/24 (Интернет и DNS остаются на Wi-Fi/LTE!)
                 builder.addRoute("10.200.0.0", 24)
             }
 
@@ -187,6 +209,11 @@ class NatBypassVpnService : VpnService() {
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 super.onAvailable(network)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                    try {
+                        setUnderlyingNetworks(arrayOf(network))
+                    } catch (_: Exception) {}
+                }
                 scope.launch {
                     delay(800)
                     org.natbypass.app.util.MobileBridge.refreshPublicIP()
@@ -202,9 +229,14 @@ class NatBypassVpnService : VpnService() {
     }
 
     private fun disconnect() {
+        if (!isRunning && vpnInterface == null) return
         isRunning = false
         serviceJob?.cancel()
-        org.natbypass.app.util.MobileBridge.detachTUN()
+        serviceJob = null
+
+        try {
+            org.natbypass.app.util.MobileBridge.detachTUN()
+        } catch (_: Exception) {}
 
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
         try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Exception) {}
@@ -221,10 +253,17 @@ class NatBypassVpnService : VpnService() {
 
         try {
             vpnInterface?.close()
-            vpnInterface = null
         } catch (_: Exception) {}
+        vpnInterface = null
 
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onDestroy() {

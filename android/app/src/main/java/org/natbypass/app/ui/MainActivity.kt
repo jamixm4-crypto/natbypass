@@ -10,6 +10,7 @@ import android.graphics.Color as AColor
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -143,6 +144,16 @@ private fun NatBypassApp(
     var showProfileSheet by remember { mutableStateOf(false) }
     var showProfileEdit by remember { mutableStateOf<ProfileEditMode?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
+
+    // Перехват системной кнопки / жеста "Назад" на Android
+    BackHandler(enabled = currentScreen != Screen.Main || showProfileSheet || showProfileEdit != null || showImportDialog) {
+        when {
+            showImportDialog -> showImportDialog = false
+            showProfileEdit != null -> showProfileEdit = null
+            showProfileSheet -> showProfileSheet = false
+            currentScreen != Screen.Main -> currentScreen = Screen.Main
+        }
+    }
 
     val checkUpdate: () -> Unit = {
         val currentVersion = try {

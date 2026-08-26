@@ -1,4 +1,4 @@
-﻿package peer
+package peer
 
 import (
 	"context"
@@ -36,6 +36,9 @@ type Peer struct {
 	LastMQTTSeen     time.Time             `json:"last_mqtt_seen,omitempty"`
 	LastTelegramSeen time.Time             `json:"last_telegram_seen,omitempty"`
 	AWG              *signaling.AWGParams  `json:"awg,omitempty"`
+	OS               string                `json:"os,omitempty"`
+	Platform         string                `json:"platform,omitempty"`
+	CountryFlag      string                `json:"country_flag,omitempty"`
 }
 
 // Registry manages thread-safe tracking of discovered mesh peers.

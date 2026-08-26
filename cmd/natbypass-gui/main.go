@@ -3002,22 +3002,12 @@ func startEngineFromConfig(c *config.Config) {
 
 			ihl := int(payload[0]&0x0F) * 4
 			if len(payload) >= ihl {
-				if destIP.String() != myVirtualIP {
-					myIPBytes := net.ParseIP(myVirtualIP).To4()
-					if myIPBytes != nil {
-						copy(payload[16:20], myIPBytes)
-						payload[10] = 0
-						payload[11] = 0
-						ipCS := tunnel.CalculateChecksum(payload[:ihl])
-						payload[10] = byte(ipCS >> 8)
-						payload[11] = byte(ipCS)
-					}
-				}
-
 				protocol := payload[9]
 				if protocol == 1 && len(payload) >= ihl+8 && payload[ihl] == 8 { // ICMP Echo Request
-					handleICMPEcho(payload)
-					return
+					if destIP.String() == myVirtualIP || destIP.String() == "10.200.0.1" {
+						handleICMPEcho(payload)
+						return
+					}
 				}
 			}
 
@@ -3054,41 +3044,74 @@ func startEngineFromConfig(c *config.Config) {
 					if srcIP == nil || destIP == nil {
 						continue
 					}
-					srcStr := srcIP.String()
 					destStr := destIP.String()
 
-					// Строго фильтруем: пакет должен исходить от нашего виртуального IP
-					if srcStr != myVirtualIP {
-						continue
-					}
-					// Строго фильтруем только одноадресные пакеты виртуальной подсети 10.200.0.x
-					// Игнорируем мультикаст Windows (224.0.0.x, 239.255.x.x, 255.255.255.255) во избежание шторма
-					if !strings.HasPrefix(destStr, "10.200.0.") || destStr == "10.200.0.255" || destStr == "10.200.0.0" || destStr == myVirtualIP {
+					// Игнорируем мультикаст Windows (224.0.0.x, 239.255.x.x, 255.255.255.255) и петли
+					if destIP.IsMulticast() || destIP.IsUnspecified() || destStr == "255.255.255.255" || destStr == myVirtualIP || destStr == "10.200.0.255" || destStr == "10.200.0.0" {
 						continue
 					}
 
 					if registry != nil {
 						peers := registry.List()
+						var targetPeer *peer.Peer
+
+						// 1. Прямое совпадение по VirtualIP (например, 10.200.0.2)
 						for _, p := range peers {
-							if p.DeviceID != myDevID && (p.VirtualIP == destStr || len(peers) == 1) {
-								if p.ActiveEndpoint != "" && udpPuncher != nil {
-									_ = udpPuncher.SendDataPacket(p.ActiveEndpoint, packet)
-									atomic.AddUint64(&packetsSentCount, 1)
-								}
-								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint && udpPuncher != nil {
-									_ = udpPuncher.SendDataPacket(p.STUNAddr, packet)
-									atomic.AddUint64(&packetsSentCount, 1)
-								}
-								// Асинхронный неблокирующий релей через MQTT
-								if activeMQTT != nil {
-									pktCopy := make([]byte, len(packet))
-									copy(pktCopy, packet)
-									go func(tID string, d []byte) {
-										_ = activeMQTT.PublishTunnelData(tID, d)
-									}(p.DeviceID, pktCopy)
-									atomic.AddUint64(&packetsSentCount, 1)
-								}
+							if p.DeviceID != myDevID && p.VirtualIP == destStr {
+								targetPeer = p
 								break
+							}
+						}
+
+						// 2. Маршрут к подсети пира (например, 192.168.1.0/24 или 10.0.0.0/8)
+						if targetPeer == nil {
+							for _, p := range peers {
+								if p.DeviceID == myDevID {
+									continue
+								}
+								for _, route := range p.AdvertisedRoutes {
+									if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
+										targetPeer = p
+										break
+									}
+								}
+								if targetPeer != nil {
+									break
+								}
+							}
+						}
+
+						// 3. Маршрутизация через Exit Node
+						if targetPeer == nil && activeExitNodeID != "" {
+							if ep, ok := registry.Get(activeExitNodeID); ok && ep.Online {
+								targetPeer = ep
+							}
+						}
+
+						// 4. Fallback для mesh-сети из 1 удаленного узла (только для 10.200.0.x)
+						if targetPeer == nil && len(peers) == 1 && strings.HasPrefix(destStr, "10.200.0.") {
+							if peers[0].DeviceID != myDevID {
+								targetPeer = peers[0]
+							}
+						}
+
+						if targetPeer != nil {
+							if targetPeer.ActiveEndpoint != "" && udpPuncher != nil {
+								_ = udpPuncher.SendDataPacket(targetPeer.ActiveEndpoint, packet)
+								atomic.AddUint64(&packetsSentCount, 1)
+							}
+							if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint && udpPuncher != nil {
+								_ = udpPuncher.SendDataPacket(targetPeer.STUNAddr, packet)
+								atomic.AddUint64(&packetsSentCount, 1)
+							}
+							// Асинхронный неблокирующий релей через MQTT
+							if activeMQTT != nil {
+								pktCopy := make([]byte, len(packet))
+								copy(pktCopy, packet)
+								go func(tID string, d []byte) {
+									_ = activeMQTT.PublishTunnelData(tID, d)
+								}(targetPeer.DeviceID, pktCopy)
+								atomic.AddUint64(&packetsSentCount, 1)
 							}
 						}
 					}
@@ -3542,29 +3565,15 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 			if srcIP.String() == myVirtualIP {
 				return
 			}
-			// Принимаем пакеты для своего VIP или базового 10.200.0.1 во избежание сброса во время согласования
-			if destIP.String() != myVirtualIP && destIP.String() != "10.200.0.1" {
-				return
-			}
 
 			ihl := int(pkt[0]&0x0F) * 4
 			if len(pkt) >= ihl {
-				if destIP.String() != myVirtualIP {
-					myIPBytes := net.ParseIP(myVirtualIP).To4()
-					if myIPBytes != nil {
-						copy(pkt[16:20], myIPBytes)
-						pkt[10] = 0
-						pkt[11] = 0
-						ipCS := tunnel.CalculateChecksum(pkt[:ihl])
-						pkt[10] = byte(ipCS >> 8)
-						pkt[11] = byte(ipCS)
-					}
-				}
-
 				protocol := pkt[9]
 				if protocol == 1 && len(pkt) >= ihl+8 && pkt[ihl] == 8 { // ICMP Echo Request
-					handleICMPEcho(pkt)
-					return
+					if destIP.String() == myVirtualIP || destIP.String() == "10.200.0.1" {
+						handleICMPEcho(pkt)
+						return
+					}
 				}
 			}
 
