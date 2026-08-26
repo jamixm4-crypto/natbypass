@@ -105,62 +105,22 @@ fun MainScreen(
                 )
             }
 
-            // ── Network card ─────────────────────────────────────────────────
+            // ── Network profile card ─────────────────────────────────────────
             item {
                 NetworkCard(
                     profileName = uiState.activeProfileName.ifEmpty { "Основная сеть" },
                     onlinePeers = uiState.onlinePeers,
                     totalPeers  = uiState.totalPeers,
                     onChangeProfile = onOpenProfiles,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
-            }
-
-            // ── Quick Actions Row ────────────────────────────────────────────
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    AssistChip(
-                        onClick = onSync,
-                        label = { Text("Синхронизация", fontSize = 11.sp) },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(15.dp))
-                        }
-                    )
-                    AssistChip(
-                        onClick = onClearCache,
-                        label = { Text("Очистить", fontSize = 11.sp) },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.CleaningServices, contentDescription = null, modifier = Modifier.size(15.dp))
-                        }
-                    )
-                    AssistChip(
-                        onClick = onOpenDiagnostics,
-                        label = { Text("Диагностика", fontSize = 11.sp) },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Analytics, contentDescription = null, modifier = Modifier.size(15.dp))
-                        }
-                    )
-                    AssistChip(
-                        onClick = onCheckUpdate,
-                        label = { Text("Обновить", fontSize = 11.sp) },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(15.dp))
-                        }
-                    )
-                }
             }
 
             // ── Peers section header ─────────────────────────────────────────
             item {
                 Row(
                     modifier = Modifier
-                        .padding(horizontal = 20.dp, vertical = 6.dp)
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
                         .fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
@@ -228,7 +188,7 @@ private fun ConnectSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 10.dp),
+            .padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ConnectToggle(state = state, onClick = onToggle)
@@ -261,7 +221,7 @@ private fun ConnectSection(
     }
 }
 
-// ── Compact round toggle button (136dp container / 118dp button) ───────────────
+// ── Compact round toggle button ───────────────────────────────────────────────
 @Composable
 private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
     val isConnected = state == ConnectionState.CONNECTED_P2P || state == ConnectionState.CONNECTED_RELAY
@@ -363,7 +323,7 @@ private fun NetworkCard(
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -394,7 +354,7 @@ private fun EmptyPeersPlaceholder() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 32.dp),
+            .padding(vertical = 36.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
