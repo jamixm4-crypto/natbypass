@@ -22,6 +22,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 import org.natbypass.app.ui.compose.AppTheme
 import org.natbypass.app.util.MobileBridge
@@ -35,6 +36,7 @@ fun SettingsScreen(
     dynamicColorEnabled: Boolean,
     onThemeChange: (AppTheme) -> Unit,
     onDynamicColorChange: (Boolean) -> Unit,
+    onCheckUpdate: () -> Unit,
 ) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
@@ -81,7 +83,6 @@ fun SettingsScreen(
                 tgProxy           = active.optString("tg_proxy", "")
                 awgPreset         = active.optString("awg_preset", prefs.getString("awg_preset", "dpi") ?: "dpi")
             } else {
-                // Fallback to prefs if no profiles system active
                 mqttBroker  = prefs.getString("mqtt_broker", "tcp://broker.emqx.io:1883") ?: ""
                 mqttTopic   = prefs.getString("mqtt_topic", "natbypass/mynet/peers") ?: ""
                 mqttUser    = prefs.getString("mqtt_user", "") ?: ""
@@ -95,7 +96,6 @@ fun SettingsScreen(
     }
 
     fun save() {
-        // 1. Save general app prefs
         prefs.edit().apply {
             putString("device_name", deviceName.trim())
             putInt("publish_interval", publishInterval.toIntOrNull() ?: 8)
@@ -112,7 +112,6 @@ fun SettingsScreen(
             apply()
         }
 
-        // 2. Update active profile in MobileBridge
         if (activeProfileId.isNotEmpty()) {
             MobileBridge.updateProfile(
                 activeProfileId,
@@ -128,10 +127,8 @@ fun SettingsScreen(
             )
         }
 
-        // 3. Set AWG preset
         MobileBridge.setAWGPreset(awgPreset)
 
-        // 4. Persist updated config.yaml to disk
         try {
             val yaml = MobileBridge.getConfigYAML()
             if (yaml.isNotEmpty() && yaml != "{}") {
@@ -224,7 +221,6 @@ fun SettingsScreen(
                         }
                 }
 
-                // Dynamic color (Android 12+ only)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     Spacer(Modifier.height(8.dp))
                     SettingsSwitch(
@@ -375,6 +371,34 @@ fun SettingsScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+
+            // ── App info & Updates ─────────────────────────────────────────
+            SettingsSection(title = "О приложении и обновления", icon = Icons.Outlined.Info) {
+                val versionName = try {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.3.0"
+                } catch (_: Exception) { "1.3.0" }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(text = "NatBypass Mesh", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text(text = "Версия v$versionName (P2P Mesh + AWG 2.0)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onCheckUpdate,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Проверить обновления на GitHub")
+                }
             }
 
             Spacer(Modifier.height(40.dp))

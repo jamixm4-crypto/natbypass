@@ -1,4 +1,4 @@
-package org.natbypass.app.ui
+﻿package org.natbypass.app.ui
 
 import android.app.Activity
 import android.content.ClipData
@@ -27,9 +27,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import kotlinx.coroutines.launch
 import org.natbypass.app.R
 import org.natbypass.app.ui.compose.*
+import org.natbypass.app.util.AppUpdateManager
 import org.natbypass.app.util.MobileBridge
+import org.natbypass.app.util.UpdateState
 import java.io.File
 import java.io.FileOutputStream
 
@@ -52,7 +55,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            // Persist theme preference across recompositions
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
             var appTheme by remember {
                 mutableStateOf(
@@ -129,11 +131,22 @@ private fun NatBypassApp(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val activity = context as? MainActivity
+    val coroutineScope = rememberCoroutineScope()
+    val updateState by AppUpdateManager.updateState.collectAsState()
 
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Main) }
     var showProfileSheet by remember { mutableStateOf(false) }
     var showProfileEdit by remember { mutableStateOf<ProfileEditMode?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
+
+    val checkUpdate: () -> Unit = {
+        val currentVersion = try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.3.0"
+        } catch (_: Exception) { "1.3.0" }
+        coroutineScope.launch {
+            AppUpdateManager.checkForUpdates(currentVersion, manual = true)
+        }
+    }
 
     when (currentScreen) {
         Screen.Main -> MainScreen(
@@ -170,6 +183,7 @@ private fun NatBypassApp(
                 viewModel.clearPeers(context)
                 Toast.makeText(context, "🧹 Кэш устройств очищен!", Toast.LENGTH_SHORT).show()
             },
+            onCheckUpdate = checkUpdate,
         )
         Screen.Diagnostics -> DiagnosticsScreen(onBack = { currentScreen = Screen.Main })
         Screen.Settings -> SettingsScreen(
@@ -178,8 +192,21 @@ private fun NatBypassApp(
             dynamicColorEnabled = dynamicColorEnabled,
             onThemeChange = onThemeChange,
             onDynamicColorChange = onDynamicColorChange,
+            onCheckUpdate = checkUpdate,
         )
     }
+
+    // ── Update Dialog ─────────────────────────────────────────────────────────
+    UpdateDialog(
+        state = updateState,
+        onDownload = { version, url, size ->
+            coroutineScope.launch {
+                AppUpdateManager.downloadAndInstall(context, version, url, size)
+            }
+        },
+        onCancelDownload = { AppUpdateManager.cancelDownload() },
+        onDismiss = { AppUpdateManager.dismiss() }
+    )
 
     // ── Profile BottomSheet ───────────────────────────────────────────────────
     if (showProfileSheet) {

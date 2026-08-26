@@ -43,6 +43,7 @@ fun MainScreen(
     onShareQR: () -> Unit,
     onSync: () -> Unit,
     onClearCache: () -> Unit,
+    onCheckUpdate: () -> Unit,
 ) {
     var speedDialExpanded by remember { mutableStateOf(false) }
 
@@ -58,6 +59,9 @@ fun MainScreen(
                     )
                 },
                 actions = {
+                    IconButton(onClick = onCheckUpdate) {
+                        Icon(Icons.Outlined.CloudDownload, contentDescription = "Обновления")
+                    }
                     IconButton(onClick = onOpenDiagnostics) {
                         Icon(Icons.Outlined.Analytics, contentDescription = "Диагностика")
                     }
@@ -118,28 +122,35 @@ fun MainScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     AssistChip(
                         onClick = onSync,
-                        label = { Text("Синхронизация", fontSize = 12.sp) },
+                        label = { Text("Синхронизация", fontSize = 11.sp) },
                         leadingIcon = {
-                            Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(15.dp))
                         }
                     )
                     AssistChip(
                         onClick = onClearCache,
-                        label = { Text("Очистить кэш", fontSize = 12.sp) },
+                        label = { Text("Очистить", fontSize = 11.sp) },
                         leadingIcon = {
-                            Icon(Icons.Outlined.CleaningServices, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Outlined.CleaningServices, contentDescription = null, modifier = Modifier.size(15.dp))
                         }
                     )
                     AssistChip(
                         onClick = onOpenDiagnostics,
-                        label = { Text("Диагностика", fontSize = 12.sp) },
+                        label = { Text("Диагностика", fontSize = 11.sp) },
                         leadingIcon = {
-                            Icon(Icons.Outlined.Analytics, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Outlined.Analytics, contentDescription = null, modifier = Modifier.size(15.dp))
+                        }
+                    )
+                    AssistChip(
+                        onClick = onCheckUpdate,
+                        label = { Text("Обновить", fontSize = 11.sp) },
+                        leadingIcon = {
+                            Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(15.dp))
                         }
                     )
                 }
@@ -250,7 +261,7 @@ private fun ConnectSection(
     }
 }
 
-// ── Compact round toggle button (130dp container / 116dp button) ───────────────
+// ── Compact round toggle button (136dp container / 118dp button) ───────────────
 @Composable
 private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
     val isConnected = state == ConnectionState.CONNECTED_P2P || state == ConnectionState.CONNECTED_RELAY
