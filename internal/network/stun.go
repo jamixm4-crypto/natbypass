@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/pion/stun/v2"
 )
+
 
 // NATType describes the type of NAT in front of the device.
 type NATType int
@@ -140,36 +140,17 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 	}
 }
 
-// DetectNATType classifies the NAT type by comparing the external (reflexive) addresses
-// seen by two different STUN servers.
+// DetectNATType classifies the NAT type by querying two different STUN servers
+// from the EXACT SAME local socket.
 //
-//   - Same IP + Same Port  → Full Cone / Restricted (UDP hole-punching works reliably)
-//   - Same IP + Diff Port  → Symmetric NAT (CGNAT on LTE — each destination gets a new port)
-//   - Diff IP              → Double NAT / Symmetric (treat as Symmetric)
-//
-// IMPORTANT: Each probe opens its own TEMPORARY UDP socket bound to the SAME local port
-// (not the shared puncher socket).  This avoids races with the puncher's readLoop goroutine
-// which also reads from the shared socket and would steal the STUN responses.
-//
-// localPort is the puncher's local port; pass 0 to let the OS choose a random port.
+//   - Same IP + Same Port  → Full Cone / Restricted NAT (P2P hole punching works)
+//   - Same IP + Diff Port  → Symmetric NAT (CGNAT assigns a different port per destination)
+//   - Diff IP              → Symmetric NAT / Multi-WAN
 func DetectNATType(ctx context.Context, _ *net.UDPConn, servers []string) (NATType, error) {
-	return DetectNATTypeFromPort(ctx, 0, servers)
-}
-
-// DetectNATTypeFromPort is the real implementation.  It creates two fresh UDP sockets,
-// each bound to a random OS-assigned port, and queries a different STUN server.
-func DetectNATTypeFromPort(ctx context.Context, _ int, servers []string) (NATType, error) {
 	if len(servers) == 0 {
 		servers = defaultSTUNServers
 	}
 
-	type mapped struct {
-		ip   net.IP
-		port int
-		err  error
-	}
-
-	// Choose two distinct servers
 	srv1 := servers[0]
 	srv2 := ""
 	for _, s := range servers[1:] {
@@ -179,74 +160,72 @@ func DetectNATTypeFromPort(ctx context.Context, _ int, servers []string) (NATTyp
 		}
 	}
 	if srv2 == "" {
-		return NATTypeUnknown, errors.New("DetectNATType: need at least 2 distinct STUN servers")
+		return NATTypeUnknown, errors.New("need at least 2 STUN servers")
 	}
 
-	// Each probe uses its own ephemeral socket — no contention with readLoop
-	probeOne := func(server string) mapped {
-		// Resolve STUN server
+	// Create ONE temporary UDP socket bound to an ephemeral port
+	lAddr, err := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
+	if err != nil {
+		return NATTypeUnknown, err
+	}
+	sock, err := net.ListenUDP("udp4", lAddr)
+	if err != nil {
+		return NATTypeUnknown, err
+	}
+	defer sock.Close()
+
+	probeServer := func(server string) (net.IP, int, error) {
 		srvAddr, err := net.ResolveUDPAddr("udp4", server)
 		if err != nil {
-			return mapped{err: err}
+			return nil, 0, err
 		}
-
-		// Fresh temporary socket
-		lAddr, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
-		sock, err := net.ListenUDP("udp4", lAddr)
-		if err != nil {
-			return mapped{err: err}
-		}
-		defer sock.Close()
 
 		msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
 		if _, err := sock.WriteToUDP(msg.Raw, srvAddr); err != nil {
-			return mapped{err: err}
+			return nil, 0, err
 		}
 
 		buf := make([]byte, 1024)
-		deadline, ok := ctx.Deadline()
-		if !ok {
-			deadline = time.Now().Add(2500 * time.Millisecond)
-		}
-		_ = sock.SetReadDeadline(deadline)
+		_ = sock.SetReadDeadline(time.Now().Add(2 * time.Second))
 		n, _, err := sock.ReadFromUDP(buf)
 		if err != nil {
-			return mapped{err: err}
+			return nil, 0, err
 		}
 
 		var stunMsg stun.Message
 		stunMsg.Raw = make([]byte, n)
 		copy(stunMsg.Raw, buf[:n])
-		if err2 := stunMsg.Decode(); err2 != nil {
-			return mapped{err: err2}
+		if err := stunMsg.Decode(); err != nil {
+			return nil, 0, err
 		}
 
 		var xor stun.XORMappedAddress
-		if err3 := xor.GetFrom(&stunMsg); err3 == nil {
-			return mapped{ip: xor.IP, port: xor.Port}
+		if err := xor.GetFrom(&stunMsg); err == nil {
+			return xor.IP, xor.Port, nil
 		}
 		var plain stun.MappedAddress
-		if err4 := plain.GetFrom(&stunMsg); err4 == nil {
-			return mapped{ip: plain.IP, port: plain.Port}
+		if err := plain.GetFrom(&stunMsg); err == nil {
+			return plain.IP, plain.Port, nil
 		}
-		return mapped{err: errors.New("no mapped address in STUN response")}
+		return nil, 0, errors.New("no mapped address attribute in STUN response")
 	}
 
-	var r1, r2 mapped
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); r1 = probeOne(srv1) }()
-	go func() { defer wg.Done(); r2 = probeOne(srv2) }()
-	wg.Wait()
-
-	if r1.err != nil || r2.err != nil {
-		return NATTypeUnknown, errors.New("DetectNATType: STUN probe failed")
+	ip1, port1, err1 := probeServer(srv1)
+	if err1 != nil {
+		return NATTypeUnknown, err1
 	}
 
-	if r1.ip.Equal(r2.ip) && r1.port == r2.port {
-		// Same external IP:Port seen by both servers → Full Cone / Restricted
+	// Small delay between probes from the same socket
+	time.Sleep(50 * time.Millisecond)
+
+	ip2, port2, err2 := probeServer(srv2)
+	if err2 != nil {
+		return NATTypeUnknown, err2
+	}
+
+	if ip1.Equal(ip2) && port1 == port2 {
 		return NATTypeFullCone, nil
 	}
-	// Different external ports → Symmetric (port-remapping CGNAT)
 	return NATTypeSymmetric, nil
 }
+

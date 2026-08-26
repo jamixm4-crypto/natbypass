@@ -422,28 +422,24 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
-	// Фоновый цикл периодической пробивки UDP-сокетов до всех онлайн пиров
-	// СТРАТЕГИЯ: двухуровневая —
-	//   Уровень 1 (каждые 7с): Лёгкий keep-alive KAEP для удержания CGNAT маппинга
-	//              (мобильные операторы убивают маппинг за 15–30с бездействия)
-	//   Уровень 2 (каждые 25с): Полный hole-punch burst если нет активного P2P соединения
+	// Фоновый цикл постоянного пробития NAT и поддержания сокетов живыми (каждые 3 секунды)
+	// Отправляет NATBYPASS:PING на все известные адреса пира для удержания NAT-сессии
+	// и непрерывного измерения RTT / подтверждения Direct P2P.
 	go func() {
-		keepAliveTicker := time.NewTicker(7 * time.Second)
-		fullProbeTicker := time.NewTicker(25 * time.Second)
-		defer keepAliveTicker.Stop()
-		defer fullProbeTicker.Stop()
+		probeTicker := time.NewTicker(3 * time.Second)
+		defer probeTicker.Stop()
 
-		// Логируем NAT тип через 8 секунд после старта (даём детекции завершиться)
-		time.AfterFunc(8*time.Second, func() {
+		// Логируем NAT тип через 6 секунд после старта (даём детекции завершиться)
+		time.AfterFunc(6*time.Second, func() {
 			if puncher != nil {
 				natType := puncher.GetNATType()
 				switch natType {
 				case network.NATTypeSymmetric:
-					logger.Warn().Str("nat_type", natType.String()).Msg("🔴 Обнаружен Symmetric NAT (CGNAT оператора) — классический UDP hole punch ненадёжен, использую расширенный sweep ±64 портов")
+					logger.Warn().Str("nat_type", natType.String()).Msg("🔴 Обнаружен Symmetric NAT (CGNAT оператора) — классический UDP hole punch ненадёжен, использую расширенный sweep")
 				case network.NATTypeFullCone:
-					logger.Info().Str("nat_type", natType.String()).Msg("🟢 Обнаружен Full Cone NAT — UDP P2P будет работать надёжно")
+					logger.Info().Str("nat_type", natType.String()).Msg("🟢 Обнаружен Full Cone / Restricted NAT — прямое P2P соединение доступно")
 				default:
-					logger.Info().Str("nat_type", natType.String()).Msg("🔍 Тип NAT определён")
+					logger.Info().Str("nat_type", natType.String()).Msg("🔍 Тип NAT: " + natType.String())
 				}
 			}
 		})
@@ -452,46 +448,30 @@ func StartEngine(configYAML string, tunFd int) string {
 			select {
 			case <-ctx.Done():
 				return
-			case <-keepAliveTicker.C:
-				// Уровень 1: лёгкий keep-alive для всех known адресов
+			case <-probeTicker.C:
 				if puncher != nil && globalRegistry != nil {
 					for _, p := range globalRegistry.List() {
 						if !p.Online {
 							continue
 						}
-						// Приоритет: ActiveEndpoint (уже проверенный прямой путь) → STUNAddr → IPv6
-						if p.ActiveEndpoint != "" {
-							_ = puncher.SendKeepAlive(p.ActiveEndpoint)
-						} else if p.STUNAddr != "" {
-							_ = puncher.SendKeepAlive(p.STUNAddr)
-						}
-						if p.IPv6Addr != "" && p.IPv6Addr != p.ActiveEndpoint {
-							_ = puncher.SendKeepAlive(p.IPv6Addr)
-						}
-					}
-				}
-			case <-fullProbeTicker.C:
-				// Уровень 2: полный burst hole-punch если нет активного Direct P2P
-				if puncher != nil && globalRegistry != nil {
-					for _, p := range globalRegistry.List() {
-						if !p.Online || p.DirectP2P {
-							continue
-						}
-						go func(pr *peer.Peer) {
-							if pr.ActiveEndpoint != "" {
-								_ = puncher.SendHolePunchProbe(pr.ActiveEndpoint)
+						go func(peer *peer.Peer) {
+							if peer.ActiveEndpoint != "" {
+								_ = puncher.SendHolePunchProbe(peer.ActiveEndpoint)
 							}
-							if pr.STUNAddr != "" && pr.STUNAddr != pr.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(pr.STUNAddr)
+							if peer.STUNAddr != "" && peer.STUNAddr != peer.ActiveEndpoint {
+								_ = puncher.SendHolePunchProbe(peer.STUNAddr)
 							}
-							if pr.IPv6Addr != "" && pr.IPv6Addr != pr.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(pr.IPv6Addr)
+							if peer.IPv6Addr != "" && peer.IPv6Addr != peer.ActiveEndpoint {
+								_ = puncher.SendHolePunchProbe(peer.IPv6Addr)
 							}
-							if pr.PublicIP != "" {
-								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:47832", pr.PublicIP))
-								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:51820", pr.PublicIP))
-								if pr.WGPort > 0 && pr.WGPort != 47832 && pr.WGPort != 51820 {
-									_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", pr.PublicIP, pr.WGPort))
+							if peer.LocalAddr != "" && peer.LocalAddr != peer.ActiveEndpoint {
+								_ = puncher.SendHolePunchProbe(peer.LocalAddr)
+							}
+							if peer.PublicIP != "" {
+								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:47832", peer.PublicIP))
+								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:51820", peer.PublicIP))
+								if peer.WGPort > 0 && peer.WGPort != 47832 && peer.WGPort != 51820 {
+									_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", peer.PublicIP, peer.WGPort))
 								}
 							}
 						}(p)
@@ -500,6 +480,7 @@ func StartEngine(configYAML string, tunFd int) string {
 			}
 		}
 	}()
+
 
 	if tunFd > 0 {
 		attachTUN(tunFd)

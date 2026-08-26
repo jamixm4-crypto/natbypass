@@ -150,10 +150,8 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 }
 
 // SendHolePunchProbe отправляет прямой UDP пакет второму устройству.
-//
-// Стратегия sweep зависит от типа NAT:
-//   - Full Cone / Unknown  → ±32 портов вокруг целевого адреса
-//   - Symmetric (CGNAT)    → ±64 портов + предсказательный сдвиг (delta) если наблюдался паттерн инкремента
+// Точное попадание отправляется всегда (3 пакета).
+// Для неизвестных / CGNAT сокетов также выполняется умеренный sweep соседних портов.
 func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
@@ -174,20 +172,19 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 		_, _ = p.conn.WriteToUDP(probeData, rAddr)
 	}
 
-	// 2. Sweep по диапазону портов для компенсации CGNAT port allocation
+	// 2. Умеренный sweep по диапазону портов для компенсации CGNAT port allocation
 	if rAddr.IP.To4() != nil {
 		p.natTypeMu.RLock()
 		natT := p.NATType
-		delta := p.portDelta
 		p.natTypeMu.RUnlock()
 
 		basePort := rAddr.Port
 		ip := rAddr.IP
 
-		// Symmetric NAT: wider sweep ±64 + predicted delta offset
-		sweep := 32
+		// Sweep диапазон: ±16 для Cone, ±32 для Symmetric
+		sweep := 16
 		if natT == NATTypeSymmetric {
-			sweep = 64
+			sweep = 32
 		}
 
 		for d := 1; d <= sweep; d++ {
@@ -198,23 +195,11 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 				_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort - d})
 			}
 		}
-
-		// Predicted shift: если CGNAT выдаёт порты инкрементально, добавляем ещё один центр
-		if natT == NATTypeSymmetric && delta > 0 {
-			shifted := basePort + delta
-			for d := 0; d <= 16; d++ {
-				if shifted+d <= 65535 {
-					_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: shifted + d})
-				}
-				if shifted-d > 1024 {
-					_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: shifted - d})
-				}
-			}
-		}
 	}
 
 	return nil
 }
+
 
 // SendKeepAlive отправляет минимальный 4-байтный пакет для поддержания CGNAT маппинга.
 // Использует отдельный tiny payload вместо полноценного PING/PONG, чтобы не триггерить лишние callback-и.
