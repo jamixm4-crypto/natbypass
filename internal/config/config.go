@@ -49,6 +49,11 @@ type NetworkConfig struct {
 	AdvertisedSubnets  []string `mapstructure:"advertised_subnets" yaml:"advertised_subnets,omitempty"`
 	SelectedExitNode   string   `mapstructure:"selected_exit_node" yaml:"selected_exit_node,omitempty"`
 	ActiveSubnetRoutes []string `mapstructure:"active_subnet_routes" yaml:"active_subnet_routes,omitempty"`
+	// UDPPort — локальный порт UDP Hole Punch сокета.
+	// 0 (по умолчанию) = OS назначает случайный порт.
+	// Задайте явно (например, 47832) если нужен фиксированный порт для firewall-правил.
+	// НЕ используйте 51820 если на этой машине работает локальный WireGuard/AmneziaWG!
+	UDPPort int `mapstructure:"udp_port" yaml:"udp_port,omitempty"`
 }
 
 // ChannelConfig — настройки одного сигнального канала

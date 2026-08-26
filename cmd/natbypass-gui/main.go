@@ -2953,7 +2953,10 @@ func startEngineFromConfig(c *config.Config) {
 	}()
 
 	// Создание реального UDP Hole Punching сокета
-	puncher, err := network.NewUDPPuncher(51820, myDevID, c.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+	// Порт берётся из конфига (Network.UDPPort). По умолчанию 0 = OS назначает случайный порт.
+	// Это критично чтобы не конфликтовать с локальным AWG/WireGuard на порту 51820.
+	udpListenPort := c.Network.UDPPort
+	puncher, err := network.NewUDPPuncher(udpListenPort, myDevID, c.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		atomic.AddUint64(&packetsRecvCount, 1)
 		if p, ok := registry.Get(remoteDevID); ok {
 			p.DirectP2P = true

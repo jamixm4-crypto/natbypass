@@ -89,9 +89,44 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 		return nil, 0, err
 	}
 
-	conn, err := net.DialUDP("udp4", nil, addr)
+	// Привязываем к физическому LAN-IP чтобы STUN-запросы не уходили через AWG/VPN-тоннель.
+	// Выбираем первый non-loopback, non-virtual IPv4-адрес (пропускаем 10.200.x.x — NatBypass VIP).
+	var localAddr *net.UDPAddr
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, _ := iface.Addrs()
+			for _, a := range addrs {
+				ipNet, ok := a.(*net.IPNet)
+				if !ok {
+					continue
+				}
+				ip4 := ipNet.IP.To4()
+				if ip4 == nil || ip4.IsLoopback() {
+					continue
+				}
+				// Пропускаем виртуальный IP NatBypass (10.200.x.x)
+				if ip4[0] == 10 && ip4[1] == 200 {
+					continue
+				}
+				localAddr = &net.UDPAddr{IP: ip4, Port: 0}
+				break
+			}
+			if localAddr != nil {
+				break
+			}
+		}
+	}
+
+	conn, err := net.DialUDP("udp4", localAddr, addr)
 	if err != nil {
-		return nil, 0, err
+		// Fallback: без привязки к интерфейсу
+		conn, err = net.DialUDP("udp4", nil, addr)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 	defer conn.Close()
 

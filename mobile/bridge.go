@@ -203,8 +203,9 @@ func StartEngine(configYAML string, tunFd int) string {
 	globalSigMgr = signaling.NewFallbackManager(channels)
 
 	// UDP Puncher для P2P сокетов
+	// UDPPort=0 (по умолчанию) → OS выделяет случайный порт (не конфликтует с AWG/WG)
 	var puncher *network.UDPPuncher
-	puncher, _ = network.NewUDPPuncher(51820, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+	puncher, _ = network.NewUDPPuncher(cfg.Network.UDPPort, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		if p, ok := globalRegistry.Get(remoteDevID); ok {
 			p.DirectP2P = true
 			p.ActiveEndpoint = fromAddr
