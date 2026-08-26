@@ -57,14 +57,6 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 		SetWriteTimeout(5 * time.Second).
 		SetResumeSubs(true)
 
-	// LWT (Last Will and Testament): брокер моментально оповестит сеть если узел отключится
-	lwtPayload, _ := json.Marshal(&Payload{
-		DeviceID: clientID,
-		Offline:  true,
-		Leave:    true,
-	})
-	opts.SetWill(topic, string(lwtPayload), 0, false)
-
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
 		log.Info().Str("broker", brokerURL).Str("topic", topic).Msg("MQTT подключен, подписка на топики...")
 		c.Subscribe(topic, 0, func(cl mqtt.Client, msg mqtt.Message) {

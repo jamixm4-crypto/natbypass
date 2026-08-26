@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui
+package org.natbypass.app.ui
 
 import android.app.Activity
 import android.content.ClipData
@@ -83,6 +83,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.syncNetwork()
     }
 
     private fun showShareQRDialog() {

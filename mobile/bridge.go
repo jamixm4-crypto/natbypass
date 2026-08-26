@@ -662,6 +662,51 @@ func RefreshPublicIP() {
 			engineMu.Unlock()
 			logger.Info().Str("ipv6", globalIPv6).Msg("✅ IPv6-адрес обновлён после смены сети")
 		}
+
+		// 4. Мгновенная публикация маяка в сигнальный канал и зондинг всех пиров
+		if globalSigMgr != nil && globalConfig != nil {
+			activeProf := globalConfig.EnsureActiveProfile()
+			activeKey := ""
+			activeTopic := ""
+			if activeProf != nil {
+				activeKey = activeProf.NetworkKey
+				activeTopic = activeProf.MQTTTopic
+			}
+			var awgParams *signaling.AWGParams
+			if globalConfig.WireGuard.AWG.Enabled || globalAWGPreset != "standard" {
+				awgParams = getAWGParamsFromPreset(globalAWGPreset)
+			}
+			payload := &signaling.Payload{
+				DeviceID:         globalDevID,
+				Nickname:         globalDevName,
+				DeviceName:       globalDevName,
+				PublicIP:         globalPublicIP,
+				STUNAddr:         globalSTUN,
+				IPv6Addr:         globalIPv6,
+				VirtualIP:        globalVirtualIP,
+				NATType:          "unknown",
+				Timestamp:        time.Now(),
+				AWG:              awgParams,
+				NetworkKey:       activeKey,
+				Topic:            activeTopic,
+			}
+			_ = globalSigMgr.Send(ctx, payload)
+		}
+
+		// 5. Мгновенная отправка UDP hole punch зондов на все известные пиры
+		if puncher != nil && globalRegistry != nil {
+			for _, p := range globalRegistry.List() {
+				if p.ActiveEndpoint != "" {
+					_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+				}
+				if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+					_ = puncher.SendHolePunchProbe(p.STUNAddr)
+				}
+				if p.IPv6Addr != "" && p.IPv6Addr != p.ActiveEndpoint {
+					_ = puncher.SendHolePunchProbe(p.IPv6Addr)
+				}
+			}
+		}
 	}()
 }
 
