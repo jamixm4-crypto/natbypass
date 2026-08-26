@@ -304,9 +304,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setExitNode(context: Context, peerId: String) {
-        prefs.edit().putString("selected_exit_node", peerId).apply()
-        MobileBridge.selectExitNode(peerId)
+    fun toggleExitNode(context: Context, peerId: String): Boolean {
+        val current = prefs.getString("selected_exit_node", "") ?: ""
+        val newTarget = if (current == peerId) "" else peerId
+        prefs.edit().putString("selected_exit_node", newTarget).apply()
+        MobileBridge.selectExitNode(newTarget)
+
+        // Если VPN активен — перезапускаем его для перестройки таблицы маршрутов (0.0.0.0/0 vs 10.200.0.0/24)
+        if (NatBypassVpnService.isRunning) {
+            val intent = Intent(context, NatBypassVpnService::class.java).apply {
+                action = NatBypassVpnService.ACTION_CONNECT
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+        viewModelScope.launch { refreshStatus() }
+        return newTarget.isNotEmpty()
     }
 
     fun deletePeer(peerId: String) {

@@ -240,15 +240,52 @@ object MobileBridge {
         }
     }
 
-    /**
-     * Триггерит пересборку публичного IP и STUN-адреса (вызывается при смене сети Wi-Fi ↔ LTE).
-     * Если Go-движок не экспортирует эту функцию — тихо игнорируется.
-     */
     fun refreshPublicIP() {
         val method = getMethod("refreshPublicIP") ?: return
         try {
             method.invoke(null)
         } catch (e: Exception) {}
+    }
+
+    fun setAllowExitNode(allow: Boolean) {
+        val method = getMethod("setAllowExitNode") ?: return
+        try {
+            method.invoke(null, allow)
+        } catch (e: Exception) {}
+    }
+
+    fun getAllowExitNode(): Boolean {
+        val method = getMethod("getAllowExitNode") ?: return false
+        return try {
+            method.invoke(null) as? Boolean ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun setAdvertisedRoutes(routes: String) {
+        val method = getMethod("setAdvertisedRoutes") ?: return
+        try {
+            method.invoke(null, routes)
+        } catch (e: Exception) {}
+    }
+
+    fun getAdvertisedRoutes(): String {
+        val method = getMethod("getAdvertisedRoutes") ?: return ""
+        return try {
+            method.invoke(null) as? String ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun getLocalSubnetsJSON(): String {
+        val method = getMethod("getLocalSubnetsJSON") ?: return "[]"
+        return try {
+            method.invoke(null) as? String ?: "[]"
+        } catch (e: Exception) {
+            "[]"
+        }
     }
 }
 

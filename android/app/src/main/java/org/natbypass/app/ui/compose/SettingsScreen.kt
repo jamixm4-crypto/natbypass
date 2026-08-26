@@ -1,4 +1,4 @@
-package org.natbypass.app.ui.compose
+﻿package org.natbypass.app.ui.compose
 
 import android.content.Context
 import android.os.Build
@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.json.JSONArray
 import org.json.JSONObject
 import org.natbypass.app.ui.compose.AppTheme
 import org.natbypass.app.util.MobileBridge
@@ -50,6 +51,11 @@ fun SettingsScreen(
     var publishInterval by remember { mutableStateOf(prefs.getInt("publish_interval", 8).toString()) }
     var autoStart       by remember { mutableStateOf(prefs.getBoolean("auto_start_on_boot", false)) }
     var saveLogs        by remember { mutableStateOf(prefs.getBoolean("save_logs", false)) }
+
+    // Routing & Network Sharing settings
+    var allowExitNode   by remember { mutableStateOf(prefs.getBoolean("allow_exit_node", false)) }
+    var advSubnets      by remember { mutableStateOf(prefs.getString("adv_subnets", "") ?: "") }
+    var detectedSubnets by remember { mutableStateOf<List<String>>(emptyList()) }
 
     // Network / Profile settings (loaded from Active Profile)
     var awgPreset       by remember { mutableStateOf("dpi") }
@@ -92,6 +98,14 @@ fun SettingsScreen(
                 tgProxy     = prefs.getString("tg_proxy", "") ?: ""
                 awgPreset   = prefs.getString("awg_preset", "dpi") ?: "dpi"
             }
+
+            val rawSubnets = MobileBridge.getLocalSubnetsJSON()
+            val arr = JSONArray(rawSubnets)
+            val list = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                list.add(arr.getString(i))
+            }
+            detectedSubnets = list
         } catch (_: Exception) {}
     }
 
@@ -101,6 +115,8 @@ fun SettingsScreen(
             putInt("publish_interval", publishInterval.toIntOrNull() ?: 8)
             putBoolean("auto_start_on_boot", autoStart)
             putBoolean("save_logs", saveLogs)
+            putBoolean("allow_exit_node", allowExitNode)
+            putString("adv_subnets", advSubnets.trim())
             putString("awg_preset", awgPreset)
             putString("mqtt_broker", mqttBroker.trim())
             putString("mqtt_topic", mqttTopic.trim())
@@ -111,6 +127,9 @@ fun SettingsScreen(
             putString("tg_proxy", tgProxy.trim())
             apply()
         }
+
+        MobileBridge.setAllowExitNode(allowExitNode)
+        MobileBridge.setAdvertisedRoutes(advSubnets.trim())
 
         if (activeProfileId.isNotEmpty()) {
             MobileBridge.updateProfile(
@@ -136,7 +155,7 @@ fun SettingsScreen(
             }
         } catch (_: Exception) {}
 
-        Toast.makeText(context, "✓ Настройки сети «$activeProfileName» сохранены", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "✓ Настройки сохранены", Toast.LENGTH_SHORT).show()
     }
 
     Scaffold(
@@ -231,6 +250,69 @@ fun SettingsScreen(
                         onCheckedChange = onDynamicColorChange,
                     )
                 }
+            }
+
+            // ── Routing & Network Sharing ─────────────────────────────────
+            SettingsSection(title = "Маршрутизация и расшаривание сети", icon = Icons.Outlined.AltRoute) {
+                SettingsSwitch(
+                    title = "Разрешить выход в интернет (Exit Node)",
+                    subtitle = "Другие компьютеры и телефоны смогут выходить в интернет через этот телефон",
+                    icon = Icons.Outlined.Public,
+                    checked = allowExitNode,
+                    onCheckedChange = {
+                        allowExitNode = it
+                        MobileBridge.setAllowExitNode(it)
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Spacer(Modifier.height(4.dp))
+
+                Text(
+                    text = "Расшарить локальные подсети (Subnet Routing)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Открывает доступ к устройствам в вашей локальной Wi-Fi сети для других узлов mesh-сети",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+
+                if (detectedSubnets.isNotEmpty()) {
+                    Text(
+                        text = "Обнаруженные локальные сети:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        detectedSubnets.forEach { subnet ->
+                            AssistChip(
+                                onClick = {
+                                    val currentList = advSubnets.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+                                    if (!currentList.contains(subnet)) {
+                                        currentList.add(subnet)
+                                        advSubnets = currentList.joinToString(", ")
+                                    }
+                                },
+                                label = { Text("+ $subnet", fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                OutlinedTextField(
+                    value = advSubnets,
+                    onValueChange = { advSubnets = it },
+                    label = { Text("Анонсируемые подсети (CIDR через запятую)") },
+                    placeholder = { Text("192.168.1.0/24") },
+                    leadingIcon = { Icon(Icons.Outlined.Lan, null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
 
             // ── Device ────────────────────────────────────────────────────

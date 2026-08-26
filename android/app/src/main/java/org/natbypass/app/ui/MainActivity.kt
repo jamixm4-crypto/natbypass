@@ -169,8 +169,12 @@ private fun NatBypassApp(
                 Toast.makeText(context, "IP ${peer.virtualIp} скопирован", Toast.LENGTH_SHORT).show()
             },
             onPeerSetExitNode = { peer ->
-                viewModel.setExitNode(context, peer.id)
-                Toast.makeText(context, "Exit Node: ${peer.displayName}", Toast.LENGTH_SHORT).show()
+                val enabled = viewModel.toggleExitNode(context, peer.id)
+                if (enabled) {
+                    Toast.makeText(context, "🌐 Весь интернет перенаправлен через ${peer.displayName}", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(context, "Локальный интернет (Exit Node отключен)", Toast.LENGTH_SHORT).show()
+                }
             },
             onPeerDelete = { peer -> viewModel.deletePeer(peer.id) },
             onOpenProfiles = { showProfileSheet = true },

@@ -78,9 +78,11 @@ var (
 	globalSTUN      string
 	globalVirtualIP string = ""
 	globalStarted   time.Time
-	globalExitNode  string
-	globalAWGPreset string = "dpi"
-	globalPuncher   *network.UDPPuncher
+	globalExitNode         string
+	globalAllowExitNode    bool
+	globalAdvertisedRoutes []string
+	globalAWGPreset        string = "dpi"
+	globalPuncher          *network.UDPPuncher
 	globalTunFile   *os.File
 	globalTxBytes   uint64
 	globalRxBytes   uint64
@@ -326,8 +328,13 @@ func StartEngine(configYAML string, tunFd int) string {
 					VirtualIP:        globalVirtualIP,
 					DirectP2P:        hasDirect,
 					NATType:          natTypeStr,
-					IsExitNode:       cfg.Network.AllowExitNode,
-					AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
+					IsExitNode:       globalAllowExitNode || cfg.Network.AllowExitNode,
+					AdvertisedRoutes: func() []string {
+						if len(globalAdvertisedRoutes) > 0 {
+							return globalAdvertisedRoutes
+						}
+						return cfg.Network.AdvertisedSubnets
+					}(),
 					Timestamp:        time.Now(),
 					AWG:              awgParams,
 					NetworkKey:       activeKey,
@@ -820,6 +827,67 @@ func GetSelectedExitNode() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	return globalExitNode
+}
+
+// SetAllowExitNode разрешает другим устройствам выходить в интернет через этот узел
+func SetAllowExitNode(allow bool) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	globalAllowExitNode = allow
+	if globalConfig != nil {
+		globalConfig.Network.AllowExitNode = allow
+	}
+	logger.Info().Bool("allow_exit_node", allow).Msg("Статус Exit Node обновлен")
+}
+
+// GetAllowExitNode возвращает true, если узел может служить шлюзом
+func GetAllowExitNode() bool {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalConfig != nil {
+		return globalConfig.Network.AllowExitNode || globalAllowExitNode
+	}
+	return globalAllowExitNode
+}
+
+// SetAdvertisedRoutes устанавливает анонсируемые локальные подсети (например, "192.168.1.0/24")
+func SetAdvertisedRoutes(routesCSV string) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	var routes []string
+	if routesCSV != "" {
+		for _, s := range strings.Split(routesCSV, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				routes = append(routes, s)
+			}
+		}
+	}
+	globalAdvertisedRoutes = routes
+	if globalConfig != nil {
+		globalConfig.Network.AdvertisedSubnets = routes
+	}
+	logger.Info().Strs("routes", routes).Msg("Анонсируемые подсети обновлены")
+}
+
+// GetAdvertisedRoutes возвращает список анонсируемых подсетей
+func GetAdvertisedRoutes() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if len(globalAdvertisedRoutes) > 0 {
+		return strings.Join(globalAdvertisedRoutes, ", ")
+	}
+	if globalConfig != nil && len(globalConfig.Network.AdvertisedSubnets) > 0 {
+		return strings.Join(globalConfig.Network.AdvertisedSubnets, ", ")
+	}
+	return ""
+}
+
+// GetLocalSubnetsJSON возвращает список обнаруженных локальных подсетей устройства
+func GetLocalSubnetsJSON() string {
+	subnets := network.GetLocalSubnets()
+	data, _ := json.Marshal(subnets)
+	return string(data)
 }
 
 // SetAWGPreset устанавливает пресет обфускации AWG 2.0

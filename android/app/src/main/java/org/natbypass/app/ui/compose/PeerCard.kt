@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui.compose
+package org.natbypass.app.ui.compose
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -215,10 +215,14 @@ private fun PeerActionsContent(
         }
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-        // Actions
         PeerActionItem(icon = Icons.Outlined.Speed,   label = "Ping",            onClick = onPing)
         PeerActionItem(icon = Icons.Outlined.ContentCopy, label = "Скопировать IP (${peer.virtualIp})", onClick = onCopyIp)
-        PeerActionItem(icon = Icons.Outlined.Router,  label = "Использовать как Exit Node", onClick = onSetExitNode)
+        PeerActionItem(
+            icon = Icons.Outlined.Public,
+            label = if (peer.isExitNode) "🌐 Маршрутизировать весь интернет через этот узел" else "Использовать как Exit Node",
+            onClick = onSetExitNode,
+            tint = if (peer.isExitNode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+        )
         PeerActionItem(
             icon    = Icons.Outlined.DeleteOutline,
             label   = "Удалить из списка",
