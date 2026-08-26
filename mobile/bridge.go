@@ -1100,6 +1100,7 @@ func GetPeersJSON() string {
 }
 
 // GetDiagnosticsJSON РІРѕР·РІСЂР°С‰Р°РµС‚ СЂРµР·СѓР»СЊС‚Р°С‚С‹ РґРёР°РіРЅРѕСЃС‚РёРєРё
+// GetDiagnosticsJSON возвращает результаты диагностики
 func GetDiagnosticsJSON() string {
 	type check struct {
 		Ok     bool   `json:"ok"`
@@ -1108,16 +1109,16 @@ func GetDiagnosticsJSON() string {
 	}
 	result := map[string]interface{}{}
 
-	// РРЅС‚РµСЂРЅРµС‚
+	// Интернет
 	conn, err := net.DialTimeout("tcp", "1.1.1.1:80", 3*time.Second)
 	if err == nil {
 		conn.Close()
-		result["internet"] = check{Ok: true, Detail: "РРЅС‚РµСЂРЅРµС‚ РґРѕСЃС‚СѓРїРµРЅ"}
+		result["internet"] = check{Ok: true, Detail: "Интернет доступен"}
 	} else {
-		result["internet"] = check{Ok: false, Detail: "РќРµС‚ СЃРІСЏР·Рё СЃ РёРЅС‚РµСЂРЅРµС‚РѕРј"}
+		result["internet"] = check{Ok: false, Detail: "Нет связи с интернетом"}
 	}
 
-	// РџСѓР±Р»РёС‡РЅС‹Р№ IP
+	// Публичный IP
 	pubIP := globalPublicIP
 	if pubIP == "" && globalSTUN != "" {
 		if host, _, err := net.SplitHostPort(globalSTUN); err == nil && host != "" {
@@ -1136,37 +1137,37 @@ func GetDiagnosticsJSON() string {
 	}
 
 	if pubIP != "" {
-		result["public_ip"] = check{Ok: true, Detail: "Р’РЅРµС€РЅРёР№ IP РѕРїСЂРµРґРµР»С‘РЅ", Extra: pubIP}
+		result["public_ip"] = check{Ok: true, Detail: "Внешний IP определён", Extra: pubIP}
 	} else {
-		result["public_ip"] = check{Ok: false, Detail: "IP РѕРїСЂРµРґРµР»СЏРµС‚СЃСЏ..."}
+		result["public_ip"] = check{Ok: false, Detail: "IP определяется..."}
 	}
 
 	// STUN
 	if globalSTUN != "" {
-		result["stun"] = check{Ok: true, Detail: "STUN-СЃРѕРєРµС‚ РѕРїСЂРµРґРµР»С‘РЅ", Extra: globalSTUN}
+		result["stun"] = check{Ok: true, Detail: "STUN-сокет определён", Extra: globalSTUN}
 	} else {
-		result["stun"] = check{Ok: false, Detail: "STUN РЅРµ РѕРїСЂРµРґРµР»С‘РЅ"}
+		result["stun"] = check{Ok: false, Detail: "STUN не определён"}
 	}
 
-	// РЎРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р»
+	// Сигнальный канал
 	ch := "MQTT / Telegram"
 	if globalSigMgr != nil && globalSigMgr.CurrentChannel() != "" {
 		ch = globalSigMgr.CurrentChannel()
 	}
-	result["channel"] = check{Ok: true, Detail: "РљР°РЅР°Р» Р°РєС‚РёРІРµРЅ", Extra: ch}
+	result["channel"] = check{Ok: true, Detail: "Канал активен", Extra: ch}
 
-	// РџРёСЂС‹
+	// Пиры
 	pCount := 0
 	if globalRegistry != nil {
 		pCount = len(globalRegistry.List())
 	}
-	result["peers"] = check{Ok: pCount > 0, Detail: fmt.Sprintf("%d СѓР·Р»РѕРІ РІ СЃРµС‚Рё", pCount)}
+	result["peers"] = check{Ok: pCount > 0, Detail: fmt.Sprintf("%d узлов в сети", pCount)}
 
 	// NAT Type
 	if globalSTUN != "" {
-		result["nat_type"] = check{Ok: true, Detail: "Р’РѕР·РјРѕР¶РЅРѕ Full Cone / Restricted NAT (P2P РґРѕСЃС‚СѓРїРµРЅ)"}
+		result["nat_type"] = check{Ok: true, Detail: "Возможно Full Cone / Restricted NAT (P2P доступен)"}
 	} else {
-		result["nat_type"] = check{Ok: false, Detail: "РЎРёРјРјРµС‚СЂРёС‡РЅС‹Р№ NAT (С‚СЂРµР±СѓРµС‚ Relay)"}
+		result["nat_type"] = check{Ok: false, Detail: "Симметричный NAT (требует Relay)"}
 	}
 
 	data, _ := json.Marshal(result)

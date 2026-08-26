@@ -100,11 +100,11 @@ object MobileBridge {
     }
 
     fun getLogsText(): String {
-        val method = getMethod("getLogsText") ?: return "вљ пёЏ РЇРґСЂРѕ GoMobile РЅРµ Р·Р°РіСЂСѓР¶РµРЅРѕ (Р±РёР±Р»РёРѕС‚РµРєР° mobile.aar)"
+        val method = getMethod("getLogsText") ?: return "⚠️ Ядро GoMobile не загружено (библиотека mobile.aar)"
         return try {
-            method.invoke(null) as? String ?: "Р›РѕРі РїСѓСЃС‚."
+            method.invoke(null) as? String ?: "Лог пуст."
         } catch (e: Exception) {
-            "РћС€РёР±РєР° С‡С‚РµРЅРёСЏ Р»РѕРіРѕРІ: ${e.message}"
+            "Ошибка чтения логов: ${e.message}"
         }
     }
 

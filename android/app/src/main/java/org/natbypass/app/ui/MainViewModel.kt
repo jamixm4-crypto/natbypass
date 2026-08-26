@@ -202,7 +202,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val pObj = JSONObject(profilesJson)
             val activeProf = pObj.optJSONObject("active_profile")
             if (activeProf != null) {
-                activeProfileName = activeProf.optString("name", "РћСЃРЅРѕРІРЅР°СЏ СЃРµС‚СЊ")
+                activeProfileName = activeProf.optString("name", "Основная сеть")
                 profilesList.add(ProfileUiModel(
                     id         = activeProf.optString("id", ""),
                     name       = activeProfileName,

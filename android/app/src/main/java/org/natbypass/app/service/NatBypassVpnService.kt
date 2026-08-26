@@ -73,7 +73,7 @@ class NatBypassVpnService : VpnService() {
             if (rawVip.contains("/")) rawVip = rawVip.substringBefore("/")
             val currentVip = if (rawVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))) rawVip else "100.64.200.10"
 
-            val notif = buildNotification("РџРѕРґРєР»СЋС‡РµРЅРѕ Рє P2P СЃРµС‚Рё ($currentVip)")
+            val notif = buildNotification("Подключено к P2P сети ($currentVip)")
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(
@@ -315,7 +315,7 @@ class NatBypassVpnService : VpnService() {
             .setContentTitle("NatBypass Mesh VPN")
             .setContentText(statusText)
             .setContentIntent(pOpen)
-            .addAction(R.drawable.ic_vpn_lock, "РћС‚РєР»СЋС‡РёС‚СЊ", pDisconnect)
+            .addAction(R.drawable.ic_vpn_lock, "Отключить", pDisconnect)
             .setOngoing(true)
             .build()
     }
