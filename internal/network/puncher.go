@@ -245,7 +245,7 @@ func (p *UDPPuncher) SendDataPacket(targetAddr string, payload []byte) error {
 }
 
 func (p *UDPPuncher) readLoop() {
-	buf := make([]byte, 2048)
+	buf := make([]byte, 65535) // MTU-safe буфер для IP-пакетов до 65535 байт
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -301,7 +301,7 @@ func (p *UDPPuncher) readLoop() {
 			continue
 		}
 
-		// 2. Входящий PING от пира -> отвечаем PONG и подтверждаем сокет
+		// 2. Входящий PING от пира -> отвечаем одним PONG
 		if strings.HasPrefix(data, "NATBYPASS:PING:") {
 			parts := strings.Split(data, ":")
 			if len(parts) >= 4 {
@@ -311,12 +311,10 @@ func (p *UDPPuncher) readLoop() {
 				}
 				sentTs := parts[len(parts)-1]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
-				// Отправляем 3 PONG пакета с исходной меткой времени отправителя
-				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
-				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
+				// Отправляем ровно 1 PONG (тройной дубль не нужен и создаёт лишний трафик)
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
-				// Подтверждаем активность сокета с rtt=0 (настоящий RTT вычисляется только на стороне отправителя при получении PONG)
+				// Подтверждаем активность сокета с rtt=0
 				if p.onPingResult != nil {
 					p.onPingResult(senderID, 0, remoteAddr.String())
 				}

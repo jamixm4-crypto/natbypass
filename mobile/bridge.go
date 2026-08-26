@@ -563,16 +563,9 @@ func attachTUN(tunFd int) {
 
 						if targetPeer != nil && targetPeer.ActiveEndpoint != "" && globalPuncher != nil {
 							_ = globalPuncher.SendDataPacket(targetPeer.ActiveEndpoint, pkt)
-							continue
 						}
-					}
-
-					if globalRegistry != nil && globalPuncher != nil {
-						for _, p := range globalRegistry.List() {
-							if p.Online && p.ActiveEndpoint != "" {
-								_ = globalPuncher.SendDataPacket(p.ActiveEndpoint, pkt)
-							}
-						}
+						// Пакеты без цели (не mesh и не exit node) отбрасываются —
+						// НЕ рассылаем broadcast по всем пирам (это вызывает шторм трафика)
 					}
 				}
 			}

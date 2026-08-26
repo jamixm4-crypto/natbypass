@@ -3197,9 +3197,10 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}()
 
-	// Фоновый цикл прямой отправки UDP Hole Punch пакетов (каждые 3 секунды)
+	// Фоновый цикл прямой отправки UDP Hole Punch пакетов (каждые 15 секунд)
+	// Проверяем только «лучший» эндпоинт пира — не рассылаем 5 пакетов одновременно
 	go func() {
-		probeTicker := time.NewTicker(3 * time.Second)
+		probeTicker := time.NewTicker(15 * time.Second)
 		defer probeTicker.Stop()
 		for {
 			select {
@@ -3209,24 +3210,17 @@ func startEngineFromConfig(c *config.Config) {
 				if udpPuncher != nil && registry != nil {
 					peers := registry.List()
 					for _, p := range peers {
-						if p.ActiveEndpoint != "" {
-							_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
+						// Приоритет: ActiveEndpoint > STUNAddr > LocalAddr
+						// Не шлём сразу по 5 адресам — это создаёт шторм
+						target := p.ActiveEndpoint
+						if target == "" {
+							target = p.STUNAddr
 						}
-						if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-							_ = udpPuncher.SendHolePunchProbe(p.STUNAddr)
+						if target == "" {
+							target = p.LocalAddr
 						}
-						if p.IPv6Addr != "" && p.IPv6Addr != p.ActiveEndpoint {
-							_ = udpPuncher.SendHolePunchProbe(p.IPv6Addr)
-						}
-						if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
-							_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
-						}
-						if p.PublicIP != "" {
-							port := p.WGPort
-							if port <= 0 {
-								port = 51820
-							}
-							_ = udpPuncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
+						if target != "" {
+							_ = udpPuncher.SendHolePunchProbe(target)
 						}
 					}
 				}
@@ -3374,9 +3368,9 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 		}
 	}()
 
-	// 2. Периодическая отправка анонса в локальную сеть каждые 4 секунды
+	// 2. Периодическая отправка анонса в локальную сеть каждые 30 секунд (не 4 с — чтобы не перегружать роутер)
 	go func() {
-		ticker := time.NewTicker(4 * time.Second)
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
