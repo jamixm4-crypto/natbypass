@@ -3186,20 +3186,24 @@ func startEngineFromConfig(c *config.Config) {
 				if udpPuncher != nil && registry != nil {
 					peers := registry.List()
 					for _, p := range peers {
-						if p.Online {
-							if p.STUNAddr != "" {
-								_ = udpPuncher.SendHolePunchProbe(p.STUNAddr)
+						if p.ActiveEndpoint != "" {
+							_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
+						}
+						if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+							_ = udpPuncher.SendHolePunchProbe(p.STUNAddr)
+						}
+						if p.IPv6Addr != "" && p.IPv6Addr != p.ActiveEndpoint {
+							_ = udpPuncher.SendHolePunchProbe(p.IPv6Addr)
+						}
+						if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
+							_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
+						}
+						if p.PublicIP != "" {
+							port := p.WGPort
+							if port <= 0 {
+								port = 51820
 							}
-							if p.PublicIP != "" {
-								port := p.WGPort
-								if port <= 0 {
-									port = 51820
-								}
-								_ = udpPuncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
-							}
-							if p.LocalAddr != "" {
-								_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
-							}
+							_ = udpPuncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
 						}
 					}
 				}
@@ -3207,9 +3211,9 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}()
 
-	// Фоновый монитор неактивных узлов (каждые 3 секунды помечаем stale пиры и удаляем оффлайн)
+	// Фоновый монитор неактивных узлов
 	go func() {
-		monitorTicker := time.NewTicker(3 * time.Second)
+		monitorTicker := time.NewTicker(5 * time.Second)
 		defer monitorTicker.Stop()
 		for {
 			select {
@@ -3217,8 +3221,8 @@ func startEngineFromConfig(c *config.Config) {
 				return
 			case <-monitorTicker.C:
 				if registry != nil {
-					registry.MarkOffline(12 * time.Second)
-					registry.Cleanup(25 * time.Second)
+					registry.MarkOffline(45 * time.Second)
+					registry.Cleanup(24 * time.Hour)
 				}
 			}
 		}

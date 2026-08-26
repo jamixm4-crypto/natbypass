@@ -1,4 +1,4 @@
-package peer
+﻿package peer
 
 import (
 	"context"
@@ -9,39 +9,36 @@ import (
 	"github.com/natbypass/natbypass/internal/signaling"
 )
 
-// Peer represents a discovered device in the network.
+// Peer represents a discovered mesh network device.
 type Peer struct {
-	DeviceID         string               `json:"device_id"`
-	Nickname         string               `json:"nickname,omitempty"`
-	VirtualIP        string               `json:"virtual_ip"`
-	PublicKey        string               `json:"public_key"`
-	PublicIP         string               `json:"public_ip"`
-	LocalAddr        string               `json:"local_addr"`
-	STUNAddr         string               `json:"stun_addr"`
-	IPv6Addr         string               `json:"ipv6_addr,omitempty"`
-	WGPubKey         string               `json:"wg_pub_key"`
-	WGPort           int                  `json:"wg_port"`
-	ActiveEndpoint   string               `json:"active_endpoint"`
-	LastSeen         time.Time            `json:"last_seen"`
-	Online           bool                 `json:"online"`
-	DirectP2P        bool                 `json:"direct_p2p"`
-	Latency          time.Duration        `json:"latency"`
-	IsExitNode       bool                 `json:"is_exit_node"`
-	AdvertisedRoutes []string             `json:"advertised_routes"`
-	AWG              *signaling.AWGParams `json:"awg,omitempty"`
-	OS               string               `json:"os,omitempty"`
-	Platform         string               `json:"platform,omitempty"`
-	Country          string               `json:"country,omitempty"`
-	CountryFlag      string               `json:"country_flag,omitempty"`
-	Channel          string               `json:"channel,omitempty"`
-	HasMQTT          bool                 `json:"has_mqtt"`
-	HasTelegram      bool                 `json:"has_telegram"`
-	PingMs           int64                `json:"ping_ms"`
-	LastMQTTSeen     time.Time            `json:"last_mqtt_seen,omitempty"`
-	LastTelegramSeen time.Time            `json:"last_telegram_seen,omitempty"`
+	DeviceID         string                `json:"device_id"`
+	Nickname         string                `json:"nickname,omitempty"`
+	PublicKey        string                `json:"public_key"`
+	PublicIP         string                `json:"public_ip"`
+	LocalAddr        string                `json:"local_addr,omitempty"`
+	STUNAddr         string                `json:"stun_addr,omitempty"`
+	IPv6Addr         string                `json:"ipv6_addr,omitempty"`
+	WGPubKey         string                `json:"wg_pubkey,omitempty"`
+	WGPort           int                   `json:"wg_port,omitempty"`
+	VirtualIP        string                `json:"virtual_ip,omitempty"`
+	DirectP2P        bool                  `json:"direct_p2p"`
+	ActiveEndpoint   string                `json:"active_endpoint,omitempty"`
+	PingMs           int64                 `json:"ping_ms"`
+	NATType          string                `json:"nat_type,omitempty"`
+	IsExitNode       bool                  `json:"is_exit_node,omitempty"`
+	AdvertisedRoutes []string              `json:"advertised_routes,omitempty"`
+	LastSeen         time.Time             `json:"last_seen"`
+	Online           bool                  `json:"online"`
+	Latency          time.Duration         `json:"latency"`
+	Channel          string                `json:"channel,omitempty"`
+	HasMQTT          bool                  `json:"has_mqtt,omitempty"`
+	HasTelegram      bool                  `json:"has_telegram,omitempty"`
+	LastMQTTSeen     time.Time             `json:"last_mqtt_seen,omitempty"`
+	LastTelegramSeen time.Time             `json:"last_telegram_seen,omitempty"`
+	AWG              *signaling.AWGParams  `json:"awg,omitempty"`
 }
 
-// Registry manages discovered peers in a thread-safe manner.
+// Registry manages thread-safe tracking of discovered mesh peers.
 type Registry struct {
 	mu    sync.RWMutex
 	peers map[string]*Peer
@@ -54,14 +51,14 @@ func NewRegistry() *Registry {
 	}
 }
 
-// ClearAll removes all peers from the registry (used when changing signaling topics).
+// ClearAll removes all peers from the registry.
 func (r *Registry) ClearAll() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.peers = make(map[string]*Peer)
 }
 
-// Delete removes a peer immediately by deviceID (e.g. when peer sends goodbye/leave).
+// Delete removes a peer immediately by deviceID.
 func (r *Registry) Delete(deviceID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -85,7 +82,6 @@ func (r *Registry) Upsert(p *Peer) {
 
 	now := time.Now()
 
-	// Обновляем метки каналов
 	if p.Channel == "mqtt" {
 		p.HasMQTT = true
 		p.LastMQTTSeen = now
@@ -112,14 +108,13 @@ func (r *Registry) Upsert(p *Peer) {
 			p.AWG = existing.AWG
 		}
 
-		// Сохраняем доступность каналов
-		if existing.HasMQTT && now.Sub(existing.LastMQTTSeen) < 60*time.Second {
+		if existing.HasMQTT && now.Sub(existing.LastMQTTSeen) < 120*time.Second {
 			p.HasMQTT = true
 			if p.LastMQTTSeen.IsZero() {
 				p.LastMQTTSeen = existing.LastMQTTSeen
 			}
 		}
-		if existing.HasTelegram && now.Sub(existing.LastTelegramSeen) < 60*time.Second {
+		if existing.HasTelegram && now.Sub(existing.LastTelegramSeen) < 120*time.Second {
 			p.HasTelegram = true
 			if p.LastTelegramSeen.IsZero() {
 				p.LastTelegramSeen = existing.LastTelegramSeen
@@ -184,8 +179,11 @@ func (r *Registry) MarkOffline(maxAge time.Duration) {
 	}
 }
 
-// Cleanup removes peers not seen within maxAge.
+// Cleanup removes stale peers not seen within maxAge (default: 24 hours).
 func (r *Registry) Cleanup(maxAge time.Duration) {
+	if maxAge < time.Hour {
+		maxAge = 24 * time.Hour
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -197,9 +195,9 @@ func (r *Registry) Cleanup(maxAge time.Duration) {
 	}
 }
 
-// StartMonitor runs a background goroutine to periodically mark stale peers offline and cleanup.
+// StartMonitor runs a background goroutine to periodically mark stale peers offline.
 func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
-	if interval <= 0 || interval > 15*time.Second {
+	if interval <= 0 {
 		interval = 10 * time.Second
 	}
 	go func() {
@@ -211,8 +209,8 @@ func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				r.MarkOffline(20 * time.Second)
-				r.Cleanup(45 * time.Second)
+				r.MarkOffline(45 * time.Second)
+				r.Cleanup(24 * time.Hour)
 			}
 		}
 	}()

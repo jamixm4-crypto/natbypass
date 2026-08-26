@@ -458,9 +458,6 @@ func StartEngine(configYAML string, tunFd int) string {
 			case <-probeTicker.C:
 				if puncher != nil && globalRegistry != nil {
 					for _, p := range globalRegistry.List() {
-						if !p.Online {
-							continue
-						}
 						go func(peer *peer.Peer) {
 							if peer.ActiveEndpoint != "" {
 								_ = puncher.SendHolePunchProbe(peer.ActiveEndpoint)
