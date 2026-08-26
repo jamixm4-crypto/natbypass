@@ -131,7 +131,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             natType    = obj.optString("nat_type", "")
         } catch (_: Exception) {}
 
-        val vpnActive = isEngineRunning || NatBypassVpnService.isRunning
+        val vpnActive = NatBypassVpnService.isRunning
 
         // --- Peers ---
         val peers = mutableListOf<PeerUiModel>()

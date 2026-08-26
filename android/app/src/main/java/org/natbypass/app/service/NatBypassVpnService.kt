@@ -71,7 +71,16 @@ class NatBypassVpnService : VpnService() {
 
         try {
             val currentVip = org.natbypass.app.util.MobileBridge.getVirtualIP().ifEmpty { "10.200.0.10" }
-            startForeground(NOTIFICATION_ID, buildNotification("Подключение к P2P сети ($currentVip)..."))
+            val notif = buildNotification("Подключение к P2P сети ($currentVip)...")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notif,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notif)
+            }
 
             // ── WakeLock: PARTIAL_WAKE_LOCK позволяет CPU работать при выключенном экране
             // Это критически важно — без него Android Doze Mode замораживает UDP-горутины

@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui.compose
+package org.natbypass.app.ui.compose
 
 import android.content.Context
 import android.os.Build
@@ -261,6 +261,27 @@ fun SettingsScreen(
                     checked = autoStart,
                     onCheckedChange = { autoStart = it },
                 )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = android.net.Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            try {
+                                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            } catch (_: Exception) {}
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Outlined.BatteryChargingFull, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Работа в фоне (без ограничений)", fontSize = 12.sp)
+                }
             }
 
             // ── Network / Protocol ────────────────────────────────────────
