@@ -308,6 +308,10 @@ func StartEngine(configYAML string, tunFd int) string {
 						}
 					}
 				}
+				natTypeStr := "unknown"
+				if puncher != nil {
+					natTypeStr = puncher.GetNATType().String()
+				}
 				payload := &signaling.Payload{
 					DeviceID:         devID,
 					Nickname:         globalDevName,
@@ -321,6 +325,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					WGPort:           cfg.WireGuard.ListenPort,
 					VirtualIP:        globalVirtualIP,
 					DirectP2P:        hasDirect,
+					NATType:          natTypeStr,
 					IsExitNode:       cfg.Network.AllowExitNode,
 					AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 					Timestamp:        time.Now(),
@@ -417,38 +422,79 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
-	// Фоновый цикл периодической пробивки UDP-сокетов до всех онлайн пиров (каждые 3 секунды)
+	// Фоновый цикл периодической пробивки UDP-сокетов до всех онлайн пиров
+	// СТРАТЕГИЯ: двухуровневая —
+	//   Уровень 1 (каждые 7с): Лёгкий keep-alive KAEP для удержания CGNAT маппинга
+	//              (мобильные операторы убивают маппинг за 15–30с бездействия)
+	//   Уровень 2 (каждые 25с): Полный hole-punch burst если нет активного P2P соединения
 	go func() {
-		probeTicker := time.NewTicker(3 * time.Second)
-		defer probeTicker.Stop()
+		keepAliveTicker := time.NewTicker(7 * time.Second)
+		fullProbeTicker := time.NewTicker(25 * time.Second)
+		defer keepAliveTicker.Stop()
+		defer fullProbeTicker.Stop()
+
+		// Логируем NAT тип через 8 секунд после старта (даём детекции завершиться)
+		time.AfterFunc(8*time.Second, func() {
+			if puncher != nil {
+				natType := puncher.GetNATType()
+				switch natType {
+				case network.NATTypeSymmetric:
+					logger.Warn().Str("nat_type", natType.String()).Msg("🔴 Обнаружен Symmetric NAT (CGNAT оператора) — классический UDP hole punch ненадёжен, использую расширенный sweep ±64 портов")
+				case network.NATTypeFullCone:
+					logger.Info().Str("nat_type", natType.String()).Msg("🟢 Обнаружен Full Cone NAT — UDP P2P будет работать надёжно")
+				default:
+					logger.Info().Str("nat_type", natType.String()).Msg("🔍 Тип NAT определён")
+				}
+			}
+		})
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-probeTicker.C:
+			case <-keepAliveTicker.C:
+				// Уровень 1: лёгкий keep-alive для всех known адресов
 				if puncher != nil && globalRegistry != nil {
 					for _, p := range globalRegistry.List() {
-						if p.Online {
-							if p.ActiveEndpoint != "" {
-								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+						if !p.Online {
+							continue
+						}
+						// Приоритет: ActiveEndpoint (уже проверенный прямой путь) → STUNAddr → IPv6
+						if p.ActiveEndpoint != "" {
+							_ = puncher.SendKeepAlive(p.ActiveEndpoint)
+						} else if p.STUNAddr != "" {
+							_ = puncher.SendKeepAlive(p.STUNAddr)
+						}
+						if p.IPv6Addr != "" && p.IPv6Addr != p.ActiveEndpoint {
+							_ = puncher.SendKeepAlive(p.IPv6Addr)
+						}
+					}
+				}
+			case <-fullProbeTicker.C:
+				// Уровень 2: полный burst hole-punch если нет активного Direct P2P
+				if puncher != nil && globalRegistry != nil {
+					for _, p := range globalRegistry.List() {
+						if !p.Online || p.DirectP2P {
+							continue
+						}
+						go func(pr *peer.Peer) {
+							if pr.ActiveEndpoint != "" {
+								_ = puncher.SendHolePunchProbe(pr.ActiveEndpoint)
 							}
-							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							if pr.STUNAddr != "" && pr.STUNAddr != pr.ActiveEndpoint {
+								_ = puncher.SendHolePunchProbe(pr.STUNAddr)
 							}
-							if p.IPv6Addr != "" && p.IPv6Addr != p.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(p.IPv6Addr)
+							if pr.IPv6Addr != "" && pr.IPv6Addr != pr.ActiveEndpoint {
+								_ = puncher.SendHolePunchProbe(pr.IPv6Addr)
 							}
-							if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(p.LocalAddr)
-							}
-							if p.PublicIP != "" {
-								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:47832", p.PublicIP))
-								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:51820", p.PublicIP))
-								if p.WGPort > 0 && p.WGPort != 47832 && p.WGPort != 51820 {
-									_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+							if pr.PublicIP != "" {
+								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:47832", pr.PublicIP))
+								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:51820", pr.PublicIP))
+								if pr.WGPort > 0 && pr.WGPort != 47832 && pr.WGPort != 51820 {
+									_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", pr.PublicIP, pr.WGPort))
 								}
 							}
-						}
+						}(p)
 					}
 				}
 			}
@@ -575,6 +621,39 @@ func RestartEngine(configYAML string) string {
 	StopEngine()
 	time.Sleep(200 * time.Millisecond)
 	return StartEngine(configYAML, 0)
+}
+
+// RefreshPublicIP вызывается Android NetworkCallback при смене сети (Wi-Fi → LTE и обратно).
+// Принудительно пересматривает публичный IP и STUN-mapped адрес, затем публикует обновлённый маяк.
+// Это критически важно: без пересмотра STUN-адреса после смены сети hole-punch летит на устаревший endpoint.
+func RefreshPublicIP() {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if !engineRunning || globalPuncher == nil {
+		return
+	}
+	puncher := globalPuncher
+	logger.Info().Msg("🔄 Смена сети обнаружена — пересматриваю IP и STUN-адрес...")
+
+	// Сбрасываем текущий STUN и IP чтобы следующий маяк отправил свежие данные
+	globalSTUN = ""
+	globalPublicIP = ""
+	globalIPv6 = ""
+
+	// Асинхронно пересматриваем STUN с небольшой задержкой (даём сети подняться)
+	go func() {
+		time.Sleep(800 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if sIP, sPort, err := puncher.DiscoverMappedAddress(ctx); err == nil && sIP != nil {
+			engineMu.Lock()
+			globalSTUN = fmt.Sprintf("%s:%d", sIP.String(), sPort)
+			engineMu.Unlock()
+			logger.Info().Str("stun", globalSTUN).Msg("✅ STUN-адрес обновлён после смены сети")
+		}
+	}()
 }
 
 // GetLogsText возвращает полный лог ядра

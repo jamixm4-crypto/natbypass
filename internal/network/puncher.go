@@ -28,6 +28,14 @@ type UDPPuncher struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mu           sync.Mutex
+
+	// NATType is detected asynchronously after construction.
+	NATType    NATType
+	natTypeMu  sync.RWMutex
+
+	// portDelta tracks the observed consecutive port increment for Symmetric NAT prediction.
+	lastMappedPort int
+	portDelta      int
 }
 
 func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPing DirectPingCallback) (*UDPPuncher, error) {
@@ -70,10 +78,25 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		stunRespCh:   make(chan struct{}, 8),
 		ctx:          ctx,
 		cancel:       cancel,
+		NATType:      NATTypeUnknown,
 	}
 
 	// Единый цикл чтения пакетов (STUN + PING/PONG)
 	go p.readLoop()
+
+	// Detect NAT type in background — doesn't block startup
+	go func() {
+		dCtx, dCancel := context.WithTimeout(ctx, 6*time.Second)
+		defer dCancel()
+		natType, err := DetectNATType(dCtx, conn, stunServers)
+		p.natTypeMu.Lock()
+		if err == nil {
+			p.NATType = natType
+		} else {
+			p.NATType = NATTypeUnknown
+		}
+		p.natTypeMu.Unlock()
+	}()
 
 	return p, nil
 }
@@ -81,6 +104,14 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 func (p *UDPPuncher) LocalPort() int {
 	return p.localPort
 }
+
+// GetNATType returns the detected NAT type (may be Unknown if detection is still running).
+func (p *UDPPuncher) GetNATType() NATType {
+	p.natTypeMu.RLock()
+	defer p.natTypeMu.RUnlock()
+	return p.NATType
+}
+
 
 // DiscoverMappedAddress отправляет STUN Binding Request с постоянного сокета
 func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, error) {
@@ -118,9 +149,11 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 	return nil, 0, fmt.Errorf("STUN discovery timeout")
 }
 
-// SendHolePunchProbe отправляет прямой UDP пакет второму компьютеру или мобильному устройству.
-// Включает Symmetric NAT Multi-Port Prediction (пробивку диапазона ±32 портов для обхода CGNAT мобильных операторов)
-// и прямую отправку по IPv6 при наличии.
+// SendHolePunchProbe отправляет прямой UDP пакет второму устройству.
+//
+// Стратегия sweep зависит от типа NAT:
+//   - Full Cone / Unknown  → ±32 портов вокруг целевого адреса
+//   - Symmetric (CGNAT)    → ±64 портов + предсказательный сдвиг (delta) если наблюдался паттерн инкремента
 func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
@@ -136,21 +169,46 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("NATBYPASS:PING:%s:%d", p.myDevID, nowNano))
 
-	// 1. Отправка серии пакетов на точный сокет для открытия Stateful NAT
+	// 1. Точное попадание — 3 пакета для надёжности
 	for i := 0; i < 3; i++ {
 		_, _ = p.conn.WriteToUDP(probeData, rAddr)
 	}
 
-	// 2. Для IPv4: Multi-Port Symmetric NAT Port Prediction (±32 порта вокруг STUN адреса для мобильного интернета / CGNAT)
+	// 2. Sweep по диапазону портов для компенсации CGNAT port allocation
 	if rAddr.IP.To4() != nil {
+		p.natTypeMu.RLock()
+		natT := p.NATType
+		delta := p.portDelta
+		p.natTypeMu.RUnlock()
+
 		basePort := rAddr.Port
 		ip := rAddr.IP
-		for delta := 1; delta <= 32; delta++ {
-			if basePort+delta <= 65535 {
-				_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort + delta})
+
+		// Symmetric NAT: wider sweep ±64 + predicted delta offset
+		sweep := 32
+		if natT == NATTypeSymmetric {
+			sweep = 64
+		}
+
+		for d := 1; d <= sweep; d++ {
+			if basePort+d <= 65535 {
+				_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort + d})
 			}
-			if basePort-delta > 1024 {
-				_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort - delta})
+			if basePort-d > 1024 {
+				_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort - d})
+			}
+		}
+
+		// Predicted shift: если CGNAT выдаёт порты инкрементально, добавляем ещё один центр
+		if natT == NATTypeSymmetric && delta > 0 {
+			shifted := basePort + delta
+			for d := 0; d <= 16; d++ {
+				if shifted+d <= 65535 {
+					_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: shifted + d})
+				}
+				if shifted-d > 1024 {
+					_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: shifted - d})
+				}
 			}
 		}
 	}
@@ -158,11 +216,29 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	return nil
 }
 
+// SendKeepAlive отправляет минимальный 4-байтный пакет для поддержания CGNAT маппинга.
+// Использует отдельный tiny payload вместо полноценного PING/PONG, чтобы не триггерить лишние callback-и.
+func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
+	if targetAddr == "" || p.conn == nil {
+		return nil
+	}
+	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+	if err != nil {
+		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = p.conn.WriteToUDP([]byte("KAEP"), rAddr)
+	return err
+}
+
 func (p *UDPPuncher) SetDataCallback(cb DirectDataCallback) {
 	p.mu.Lock()
 	p.onDataPacket = cb
 	p.mu.Unlock()
 }
+
 
 // SendDataPacket отправляет сырой IP пакет туннеля пиру
 func (p *UDPPuncher) SendDataPacket(targetAddr string, payload []byte) error {
@@ -235,6 +311,11 @@ func (p *UDPPuncher) readLoop() {
 
 		data := string(buf[:n])
 
+		// Тихий keep-alive пакет — просто игнорируем без callback
+		if data == "KAEP" {
+			continue
+		}
+
 		// 2. Входящий PING от пира -> отвечаем PONG и подтверждаем сокет
 		if strings.HasPrefix(data, "NATBYPASS:PING:") {
 			parts := strings.Split(data, ":")
@@ -245,13 +326,22 @@ func (p *UDPPuncher) readLoop() {
 				}
 				sentTs := parts[len(parts)-1]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
-				// Отправляем 2 PONG пакета для гарантии доставки
+				// Отправляем 3 PONG пакета для гарантии доставки через CGNAT
+				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
-				// Уведомляем о прямом UDP-контакте — fromAddr = РЕАЛЬНЫЙ адрес пира за NAT
+				// FIX: вычисляем реальный RTT из метки времени внутри PING-пакета
+				// (ранее передавался rtt=0, из-за чего PingMs не обновлялся и DirectP2P не фиксировался)
+				var rttForCallback time.Duration = time.Millisecond // минимум 1ms — показатель что сокет живой
+				if sentNano, parseErr := strconv.ParseInt(sentTs, 10, 64); parseErr == nil {
+					if computed := time.Since(time.Unix(0, sentNano)); computed > 0 && computed < 10*time.Second {
+						rttForCallback = computed
+					}
+				}
+
 				if p.onPingResult != nil {
-					p.onPingResult(senderID, 0, remoteAddr.String())
+					p.onPingResult(senderID, rttForCallback, remoteAddr.String())
 				}
 			}
 			continue
@@ -268,6 +358,18 @@ func (p *UDPPuncher) readLoop() {
 				sentNano, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
 				if err == nil {
 					rtt := time.Since(time.Unix(0, sentNano))
+					// Обновляем portDelta для Symmetric NAT предсказания (разница между mapped портами)
+					if remoteAddr != nil && rtt > 0 {
+						p.natTypeMu.Lock()
+						if p.lastMappedPort > 0 && remoteAddr.Port > 0 {
+							observed := remoteAddr.Port - p.lastMappedPort
+							if observed > 0 && observed < 512 {
+								p.portDelta = observed
+							}
+						}
+						p.lastMappedPort = remoteAddr.Port
+						p.natTypeMu.Unlock()
+					}
 					if p.onPingResult != nil {
 						p.onPingResult(senderID, rtt, remoteAddr.String())
 					}

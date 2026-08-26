@@ -6,9 +6,15 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +31,13 @@ class NatBypassVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var serviceJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default)
+
+    // WakeLock — предотвращает засыпание CPU, чтобы UDP горутины продолжали работать при выключенном экране
+    private var wakeLock: PowerManager.WakeLock? = null
+    // WifiLock — удерживает Wi-Fi в высокопроизводительном режиме при включённом экране
+    private var wifiLock: WifiManager.WifiLock? = null
+    // NetworkCallback — автоматически пере-STUN при смене сети (Wi-Fi → LTE и обратно)
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     companion object {
         const val ACTION_CONNECT = "org.natbypass.app.CONNECT"
@@ -59,6 +72,27 @@ class NatBypassVpnService : VpnService() {
         try {
             val currentVip = org.natbypass.app.util.MobileBridge.getVirtualIP().ifEmpty { "10.200.0.10" }
             startForeground(NOTIFICATION_ID, buildNotification("Подключение к P2P сети ($currentVip)..."))
+
+            // ── WakeLock: PARTIAL_WAKE_LOCK позволяет CPU работать при выключенном экране
+            // Это критически важно — без него Android Doze Mode замораживает UDP-горутины
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "NatBypass::P2PWakeLock"
+            ).also { lock ->
+                lock.acquire(12 * 60 * 60 * 1000L) // max 12 часов, сервис сам освободит при disconnect
+            }
+
+            // ── WifiLock: HIGH_PERF режим — снижает latency на Wi-Fi, предотвращает засыпание адаптера
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "NatBypass::WifiLock").also {
+                it.acquire()
+            }
+
+            // ── NetworkCallback: триггерит re-STUN при переключении сети (Wi-Fi ↔ LTE)
+            // Без этого после смены сети STUN-адрес остаётся устаревшим и hole punch не работает
+            registerNetworkCallback()
 
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
@@ -122,10 +156,49 @@ class NatBypassVpnService : VpnService() {
         }
     }
 
+    private fun registerNetworkCallback() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                super.onAvailable(network)
+                // Сеть изменилась — триггерим пересборку STUN-адреса через 1 секунду
+                // (даём сети стабилизироваться перед отправкой нового маяка)
+                scope.launch {
+                    delay(1000)
+                    if (isRunning) {
+                        // Уведомляем Go-движок о смене сети через обновление конфигурации
+                        // В текущей архитектуре достаточно принудительного переопределения IP
+                        org.natbypass.app.util.MobileBridge.refreshPublicIP()
+                    }
+                }
+            }
+        }
+        cm.registerNetworkCallback(request, cb)
+        networkCallback = cb
+    }
+
     private fun disconnect() {
         isRunning = false
         serviceJob?.cancel()
         org.natbypass.app.util.MobileBridge.detachTUN()
+
+        // Освобождаем WakeLock и WifiLock
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
+        try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Exception) {}
+        wakeLock = null
+        wifiLock = null
+
+        // Снимаем регистрацию NetworkCallback
+        try {
+            networkCallback?.let {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                cm.unregisterNetworkCallback(it)
+            }
+        } catch (_: Exception) {}
+        networkCallback = null
 
         try {
             vpnInterface?.close()
@@ -176,3 +249,4 @@ class NatBypassVpnService : VpnService() {
             .build()
     }
 }
+

@@ -239,4 +239,16 @@ object MobileBridge {
             -1L
         }
     }
+
+    /**
+     * Триггерит пересборку публичного IP и STUN-адреса (вызывается при смене сети Wi-Fi ↔ LTE).
+     * Если Go-движок не экспортирует эту функцию — тихо игнорируется.
+     */
+    fun refreshPublicIP() {
+        val method = getMethod("refreshPublicIP") ?: return
+        try {
+            method.invoke(null)
+        } catch (e: Exception) {}
+    }
 }
+

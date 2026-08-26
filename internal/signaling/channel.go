@@ -127,6 +127,7 @@ type Payload struct {
 	DirectP2P        bool       `json:"direct_p2p,omitempty"`
 	ActiveEndpoint   string     `json:"active_endpoint,omitempty"`
 	PingMs           int64      `json:"ping_ms,omitempty"`
+	NATType          string     `json:"nat_type,omitempty"` // "full_cone", "restricted", "symmetric", "unknown"
 }
 
 func (p *Payload) UnmarshalJSON(data []byte) error {
