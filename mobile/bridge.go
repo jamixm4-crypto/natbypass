@@ -286,13 +286,13 @@ func StartEngine(configYAML string, tunFd int) string {
 				if cfg.WireGuard.AWG.Enabled || globalAWGPreset != "standard" {
 					awgParams = getAWGParamsFromPreset(globalAWGPreset)
 				}
+				pPort := 47832
+				if puncher != nil {
+					pPort = puncher.LocalPort()
+				}
 				lanIP := network.GetLocalLANIP()
 				localAddr := ""
 				if lanIP != "" {
-					pPort := 51820
-					if puncher != nil {
-						pPort = puncher.LocalPort()
-					}
 					localAddr = fmt.Sprintf("%s:%d", lanIP, pPort)
 				}
 				activeProf := cfg.EnsureActiveProfile()
@@ -325,7 +325,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					STUNAddr:         globalSTUN,
 					IPv6Addr:         globalIPv6,
 					WGPubKey:         wgKey.PublicKey,
-					WGPort:           cfg.WireGuard.ListenPort,
+					WGPort:           pPort,
 					VirtualIP:        globalVirtualIP,
 					DirectP2P:        hasDirect,
 					NATType:          natTypeStr,
@@ -506,6 +506,14 @@ func attachTUN(tunFd int) {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
 
+			// Instant ICMP echo reply for Android
+			if len(payload) >= 20 && (payload[0]>>4) == 4 && payload[9] == 1 {
+				ihl := int(payload[0]&0x0F) * 4
+				if len(payload) >= ihl+8 && payload[ihl] == 8 {
+					respondICMPEcho(payload, srcAddr)
+				}
+			}
+
 			// Р—Р°РїРёСЃС‹РІР°РµРј РїР°РєРµС‚ РІ TUN вЂ” Android OS СЃР°РјР° РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ ICMP, TCP, UDP
 			// РќР• РїРµСЂРµС…РІР°С‚С‹РІР°РµРј ICMP РІСЂСѓС‡РЅСѓСЋ вЂ” РћРЎ РіРµРЅРµСЂРёСЂСѓРµС‚ Echo Reply СЃР°РјР° Рё РїРёС€РµС‚ РµРіРѕ РѕР±СЂР°С‚РЅРѕ РІ TUN
 			if globalTunFile != nil {
@@ -556,8 +564,16 @@ func attachTUN(tunFd int) {
 							}
 						}
 
-						if targetPeer != nil && targetPeer.ActiveEndpoint != "" && globalPuncher != nil {
-							_ = globalPuncher.SendDataPacket(targetPeer.ActiveEndpoint, pkt)
+						if targetPeer != nil && globalPuncher != nil {
+							if targetPeer.ActiveEndpoint != "" {
+								_ = globalPuncher.SendDataPacket(targetPeer.ActiveEndpoint, pkt)
+							}
+							if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetPeer.ActiveEndpoint {
+								_ = globalPuncher.SendDataPacket(targetPeer.LocalAddr, pkt)
+							}
+							if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint && targetPeer.STUNAddr != targetPeer.LocalAddr {
+								_ = globalPuncher.SendDataPacket(targetPeer.STUNAddr, pkt)
+							}
 						}
 						// РџР°РєРµС‚С‹ Р±РµР· С†РµР»Рё (РЅРµ mesh Рё РЅРµ exit node) РѕС‚Р±СЂР°СЃС‹РІР°СЋС‚СЃСЏ вЂ”
 						// РќР• СЂР°СЃСЃС‹Р»Р°РµРј broadcast РїРѕ РІСЃРµРј РїРёСЂР°Рј (СЌС‚Рѕ РІС‹Р·С‹РІР°РµС‚ С€С‚РѕСЂРј С‚СЂР°С„РёРєР°)

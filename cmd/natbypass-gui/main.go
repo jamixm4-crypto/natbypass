@@ -2999,8 +2999,12 @@ func startEngineFromConfig(c *config.Config) {
 				return
 			}
 			// РџСЂРёРЅРёРјР°РµРј РїР°РєРµС‚С‹, Р°РґСЂРµСЃРѕРІР°РЅРЅС‹Рµ РЅР°С€РµРјСѓ VIP РёР»Рё 100.64.200.1 (РґРѕ СЃРѕРіР»Р°СЃРѕРІР°РЅРёСЏ)
-			if destIP.String() != myVirtualIP && destIP.String() != "100.64.200.1" {
-				return
+			// Instant ICMP echo response for 100% reliable ping
+			ihl := int(payload[0]&0x0F) * 4
+			if len(payload) >= ihl+8 && payload[9] == 1 && payload[ihl] == 8 {
+				if destIP.String() == myVirtualIP || destIP.String() == "100.64.200.1" {
+					respondICMPEcho(payload, srcAddr)
+				}
 			}
 
 			// Р—Р°РїРёСЃС‹РІР°РµРј РїР°РєРµС‚ РІ Wintun вЂ” Windows OS СЃР°РјР° РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ ICMP, TCP, UDP
@@ -3094,7 +3098,11 @@ func startEngineFromConfig(c *config.Config) {
 								_ = udpPuncher.SendDataPacket(targetPeer.ActiveEndpoint, packet)
 								atomic.AddUint64(&packetsSentCount, 1)
 							}
-							if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint && udpPuncher != nil {
+							if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetPeer.ActiveEndpoint && udpPuncher != nil {
+								_ = udpPuncher.SendDataPacket(targetPeer.LocalAddr, packet)
+								atomic.AddUint64(&packetsSentCount, 1)
+							}
+							if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint && targetPeer.STUNAddr != targetPeer.LocalAddr && udpPuncher != nil {
 								_ = udpPuncher.SendDataPacket(targetPeer.STUNAddr, packet)
 								atomic.AddUint64(&packetsSentCount, 1)
 							}
@@ -3318,8 +3326,14 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						peerVIP = "100.64.200.1"
 					}
 
-					lanAddr := fmt.Sprintf("%s:51820", srcAddr.IP.String())
-					if p.LocalAddr == "" {
+					peerPort := p.WGPort
+					if peerPort <= 0 {
+						peerPort = 47832
+					}
+					lanAddr := fmt.Sprintf("%s:%d", srcAddr.IP.String(), peerPort)
+					if p.LocalAddr != "" {
+						lanAddr = p.LocalAddr
+					} else {
 						p.LocalAddr = lanAddr
 					}
 
@@ -3450,6 +3464,10 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						activeTopic = active.MQTTTopic
 					}
 				}
+				pPort := 47832
+				if udpPuncher != nil {
+					pPort = udpPuncher.LocalPort()
+				}
 				payload := &signaling.Payload{
 					DeviceID:         myDevID,
 					Nickname:         myNick,
@@ -3457,10 +3475,10 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					VirtualIP:        myVirtualIP,
 					PublicKey:        crypto.KeyToHex(myPubKey),
 					PublicIP:         myPublicIP,
-					LocalAddr:        fmt.Sprintf("%s:51820", localIP),
+					LocalAddr:        fmt.Sprintf("%s:%d", localIP, pPort),
 					STUNAddr:         mySTUNAddr,
 					WGPubKey:         myWGPubKey,
-					WGPort:           51820,
+					WGPort:           pPort,
 					Timestamp:        time.Now(),
 					IsExitNode:       allowExitNode,
 					AdvertisedRoutes: advSubnets,
@@ -3751,7 +3769,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					if p.PublicIP != "" {
 						port := p.WGPort
 						if port <= 0 {
-							port = 51820
+							port = 47832
 						}
 						_ = udpPuncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
 					}
@@ -3768,7 +3786,45 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 }
 
 // handleICMPEcho РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ РІС…РѕРґСЏС‰РёР№ ICMP Echo Request (Type 8, Code 0)
-func handleICMPEcho(payload []byte) {
+func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
+	if len(payload) < 20 {
+		return
+	}
+	ihl := int(payload[0]&0x0F) * 4
+	if len(payload) < ihl+8 {
+		return
+	}
+	if payload[9] != 1 || payload[ihl] != 8 {
+		return
+	}
+
+	reply := make([]byte, len(payload))
+	copy(reply, payload)
+
+	srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15])
+	destIP := net.IPv4(payload[16], payload[17], payload[18], payload[19])
+	copy(reply[12:16], destIP.To4())
+	copy(reply[16:20], srcIP.To4())
+
+	reply[10] = 0
+	reply[11] = 0
+	ipCS := tunnel.CalculateChecksum(reply[:ihl])
+	reply[10] = byte(ipCS >> 8)
+	reply[11] = byte(ipCS)
+
+	reply[ihl] = 0
+	reply[ihl+2] = 0
+	reply[ihl+3] = 0
+	icmpCS := tunnel.CalculateChecksum(reply[ihl:])
+	reply[ihl+2] = byte(icmpCS >> 8)
+	reply[ihl+3] = byte(icmpCS)
+
+	if fromAddr != nil && udpPuncher != nil {
+		_ = udpPuncher.SendDataPacket(fromAddr.String(), reply)
+	}
+}
+
+func unusedOldICMP(payload []byte) {
 	if len(payload) < 20 {
 		return
 	}
@@ -3870,10 +3926,14 @@ func publishCurrentState(ctx context.Context) {
 		ipStr = "0.0.0.0"
 	}
 
+	pPort := 47832
+	if udpPuncher != nil {
+		pPort = udpPuncher.LocalPort()
+	}
 	localIP := getLocalLANIP()
 	localAddr := ""
 	if localIP != "" {
-		localAddr = fmt.Sprintf("%s:51820", localIP)
+		localAddr = fmt.Sprintf("%s:%d", localIP, pPort)
 	}
 
 	var advSubnets []string
@@ -3964,7 +4024,7 @@ func publishCurrentState(ctx context.Context) {
 		LocalAddr:        localAddr,
 		STUNAddr:         mySTUNAddr,
 		WGPubKey:         myWGPubKey,
-		WGPort:           51820,
+		WGPort:           pPort,
 		Timestamp:        time.Now(),
 		IsExitNode:       allowExitNode,
 		AdvertisedRoutes: advSubnets,
