@@ -118,7 +118,7 @@ jobs:
             [ -z "$TAG" ] && TAG="v1.2.7"
           fi
           echo "Attaching Android APK to release $TAG..."
-          gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --target main || true
+          gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --draft=false --latest || true
           
           for apk in release_apk/*.apk; do
             if [ -f "$apk" ]; then
@@ -126,4 +126,4 @@ jobs:
               gh release upload "${TAG}" "$apk" --clobber
             fi
           done
-          gh release edit "${TAG}" --latest --title "NatBypass ${TAG}" 2>/dev/null || true
+          gh release edit "${TAG}" --draft=false --latest --title "NatBypass ${TAG}" 2>/dev/null || true

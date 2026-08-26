@@ -123,7 +123,7 @@ jobs:
           $null = gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
               Write-Host "==> Creating clean release $tag..."
-              gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --target main
+              gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --draft=false --latest
           }
 
           $files = Get-ChildItem -Path release -File
@@ -132,8 +132,8 @@ jobs:
               gh release upload $tag $f.FullName --clobber
           }
           
-          # Устанавливаем статус Latest
-          $null = gh release edit $tag --latest --title "NatBypass $tag" 2>$null
+          # Публикуем релиз из draft и устанавливаем статус Latest
+          $null = gh release edit $tag --draft=false --latest --title "NatBypass $tag" 2>$null
           Write-Host "==> All fresh release files successfully uploaded for $tag!"
           $global:LASTEXITCODE = 0
           exit 0
