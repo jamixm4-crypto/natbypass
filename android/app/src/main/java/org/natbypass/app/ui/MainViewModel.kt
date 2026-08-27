@@ -38,6 +38,8 @@ data class PeerUiModel(
     val isOnline: Boolean,
     val isExitNode: Boolean,
     val natType: String,
+    val advertisedRoutes: List<String> = emptyList(),
+    val isSelectedExitNode: Boolean = false,
 )
 
 data class ProfileUiModel(
@@ -158,6 +160,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val pingMs   = obj.optLong("ping_ms", obj.optLong("PingMs", 0L))
                 val directP2p = obj.optBoolean("direct_p2p", false)
                 val peerNat  = obj.optString("nat_type", "")
+                val routesList = mutableListOf<String>()
+                val routesArr = obj.optJSONArray("advertised_routes") ?: obj.optJSONArray("AdvertisedRoutes")
+                if (routesArr != null) {
+                    for (rIdx in 0 until routesArr.length()) {
+                        val rStr = routesArr.optString(rIdx, "").trim()
+                        if (rStr.isNotEmpty()) routesList.add(rStr)
+                    }
+                }
+                val selectedExit = prefs.getString("selected_exit_node", "") ?: ""
 
                 var plat = obj.optString("platform", obj.optString("Platform", ""))
                 if (plat.isEmpty()) {
@@ -182,15 +193,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
 
                 peers.add(PeerUiModel(
-                    id          = id,
-                    displayName = displayName,
-                    virtualIp   = vip,
-                    platform    = plat,
-                    channelType = channelType,
-                    pingMs      = pingMs,
-                    isOnline    = isOnline,
-                    isExitNode  = isExit,
-                    natType     = peerNat,
+                    id                 = id,
+                    displayName        = displayName,
+                    virtualIp          = vip,
+                    platform           = plat,
+                    channelType        = channelType,
+                    pingMs             = pingMs,
+                    isOnline           = isOnline,
+                    isExitNode         = isExit,
+                    natType            = peerNat,
+                    advertisedRoutes   = routesList,
+                    isSelectedExitNode = (selectedExit.isNotEmpty() && selectedExit == id),
                 ))
             }
         } catch (_: Exception) {}
@@ -317,6 +330,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             onResult(rtt)
             if (rtt >= 0) refreshStatus()
         }
+    }
+
+    fun toggleSubnetRoute(context: Context, subnet: String): Boolean {
+        val current = prefs.getString("adv_subnets", "") ?: ""
+        val currentList = current.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+        val isActive = currentList.contains(subnet)
+        if (isActive) {
+            currentList.remove(subnet)
+        } else {
+            currentList.add(subnet)
+        }
+        val newAdv = currentList.joinToString(",")
+        prefs.edit().putString("adv_subnets", newAdv).apply()
+        
+        if (NatBypassVpnService.isRunning) {
+            val intent = Intent(context, NatBypassVpnService::class.java).apply {
+                action = NatBypassVpnService.ACTION_CONNECT
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+        viewModelScope.launch { refreshStatus() }
+        return !isActive
     }
 
     fun toggleExitNode(context: Context, peerId: String): Boolean {

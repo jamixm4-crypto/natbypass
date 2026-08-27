@@ -141,12 +141,46 @@ fun PeerCard(
                     }
                     if (peer.isExitNode) {
                         Spacer(Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Filled.Router,
-                            contentDescription = "Exit Node",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (peer.isSelectedExitNode) Color(0xFF22C55E).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            modifier = Modifier.padding(start = 2.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Public,
+                                    contentDescription = "Exit Node",
+                                    tint = if (peer.isSelectedExitNode) Color(0xFF22C55E) else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Text(
+                                    text = if (peer.isSelectedExitNode) "ШЛЮЗ" else "EXIT",
+                                    color = if (peer.isSelectedExitNode) Color(0xFF22C55E) else MaterialTheme.colorScheme.primary,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                    if (peer.advertisedRoutes.isNotEmpty()) {
+                        Spacer(Modifier.width(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color(0xFF38BDF8).copy(alpha = 0.15f),
+                            modifier = Modifier.padding(start = 2.dp)
+                        ) {
+                            Text(
+                                text = "🏠 " + peer.advertisedRoutes.first(),
+                                color = Color(0xFF38BDF8),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
                     }
                 }
             }

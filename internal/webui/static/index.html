@@ -779,6 +779,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     <!-- TAB 1: DASHBOARD (EXACT SCREENSHOT LAYOUT) -->
     <div id="tab-dashboard" class="tab-pane active">
+      <!-- Active Gateway Banner -->
+      <div id="activeGatewayBanner" style="display:none; background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.4); border-radius:12px; padding:8px 14px; margin-bottom:12px; justify-content:space-between; align-items:center;">
+        <div style="display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:700;">
+          <span style="font-size:1.1rem;">🌐</span>
+          <span>Весь интернет маршрутизируется через узел:</span>
+          <span id="gatewayBannerName" style="color:#c084fc;" class="mono">—</span>
+        </div>
+        <button onclick="toggleClientExitNode(currentSelectedExitNode, currentActiveExitVIP, false)" class="btn-pill" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#f87171; padding:3px 10px; font-weight:700; font-size:0.74rem; cursor:pointer;">🔌 Отключить шлюз</button>
+      </div>
       <div class="dashboard-grid">
         <!-- Card 1: Top-Left (Number + Donut Ring) -->
         <div class="glass-card card-top-left">
@@ -2198,7 +2207,30 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           chanBadge = `<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-dim); font-size:0.72rem; padding:2px 7px;">📡 Сигнал</span>`;
         }
 
-        const exitBadge = p.is_exit_node ? `<span class="badge badge-purple" style="font-size:0.72rem;">🌐 Exit Node</span>` : `—`;
+        let exitBadge = '—';
+        let exitBtn = '';
+        if (p.is_exit_node) {
+          const isExitActive = (currentSelectedExitNode === p.device_id);
+          if (isExitActive) {
+            exitBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" title="Нажмите чтобы отключить шлюз">🟢 Exit Node (АКТИВЕН)</span>`;
+            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#22c55e; color:#000; font-weight:700; padding:3px 9px; font-size:0.72rem;">🟢 Шлюз ВКЛ</button>`;
+          } else {
+            exitBadge = `<span class="badge badge-purple" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" title="Нажмите чтобы направить интернет через этот узел">🌐 Exit Node</span>`;
+            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#c084fc; border-color:rgba(168,85,247,0.4); padding:3px 9px; font-size:0.72rem;">🌐 В интернет</button>`;
+          }
+        }
+
+        let subnetBadges = '';
+        if (p.advertised_routes && p.advertised_routes.length > 0) {
+          p.advertised_routes.forEach(sub => {
+            const isSubActive = currentActiveSubnetRoutes.includes(sub);
+            if (isSubActive) {
+              subnetBadges += `<button onclick="toggleClientSubnet('${p.device_id}', '${vIP}', '${sub}', false)" class="btn-pill" style="background:#22c55e; color:#000; font-weight:700; padding:2px 7px; font-size:0.7rem; margin-right:3px;" title="Маршрут активен. Нажмите для отключения">🏠 ${sub} (ВКЛ)</button>`;
+            } else {
+              subnetBadges += `<button onclick="toggleClientSubnet('${p.device_id}', '${vIP}', '${sub}', true)" class="btn-pill" style="background:rgba(34,197,94,0.14); border:1px solid rgba(34,197,94,0.35); color:#4ade80; padding:2px 7px; font-size:0.7rem; margin-right:3px;" title="Нажмите чтобы подключить подсеть">🏠 ${sub}</button>`;
+            }
+          });
+        }
         const vIP = p.virtual_ip || ('10.200.0.' + (idx + 2));
 
         let plat = p.platform || p.os || '';
@@ -2233,6 +2265,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <td>${p2pBadge}</td>
             <td>${latDisplay}</td>
             <td style="white-space:nowrap;">
+              ${exitBtn}
+              ${subnetBadges}
               <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:3px 7px; font-size:0.72rem;" title="Послать прямой UDP пинг">⚡</button>
               <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:3px 7px; font-size:0.72rem;" title="Задать имя">⭐</button>
             </td>
@@ -2255,6 +2289,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <td>${latDisplay}</td>
             <td>${exitBadge}</td>
             <td style="white-space:nowrap;">
+              ${exitBtn}
+              ${subnetBadges}
               <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⚡ Ping</button>
               <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⭐</button>
               <button onclick="copyText('${vIP}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">📋 IP</button>
@@ -3087,3 +3123,123 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   </script>
 </body>
 </html>
+
+
+    async function loadRoutingStatus() {
+      try {
+        const res = await fetch('/api/routing/status');
+        const json = await res.json();
+        if (json.ok && json.data) {
+          currentSelectedExitNode = json.data.selected_exit_node || '';
+          currentActiveExitVIP = json.data.active_exit_vip || '';
+          currentActiveSubnetRoutes = json.data.active_subnet_routes || [];
+          
+          const chkExit = document.getElementById('cfgAllowExitNode');
+          if (chkExit) chkExit.checked = !!json.data.allow_exit_node;
+          
+          const inpSubnets = document.getElementById('cfgAdvertisedSubnets');
+          if (inpSubnets && json.data.advertised_subnets) {
+            inpSubnets.value = json.data.advertised_subnets.join(', ');
+          }
+
+          renderGatewayBanner(json.data);
+        }
+      } catch(e) {}
+    }
+
+    function renderGatewayBanner(data) {
+      const banner = document.getElementById('activeGatewayBanner');
+      if (!banner) return;
+      if (data && data.selected_exit_node && data.active_exit_vip) {
+        banner.style.display = 'flex';
+        document.getElementById('gatewayBannerName').innerText = (data.active_exit_name || data.selected_exit_node) + ' (' + data.active_exit_vip + ')';
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    async function toggleClientExitNode(peerId, gatewayVIP, enable) {
+      showToast(enable ? '🌐 Подключение к интернет-шлюзу...' : '🔌 Отключение интернет-шлюза...');
+      try {
+        const res = await fetch('/api/routing/exit-node/toggle', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({peer_id: peerId, gateway_vip: gatewayVIP, enabled: enable})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast(enable ? '✅ Весь интернет направлен через шлюз ' + gatewayVIP : '✅ Восстановлен прямой интернет');
+          loadRoutingStatus();
+          refreshData();
+        } else {
+          showToast('❌ Ошибка: ' + json.error);
+        }
+      } catch(e) {
+        showToast('❌ Ошибка связи');
+      }
+    }
+
+    async function toggleClientSubnet(peerId, gatewayVIP, subnet, enable) {
+      showToast(enable ? ('🏠 Добавление маршрута к ' + subnet + '...') : ('Удаление маршрута к ' + subnet + '...'));
+      try {
+        const res = await fetch('/api/routing/subnet/toggle', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({peer_id: peerId, gateway_vip: gatewayVIP, subnet: subnet, enabled: enable})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast(enable ? ('✅ Маршрут к подсети ' + subnet + ' активен!') : ('✅ Маршрут к ' + subnet + ' отключен'));
+          loadRoutingStatus();
+          refreshData();
+        } else {
+          showToast('❌ Ошибка: ' + json.error);
+        }
+      } catch(e) {
+        showToast('❌ Ошибка связи');
+      }
+    }
+
+    async function saveHostRoutingSettings() {
+      const allowExit = document.getElementById('cfgAllowExitNode') ? document.getElementById('cfgAllowExitNode').checked : false;
+      const rawSubnets = document.getElementById('cfgAdvertisedSubnets') ? document.getElementById('cfgAdvertisedSubnets').value : '';
+      const subnets = rawSubnets.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
+      showToast('💾 Сохранение настроек маршрутизации...');
+      try {
+        const res = await fetch('/api/routing/host/settings', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({allow_exit_node: allowExit, advertised_subnets: subnets})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✅ Настройки шлюза и подсетей сохранены!');
+          loadRoutingStatus();
+          refreshData();
+        } else {
+          showToast('❌ Ошибка: ' + json.error);
+        }
+      } catch(e) {
+        showToast('❌ Ошибка сохранения');
+      }
+    }
+
+    async function autoDetectLocalSubnets() {
+      showToast('🔍 Поиск локальных подсетей...');
+      try {
+        const res = await fetch('/api/routing/local-subnets');
+        const json = await res.json();
+        if (json.ok && json.data && json.data.subnets && json.data.subnets.length > 0) {
+          const inp = document.getElementById('cfgAdvertisedSubnets');
+          if (inp) {
+            inp.value = json.data.subnets.join(', ');
+            showToast('✅ Найдено: ' + json.data.subnets.join(', '));
+          }
+        } else {
+          showToast('ℹ️ Локальные подсети не обнаружены (введите вручную)');
+        }
+      } catch(e) {
+        showToast('❌ Ошибка автоопределения');
+      }
+    }

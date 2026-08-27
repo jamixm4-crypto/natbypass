@@ -25,6 +25,7 @@ import (
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/updater"
+	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/wireguard"
 	"github.com/skip2/go-qrcode"
 	"golang.org/x/net/proxy"
@@ -2076,3 +2077,213 @@ func (s *Server) handleProfileImport(w http.ResponseWriter, r *http.Request) {
 		"profile": saved,
 	}, "")
 }
+
+
+// ── Routing & Exit Node API ──────────────────────────────────────────────────
+
+// handleRoutingStatus — GET /api/routing/status — статус шлюза и маршрутизации
+func (s *Server) handleRoutingStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	activeExitVIP := ""
+	activeExitName := ""
+	if cfg.Network.SelectedExitNode != "" && s.registry != nil {
+		if p, ok := s.registry.Get(cfg.Network.SelectedExitNode); ok && p.Online && p.IsExitNode {
+			activeExitVIP = p.VirtualIP
+			activeExitName = p.DeviceID
+		} else if cfg.Network.SelectedExitNode != "" {
+			// Auto-recovery: Peer is offline or disabled Exit Node -> flush client routing
+			_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+			cfg.Network.SelectedExitNode = ""
+			_ = config.Save(cfg, s.configPath, false)
+			s.AddEvent("warn", "Шлюз недоступен", "Автоматический возврат на прямое интернет-соединение")
+		}
+	}
+
+	data := map[string]interface{}{
+		"allow_exit_node":        cfg.Network.AllowExitNode,
+		"advertised_subnets":     cfg.Network.AdvertisedSubnets,
+		"selected_exit_node":     cfg.Network.SelectedExitNode,
+		"active_exit_vip":        activeExitVIP,
+		"active_exit_name":       activeExitName,
+		"active_subnet_routes":   cfg.Network.ActiveSubnetRoutes,
+		"local_detected_subnets": tunnel.GetLocalSubnets(),
+	}
+
+	s.jsonResponse(w, http.StatusOK, data, "")
+}
+
+// handleRoutingExitNodeToggle — POST /api/routing/exit-node/toggle — включение/выключение интернет-шлюза
+func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	var req struct {
+		PeerID     string `json:"peer_id"`
+		GatewayVIP string `json:"gateway_vip"`
+		Enabled    bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
+		return
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	if req.Enabled {
+		if req.GatewayVIP == "" && s.registry != nil {
+			if p, ok := s.registry.Get(req.PeerID); ok {
+				req.GatewayVIP = p.VirtualIP
+			}
+		}
+		if req.GatewayVIP == "" {
+			s.jsonResponse(w, http.StatusBadRequest, nil, "не указан виртуальный IP шлюза")
+			return
+		}
+
+		if err := tunnel.EnableExitNodeRouting(req.GatewayVIP); err != nil {
+			s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка настройки шлюза: "+err.Error())
+			return
+		}
+
+		cfg.Network.SelectedExitNode = req.PeerID
+		_ = config.Save(cfg, s.configPath, false)
+		s.AddEvent("info", "Активирован интернет-шлюз", "Весь интернет перенаправлен через "+req.GatewayVIP)
+	} else {
+		_ = tunnel.DisableExitNodeRouting(req.GatewayVIP)
+		cfg.Network.SelectedExitNode = ""
+		_ = config.Save(cfg, s.configPath, false)
+		s.AddEvent("info", "Отключен интернет-шлюз", "Восстановлено прямое подключение к интернету")
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":                 true,
+		"selected_exit_node": cfg.Network.SelectedExitNode,
+	}, "")
+}
+
+// handleRoutingSubnetToggle — POST /api/routing/subnet/toggle — включение/выключение маршрута к подсети
+func (s *Server) handleRoutingSubnetToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	var req struct {
+		PeerID     string `json:"peer_id"`
+		GatewayVIP string `json:"gateway_vip"`
+		Subnet     string `json:"subnet"`
+		Enabled    bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Subnet == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указана подсеть")
+		return
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	if req.GatewayVIP == "" && s.registry != nil {
+		if p, ok := s.registry.Get(req.PeerID); ok {
+			req.GatewayVIP = p.VirtualIP
+		}
+	}
+	if req.GatewayVIP == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан виртуальный IP узла")
+		return
+	}
+
+	if req.Enabled {
+		if err := tunnel.AddSubnetRoute(req.Subnet, req.GatewayVIP); err != nil {
+			s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка добавления маршрута: "+err.Error())
+			return
+		}
+
+		// Добавляем в активные маршруты
+		exists := false
+		for _, s := range cfg.Network.ActiveSubnetRoutes {
+			if s == req.Subnet {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			cfg.Network.ActiveSubnetRoutes = append(cfg.Network.ActiveSubnetRoutes, req.Subnet)
+		}
+		_ = config.Save(cfg, s.configPath, false)
+		s.AddEvent("info", "Добавлен маршрут к подсети: "+req.Subnet, "Шлюз: "+req.GatewayVIP)
+	} else {
+		_ = tunnel.RemoveSubnetRoute(req.Subnet, req.GatewayVIP)
+		var newRoutes []string
+		for _, s := range cfg.Network.ActiveSubnetRoutes {
+			if s != req.Subnet {
+				newRoutes = append(newRoutes, s)
+			}
+		}
+		cfg.Network.ActiveSubnetRoutes = newRoutes
+		_ = config.Save(cfg, s.configPath, false)
+		s.AddEvent("info", "Удален маршрут к подсети: "+req.Subnet, "Шлюз: "+req.GatewayVIP)
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":                   true,
+		"active_subnet_routes": cfg.Network.ActiveSubnetRoutes,
+	}, "")
+}
+
+// handleRoutingHostSettings — POST /api/routing/host/settings — настройки роли шлюза и анонсируемых подсетей
+func (s *Server) handleRoutingHostSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	var req struct {
+		AllowExitNode     bool     `json:"allow_exit_node"`
+		AdvertisedSubnets []string `json:"advertised_subnets"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
+		return
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	cfg.Network.AllowExitNode = req.AllowExitNode
+	cfg.Network.AdvertisedSubnets = req.AdvertisedSubnets
+	_ = config.Save(cfg, s.configPath, false)
+
+	if req.AllowExitNode || len(req.AdvertisedSubnets) > 0 {
+		_ = tunnel.EnableHostIPForwarding()
+		s.AddEvent("info", "Включена роль маршрутизатора/шлюза", "Активирован IP Forwarding и NAT Masquerade")
+	} else {
+		_ = tunnel.DisableHostIPForwarding()
+		s.AddEvent("info", "Роль маршрутизатора/шлюза отключена", "NAT Masquerade деактивирован")
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":                 true,
+		"allow_exit_node":    cfg.Network.AllowExitNode,
+		"advertised_subnets": cfg.Network.AdvertisedSubnets,
+	}, "")
+}
+
+

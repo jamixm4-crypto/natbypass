@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package tunnel
 
@@ -8,32 +8,40 @@ import (
 	"github.com/natbypass/natbypass/internal/network"
 )
 
-var ErrRoutingNotSupported = errors.New("routing is only supported on Windows")
+var ErrRoutingNotSupported = errors.New("routing is only supported on Windows and Linux")
 
-// EnableHostIPForwarding stub for non-windows platforms.
+// EnableHostIPForwarding stub.
 func EnableHostIPForwarding() error {
 	return ErrRoutingNotSupported
 }
 
-// EnableExitNodeRouting stub for non-windows platforms.
+// DisableHostIPForwarding stub.
+func DisableHostIPForwarding() error {
+	return ErrRoutingNotSupported
+}
+
+// EnableExitNodeRouting stub.
 func EnableExitNodeRouting(gatewayVIP string) error {
 	return ErrRoutingNotSupported
 }
 
-// DisableExitNodeRouting stub for non-windows platforms.
+// DisableExitNodeRouting stub.
 func DisableExitNodeRouting(gatewayVIP string) error {
 	return ErrRoutingNotSupported
 }
 
-// AddSubnetRoute stub for non-windows platforms.
+// AddSubnetRoute stub.
 func AddSubnetRoute(subnetCIDR string, gatewayVIP string) error {
 	return ErrRoutingNotSupported
 }
 
-// RemoveSubnetRoute stub for non-windows platforms.
+// RemoveSubnetRoute stub.
 func RemoveSubnetRoute(subnetCIDR string, gatewayVIP string) error {
 	return ErrRoutingNotSupported
 }
+
+// FlushAllRouting stub.
+func FlushAllRouting(gatewayVIP string, subnets []string) {}
 
 // GetLocalSubnets returns a unique list of local IPv4 subnet CIDRs.
 func GetLocalSubnets() []string {
