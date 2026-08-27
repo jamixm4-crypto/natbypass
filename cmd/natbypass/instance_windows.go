@@ -262,7 +262,7 @@ func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/?v=%d", port, time.Now().Unix())
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
 
 	screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0)
 	screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1)
@@ -387,8 +387,17 @@ func openAppWindow(port int) {
 }
 
 func openBrowserFallback(url string) {
-	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	procShellExecuteW := modshell32Instance.NewProc("ShellExecuteW")
+	if procShellExecuteW.Find() == nil {
+		urlPtr, _ := windows.UTF16PtrFromString(url)
+		openVerb, _ := windows.UTF16PtrFromString("open")
+		ret, _, _ := procShellExecuteW.Call(0, uintptr(unsafe.Pointer(openVerb)), uintptr(unsafe.Pointer(urlPtr)), 0, 0, 1 /* SW_SHOWNORMAL */)
+		if ret > 32 {
+			return
+		}
+	}
+	cmd := exec.Command("cmd.exe", "/C", "start", "", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	_ = cmd.Start()
 }
 
