@@ -279,6 +279,12 @@ class NatBypassVpnService : VpnService() {
         } catch (_: Exception) {}
     }
 
+    override fun onRevoke() {
+        disconnect()
+        stopSelf()
+        super.onRevoke()
+    }
+
     override fun onDestroy() {
         disconnect()
         super.onDestroy()
