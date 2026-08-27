@@ -171,14 +171,17 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
-            vpnInterface = builder.establish()
-            if (vpnInterface == null) {
+            val pfd = builder.establish()
+            if (pfd == null) {
                 Log.e(TAG, "builder.establish() returned NULL")
                 stopSelf()
                 return
             }
-            val fd = vpnInterface?.fd ?: -1
-            Log.i(TAG, "VPN TUN established! fd=$fd, VIP=$currentVip")
+            // detachFd() передает владение дескриптором файловому объекту Go (os.File),
+            // исключая double-close и падение процесса/задач Android WindowManager
+            val fd = pfd.detachFd()
+            vpnInterface = null
+            Log.i(TAG, "VPN TUN established! detached fd=$fd, VIP=$currentVip")
 
             val configFile = File(filesDir, "config.yaml")
             val configYaml = if (configFile.exists()) configFile.readText() else "{}"

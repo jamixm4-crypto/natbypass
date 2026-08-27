@@ -15,16 +15,22 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
@@ -91,7 +97,10 @@ class MainActivity : ComponentActivity() {
                         dynamicColor = d
                         prefs.edit().putBoolean("dynamic_color", d).apply()
                     },
-                    onShareQR = { showShareQRDialog() },
+                    onShareQR = {
+                        val uri = org.natbypass.app.util.MobileBridge.exportProfileURI("")
+                        showQrDialogPayload = if (uri.isNotEmpty()) uri else "https://github.com/jamixm4-crypto/natbypass"
+                    },
                 )
             }
         }
@@ -115,10 +124,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showShareQRDialog() {
-        val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
-        val devName = prefs.getString("device_name", android.os.Build.MODEL ?: "Android-Node")
-        val inviteText = "NatBypass|$devName|https://github.com/jamixm4-crypto/natbypass/releases/latest"
-        shareQRPayload(inviteText)
+        val uri = org.natbypass.app.util.MobileBridge.exportProfileURI("")
+        if (uri.isNotEmpty()) {
+            shareQRPayload(uri)
+        } else {
+            val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+            val devName = prefs.getString("device_name", android.os.Build.MODEL ?: "Android-Node")
+            shareQRPayload("NatBypass|$devName|https://github.com/jamixm4-crypto/natbypass/releases/latest")
+        }
     }
 
     fun shareQRPayload(payload: String) {
@@ -167,6 +180,7 @@ private fun NatBypassApp(
     var showProfileSheet by remember { mutableStateOf(false) }
     var showProfileEdit by remember { mutableStateOf<ProfileEditMode?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var showQrDialogPayload by remember { mutableStateOf<String?>(null) }
 
     // Перехват системной кнопки / жеста "Назад" на Android
     BackHandler(enabled = currentScreen != Screen.Main || showProfileSheet || showProfileEdit != null || showImportDialog) {
@@ -267,7 +281,7 @@ private fun NatBypassApp(
             onShareQR = { id ->
                 showProfileSheet = false
                 val uri = viewModel.exportProfileUri(id)
-                activity?.shareQRPayload(uri)
+                showQrDialogPayload = uri
             },
             onCreate = {
                 showProfileSheet = false
@@ -281,6 +295,17 @@ private fun NatBypassApp(
                 showProfileSheet = false
                 viewModel.deleteProfile(context, id)
             },
+        )
+    }
+
+    // ── On-screen QR Code Dialog ─────────────────────────────────────────────
+    showQrDialogPayload?.let { payload ->
+        QRCodeShareDialog(
+            payload = payload,
+            onDismiss = { showQrDialogPayload = null },
+            onShareExternal = {
+                activity?.shareQRPayload(payload)
+            }
         )
     }
 
@@ -382,4 +407,125 @@ private sealed class Screen {
     object Main : Screen()
     object Diagnostics : Screen()
     object Settings : Screen()
+}
+
+
+// ── On-screen QR Code Dialog for easy camera scanning ─────────────────────────
+@Composable
+fun QRCodeShareDialog(
+    payload: String,
+    onDismiss: () -> Unit,
+    onShareExternal: () -> Unit,
+) {
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val qrBitmap = remember(payload) {
+        try {
+            val writer = QRCodeWriter()
+            val bitMatrix = writer.encode(payload, BarcodeFormat.QR_CODE, 512, 512)
+            val w = bitMatrix.width; val h = bitMatrix.height
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
+            for (x in 0 until w) for (y in 0 until h) {
+                bmp.setPixel(x, y, if (bitMatrix.get(x, y)) AColor.BLACK else AColor.WHITE)
+            }
+            bmp
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "📱 QR-код профиля сети",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Закрыть")
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = "Отсканируйте камерой второго устройства для подключения к этой P2P сети:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                // High contrast white container for QR
+                Box(
+                    modifier = Modifier
+                        .size(230.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                        .background(androidx.compose.ui.graphics.Color.White)
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (qrBitmap != null) {
+                        Image(
+                            bitmap = qrBitmap.asImageBitmap(),
+                            contentDescription = "QR-код",
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        CircularProgressIndicator(modifier = Modifier.size(36.dp))
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(payload))
+                            Toast.makeText(context, "📋 Ссылка скопирована в буфер!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Копировать", fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = onShareExternal,
+                        modifier = Modifier.weight(1f),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Outlined.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Поделиться", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
 }
