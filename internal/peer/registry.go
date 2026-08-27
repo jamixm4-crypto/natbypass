@@ -171,6 +171,9 @@ func (r *Registry) Get(deviceID string) (*Peer, bool) {
 
 // MarkOffline sets the Online flag to false for peers not seen within maxAge.
 func (r *Registry) MarkOffline(maxAge time.Duration) {
+	if maxAge < 60*time.Second {
+		maxAge = 120 * time.Second
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -178,6 +181,7 @@ func (r *Registry) MarkOffline(maxAge time.Duration) {
 	for _, p := range r.peers {
 		if p.Online && p.LastSeen.Before(threshold) {
 			p.Online = false
+			p.DirectP2P = false
 		}
 	}
 }
@@ -212,7 +216,7 @@ func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				r.MarkOffline(45 * time.Second)
+				r.MarkOffline(120 * time.Second)
 				r.Cleanup(24 * time.Hour)
 			}
 		}

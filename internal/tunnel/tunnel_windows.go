@@ -45,17 +45,29 @@ func initWintun() error {
 	wintunInitOnce.Do(func() {
 		dllPath := "wintun.dll"
 		if _, err := os.Stat(dllPath); err != nil {
-			if len(embeddedWintunDLL) > 0 {
-				_ = os.WriteFile(dllPath, embeddedWintunDLL, 0755)
-			} else {
-				tempDll := filepath.Join(os.TempDir(), "wintun.dll")
-				if _, err := os.Stat(tempDll); err == nil {
+			tempDll := filepath.Join(os.TempDir(), "wintun.dll")
+			if _, tErr := os.Stat(tempDll); tErr == nil {
+				dllPath = tempDll
+			} else if len(embeddedWintunDLL) > 0 {
+				if wErr := os.WriteFile(dllPath, embeddedWintunDLL, 0755); wErr == nil {
+					// written locally
+				} else if twErr := os.WriteFile(tempDll, embeddedWintunDLL, 0755); twErr == nil {
 					dllPath = tempDll
+				} else {
+					initErr = fmt.Errorf("не удалось извлечь wintun.dll: %v", twErr)
+					return
 				}
+			} else {
+				initErr = fmt.Errorf("wintun.dll не найден и не встроен")
+				return
 			}
 		}
 
 		wintunDLL = windows.NewLazyDLL(dllPath)
+		if err := wintunDLL.Load(); err != nil {
+			initErr = fmt.Errorf("ошибка загрузки wintun.dll: %w", err)
+			return
+		}
 		procWintunCreateAdapter = wintunDLL.NewProc("WintunCreateAdapter")
 		procWintunOpenAdapter = wintunDLL.NewProc("WintunOpenAdapter")
 		procWintunCloseAdapter = wintunDLL.NewProc("WintunCloseAdapter")

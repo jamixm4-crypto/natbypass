@@ -604,6 +604,7 @@ func startSystemWatchdog() {
 
 // cleanStaleInstances Р·Р°РІРµСЂС€Р°РµС‚ Р·Р°РІРёСЃС€РёРµ РїСЂРµРґС‹РґСѓС‰РёРµ РїСЂРѕС†РµСЃСЃС‹ NatBypass
 func cleanStaleInstances() {
+	defer func() { recover() }()
 	myPID := uint32(os.Getpid())
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
@@ -659,27 +660,30 @@ func cleanStaleInstances() {
 	}
 }
 
+func setupDPI() {
+	defer func() { recover() }()
+	proc := moduser32.NewProc("SetProcessDpiAwarenessContext")
+	if proc.Find() == nil {
+		proc.Call(uintptr(uint64(0xFFFFFFFFFFFFFFFC)))
+		return
+	}
+	proc2 := moduser32.NewProc("SetProcessDPIAware")
+	if proc2.Find() == nil {
+		proc2.Call()
+	}
+}
+
 func main() {
 	runtime.LockOSThread()
 	defer func() {
 		if r := recover(); r != nil {
 			stackStr := string(debug.Stack())
-			writeDebug(fmt.Sprintf("вќЊ CRITICAL PANIC IN MAIN: %v\r\n%s", r, stackStr))
+			writeDebug(fmt.Sprintf("CRITICAL PANIC IN MAIN: %v\r\n%s", r, stackStr))
 			_ = os.WriteFile("crash_dump.log", []byte(fmt.Sprintf("CRASH: %v\r\n%s", r, stackStr)), 0644)
 		}
 	}()
 
-	// 0. High-DPI Crystal Crispness
-	// DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
-	procSetProcessDpiAwarenessContext := moduser32.NewProc("SetProcessDpiAwarenessContext")
-	if procSetProcessDpiAwarenessContext.Find() == nil {
-		procSetProcessDpiAwarenessContext.Call(uintptr(uint64(0xFFFFFFFFFFFFFFFC)))
-	} else {
-		procSetProcessDPIAware := moduser32.NewProc("SetProcessDPIAware")
-		if procSetProcessDPIAware.Find() == nil {
-			procSetProcessDPIAware.Call()
-		}
-	}
+	setupDPI()
 
 	initDebugLog()
 
@@ -3190,7 +3194,7 @@ func startEngineFromConfig(c *config.Config) {
 	// Р¤РѕРЅРѕРІС‹Р№ С†РёРєР» РїСЂСЏРјРѕР№ РѕС‚РїСЂР°РІРєРё UDP Hole Punch РїР°РєРµС‚РѕРІ (РєР°Р¶РґС‹Рµ 15 СЃРµРєСѓРЅРґ)
 	// РџСЂРѕРІРµСЂСЏРµРј С‚РѕР»СЊРєРѕ В«Р»СѓС‡С€РёР№В» СЌРЅРґРїРѕРёРЅС‚ РїРёСЂР° вЂ” РЅРµ СЂР°СЃСЃС‹Р»Р°РµРј 5 РїР°РєРµС‚РѕРІ РѕРґРЅРѕРІСЂРµРјРµРЅРЅРѕ
 	go func() {
-		probeTicker := time.NewTicker(15 * time.Second)
+		probeTicker := time.NewTicker(45 * time.Second)
 		defer probeTicker.Stop()
 		for {
 			select {
@@ -3228,7 +3232,7 @@ func startEngineFromConfig(c *config.Config) {
 				return
 			case <-monitorTicker.C:
 				if registry != nil {
-					registry.MarkOffline(45 * time.Second)
+					registry.MarkOffline(120 * time.Second)
 					registry.Cleanup(24 * time.Hour)
 				}
 			}
@@ -3366,7 +3370,7 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 
 	// 2. РџРµСЂРёРѕРґРёС‡РµСЃРєР°СЏ РѕС‚РїСЂР°РІРєР° Р°РЅРѕРЅСЃР° РІ Р»РѕРєР°Р»СЊРЅСѓСЋ СЃРµС‚СЊ РєР°Р¶РґС‹Рµ 30 СЃРµРєСѓРЅРґ (РЅРµ 4 СЃ вЂ” С‡С‚РѕР±С‹ РЅРµ РїРµСЂРµРіСЂСѓР¶Р°С‚СЊ СЂРѕСѓС‚РµСЂ)
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(120 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {

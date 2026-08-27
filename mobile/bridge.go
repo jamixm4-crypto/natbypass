@@ -246,9 +246,11 @@ func StartEngine(configYAML string, tunFd int) string {
 	var puncher *network.UDPPuncher
 	puncher, _ = network.NewUDPPuncher(cfg.Network.UDPPort, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		if p, ok := globalRegistry.Get(remoteDevID); ok {
-			p.DirectP2P = true // ВСЕГДА true при получении PONG!
+			p.DirectP2P = true
 			p.ActiveEndpoint = fromAddr
 			p.STUNAddr = fromAddr
+			p.LastSeen = time.Now() // ВСЕГДА обновляем LastSeen!
+			p.Online = true
 			if rtt > 0 {
 				p.PingMs = rtt.Milliseconds()
 			} else {
@@ -262,8 +264,6 @@ func StartEngine(configYAML string, tunFd int) string {
 			} else {
 				p.Latency = rtt
 			}
-			p.Online = true
-			p.LastSeen = time.Now()
 			globalRegistry.Upsert(p)
 			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("⚡ Android P2P сокет пробит!")
 
@@ -315,8 +315,8 @@ func StartEngine(configYAML string, tunFd int) string {
 
 	// Цикл публикации в сигнальный канал (каждые 8 секунд)
 	pubInterval := time.Duration(cfg.App.PublishInterval) * time.Second
-	if pubInterval <= 0 {
-		pubInterval = 8 * time.Second
+	if pubInterval <= 0 || pubInterval > 15*time.Second {
+		pubInterval = 5 * time.Second
 	}
 	go func() {
 		ticker := time.NewTicker(pubInterval)
@@ -480,18 +480,18 @@ func StartEngine(configYAML string, tunFd int) string {
 	// Отправляет NATBYPASS:PING на все известные адреса пира для удержания NAT-сессии
 	// и непрерывного измерения RTT / подтверждения Direct P2P.
 	go func() {
-		probeTicker := time.NewTicker(3 * time.Second)
+		probeTicker := time.NewTicker(30 * time.Second)
 		defer probeTicker.Stop()
 
-		// Логируем NAT тип через 6 секунд после старта (даём детекции завершиться)
+		// Логируем NAT тип через 6 секунд после старта
 		time.AfterFunc(6*time.Second, func() {
 			if puncher != nil {
 				natType := puncher.GetNATType()
 				switch natType {
 				case network.NATTypeSymmetric:
-					logger.Warn().Str("nat_type", natType.String()).Msg("🔴 Обнаружен Symmetric NAT (CGNAT оператора) — классический UDP hole punch ненадёжен, использую расширенный sweep")
+					logger.Warn().Str("nat_type", natType.String()).Msg("🔴 Обнаружен Symmetric NAT (CGNAT оператора)")
 				case network.NATTypeFullCone:
-					logger.Info().Str("nat_type", natType.String()).Msg("🟢 Обнаружен Full Cone / Restricted NAT — прямое P2P соединение доступно")
+					logger.Info().Str("nat_type", natType.String()).Msg("🟢 Обнаружен Full Cone / Restricted NAT — прямое P2P доступно")
 				default:
 					logger.Info().Str("nat_type", natType.String()).Msg("🔍 Тип NAT: " + natType.String())
 				}
@@ -506,24 +506,16 @@ func StartEngine(configYAML string, tunFd int) string {
 				if puncher != nil && globalRegistry != nil {
 					for _, p := range globalRegistry.List() {
 						go func(peer *peer.Peer) {
-							if peer.ActiveEndpoint != "" {
-								_ = puncher.SendHolePunchProbe(peer.ActiveEndpoint)
+							// Приоритет: ActiveEndpoint > STUNAddr > LocalAddr (ровно 1 целевой адрес)
+							target := peer.ActiveEndpoint
+							if target == "" {
+								target = peer.STUNAddr
 							}
-							if peer.STUNAddr != "" && peer.STUNAddr != peer.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(peer.STUNAddr)
+							if target == "" {
+								target = peer.LocalAddr
 							}
-							if peer.IPv6Addr != "" && peer.IPv6Addr != peer.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(peer.IPv6Addr)
-							}
-							if peer.LocalAddr != "" && peer.LocalAddr != peer.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(peer.LocalAddr)
-							}
-							if peer.PublicIP != "" {
-								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:47832", peer.PublicIP))
-								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:51820", peer.PublicIP))
-								if peer.WGPort > 0 && peer.WGPort != 47832 && peer.WGPort != 51820 {
-									_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", peer.PublicIP, peer.WGPort))
-								}
+							if target != "" {
+								_ = puncher.SendHolePunchProbe(target)
 							}
 						}(p)
 					}

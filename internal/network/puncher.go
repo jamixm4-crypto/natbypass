@@ -36,6 +36,9 @@ type UDPPuncher struct {
 	// portDelta tracks the observed consecutive port increment for Symmetric NAT prediction.
 	lastMappedPort int
 	portDelta      int
+
+	probeMu      sync.Mutex
+	lastProbeMap map[string]time.Time
 }
 
 func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPing DirectPingCallback) (*UDPPuncher, error) {
@@ -164,40 +167,23 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 		}
 	}
 
+	p.probeMu.Lock()
+	if p.lastProbeMap == nil {
+		p.lastProbeMap = make(map[string]time.Time)
+	}
+	if time.Since(p.lastProbeMap[targetAddr]) < 2*time.Second {
+		p.probeMu.Unlock()
+		return nil // Rate limit: не более 1 зонда в 2 секунды на адрес
+	}
+	p.lastProbeMap[targetAddr] = time.Now()
+	p.probeMu.Unlock()
+
 	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("NATBYPASS:PING:%s:%d", p.myDevID, nowNano))
 
-	// 1. Точное попадание — 3 пакета для надёжности
-	for i := 0; i < 3; i++ {
-		_, _ = p.conn.WriteToUDP(probeData, rAddr)
-	}
-
-	// 2. Умеренный sweep по диапазону портов для компенсации CGNAT port allocation
-	if rAddr.IP.To4() != nil {
-		p.natTypeMu.RLock()
-		natT := p.NATType
-		p.natTypeMu.RUnlock()
-
-		basePort := rAddr.Port
-		ip := rAddr.IP
-
-		// Sweep диапазон: ±16 для Cone, ±32 для Symmetric
-		sweep := 16
-		if natT == NATTypeSymmetric {
-			sweep = 32
-		}
-
-		for d := 1; d <= sweep; d++ {
-			if basePort+d <= 65535 {
-				_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort + d})
-			}
-			if basePort-d > 1024 {
-				_, _ = p.conn.WriteToUDP(probeData, &net.UDPAddr{IP: ip, Port: basePort - d})
-			}
-		}
-	}
-
-	return nil
+	// 1 точный пакет — без флуда и sweep-шторма
+	_, err = p.conn.WriteToUDP(probeData, rAddr)
+	return err
 }
 
 
@@ -311,10 +297,10 @@ func (p *UDPPuncher) readLoop() {
 				}
 				sentTs := parts[len(parts)-1]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
-				// Отправляем ровно 1 PONG (тройной дубль не нужен и создаёт лишний трафик)
+				// Отправляем ровно 1 PONG
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
-				// Подтверждаем активность сокета с rtt=0
+				// Обновляем активность пира (LastSeen)
 				if p.onPingResult != nil {
 					p.onPingResult(senderID, 0, remoteAddr.String())
 				}
