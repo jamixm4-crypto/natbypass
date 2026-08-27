@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,9 +22,11 @@ import (
 var (
 	singleInstanceMutex windows.Handle
 	moduser32Instance   = windows.NewLazySystemDLL("user32.dll")
+	modkernel32Instance = windows.NewLazySystemDLL("kernel32.dll")
 	modshell32Instance  = windows.NewLazySystemDLL("shell32.dll")
 	moddwmapiInstance   = windows.NewLazySystemDLL("dwmapi.dll")
 	appHIcon            uintptr
+	lastWebUIPort       = 8080
 )
 
 func init() {
@@ -52,24 +55,37 @@ func acquireSingleInstanceMutex(port int) bool {
 		return true
 	}
 
-	// Используем Local\ (не Global\) — Global\ требует SeCreateGlobalPrivilege,
-	// которой нет у обычных пользователей даже с отключённым UAC.
-	mutexName, _ := windows.UTF16PtrFromString("Local\\NatBypass_SingleInstance_App_Mutex")
-	hMutex, err := windows.CreateMutex(nil, true, mutexName)
-	if err != nil {
-		if errors.Is(err, windows.ERROR_ALREADY_EXISTS) || err == windows.ERROR_ALREADY_EXISTS {
-			if hMutex != 0 {
-				_ = windows.CloseHandle(hMutex)
-			}
-			// Экземпляр уже запущен — активируем существующее окно и выходим
-			activateExistingWindow()
-			return false
-		}
-		// ERROR_ACCESS_DENIED или любая другая ошибка — разрешаем запуск
-		return true
+	if port <= 0 {
+		port = 8080
 	}
+	lastWebUIPort = port
+
+	// Очищаем LastError перед созданием мьютекса
+	procSetLastError := modkernel32Instance.NewProc("SetLastError")
+	if procSetLastError.Find() == nil {
+		_, _, _ = procSetLastError.Call(0)
+	}
+
+	mutexName, _ := windows.UTF16PtrFromString("Local\\NatBypass_SingleInstance_App_Mutex")
+	hMutex, err := windows.CreateMutex(nil, false, mutexName)
 	if hMutex == 0 {
 		return true
+	}
+
+	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) || err == windows.ERROR_ALREADY_EXISTS {
+		// Проверяем, действительно ли предыдущий процесс жив и отвечает на HTTP
+		client := http.Client{Timeout: 350 * time.Millisecond}
+		resp, httpErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/status", port))
+		if httpErr == nil && resp != nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == 200 {
+				// Сервер реально работает — активируем существующее окно и выходим
+				_ = windows.CloseHandle(hMutex)
+				activateExistingWindow()
+				return false
+			}
+		}
+		// Предыдущий процесс не отвечает (завис или был убит) — перехватываем мьютекс и продолжаем работу
 	}
 
 	singleInstanceMutex = hMutex
