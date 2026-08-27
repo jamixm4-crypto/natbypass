@@ -97,10 +97,7 @@ class MainActivity : ComponentActivity() {
                         dynamicColor = d
                         prefs.edit().putBoolean("dynamic_color", d).apply()
                     },
-                    onShareQR = {
-                        val uri = org.natbypass.app.util.MobileBridge.exportProfileURI("")
-                        showQrDialogPayload = if (uri.isNotEmpty()) uri else "https://github.com/jamixm4-crypto/natbypass"
-                    },
+                    onShareQR = { showShareQRDialog() },
                 )
             }
         }
@@ -231,7 +228,10 @@ private fun NatBypassApp(
             onOpenQRScanner = {
                 context.startActivity(Intent(context, QRScannerActivity::class.java))
             },
-            onShareQR = onShareQR,
+            onShareQR = {
+                val uri = org.natbypass.app.util.MobileBridge.exportProfileURI("")
+                showQrDialogPayload = if (uri.isNotEmpty()) uri else "https://github.com/jamixm4-crypto/natbypass"
+            },
             onSync = {
                 viewModel.syncNetwork()
                 Toast.makeText(context, "🔄 Синхронизация сети...", Toast.LENGTH_SHORT).show()
