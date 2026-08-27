@@ -41,6 +41,17 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    /** Receives VPN state changes from NatBypassVpnService without closing the Activity */
+    private val vpnStateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            val state = intent?.getStringExtra("state") ?: return
+            when (state) {
+                "disconnected", "revoked" -> viewModel.onVpnDisconnectedExternally()
+                "connected" -> viewModel.syncNetwork()
+            }
+        }
+    }
+
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -89,6 +100,18 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.syncNetwork()
+        val filter = android.content.IntentFilter("org.natbypass.app.VPN_STATE_CHANGED")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(vpnStateReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(vpnStateReceiver, filter)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try { unregisterReceiver(vpnStateReceiver) } catch (_: Exception) {}
     }
 
     private fun showShareQRDialog() {

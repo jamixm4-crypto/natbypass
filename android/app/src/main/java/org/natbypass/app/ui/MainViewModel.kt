@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui
+package org.natbypass.app.ui
 
 import android.app.Activity
 import android.app.Application
@@ -291,6 +291,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             action = NatBypassVpnService.ACTION_DISCONNECT
         }
         appContext.startService(intent)
+        prefs.edit().putBoolean("vpn_running", false).apply()
+        _uiState.update { it.copy(connectionState = ConnectionState.DISCONNECTED) }
+    }
+
+    /** Called when VPN disconnects via broadcast from NatBypassVpnService (onRevoke or user disconnect). */
+    fun onVpnDisconnectedExternally() {
         prefs.edit().putBoolean("vpn_running", false).apply()
         _uiState.update { it.copy(connectionState = ConnectionState.DISCONNECTED) }
     }

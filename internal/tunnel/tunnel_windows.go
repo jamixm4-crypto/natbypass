@@ -156,18 +156,41 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		// Metric 9000 = самый низкий приоритет, физические адаптеры обычно metric 25-50
 		_ = runNetsh("interface", "ipv4", "set", "interface",
 			fmt.Sprintf("name=%s", adapterName),
-			"metric=9000",
+			"metric=100",
 		)
 
-		// Разрешаем входящий ICMP ping и пакеты в Брандмауэре Windows
-		_ = runNetsh("advfirewall", "firewall", "add", "rule", "name=NatBypass ICMP", "dir=in", "action=allow", "protocol=icmpv4:8,any", "interface=NatBypass")
-		_ = runNetsh("advfirewall", "firewall", "add", "rule", "name=NatBypass Allow All", "dir=in", "action=allow", "interface=NatBypass")
+		// Allow ICMP and mesh traffic — no interface= binding to avoid Firewall name mismatch
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass Allow All")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass-Inbound")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP Allow")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP Reply Allow")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass Mesh Subnet")
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass-Inbound",
+			"name=NatBypass ICMP Allow",
 			"dir=in",
 			"action=allow",
+			"protocol=icmpv4:8,any",
+		)
+		_ = runNetsh("advfirewall", "firewall", "add", "rule",
+			"name=NatBypass ICMP Reply Allow",
+			"dir=in",
+			"action=allow",
+			"protocol=icmpv4:0,any",
+		)
+		_ = runNetsh("advfirewall", "firewall", "add", "rule",
+			"name=NatBypass Mesh Subnet",
+			"dir=in",
+			"action=allow",
+			"remoteip=100.64.200.0/24",
+		)
+		// Explicit low-metric route: ensures ICMP Reply goes via Wintun, not physical NIC
+		_ = runNetsh("interface", "ipv4", "add", "route",
+			"prefix=100.64.200.0/24",
 			fmt.Sprintf("interface=%s", adapterName),
-			"enable=yes",
+			"nexthop=0.0.0.0",
+			"metric=1",
+			"store=active",
 		)
 	}()
 

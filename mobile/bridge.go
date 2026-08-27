@@ -541,18 +541,14 @@ func attachTUN(tunFd int) {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
 
-			// Instant ICMP echo reply for Android
-			if len(payload) >= 20 && (payload[0]>>4) == 4 && payload[9] == 1 {
-				ihl := int(payload[0]&0x0F) * 4
-				if len(payload) >= ihl+8 && payload[ihl] == 8 {
-					respondICMPEcho(payload, srcAddr)
-				}
-			}
-
-			// Записываем пакет в TUN — Android OS сама обрабатывает ICMP, TCP, UDP
-			// НЕ перехватываем ICMP вручную — ОС генерирует Echo Reply сама и пишет его обратно в TUN
-			if globalTunFile != nil {
-				_, _ = globalTunFile.Write(payload)
+			// Write ALL packets directly to TUN fd.
+			// Android OS handles ICMP Echo Reply, TCP ACK, UDP natively — no userspace interception needed.
+			// Do NOT call respondICMPEcho here: it causes double-ICMP and corrupts the reply path.
+			engineMu.Lock()
+			tf := globalTunFile
+			engineMu.Unlock()
+			if tf != nil {
+				_, _ = tf.Write(payload)
 			}
 		})
 
