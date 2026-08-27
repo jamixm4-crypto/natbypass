@@ -1,35 +1,36 @@
-# NatBypass v1.2.7
+# NatBypass v1.5.2
 
 **P2P Mesh VPN & DPI Bypass** — прямое сокет-в-сокет соединение компьютеров, серверов, телефонов и роутеров через любые виды NAT/CGNAT без выделенных серверов.
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
-[![Release](https://img.shields.io/badge/Release-v1.2.7-8b5cf6?style=flat&logo=github)](https://github.com/jamixm4-crypto/natbypass/releases/latest)
-[![Wiki](https://img.shields.io/badge/Wiki-Documentation-blue?style=flat&logo=gitbook)](wiki/Home.md)
+[![Release](https://img.shields.io/badge/Release-v1.5.2-8b5cf6?style=flat&logo=github)](https://github.com/jamixm4-crypto/natbypass/releases/latest)
+[![Wiki](https://img.shields.io/badge/Wiki-Documentation-blue?style=flat&logo=gitbook)](https://github.com/jamixm4-crypto/natbypass/wiki)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20Keenetic%20%7C%20OpenWrt%20%7C%20Android-brightgreen)](#поддерживаемые-платформы)
+[![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20Keenetic%20%7C%20OpenWrt%20%7C%20Android-brightgreen)](#-поддерживаемые-платформы)
 [![Zero CGO](https://img.shields.io/badge/CGO-Zero%20(Pure%20Go)-blue)](https://golang.org)
 
 ---
 
-## 📚 [Официальная База Знаний (Wiki)](wiki/Home.md)
+## 📚 [Официальная База Знаний (Wiki)](https://github.com/jamixm4-crypto/natbypass/wiki)
 
-Полная документация и пошаговые инструкции доступны в нашей [**NatBypass Wiki**](wiki/Home.md):
-* 🚀 [**Быстрый старт за 5 минут**](wiki/Quick-Start.md) — подключение первой P2P-пары устройств без консоли.
-* 🛡️ [**Обход блокировок (AmneziaWG 2.0)**](wiki/AmneziaWG-DPI-Bypass.md) — тюнинг параметров $J_c, S_1, S_2, H_1..H_4$ против ТСПУ / DPI.
-* 🌐 [**Роутеры Keenetic (Entware)**](wiki/Keenetic-Routers.md) & [**OpenWrt**](wiki/OpenWrt-Routers.md) — установка в 1 команду и автозапуск.
-* 📱 [**Android-руководство**](wiki/Android-Setup.md) — подключение по QR-коду и системный VpnService.
-* 🔧 [**Диагностика и устранение неполадок**](wiki/Troubleshooting-and-Diagnostics.md) — расшифровка NAT-типов и проверка связности.
+Полная документация и пошаговые инструкции доступны в нашей [**NatBypass Wiki**](https://github.com/jamixm4-crypto/natbypass/wiki):
+* 🚀 [**Быстрый старт за 5 минут**](https://github.com/jamixm4-crypto/natbypass/wiki/Quick-Start) — подключение первой P2P-пары устройств без консоли.
+* 🛡️ [**Обход блокировок (AmneziaWG 2.0)**](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass) — тюнинг параметров $J_c, S_1, S_2, H_1..H_4$ против ТСПУ / DPI.
+* 🌐 [**Роутеры Keenetic (Entware)**](https://github.com/jamixm4-crypto/natbypass/wiki/Keenetic-Routers) & [**OpenWrt**](https://github.com/jamixm4-crypto/natbypass/wiki/OpenWrt-Routers) — установка в 1 команду и автозапуск.
+* 📱 [**Android-руководство**](https://github.com/jamixm4-crypto/natbypass/wiki/Android-Setup) — подключение по QR-коду, отображение QR на экране и системный VpnService.
+* 🪟 [**Windows-руководство**](https://github.com/jamixm4-crypto/natbypass/wiki/Windows-Guide) — нативный UI, трей, Wintun и серверный режим.
+* 🔧 [**Диагностика и устранение неполадок**](https://github.com/jamixm4-crypto/natbypass/wiki/Troubleshooting-and-Diagnostics) — расшифровка NAT-типов и проверка связности.
 
 ---
 
-## ✨ Что нового в версии 1.2.7
+## ✨ Что нового в версии 1.5.2
 
-- 🔐 **Мультипрофили сетей (Mesh Profiles)** — автоматическая генерация уникальных приватных топиков/ключей при первом запуске, создание нескольких сетей («Дом», «Офис», «Семья») с переключением на лету.
-- 📱 **QR-код и шеринг профилей** — моментальный перенос настроек сети на смартфон или второй ПК через сканирование QR-кода или ссылку `natbypass://profile?...`.
-- ⚡ **Честный замер задержки UDP-пинга** — удалены любые синтетические 14 мс; реальный динамический RTT и кнопка немедленного зондирования P2P-сокета.
-- 🎨 **Зрелый минималистичный UI Android** — строгая контрастная темная палитра без «радужных» шрифтов и пестрых рамок в стиле Tailscale/WireGuard.
-- 🌊 **Шелковистые графики (Cardinal Spline)** — плавная отрисовка трафика и задержки кубическими сплайнами Безье.
-- 🪟 **Нативное окно Windows (Embedded WebView2)** — красивый современный UI прямо в процессе `NatBypass.exe` с поддержкой DPI Awareness, Dark Mode и системным треем.
+- 📱 **Интерактивный экранный QR-код в Android** — удобный просмотр и копирование QR-кода активной конфигурации прямо на экране смартфона для сканирования другими устройствами.
+- ⚡ **Мгновенное сопряжение устройств** — QR-код приглашения в Web UI и на мобильном теперь сразу передаёт полный профиль сети (`natbypass://profile?...`) и инициирует немедленный опрос STUN и отправку маяка.
+- 🛡️ **Защита от сброса задач Android при отключении VPN** — внедрена передача дескриптора через `detachFd()`, исключающая double-close и падение/сворачивание приложения.
+- 🪟 **Надёжный запуск на Windows Desktop & Server** — исправлены ложные срабатывания Single-Instance мьютекса и ошибка `code 1-11 msg Invalid url` на серверных ОС через нативный `ShellExecuteW`.
+- 🔐 **Мультипрофили сетей (Mesh Profiles)** — автоматическая генерация уникальных приватных топиков/ключей, изоляция сетей («Дом», «Офис», «Семья») с переключением на лету.
+- 🌊 **Шелковистые графики и честный RTT** — замер задержки реальными UDP-пинг пакетами и визуализация трафика кубическими сплайнами Безье.
 - 📡 **4-уровневый стек отказоустойчивости** — `Direct P2P UDP ➔ AmneziaWG 2.0 ➔ MQTT Datagram Stream ➔ Xray Reality`.
 
 ---
@@ -47,7 +48,7 @@
          │    Устройство A        │   │    Устройство B        │
          │  STUN Discovery        │   │  STUN Discovery        │
          │  Windows App (Wintun)  │   │  Keenetic / Linux / Android
-         │  IP: 10.200.0.1        │   │  IP: 10.200.0.2        │
+         │  IP: 100.64.200.1      │   │  IP: 100.64.200.2      │
          └─────────────┬──────────┘   └──────────┬─────────────┘
                        │                         │
                        └──── Direct UDP Socket ──┘
@@ -62,21 +63,21 @@
 
 | Платформа | Архитектура | Файл релиза | Описание |
 |---|---|---|---|
-| **Windows** | amd64 | [`NatBypass-v1.2.7-windows-amd64.exe`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Windows 10/11 (Desktop UI + Трей) |
-| **Android** | arm64 / arm / x64 | [`NatBypass-v1.2.7.apk`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Android 8.0+ (VpnService + QR-сканер) |
-| **Linux** | amd64 | `natbypass-v1.2.7-linux-amd64` | Ubuntu, Debian, CentOS, Arch |
-| **Linux ARM64** | arm64 | `natbypass-v1.2.7-linux-arm64` | Raspberry Pi 3/4/5, Keenetic Ultra/Giga |
-| **Роутеры MIPS** | mips (Big Endian) | `natbypass-v1.2.7-router-mips` | OpenWrt (TP-Link, GL.iNet, Atheros) |
-| **Роутеры MIPSLE** | mipsle (Little Endian)| `natbypass-v1.2.7-router-mipsle`| Keenetic Start/City/Air, Xiaomi 3G/4A |
+| **Windows** | amd64 | [`NatBypass-v1.5.2-windows-amd64.exe`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Windows 10/11 / Server 2016-2022 (Desktop UI + Трей) |
+| **Android** | arm64 / arm / x64 | [`NatBypass-v1.5.2.apk`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Android 8.0+ (VpnService + QR-сканер + Экранный QR) |
+| **Linux** | amd64 | [`natbypass-v1.5.2-linux-amd64`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Ubuntu, Debian, CentOS, Arch |
+| **Linux ARM64** | arm64 | [`natbypass-v1.5.2-linux-arm64`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Raspberry Pi 3/4/5, Keenetic Ultra/Giga |
+| **Роутеры MIPS** | mips (Big Endian) | [`natbypass-v1.5.2-router-mips`](https://github.com/jamixm4-crypto/natbypass/releases/latest) | OpenWrt (TP-Link, GL.iNet, Atheros) |
+| **Роутеры MIPSLE** | mipsle (Little Endian)| [`natbypass-v1.5.2-router-mipsle`](https://github.com/jamixm4-crypto/natbypass/releases/latest)| Keenetic Start/City/Air, Xiaomi 3G/4A |
 
 ---
 
 ## 🚀 Быстрая установка
 
 ### Windows
-1. Скачайте [**`NatBypass-v1.2.7-windows-amd64.exe`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
-2. Запустите от имени администратора.
-3. В разделе **«Настройки»** укажите данные Telegram-бота или MQTT-брокера и нажмите **«💾 Сохранить»**.
+1. Скачайте [**`NatBypass-v1.5.2-windows-amd64.exe`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+2. Запустите файл (для поднятия виртуального адаптера `NatBypass` рекомендуются права администратора).
+3. Приложение откроется в нативном графическом окне.
 
 ### Linux / Keenetic / OpenWrt (Установка в 1 команду)
 ```bash
@@ -97,8 +98,8 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/unins
 ```
 
 ### Android
-1. Скачайте [**`NatBypass-v1.2.7.apk`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
-2. Нажмите **«📷 Сканировать QR»** и наведите камеру на QR-код во вкладке *«Быстрый старт»* на ПК для мгновенного импорта настроек!
+1. Скачайте [**`NatBypass-v1.5.2.apk`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+2. Нажмите **«📷 Сканировать QR»** и наведите камеру на QR-код во вкладке *«Быстрый старт»* на ПК для мгновенного сопряжения!
 
 ---
 
