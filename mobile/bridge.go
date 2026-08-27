@@ -53,7 +53,7 @@ func (lr *logRing) GetText() string {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
 	if len(lr.lines) == 0 {
-		return "Р›РѕРі РїРѕРєР° РїСѓСЃС‚. Р—Р°РїСѓСЃС‚РёС‚Рµ VPN РёР»Рё РІС‹РїРѕР»РЅРёС‚Рµ РґРёР°РіРЅРѕСЃС‚РёРєСѓ."
+		return "Журнал пуст. Запустите соединение или выполните диагностику."
 	}
 	return strings.Join(lr.lines, "\n")
 }
@@ -132,12 +132,12 @@ func init() {
 	logger = zerolog.New(multiWriter).With().Timestamp().Str("module", "mobile").Logger()
 }
 
-// StartEngine Р·Р°РїСѓСЃРєР°РµС‚ СЏРґСЂРѕ NatBypass РІРЅСѓС‚СЂРё Android VpnService
+// StartEngine запускает ядро NatBypass внутри Android VpnService
 func StartEngine(configYAML string, tunFd int) string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 
-	// Р•СЃР»Рё РґРІРёР¶РѕРє СѓР¶Рµ Р°РєС‚РёРІРµРЅ Рё РїРµСЂРµРґР°РЅ РІР°Р»РёРґРЅС‹Р№ TUN fd - РїСЂРёРІСЏР·С‹РІР°РµРј TUN Рє СЂР°Р±РѕС‚Р°СЋС‰РµРјСѓ СЃРѕРєРµС‚Сѓ
+	// Если движок уже активен и передан валидный TUN fd - привязываем TUN к работающему сокету
 	if engineRunning {
 		if tunFd > 0 {
 			attachTUN(tunFd)
@@ -147,7 +147,7 @@ func StartEngine(configYAML string, tunFd int) string {
 
 	cfg, err := parseConfigFromString(configYAML)
 	if err != nil {
-		return fmt.Sprintf("РѕС€РёР±РєР° РїР°СЂСЃРёРЅРіР° РєРѕРЅС„РёРіР°: %v", err)
+		return fmt.Sprintf("ошибка парсинга конфига: %v", err)
 	}
 	globalConfig = cfg
 
@@ -156,11 +156,11 @@ func StartEngine(configYAML string, tunFd int) string {
 	engineCancel = cancel
 	globalStarted = time.Now()
 
-	// NaCl РєР»СЋС‡Рё
+	// NaCl ключи
 	pubKey, _, err := loadOrGenKeys(cfg)
 	if err != nil {
 		cancel()
-		return fmt.Sprintf("РѕС€РёР±РєР° РіРµРЅРµСЂР°С†РёРё РєР»СЋС‡РµР№: %v", err)
+		return fmt.Sprintf("ошибка генерации ключей: %v", err)
 	}
 
 	devID := cfg.App.DeviceID
@@ -177,11 +177,11 @@ func StartEngine(configYAML string, tunFd int) string {
 		globalDevName = devID
 	}
 
-	// Р РµРµСЃС‚СЂ РїРёСЂРѕРІ
+	// Реестр пиров
 	globalRegistry = peer.NewRegistry()
 	globalRegistry.StartMonitor(ctx, 2*time.Minute)
 
-	// РЎРёРіРЅР°Р»СЊРЅС‹Рµ РєР°РЅР°Р»С‹
+	// Сигнальные каналы
 	activeProf := cfg.EnsureActiveProfile()
 	if activeProf.AWGPreset != "" {
 		globalAWGPreset = activeProf.AWGPreset
@@ -203,8 +203,8 @@ func StartEngine(configYAML string, tunFd int) string {
 	}
 	globalSigMgr = signaling.NewFallbackManager(channels)
 
-	// UDP Puncher РґР»СЏ P2P СЃРѕРєРµС‚РѕРІ
-	// UDPPort=0 (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ) в†’ OS РІС‹РґРµР»СЏРµС‚ СЃР»СѓС‡Р°Р№РЅС‹Р№ РїРѕСЂС‚ (РЅРµ РєРѕРЅС„Р»РёРєС‚СѓРµС‚ СЃ AWG/WG)
+	// UDP Puncher для P2P сокетов
+	// UDPPort=0 (по умолчанию) → OS выделяет случайный порт (не конфликтует с AWG/WG)
 	var puncher *network.UDPPuncher
 	puncher, _ = network.NewUDPPuncher(cfg.Network.UDPPort, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		if p, ok := globalRegistry.Get(remoteDevID); ok {
@@ -222,9 +222,9 @@ func StartEngine(configYAML string, tunFd int) string {
 			p.Online = true
 			p.LastSeen = time.Now()
 			globalRegistry.Upsert(p)
-			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("вљЎ Android P2P СЃРѕРєРµС‚ РїСЂРѕР±РёС‚!")
+			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("⚡ Android P2P сокет пробит!")
 
-			// Р’СЃС‚СЂРµС‡РЅС‹Р№ Р·РѕРЅРґ РЅР° РѕР±РЅР°СЂСѓР¶РµРЅРЅС‹Р№ СЃРѕРєРµС‚ РґР»СЏ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРЅРѕРіРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ СЃРѕ СЃС‚РѕСЂРѕРЅС‹ РџРљ/СЂРѕСѓС‚РµСЂР°
+			// Встречный зонд на обнаруженный сокет для гарантированного подтверждения со стороны ПК/роутера
 			if puncher != nil {
 				go func(targetAddr string) {
 					for i := 0; i < 3; i++ {
@@ -237,7 +237,7 @@ func StartEngine(configYAML string, tunFd int) string {
 	})
 	globalPuncher = puncher
 
-	// РћРїСЂРµРґРµР»РµРЅРёРµ IP Рё STUN РЅР° РїРѕСЃС‚РѕСЏРЅРЅРѕРј UDP Puncher СЃРѕРєРµС‚Рµ
+	// Определение IP и STUN на постоянном UDP Puncher сокете
 	ipDisc := network.NewDiscoverer(cfg.Network.IPApis, 5*time.Second)
 	go func() {
 		if ip, err := ipDisc.GetPublicIPCached(ctx, 5*time.Minute); err == nil {
@@ -249,7 +249,7 @@ func StartEngine(configYAML string, tunFd int) string {
 				pPort = puncher.LocalPort()
 			}
 			globalIPv6 = fmt.Sprintf("[%s]:%d", v6, pPort)
-			logger.Info().Str("ipv6", globalIPv6).Msg("Р“Р»РѕР±Р°Р»СЊРЅС‹Р№ IPv6 Р°РґСЂРµСЃ РјРѕР±РёР»СЊРЅРѕРіРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР° РѕРїСЂРµРґРµР»С‘РЅ (P2P Р±РµР· CGNAT)")
+			logger.Info().Str("ipv6", globalIPv6).Msg("Глобальный IPv6 адрес мобильного устройства определён (P2P без CGNAT)")
 		}
 		if puncher != nil {
 			if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil {
@@ -264,13 +264,13 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
-	// WireGuard РєР»СЋС‡Рё
+	// WireGuard ключи
 	wgKey, err := wireguard.GenerateKeyPair()
 	if err != nil {
 		wgKey = &wireguard.KeyPair{PublicKey: "", PrivateKey: ""}
 	}
 
-	// Р¦РёРєР» РїСѓР±Р»РёРєР°С†РёРё РІ СЃРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р» (РєР°Р¶РґС‹Рµ 8 СЃРµРєСѓРЅРґ)
+	// Цикл публикации в сигнальный канал (каждые 8 секунд)
 	pubInterval := time.Duration(cfg.App.PublishInterval) * time.Second
 	if pubInterval <= 0 {
 		pubInterval = 8 * time.Second
@@ -347,7 +347,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
-	// Р¦РёРєР» РїСЂРёС‘РјР° РѕС‚ СЃРёРіРЅР°Р»СЊРЅРѕРіРѕ РєР°РЅР°Р»Р°
+	// Цикл приёма от сигнального канала
 	go func() {
 		rxChan, err := globalSigMgr.Receive(ctx)
 		if err != nil {
@@ -400,7 +400,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					})
 					negotiateVirtualIP()
 
-					// РќРµРјРµРґР»РµРЅРЅРѕ РїРѕСЃС‹Р»Р°РµРј UDP Hole Punch РїСЂРѕР±Сѓ РїРѕ РІСЃРµРј РІРµРєС‚РѕСЂР°Рј (burst 5)
+					// Немедленно посылаем UDP Hole Punch пробу по всем векторам (burst 5)
 					if puncher != nil {
 						go func(target *signaling.Payload) {
 							addrs := []string{target.STUNAddr, target.LocalAddr}
@@ -431,24 +431,24 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
-	// Р¤РѕРЅРѕРІС‹Р№ С†РёРєР» РїРѕСЃС‚РѕСЏРЅРЅРѕРіРѕ РїСЂРѕР±РёС‚РёСЏ NAT Рё РїРѕРґРґРµСЂР¶Р°РЅРёСЏ СЃРѕРєРµС‚РѕРІ Р¶РёРІС‹РјРё (РєР°Р¶РґС‹Рµ 3 СЃРµРєСѓРЅРґС‹)
-	// РћС‚РїСЂР°РІР»СЏРµС‚ NATBYPASS:PING РЅР° РІСЃРµ РёР·РІРµСЃС‚РЅС‹Рµ Р°РґСЂРµСЃР° РїРёСЂР° РґР»СЏ СѓРґРµСЂР¶Р°РЅРёСЏ NAT-СЃРµСЃСЃРёРё
-	// Рё РЅРµРїСЂРµСЂС‹РІРЅРѕРіРѕ РёР·РјРµСЂРµРЅРёСЏ RTT / РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ Direct P2P.
+	// Фоновый цикл постоянного пробития NAT и поддержания сокетов живыми (каждые 3 секунды)
+	// Отправляет NATBYPASS:PING на все известные адреса пира для удержания NAT-сессии
+	// и непрерывного измерения RTT / подтверждения Direct P2P.
 	go func() {
 		probeTicker := time.NewTicker(3 * time.Second)
 		defer probeTicker.Stop()
 
-		// Р›РѕРіРёСЂСѓРµРј NAT С‚РёРї С‡РµСЂРµР· 6 СЃРµРєСѓРЅРґ РїРѕСЃР»Рµ СЃС‚Р°СЂС‚Р° (РґР°С‘Рј РґРµС‚РµРєС†РёРё Р·Р°РІРµСЂС€РёС‚СЊСЃСЏ)
+		// Логируем NAT тип через 6 секунд после старта (даём детекции завершиться)
 		time.AfterFunc(6*time.Second, func() {
 			if puncher != nil {
 				natType := puncher.GetNATType()
 				switch natType {
 				case network.NATTypeSymmetric:
-					logger.Warn().Str("nat_type", natType.String()).Msg("рџ”ґ РћР±РЅР°СЂСѓР¶РµРЅ Symmetric NAT (CGNAT РѕРїРµСЂР°С‚РѕСЂР°) вЂ” РєР»Р°СЃСЃРёС‡РµСЃРєРёР№ UDP hole punch РЅРµРЅР°РґС‘Р¶РµРЅ, РёСЃРїРѕР»СЊР·СѓСЋ СЂР°СЃС€РёСЂРµРЅРЅС‹Р№ sweep")
+					logger.Warn().Str("nat_type", natType.String()).Msg("🔴 Обнаружен Symmetric NAT (CGNAT оператора) — классический UDP hole punch ненадёжен, использую расширенный sweep")
 				case network.NATTypeFullCone:
-					logger.Info().Str("nat_type", natType.String()).Msg("рџџў РћР±РЅР°СЂСѓР¶РµРЅ Full Cone / Restricted NAT вЂ” РїСЂСЏРјРѕРµ P2P СЃРѕРµРґРёРЅРµРЅРёРµ РґРѕСЃС‚СѓРїРЅРѕ")
+					logger.Info().Str("nat_type", natType.String()).Msg("🟢 Обнаружен Full Cone / Restricted NAT — прямое P2P соединение доступно")
 				default:
-					logger.Info().Str("nat_type", natType.String()).Msg("рџ”Ќ РўРёРї NAT: " + natType.String())
+					logger.Info().Str("nat_type", natType.String()).Msg("🔍 Тип NAT: " + natType.String())
 				}
 			}
 		})
@@ -493,7 +493,7 @@ func StartEngine(configYAML string, tunFd int) string {
 	}
 
 	engineRunning = true
-	logger.Info().Str("device_id", devID).Int("tun_fd", tunFd).Msg("NatBypass Android СЏРґСЂРѕ Р·Р°РїСѓС‰РµРЅРѕ")
+	logger.Info().Str("device_id", devID).Int("tun_fd", tunFd).Msg("NatBypass Android ядро запущено")
 	return "OK"
 }
 
@@ -515,27 +515,37 @@ func attachTUN(tunFd int) {
 				}
 			}
 
-			// Р—Р°РїРёСЃС‹РІР°РµРј РїР°РєРµС‚ РІ TUN вЂ” Android OS СЃР°РјР° РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ ICMP, TCP, UDP
-			// РќР• РїРµСЂРµС…РІР°С‚С‹РІР°РµРј ICMP РІСЂСѓС‡РЅСѓСЋ вЂ” РћРЎ РіРµРЅРµСЂРёСЂСѓРµС‚ Echo Reply СЃР°РјР° Рё РїРёС€РµС‚ РµРіРѕ РѕР±СЂР°С‚РЅРѕ РІ TUN
+			// Записываем пакет в TUN — Android OS сама обрабатывает ICMP, TCP, UDP
+			// НЕ перехватываем ICMP вручную — ОС генерирует Echo Reply сама и пишет его обратно в TUN
 			if globalTunFile != nil {
 				_, _ = globalTunFile.Write(payload)
 			}
 		})
 
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Warn().Msg(fmt.Sprintf("TUN read loop recovered: %v", r))
+				}
+			}()
 			buf := make([]byte, 65535)
 			for {
-				if globalTunFile == nil || engineCtx == nil {
+				engineMu.Lock()
+				tf := globalTunFile
+				ctx := engineCtx
+				engineMu.Unlock()
+
+				if tf == nil || ctx == nil {
 					return
 				}
 				select {
-				case <-engineCtx.Done():
+				case <-ctx.Done():
 					return
 				default:
-					n, err := globalTunFile.Read(buf)
+					n, err := tf.Read(buf)
 					if err != nil || n == 0 {
-						time.Sleep(10 * time.Millisecond)
-						continue
+						// Socket closed or EOF -> exit loop cleanly
+						return
 					}
 					pkt := buf[:n]
 					atomic.AddUint64(&globalTxBytes, uint64(n))
@@ -576,8 +586,6 @@ func attachTUN(tunFd int) {
 								_ = globalPuncher.SendDataPacket(targetPeer.STUNAddr, pkt)
 							}
 						}
-						// РџР°РєРµС‚С‹ Р±РµР· С†РµР»Рё (РЅРµ mesh Рё РЅРµ exit node) РѕС‚Р±СЂР°СЃС‹РІР°СЋС‚СЃСЏ вЂ”
-						// РќР• СЂР°СЃСЃС‹Р»Р°РµРј broadcast РїРѕ РІСЃРµРј РїРёСЂР°Рј (СЌС‚Рѕ РІС‹Р·С‹РІР°РµС‚ С€С‚РѕСЂРј С‚СЂР°С„РёРєР°)
 					}
 				}
 			}
@@ -649,20 +657,20 @@ func calcChecksum(data []byte) uint16 {
 	return ^uint16(sum)
 }
 
-// DetachTUN РѕС‚РєР»СЋС‡Р°РµС‚ TUN-РёРЅС‚РµСЂС„РµР№СЃ Р±РµР· РѕСЃС‚Р°РЅРѕРІРєРё СЃРёРіРЅР°Р»СЊРЅРѕРіРѕ РєР°РЅР°Р»Р°
+// DetachTUN отключает TUN-интерфейс без остановки сигнального канала
 func DetachTUN() {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	if globalTunFile == nil {
-		// Already detached вЂ” do not log again to avoid duplicate messages
 		return
 	}
-	_ = globalTunFile.Close()
+	tf := globalTunFile
 	globalTunFile = nil
-	logger.Info().Msg("TUN РёРЅС‚РµСЂС„РµР№СЃ РѕС‚РєР»СЋС‡РµРЅ (СЃРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р» РїСЂРѕРґРѕР»Р¶Р°РµС‚ СЂР°Р±РѕС‚Сѓ)")
+	_ = tf.Close()
+	logger.Info().Msg("TUN интерфейс безопасно отключен")
 }
 
-// StopEngine РѕСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ С„РѕРЅРѕРІС‹Р№ РґРІРёР¶РѕРє
+// StopEngine останавливает фоновый движок
 func StopEngine() {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -678,19 +686,19 @@ func StopEngine() {
 		globalTunFile = nil
 	}
 	engineRunning = false
-	logger.Info().Msg("NatBypass Android СЏРґСЂРѕ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ")
+	logger.Info().Msg("NatBypass Android ядро остановлено")
 }
 
-// RestartEngine РїРµСЂРµР·Р°РїСѓСЃРєР°РµС‚ РґРІРёР¶РѕРє СЃ РЅРѕРІС‹Рј РєРѕРЅС„РёРіРѕРј
+// RestartEngine перезапускает движок с новым конфигом
 func RestartEngine(configYAML string) string {
 	StopEngine()
 	time.Sleep(200 * time.Millisecond)
 	return StartEngine(configYAML, 0)
 }
 
-// RefreshPublicIP РІС‹Р·С‹РІР°РµС‚СЃСЏ Android NetworkCallback РїСЂРё СЃРјРµРЅРµ СЃРµС‚Рё (Wi-Fi в†’ LTE Рё РѕР±СЂР°С‚РЅРѕ)
-// РёР»Рё РїРѕ РЅР°Р¶Р°С‚РёСЋ РєРЅРѕРїРєРё В«РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏВ»/В«РћР±РЅРѕРІРёС‚СЊВ» РІ РёРЅС‚РµСЂС„РµР№СЃРµ.
-// РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ РїРµСЂРµСЃРјР°С‚СЂРёРІР°РµС‚ РїСѓР±Р»РёС‡РЅС‹Р№ IP Рё STUN-mapped Р°РґСЂРµСЃ, Р·Р°С‚РµРј РїСѓР±Р»РёРєСѓРµС‚ РѕР±РЅРѕРІР»С‘РЅРЅС‹Р№ РјР°СЏРє.
+// RefreshPublicIP вызывается Android NetworkCallback при смене сети (Wi-Fi → LTE и обратно)
+// или по нажатию кнопки «Синхронизация»/«Обновить» в интерфейсе.
+// Принудительно пересматривает публичный IP и STUN-mapped адрес, затем публикует обновлённый маяк.
 func RefreshPublicIP() {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -699,9 +707,9 @@ func RefreshPublicIP() {
 		return
 	}
 	puncher := globalPuncher
-	logger.Info().Msg("рџ”„ РЎРјРµРЅР° СЃРµС‚Рё РѕР±РЅР°СЂСѓР¶РµРЅР° вЂ” РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ РїРµСЂРµСЃРјР°С‚СЂРёРІР°СЋ IP Рё STUN-Р°РґСЂРµСЃ...")
+	logger.Info().Msg("🔄 Смена сети обнаружена — принудительно пересматриваю IP и STUN-адрес...")
 
-	// РЎР±СЂР°СЃС‹РІР°РµРј С‚РµРєСѓС‰РёР№ STUN Рё IP
+	// Сбрасываем текущий STUN и IP
 	globalSTUN = ""
 	globalPublicIP = ""
 	globalIPv6 = ""
@@ -711,29 +719,29 @@ func RefreshPublicIP() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		// 1. РћРїСЂРѕСЃ STUN С‡РµСЂРµР· puncher СЃРѕРєРµС‚ (РЅР°РёР±РѕР»РµРµ С‚РѕС‡РЅС‹Р№ UDP-РјР°РїРїРёРЅРі)
+		// 1. Опрос STUN через puncher сокет (наиболее точный UDP-маппинг)
 		if puncher != nil {
 			if sIP, sPort, err := puncher.DiscoverMappedAddress(ctx); err == nil && sIP != nil {
 				engineMu.Lock()
 				globalSTUN = fmt.Sprintf("%s:%d", sIP.String(), sPort)
 				globalPublicIP = sIP.String()
 				engineMu.Unlock()
-				logger.Info().Str("stun", globalSTUN).Str("ip", globalPublicIP).Msg("вњ… STUN Рё РІРЅРµС€РЅРёР№ IP РѕР±РЅРѕРІР»РµРЅС‹ РїРѕСЃР»Рµ СЃРјРµРЅС‹ СЃРµС‚Рё")
+				logger.Info().Str("stun", globalSTUN).Str("ip", globalPublicIP).Msg("✅ STUN и внешний IP обновлены после смены сети")
 			}
 		}
 
-		// 2. Р•СЃР»Рё STUN РЅРµ РѕРїСЂРµРґРµР»РёР» IP, Р±С‹СЃС‚СЂС‹Р№ HTTP discoverer Р±РµР· РєСЌС€Р°
+		// 2. Если STUN не определил IP, быстрый HTTP discoverer без кэша
 		if globalPublicIP == "" {
 			ipDisc := network.NewDiscoverer(nil, 3*time.Second)
 			if ip, err := ipDisc.GetPublicIP(ctx); err == nil && ip != nil {
 				engineMu.Lock()
 				globalPublicIP = ip.String()
 				engineMu.Unlock()
-				logger.Info().Str("public_ip", globalPublicIP).Msg("вњ… Р’РЅРµС€РЅРёР№ IP РѕР±РЅРѕРІР»С‘РЅ С‡РµСЂРµР· HTTP РїРѕСЃР»Рµ СЃРјРµРЅС‹ СЃРµС‚Рё")
+				logger.Info().Str("public_ip", globalPublicIP).Msg("✅ Внешний IP обновлён через HTTP после смены сети")
 			}
 		}
 
-		// 3. РћР±РЅРѕРІР»РµРЅРёРµ IPv6
+		// 3. Обновление IPv6
 		if v6 := network.GetPublicIPv6(ctx); v6 != "" {
 			pPort := 51820
 			if puncher != nil {
@@ -742,10 +750,10 @@ func RefreshPublicIP() {
 			engineMu.Lock()
 			globalIPv6 = fmt.Sprintf("[%s]:%d", v6, pPort)
 			engineMu.Unlock()
-			logger.Info().Str("ipv6", globalIPv6).Msg("вњ… IPv6-Р°РґСЂРµСЃ РѕР±РЅРѕРІР»С‘РЅ РїРѕСЃР»Рµ СЃРјРµРЅС‹ СЃРµС‚Рё")
+			logger.Info().Str("ipv6", globalIPv6).Msg("✅ IPv6-адрес обновлён после смены сети")
 		}
 
-		// 4. РњРіРЅРѕРІРµРЅРЅР°СЏ РїСѓР±Р»РёРєР°С†РёСЏ РјР°СЏРєР° РІ СЃРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р» Рё Р·РѕРЅРґРёРЅРі РІСЃРµС… РїРёСЂРѕРІ
+		// 4. Мгновенная публикация маяка в сигнальный канал и зондинг всех пиров
 		if globalSigMgr != nil && globalConfig != nil {
 			activeProf := globalConfig.EnsureActiveProfile()
 			activeKey := ""
@@ -775,7 +783,7 @@ func RefreshPublicIP() {
 			_ = globalSigMgr.Send(ctx, payload)
 		}
 
-		// 5. РњРіРЅРѕРІРµРЅРЅР°СЏ РѕС‚РїСЂР°РІРєР° UDP hole punch Р·РѕРЅРґРѕРІ РЅР° РІСЃРµ РёР·РІРµСЃС‚РЅС‹Рµ РїРёСЂС‹
+		// 5. Мгновенная отправка UDP hole punch зондов на все известные пиры
 		if puncher != nil && globalRegistry != nil {
 			for _, p := range globalRegistry.List() {
 				if p.ActiveEndpoint != "" {
@@ -792,27 +800,27 @@ func RefreshPublicIP() {
 	}()
 }
 
-// GetLogsText РІРѕР·РІСЂР°С‰Р°РµС‚ РїРѕР»РЅС‹Р№ Р»РѕРі СЏРґСЂР°
+// GetLogsText возвращает полный лог ядра
 func GetLogsText() string {
 	return globalLogs.GetText()
 }
 
-// ClearLogs РѕС‡РёС‰Р°РµС‚ РЅР°РєРѕРїР»РµРЅРЅС‹Р№ Р±СѓС„РµСЂ Р»РѕРіРѕРІ
+// ClearLogs очищает накопленный буфер логов
 func ClearLogs() {
 	globalLogs.Clear()
 }
 
-// IsRunning РІРѕР·РІСЂР°С‰Р°РµС‚ true, РµСЃР»Рё РґРІРёР¶РѕРє Р°РєС‚РёРІРµРЅ
+// IsRunning возвращает true, если движок активен
 func IsRunning() bool {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	return engineRunning
 }
 
-// TestTelegram РїСЂРѕРІРµСЂСЏРµС‚ РїРѕРґРєР»СЋС‡РµРЅРёРµ Рє Telegram Bot API
+// TestTelegram проверяет подключение к Telegram Bot API
 func TestTelegram(token, chatID, proxyURL string) string {
 	if token == "" || chatID == "" {
-		return "РћС€РёР±РєР°: СѓРєР°Р¶РёС‚Рµ С‚РѕРєРµРЅ Рё Chat ID Р±РѕС‚Р°"
+		return "Ошибка: укажите токен и Chat ID бота"
 	}
 	ch := signaling.NewTelegramChannel(token, chatID, proxyURL)
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
@@ -824,15 +832,15 @@ func TestTelegram(token, chatID, proxyURL string) string {
 		Timestamp: time.Now(),
 	}
 	if err := ch.Send(ctx, p); err != nil {
-		return fmt.Sprintf("РћС€РёР±РєР° СЃРІСЏР·Рё СЃ Telegram: %v", err)
+		return fmt.Sprintf("Ошибка связи с Telegram: %v", err)
 	}
-	return "вњ“ Р‘РѕС‚ СѓСЃРїРµС€РЅРѕ РѕС‚РІРµС‚РёР»! РўРµСЃС‚РѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ."
+	return "✓ Бот успешно ответил! Тестовое сообщение отправлено."
 }
 
-// TestMQTT РїСЂРѕРІРµСЂСЏРµС‚ РїРѕРґРєР»СЋС‡РµРЅРёРµ Рє MQTT Р±СЂРѕРєРµСЂСѓ
+// TestMQTT проверяет подключение к MQTT брокеру
 func TestMQTT(broker, topic, user, pass string) string {
 	if broker == "" || topic == "" {
-		return "РћС€РёР±РєР°: СѓРєР°Р¶РёС‚Рµ URL Р±СЂРѕРєРµСЂР° Рё С‚РѕРїРёРє"
+		return "Ошибка: укажите URL брокера и топик"
 	}
 	ch := signaling.NewMQTTChannel(broker, topic, "test-probe", user, pass)
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
@@ -844,12 +852,12 @@ func TestMQTT(broker, topic, user, pass string) string {
 		Timestamp: time.Now(),
 	}
 	if err := ch.Send(ctx, p); err != nil {
-		return fmt.Sprintf("РћС€РёР±РєР° СЃРІСЏР·Рё СЃ MQTT: %v", err)
+		return fmt.Sprintf("Ошибка связи с MQTT: %v", err)
 	}
-	return fmt.Sprintf("вњ“ РЈСЃРїРµС€РЅРѕРµ РїРѕРґРєР»СЋС‡РµРЅРёРµ Рє Р±СЂРѕРєРµСЂСѓ %s (С‚РѕРїРёРє: %s)!", broker, topic)
+	return fmt.Sprintf("✓ Успешное подключение к брокеру %s (топик: %s)!", broker, topic)
 }
 
-// GetVirtualIP РІРѕР·РІСЂР°С‰Р°РµС‚ С‚РµРєСѓС‰РёР№ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ IP СѓСЃС‚СЂРѕР№СЃС‚РІР° РІ P2P СЃРµС‚Рё
+// GetVirtualIP возвращает текущий виртуальный IP устройства в P2P сети
 func GetVirtualIP() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -862,49 +870,49 @@ func GetVirtualIP() string {
 	return "100.64.200.10"
 }
 
-// GetPublicIP РІРѕР·РІСЂР°С‰Р°РµС‚ С‚РµРєСѓС‰РёР№ РїСѓР±Р»РёС‡РЅС‹Р№ IP
+// GetPublicIP возвращает текущий публичный IP
 func GetPublicIP() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	if globalPublicIP != "" {
 		return globalPublicIP
 	}
-	return "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ..."
+	return "Определяется..."
 }
 
-// GetSTUNAddr РІРѕР·РІСЂР°С‰Р°РµС‚ С‚РµРєСѓС‰РёР№ STUN-Р°РґСЂРµСЃ
+// GetSTUNAddr возвращает текущий STUN-адрес
 func GetSTUNAddr() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	if globalSTUN != "" {
 		return globalSTUN
 	}
-	return "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ..."
+	return "Определяется..."
 }
 
-// SetDeviceName СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ РёРјСЏ СѓСЃС‚СЂРѕР№СЃС‚РІР°
+// SetDeviceName устанавливает имя устройства
 func SetDeviceName(name string) {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	globalDevName = name
 }
 
-// SelectExitNode РІС‹Р±РёСЂР°РµС‚ С€Р»СЋР· РґР»СЏ РІС‹С…РѕРґР° РІ РёРЅС‚РµСЂРЅРµС‚
+// SelectExitNode выбирает шлюз для выхода в интернет
 func SelectExitNode(deviceID string) {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	globalExitNode = deviceID
-	logger.Info().Str("exit_node", deviceID).Msg("Р’С‹Р±СЂР°РЅ Exit Node РґР»СЏ Android")
+	logger.Info().Str("exit_node", deviceID).Msg("Выбран Exit Node для Android")
 }
 
-// GetSelectedExitNode РІРѕР·РІСЂР°С‰Р°РµС‚ ID РІС‹Р±СЂР°РЅРЅРѕРіРѕ С€Р»СЋР·Р°
+// GetSelectedExitNode возвращает ID выбранного шлюза
 func GetSelectedExitNode() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	return globalExitNode
 }
 
-// SetAllowExitNode СЂР°Р·СЂРµС€Р°РµС‚ РґСЂСѓРіРёРј СѓСЃС‚СЂРѕР№СЃС‚РІР°Рј РІС‹С…РѕРґРёС‚СЊ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· СЌС‚РѕС‚ СѓР·РµР»
+// SetAllowExitNode разрешает другим устройствам выходить в интернет через этот узел
 func SetAllowExitNode(allow bool) {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -912,10 +920,10 @@ func SetAllowExitNode(allow bool) {
 	if globalConfig != nil {
 		globalConfig.Network.AllowExitNode = allow
 	}
-	logger.Info().Bool("allow_exit_node", allow).Msg("РЎС‚Р°С‚СѓСЃ Exit Node РѕР±РЅРѕРІР»РµРЅ")
+	logger.Info().Bool("allow_exit_node", allow).Msg("Статус Exit Node обновлен")
 }
 
-// GetAllowExitNode РІРѕР·РІСЂР°С‰Р°РµС‚ true, РµСЃР»Рё СѓР·РµР» РјРѕР¶РµС‚ СЃР»СѓР¶РёС‚СЊ С€Р»СЋР·РѕРј
+// GetAllowExitNode возвращает true, если узел может служить шлюзом
 func GetAllowExitNode() bool {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -925,7 +933,7 @@ func GetAllowExitNode() bool {
 	return globalAllowExitNode
 }
 
-// SetAdvertisedRoutes СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ Р°РЅРѕРЅСЃРёСЂСѓРµРјС‹Рµ Р»РѕРєР°Р»СЊРЅС‹Рµ РїРѕРґСЃРµС‚Рё (РЅР°РїСЂРёРјРµСЂ, "192.168.1.0/24")
+// SetAdvertisedRoutes устанавливает анонсируемые локальные подсети (например, "192.168.1.0/24")
 func SetAdvertisedRoutes(routesCSV string) {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -942,10 +950,10 @@ func SetAdvertisedRoutes(routesCSV string) {
 	if globalConfig != nil {
 		globalConfig.Network.AdvertisedSubnets = routes
 	}
-	logger.Info().Strs("routes", routes).Msg("РђРЅРѕРЅСЃРёСЂСѓРµРјС‹Рµ РїРѕРґСЃРµС‚Рё РѕР±РЅРѕРІР»РµРЅС‹")
+	logger.Info().Strs("routes", routes).Msg("Анонсируемые подсети обновлены")
 }
 
-// GetAdvertisedRoutes РІРѕР·РІСЂР°С‰Р°РµС‚ СЃРїРёСЃРѕРє Р°РЅРѕРЅСЃРёСЂСѓРµРјС‹С… РїРѕРґСЃРµС‚РµР№
+// GetAdvertisedRoutes возвращает список анонсируемых подсетей
 func GetAdvertisedRoutes() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -958,22 +966,22 @@ func GetAdvertisedRoutes() string {
 	return ""
 }
 
-// GetLocalSubnetsJSON РІРѕР·РІСЂР°С‰Р°РµС‚ СЃРїРёСЃРѕРє РѕР±РЅР°СЂСѓР¶РµРЅРЅС‹С… Р»РѕРєР°Р»СЊРЅС‹С… РїРѕРґСЃРµС‚РµР№ СѓСЃС‚СЂРѕР№СЃС‚РІР°
+// GetLocalSubnetsJSON возвращает список обнаруженных локальных подсетей устройства
 func GetLocalSubnetsJSON() string {
 	subnets := network.GetLocalSubnets()
 	data, _ := json.Marshal(subnets)
 	return string(data)
 }
 
-// SetAWGPreset СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ РїСЂРµСЃРµС‚ РѕР±С„СѓСЃРєР°С†РёРё AWG 2.0
+// SetAWGPreset устанавливает пресет обфускации AWG 2.0
 func SetAWGPreset(preset string) {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	globalAWGPreset = preset
-	logger.Info().Str("preset", preset).Msg("РЈСЃС‚Р°РЅРѕРІР»РµРЅ РїСЂРµСЃРµС‚ AmneziaWG 2.0")
+	logger.Info().Str("preset", preset).Msg("Установлен пресет AmneziaWG 2.0")
 }
 
-// GetRandomAWGParamsJSON РіРµРЅРµСЂРёСЂСѓРµС‚ СЃР»СѓС‡Р°Р№РЅС‹Рµ РїР°СЂР°РјРµС‚СЂС‹ РѕР±С…РѕРґР° Р±Р»РѕРєРёСЂРѕРІРѕРє
+// GetRandomAWGParamsJSON генерирует случайные параметры обхода блокировок
 func GetRandomAWGParamsJSON() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
@@ -1028,7 +1036,7 @@ func getAWGParamsFromPreset(preset string) *signaling.AWGParams {
 	}
 }
 
-// GetFullTelemetryJSON РІРѕР·РІСЂР°С‰Р°РµС‚ РґРµС‚Р°Р»СЊРЅС‹Рµ С‚РµР»РµРјРµС‚СЂРёС‡РµСЃРєРёРµ РјРµС‚СЂРёРєРё
+// GetFullTelemetryJSON возвращает детальные телеметрические метрики
 func GetFullTelemetryJSON() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1081,12 +1089,12 @@ func GetFullTelemetryJSON() string {
 	return string(data)
 }
 
-// GetStatusJSON РІРѕР·РІСЂР°С‰Р°РµС‚ Р±Р°Р·РѕРІС‹Р№ СЃС‚Р°С‚СѓСЃ
+// GetStatusJSON возвращает базовый статус
 func GetStatusJSON() string {
 	return GetFullTelemetryJSON()
 }
 
-// GetPeersJSON РІРѕР·РІСЂР°С‰Р°РµС‚ СЃРїРёСЃРѕРє СѓСЃС‚СЂРѕР№СЃС‚РІ
+// GetPeersJSON возвращает список устройств
 func GetPeersJSON() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1099,7 +1107,7 @@ func GetPeersJSON() string {
 	return string(data)
 }
 
-// GetDiagnosticsJSON РІРѕР·РІСЂР°С‰Р°РµС‚ СЂРµР·СѓР»СЊС‚Р°С‚С‹ РґРёР°РіРЅРѕСЃС‚РёРєРё
+// GetDiagnosticsJSON возвращает результаты диагностики
 // GetDiagnosticsJSON возвращает результаты диагностики
 func GetDiagnosticsJSON() string {
 	type check struct {
@@ -1149,7 +1157,7 @@ func GetDiagnosticsJSON() string {
 		result["stun"] = check{Ok: false, Detail: "STUN не определён"}
 	}
 
-	// Сигнальный канал
+	//                 
 	ch := "MQTT / Telegram"
 	if globalSigMgr != nil && globalSigMgr.CurrentChannel() != "" {
 		ch = globalSigMgr.CurrentChannel()
@@ -1167,14 +1175,14 @@ func GetDiagnosticsJSON() string {
 	if globalSTUN != "" {
 		result["nat_type"] = check{Ok: true, Detail: "Возможно Full Cone / Restricted NAT (P2P доступен)"}
 	} else {
-		result["nat_type"] = check{Ok: false, Detail: "Симметричный NAT (требует Relay)"}
+		result["nat_type"] = check{Ok: false, Detail: "             NAT (        Relay)"}
 	}
 
 	data, _ := json.Marshal(result)
 	return string(data)
 }
 
-// ParseQRInvite РїР°СЂСЃРёС‚ QR-РєРѕРґ РїСЂРёРіР»Р°С€РµРЅРёСЏ
+// ParseQRInvite парсит QR-код приглашения
 func ParseQRInvite(qrText string) string {
 	parts := strings.Split(qrText, "|")
 	res := map[string]interface{}{
@@ -1190,7 +1198,7 @@ func ParseQRInvite(qrText string) string {
 	return string(data)
 }
 
-// ClearPeers РѕС‡РёС‰Р°РµС‚ РєСЌС€ РІСЃРµС… СѓР·Р»РѕРІ РІ РѕРїРµСЂР°С‚РёРІРЅРѕР№ РїР°РјСЏС‚Рё
+// ClearPeers очищает кэш всех узлов в оперативной памяти
 func ClearPeers() {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1199,7 +1207,7 @@ func ClearPeers() {
 	}
 }
 
-// GenerateInviteQRText РІРѕР·РІСЂР°С‰Р°РµС‚ СЃС‚СЂРѕРєСѓ QR-РєРѕРґР° РїСЂРёРіР»Р°С€РµРЅРёСЏ
+// GenerateInviteQRText возвращает строку QR-кода приглашения
 func GenerateInviteQRText() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1214,7 +1222,7 @@ func GenerateInviteQRText() string {
 	return fmt.Sprintf("NatBypass|%s|%s|https://github.com/jamixm4-crypto/natbypass/releases/latest", name, ip)
 }
 
-// GenerateKeysJSON РіРµРЅРµСЂРёСЂСѓРµС‚ РєР»СЋС‡Рё
+// GenerateKeysJSON генерирует ключи
 func GenerateKeysJSON() string {
 	pub, priv, _ := crypto.GenerateKeyPair()
 	wg, _ := wireguard.GenerateKeyPair()
@@ -1299,7 +1307,7 @@ func buildChannels(cfg *config.Config, deviceID string) ([]signaling.SignalingCh
 	return channels, nil
 }
 
-// GetProfilesJSON РІРѕР·РІСЂР°С‰Р°РµС‚ JSON СЃРїРёСЃРѕРє РІСЃРµС… РїСЂРѕС„РёР»РµР№ СЃ СѓРєР°Р·Р°РЅРёРµРј Р°РєС‚РёРІРЅРѕРіРѕ
+// GetProfilesJSON возвращает JSON список всех профилей с указанием активного
 func GetProfilesJSON() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1319,7 +1327,7 @@ func GetProfilesJSON() string {
 	return string(data)
 }
 
-// CreateProfile СЃРѕР·РґР°РµС‚ РЅРѕРІС‹Р№ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё Рё РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ РїРµСЂРµРєР»СЋС‡Р°РµС‚СЃСЏ РЅР° РЅРµРіРѕ
+// CreateProfile создает новый профиль сети и опционально переключается на него
 func CreateProfile(name, broker, topic, user, pass, tgToken string, tgChat int64, tgProxy, awgPreset string, autoSwitch bool) string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1329,7 +1337,7 @@ func CreateProfile(name, broker, topic, user, pass, tgToken string, tgChat int64
 	}
 
 	if name == "" {
-		name = fmt.Sprintf("РЎРµС‚СЊ #%d", len(globalConfig.Profiles)+1)
+		name = fmt.Sprintf("Сеть #%d", len(globalConfig.Profiles)+1)
 	}
 	if topic == "" {
 		topic = "natbypass/mesh/" + config.GenerateRandomHex(8)
@@ -1366,7 +1374,7 @@ func CreateProfile(name, broker, topic, user, pass, tgToken string, tgChat int64
 	return string(data)
 }
 
-// UpdateProfile РѕР±РЅРѕРІР»СЏРµС‚ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ РїСЂРѕС„РёР»СЊ (РЅР°Р·РІР°РЅРёРµ, С‚РѕРїРёРє, Р±СЂРѕРєРµСЂ, AWG РїСЂРµСЃРµС‚, TG)
+// UpdateProfile обновляет существующий профиль (название, топик, брокер, AWG пресет, TG)
 func UpdateProfile(profileID, name, broker, topic, user, pass, tgToken string, tgChat int64, tgProxy, awgPreset string) string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1407,10 +1415,10 @@ func UpdateProfile(profileID, name, broker, topic, user, pass, tgToken string, t
 			return string(data)
 		}
 	}
-	return `{"error":"РїСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅ"}`
+	return `{"error":"профиль не найден"}`
 }
 
-// GetConfigYAML РІРѕР·РІСЂР°С‰Р°РµС‚ С‚РµРєСѓС‰РёР№ РїРѕР»РЅС‹Р№ РєРѕРЅС„РёРі РІ С„РѕСЂРјР°С‚Рµ YAML РґР»СЏ СЃРѕС…СЂР°РЅРµРЅРёСЏ
+// GetConfigYAML возвращает текущий полный конфиг в формате YAML для сохранения
 func GetConfigYAML() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1424,7 +1432,7 @@ func GetConfigYAML() string {
 	return string(data)
 }
 
-// SwitchProfile РїРµСЂРµРєР»СЋС‡Р°РµС‚ Р°РєС‚РёРІРЅС‹Р№ РїСЂРѕС„РёР»СЊ РїРѕ ID
+// SwitchProfile переключает активный профиль по ID
 func SwitchProfile(profileID string) bool {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1435,7 +1443,7 @@ func SwitchProfile(profileID string) bool {
 
 	target, err := globalConfig.SwitchProfile(profileID)
 	if err != nil {
-		logger.Error().Err(err).Msg("РћС€РёР±РєР° РїРµСЂРµРєР»СЋС‡РµРЅРёСЏ РїСЂРѕС„РёР»СЏ")
+		logger.Error().Err(err).Msg("Ошибка переключения профиля")
 		return false
 	}
 
@@ -1447,7 +1455,7 @@ func SwitchProfile(profileID string) bool {
 	return true
 }
 
-// DeleteProfile СѓРґР°Р»СЏРµС‚ РїСЂРѕС„РёР»СЊ
+// DeleteProfile удаляет профиль
 func DeleteProfile(profileID string) bool {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1471,7 +1479,7 @@ func DeleteProfile(profileID string) bool {
 	return true
 }
 
-// ExportProfileURI С„РѕСЂРјРёСЂСѓРµС‚ natbypass://profile?... РґР»СЏ QR РёР»Рё С€РµСЂРёРЅРіР°
+// ExportProfileURI формирует natbypass://profile?... для QR или шеринга
 func ExportProfileURI(profileID string) string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
@@ -1496,7 +1504,7 @@ func ExportProfileURI(profileID string) string {
 	return config.ExportProfileURI(*target)
 }
 
-// ImportProfileURI РёРјРїРѕСЂС‚РёСЂСѓРµС‚ РїСЂРѕС„РёР»СЊ РїРѕ СЃСЃС‹Р»РєРµ РёР»Рё QR СЃС‚СЂРѕРєРµ
+// ImportProfileURI импортирует профиль по ссылке или QR строке
 func ImportProfileURI(rawURI string) string {
 	parsed, err := config.ImportProfileURI(rawURI)
 	if err != nil {
@@ -1518,12 +1526,12 @@ func ImportProfileURI(rawURI string) string {
 	return string(data)
 }
 
-// rebuildSignalingInternal РїРµСЂРµСЃРѕР±РёСЂР°РµС‚ СЃРёРіРЅР°Р»СЊРЅС‹Рµ РєР°РЅР°Р»С‹ РїСЂРё СЃРјРµРЅРµ РїСЂРѕС„РёР»СЏ (РІС‹Р·С‹РІР°РµС‚СЃСЏ РїРѕРґ engineMu)
+// rebuildSignalingInternal пересобирает сигнальные каналы при смене профиля (вызывается под engineMu)
 func rebuildSignalingInternal(p *config.Profile) {
 	if p == nil {
 		return
 	}
-	logger.Info().Str("profile", p.Name).Str("topic", p.MQTTTopic).Msg("рџ”„ РџРµСЂРµРєР»СЋС‡РµРЅРёРµ СЃРёРіРЅР°Р»СЊРЅРѕРіРѕ РєР°РЅР°Р»Р° РЅР° РЅРѕРІС‹Р№ РїСЂРѕС„РёР»СЊ...")
+	logger.Info().Str("profile", p.Name).Str("topic", p.MQTTTopic).Msg("🔄 Переключение сигнального канала на новый профиль...")
 
 	if globalRegistry != nil {
 		globalRegistry.ClearAll()
@@ -1538,7 +1546,7 @@ func rebuildSignalingInternal(p *config.Profile) {
 	}
 }
 
-// PingPeer Р°РєС‚РёРІРЅРѕ РѕС‚РїСЂР°РІР»СЏРµС‚ UDP Р·РѕРЅРґ РїРёСЂСѓ Рё РІРѕР·РІСЂР°С‰Р°РµС‚ СЂРµР°Р»СЊРЅС‹Р№ RTT РІ РјРёР»Р»РёСЃРµРєСѓРЅРґР°С… (-1 РїСЂРё РѕС‚СЃСѓС‚СЃС‚РІРёРё РѕС‚РІРµС‚Р°)
+// PingPeer активно отправляет UDP зонд пиру и возвращает реальный RTT в миллисекундах (-1 при отсутствии ответа)
 func PingPeer(deviceID string) int64 {
 	engineMu.Lock()
 	p := globalPuncher
@@ -1556,7 +1564,7 @@ func PingPeer(deviceID string) int64 {
 
 	initialTs := peerObj.LastSeen
 
-	// РћС‚РїСЂР°РІР»СЏРµРј Р·РѕРЅРґС‹ РЅР° РІСЃРµ РёР·РІРµСЃС‚РЅС‹Рµ Р°РґСЂРµСЃР° РїРёСЂР°
+	// Отправляем зонды на все известные адреса пира
 	if peerObj.ActiveEndpoint != "" {
 		_ = p.SendHolePunchProbe(peerObj.ActiveEndpoint)
 	}
@@ -1577,7 +1585,7 @@ func PingPeer(deviceID string) int64 {
 		}
 	}
 
-	// Р–РґРµРј РґРѕ 400РјСЃ СЂРµР°Р»СЊРЅРѕРіРѕ СЌС…Рѕ-РѕС‚РІРµС‚Р°
+	// Ждем до 400мс реального эхо-ответа
 	for i := 0; i < 8; i++ {
 		time.Sleep(50 * time.Millisecond)
 		if updated, exists := reg.Get(deviceID); exists {
