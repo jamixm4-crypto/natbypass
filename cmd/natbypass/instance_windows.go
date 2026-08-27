@@ -518,6 +518,8 @@ func startTrayIcon(port int) {
 						nid.uID = trayIconID
 						procShellNotifyIconW.Call(2 /* NIM_DELETE */, uintptr(unsafe.Pointer(&nid)))
 						procDestroyWindow.Call(hwnd)
+						cleanupSingleInstanceMutex()
+						closeLogging()
 						os.Exit(0)
 					}
 				}
@@ -583,3 +585,11 @@ func startTrayIcon(port int) {
 	procShellNotifyIconW.Call(2 /* NIM_DELETE */, uintptr(unsafe.Pointer(&nid)))
 }
 
+
+
+func cleanupSingleInstanceMutex() {
+	if singleInstanceMutex != 0 {
+		_ = windows.CloseHandle(singleInstanceMutex)
+		singleInstanceMutex = 0
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
-	"github.com/natbypass/natbypass/internal/tray"
 	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/updater"
 	"github.com/natbypass/natbypass/internal/webui"
@@ -1132,43 +1132,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	}()
 
-	// Если включен режим трея (на Windows)
-	if enableTray && runtime.GOOS == "windows" {
-		trayApp := tray.NewTray(tray.TrayOptions{
-			WebUIPort:  port,
-			ConfigPath: configFile,
-			GetWebUIPort: func() int {
-				if uiServer != nil {
-					return uiServer.GetPort()
-				}
-				return port
-			},
-			OnRefreshIP: func() {
-				ipDisc.GetPublicIP(engineCtx)
-			},
-			OnExit: func() {
-				cancel()
-			},
-			GetStatusText: func() string {
-				ch := sigMgr.CurrentChannel()
-				if ch == "" {
-					ch = "нет"
-				}
-				return fmt.Sprintf("💡 Статус: Онлайн (Канал: %s)", ch)
-			},
-		})
-		log.Info().Msg("Запущен системный трей Windows")
-		return trayApp.Run(engineCtx)
-	}
-
-	// Консольный режим (ожидание SIGINT/SIGTERM)
+	// Ожидание завершения (SIGINT/SIGTERM или context cancel)
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+	select {
+	case <-sigChan:
+	case <-engineCtx.Done():
+	}
 
 	log.Info().Msg("Завершение работы...")
 	cancel()
-	time.Sleep(300 * time.Millisecond)
+	closeLogging()
+	time.Sleep(200 * time.Millisecond)
 	return nil
 }
 
@@ -1316,6 +1291,21 @@ func newInstallCmd() *cobra.Command {
 	}
 	cmd.Flags().String("service", "systemd", "тип сервиса: systemd|procd|entware")
 	return cmd
+}
+
+var (
+	globalLogFileHandle   *os.File
+	globalLogFileHandleMu sync.Mutex
+)
+
+func closeLogging() {
+	globalLogFileHandleMu.Lock()
+	defer globalLogFileHandleMu.Unlock()
+	if globalLogFileHandle != nil {
+		_ = globalLogFileHandle.Sync()
+		_ = globalLogFileHandle.Close()
+		globalLogFileHandle = nil
+	}
 }
 
 func installService(svcType string) error {
