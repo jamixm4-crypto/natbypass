@@ -741,37 +741,89 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	}()
 
-	// 🏠 LAN Broadcast Discovery (локальный поиск за <0.1с)
+	var stunAddr string
+	var ipv6Addr string
+	var publicIP net.IP = net.IPv4(0, 0, 0, 0)
+	ipDisc := network.NewDiscoverer(cfg.Network.IPApis, time.Duration(cfg.Network.IPTimeout)*time.Second)
+
+	// Фоновый периодический анонс в LAN (раз в 60 секунд)
 	go func() {
-		lAddr, _ := net.ResolveUDPAddr("udp4", ":51821")
-		conn, err := net.ListenUDP("udp4", lAddr)
-		if err == nil {
-			defer conn.Close()
-			buf := make([]byte, 1024)
-			for {
-				n, src, rErr := conn.ReadFromUDP(buf)
-				if rErr != nil {
-					return
-				}
-				parts := strings.Split(string(buf[:n]), "|")
-				if len(parts) >= 2 && parts[0] == "NATBYPASS_LAN" && parts[1] != deviceID {
-					peerID := parts[1]
-					p, exists := registry.Get(peerID)
-					if !exists || !p.Online || !p.DirectP2P {
-						log.Info().Str("peer", peerID).Str("addr", src.String()).Msg("🏠 [LAN Discovery] Обнаружен локальный пир в сети")
+		lanTicker := time.NewTicker(60 * time.Second)
+		defer lanTicker.Stop()
+		for {
+			select {
+			case <-engineCtx.Done():
+				return
+			case <-lanTicker.C:
+				if bcastAddr, bErr := net.ResolveUDPAddr("udp4", "255.255.255.255:51821"); bErr == nil {
+					pPort := 47832
+					if puncher != nil {
+						pPort = puncher.LocalPort()
 					}
-					if puncher != nil && len(parts) >= 3 && parts[2] != "" {
-						_ = puncher.SendHolePunchProbe(parts[2])
+					localTarget := fmt.Sprintf("%s:%d", publicIP.String(), pPort)
+					if stunAddr != "" {
+						localTarget = stunAddr
+					}
+					if bConn, bConnErr := net.DialUDP("udp4", nil, bcastAddr); bConnErr == nil {
+						_, _ = bConn.Write([]byte(fmt.Sprintf("NATBYPASS_LAN|%s|%s", deviceID, localTarget)))
+						_ = bConn.Close()
 					}
 				}
 			}
 		}
 	}()
 
-	var stunAddr string
-	var ipv6Addr string
-	var publicIP net.IP = net.IPv4(0, 0, 0, 0)
-	ipDisc := network.NewDiscoverer(cfg.Network.IPApis, time.Duration(cfg.Network.IPTimeout)*time.Second)
+	// 🏠 LAN Broadcast Discovery (локальный поиск в локальной сети)
+	go func() {
+		lAddr, _ := net.ResolveUDPAddr("udp4", ":51821")
+		conn, err := net.ListenUDP("udp4", lAddr)
+		if err == nil {
+			defer conn.Close()
+			buf := make([]byte, 2048)
+			for {
+				n, src, rErr := conn.ReadFromUDP(buf)
+				if rErr != nil {
+					return
+				}
+				dataStr := string(buf[:n])
+				parts := strings.Split(dataStr, "|")
+				if len(parts) >= 2 && parts[0] == "NATBYPASS_LAN" && parts[1] != deviceID {
+					peerID := parts[1]
+					targetAddr := ""
+					if len(parts) >= 3 && parts[2] != "" {
+						targetAddr = parts[2]
+					} else {
+						targetAddr = src.String()
+					}
+
+					p, exists := registry.Get(peerID)
+					if !exists || !p.Online || !p.DirectP2P {
+						log.Info().Str("peer", peerID).Str("addr", targetAddr).Msg("🏠 [LAN Discovery] Обнаружен локальный пир в сети")
+						registry.Upsert(&peer.Peer{
+							DeviceID:       peerID,
+							LocalAddr:      targetAddr,
+							ActiveEndpoint: targetAddr,
+							Online:         true,
+							DirectP2P:      true,
+							LastSeen:       time.Now(),
+						})
+					} else {
+						// Пир уже зарегистрирован и на связи — обновляем время активности без спама в лог
+						p.LastSeen = time.Now()
+						p.Online = true
+						if p.ActiveEndpoint == "" {
+							p.ActiveEndpoint = targetAddr
+						}
+						registry.Upsert(p)
+					}
+
+					if puncher != nil && targetAddr != "" {
+						_ = puncher.SendHolePunchProbe(targetAddr)
+					}
+				}
+			}
+		}
+	}()
 
 	triggerPublishCh := make(chan struct{}, 10)
 	triggerPublish := func() {
@@ -935,21 +987,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				_ = sigMgr.Send(engineCtx, payload)
 
-				// LAN Broadcast Ping (умеренно, раз в несколько циклов)
-				if bcastAddr, bErr := net.ResolveUDPAddr("udp4", "255.255.255.255:51821"); bErr == nil {
-					pPort := 47832
-					if puncher != nil {
-						pPort = puncher.LocalPort()
-					}
-					localTarget := fmt.Sprintf("%s:%d", publicIP.String(), pPort)
-					if stunAddr != "" {
-						localTarget = stunAddr
-					}
-					if bConn, bConnErr := net.DialUDP("udp4", nil, bcastAddr); bConnErr == nil {
-						_, _ = bConn.Write([]byte(fmt.Sprintf("NATBYPASS_LAN|%s|%s", deviceID, localTarget)))
-						_ = bConn.Close()
-					}
-				}
+				// LAN Broadcast Ping выполняется в отдельном фоновом цикле раз в 60 секунд
 			}
 		}
 	}()
