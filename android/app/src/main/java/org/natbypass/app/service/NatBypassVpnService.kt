@@ -59,13 +59,26 @@ class NatBypassVpnService : VpnService() {
                 connect()
             }
             ACTION_DISCONNECT -> {
-                // KEY FIX: Do NOT call stopSelf() immediately here.
-                // Instead: gracefully teardown TUN, update notification to "Disconnected",
-                // keep the service alive briefly so Android does not dismiss the Activity.
-                disconnectGracefully()
+                // БАГ #1: При нажатии "Отключить" НЕ вызываем stopSelf(), чтобы сервис оставался якорем процесса
+                disconnect()
+                val notif = buildNotification("Отключено. Нажмите для подключения.", showDisconnect = false)
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(
+                            NOTIFICATION_ID, notif,
+                            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                        )
+                    } else {
+                        startForeground(NOTIFICATION_ID, notif)
+                    }
+                } catch (_: Exception) {
+                    try {
+                        val nm = getSystemService(NotificationManager::class.java)
+                        nm.notify(NOTIFICATION_ID, notif)
+                    } catch (_: Exception) {}
+                }
             }
             else -> {
-                // System restart with null intent — do not auto-reconnect
                 if (!isRunning) {
                     stopSelf()
                 }
@@ -137,13 +150,23 @@ class NatBypassVpnService : VpnService() {
             }
 
             if (useExitNode) {
-                builder.addRoute("0.0.0.0", 0)
+                try {
+                    builder.addRoute("0.0.0.0", 0)
+                    Log.i(TAG, "ExitNode default route 0.0.0.0/0 added")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to add default route: ${e.message}")
+                }
                 try {
                     builder.addDnsServer("1.1.1.1")
                     builder.addDnsServer("8.8.8.8")
                 } catch (e: Exception) { Log.w(TAG, "addDnsServer error: ${e.message}") }
             } else {
-                builder.addRoute("100.64.200.0", 24)
+                try {
+                    builder.addRoute("100.64.200.0", 24)
+                    Log.i(TAG, "Mesh route 100.64.200.0/24 added")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to add mesh route 100.64.200.0/24: ${e.message}")
+                }
             }
 
             val advSubnets = prefs.getString("adv_subnets", "") ?: ""
@@ -152,8 +175,14 @@ class NatBypassVpnService : VpnService() {
                     val s = subnet.trim()
                     if (s.contains("/")) {
                         val parts = s.split("/")
-                        try { builder.addRoute(parts[0], parts[1].toIntOrNull() ?: 24) }
-                        catch (e: Exception) { Log.w(TAG, "addRoute error: ${e.message}") }
+                        val ip = parts[0]
+                        val prefix = parts[1].toIntOrNull() ?: 24
+                        try {
+                            builder.addRoute(ip, prefix)
+                            Log.i(TAG, "Route $ip/$prefix added")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to add route $subnet: ${e.message}")
+                        }
                     }
                 }
             }
@@ -173,6 +202,12 @@ class NatBypassVpnService : VpnService() {
 
             isRunning = true
 
+            // БАГ #2: При подключении сразу инициируем опрос STUN и обновление IP
+            scope.launch {
+                delay(500)
+                org.natbypass.app.util.MobileBridge.refreshPublicIP()
+            }
+
             serviceJob = scope.launch {
                 while (isActive) {
                     delay(3000)
@@ -181,17 +216,12 @@ class NatBypassVpnService : VpnService() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "connect failed", e)
-            disconnectGracefully()
+            disconnect()
         }
     }
 
-    /**
-     * Graceful disconnect: closes TUN, releases locks, detaches foreground notification
-     * using STOP_FOREGROUND_DETACH so the PROCESS stays alive and Android does NOT
-     * dismiss or minimize MainActivity.
-     */
-    private fun disconnectGracefully() {
-        val wasRunning = isRunning
+    private fun disconnect() {
+        if (!isRunning && vpnInterface == null) return
         isRunning = false
         serviceJob?.cancel()
         serviceJob = null
@@ -213,9 +243,7 @@ class NatBypassVpnService : VpnService() {
         try { vpnInterface?.close() } catch (_: Exception) {}
         vpnInterface = null
 
-        // CRITICAL: Use STOP_FOREGROUND_DETACH (NOT REMOVE).
-        // DETACH keeps the notification alive but detaches it from VpnService lifecycle.
-        // REMOVE would destroy the foreground service anchor causing Android to minimize the Activity.
+        // БАГ #1: Используем DETACH, а не REMOVE, чтобы не убивать контекст процесса
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_DETACH)
@@ -225,20 +253,10 @@ class NatBypassVpnService : VpnService() {
             }
         } catch (_: Exception) {}
 
-        // Update notification to "Disconnected" state
-        if (wasRunning) {
-            try {
-                val nm = getSystemService(NotificationManager::class.java)
-                nm.notify(NOTIFICATION_ID, buildNotification("VPN отключён. Нажмите для подключения.", showDisconnect = false))
-            } catch (_: Exception) {}
-        }
-
-        // Notify MainActivity via broadcast to update UI (connection toggle button etc.)
         sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
             putExtra("state", "disconnected")
         })
-
-        stopSelf()
+        // БЕЗ stopSelf()!
     }
 
     private fun registerNetworkCallback() {
@@ -265,34 +283,41 @@ class NatBypassVpnService : VpnService() {
     }
 
     override fun onRevoke() {
-        // System revoked VPN (another VPN app started, permission removed, etc.)
-        // KEY FIX: Do NOT call stopSelf() here — that would kill the Activity.
-        // Keep the process alive, close TUN, update notification.
+        Log.w(TAG, "VPN отозван системой")
+        try { vpnInterface?.close() } catch (_: Exception) {}
+        vpnInterface = null
         isRunning = false
         serviceJob?.cancel()
         serviceJob = null
 
         try { org.natbypass.app.util.MobileBridge.detachTUN() } catch (_: Exception) {}
-        try { vpnInterface?.close() } catch (_: Exception) {}
-        vpnInterface = null
 
-        // Keep foreground alive with "revoked" status notification
+        val notif = buildNotification("⚠️ VPN отключён. Нажмите для подключения.", showDisconnect = false)
         try {
-            val notif = buildNotification("⚠️ VPN отключён системой. Нажмите для переподключения.", showDisconnect = false)
-            startForeground(NOTIFICATION_ID, notif)
-        } catch (_: Exception) {}
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID, notif,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notif)
+            }
+        } catch (_: Exception) {
+            try {
+                val nm = getSystemService(NotificationManager::class.java)
+                nm.notify(NOTIFICATION_ID, notif)
+            } catch (_: Exception) {}
+        }
 
-        // Broadcast to Activity to update UI without closing it
         sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
             putExtra("state", "revoked")
         })
-
-        super.onRevoke()  // NO stopSelf() here!
+        super.onRevoke() // БЕЗ stopSelf()!
     }
 
     override fun onDestroy() {
         if (isRunning) {
-            disconnectGracefully()
+            disconnect()
         }
         super.onDestroy()
     }

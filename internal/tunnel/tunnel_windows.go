@@ -159,39 +159,58 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 			"metric=100",
 		)
 
-		// Allow ICMP and mesh traffic — no interface= binding to avoid Firewall name mismatch
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP")
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass Allow All")
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass-Inbound")
+		// Full Firewall rules for TCP, UDP, ICMP and 100.64.200.0/24 mesh subnet
 		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP Allow")
 		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP Reply Allow")
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass Mesh Subnet")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass Mesh Inbound")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass Mesh Outbound")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass TCP Mesh")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass UDP Mesh")
+
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
 			"name=NatBypass ICMP Allow",
-			"dir=in",
-			"action=allow",
+			"dir=in", "action=allow",
 			"protocol=icmpv4:8,any",
 		)
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
 			"name=NatBypass ICMP Reply Allow",
-			"dir=in",
-			"action=allow",
+			"dir=in", "action=allow",
 			"protocol=icmpv4:0,any",
 		)
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass Mesh Subnet",
-			"dir=in",
-			"action=allow",
+			"name=NatBypass Mesh Inbound",
+			"dir=in", "action=allow",
 			"remoteip=100.64.200.0/24",
 		)
-		// Explicit low-metric route: ensures ICMP Reply goes via Wintun, not physical NIC
-		_ = runNetsh("interface", "ipv4", "add", "route",
-			"prefix=100.64.200.0/24",
-			fmt.Sprintf("interface=%s", adapterName),
-			"nexthop=0.0.0.0",
-			"metric=1",
-			"store=active",
+		_ = runNetsh("advfirewall", "firewall", "add", "rule",
+			"name=NatBypass Mesh Outbound",
+			"dir=out", "action=allow",
+			"remoteip=100.64.200.0/24",
 		)
+		_ = runNetsh("advfirewall", "firewall", "add", "rule",
+			"name=NatBypass TCP Mesh",
+			"dir=in", "action=allow", "protocol=tcp",
+			"remoteip=100.64.200.0/24",
+		)
+		_ = runNetsh("advfirewall", "firewall", "add", "rule",
+			"name=NatBypass UDP Mesh",
+			"dir=in", "action=allow", "protocol=udp",
+			"remoteip=100.64.200.0/24",
+		)
+
+		// Explicit metric=1 route for 100.64.200.0/24 via Wintun adapter
+		for i := 0; i < 3; i++ {
+			err := runNetsh("interface", "ipv4", "add", "route",
+				"100.64.200.0/24",
+				fmt.Sprintf("name=%s", adapterName),
+				"0.0.0.0",
+				"metric=1",
+			)
+			if err == nil {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
 	}()
 
 	return dev, nil

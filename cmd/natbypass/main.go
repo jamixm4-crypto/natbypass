@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -602,11 +602,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	if err == nil {
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDPPuncher Р°РєС‚РёРІРµРЅ")
 		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
-			if len(payload) >= 20 && (payload[0]>>4) == 4 && payload[9] == 1 {
-				ihl := int(payload[0]&0x0F) * 4
-				if len(payload) >= ihl+8 && payload[ihl] == 8 {
-					respondICMPEcho(puncher, payload, srcAddr)
-				}
+			if len(payload) < 20 {
+				return
+			}
+			srcIP := tunnel.GetSrcIP(payload)
+			if srcIP != nil && srcIP.String() == myVirtualIP {
+				return // Защита от петель
 			}
 			if tunDev != nil {
 				_ = tunDev.WritePacket(payload)

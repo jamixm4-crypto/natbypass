@@ -333,6 +333,9 @@ func (p *UDPPuncher) readLoop() {
 				sentNano, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
 				if err == nil {
 					rtt := time.Since(time.Unix(0, sentNano))
+					if rtt <= 0 {
+						rtt = 1 * time.Millisecond
+					}
 					// Обновляем portDelta для Symmetric NAT предсказания (разница между mapped портами)
 					if remoteAddr != nil && rtt > 0 {
 						p.natTypeMu.Lock()

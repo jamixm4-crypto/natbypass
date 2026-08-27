@@ -1,4 +1,4 @@
-﻿//go:build windows
+//go:build windows
 
 package main
 
@@ -2985,33 +2985,20 @@ func startEngineFromConfig(c *config.Config) {
 		writeDebug(fmt.Sprintf("UDPPuncher СЃР»СѓС€Р°РµС‚ Р»РѕРєР°Р»СЊРЅС‹Р№ UDP РїРѕСЂС‚ :%d", puncher.LocalPort()))
 
 		// РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ РІС…РѕРґСЏС‰РёС… IP-РїР°РєРµС‚РѕРІ С‚СѓРЅРЅРµР»СЏ РЅР°РїСЂСЏРјСѓСЋ РІ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ Р°РґР°РїС‚РµСЂ Windows
-		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+				puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			if len(payload) < 20 {
 				return
 			}
 			srcIP := tunnel.GetSrcIP(payload)
-			destIP := tunnel.GetDestIP(payload)
-			if srcIP == nil || destIP == nil {
-				return
+			if srcIP != nil && srcIP.String() == myVirtualIP {
+				return // Защита от петель
 			}
-			// Р—Р°С‰РёС‚Р° РѕС‚ РїРµС‚РµР»СЊ: РїСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ РїР°РєРµС‚ РЅРµ РѕС‚СЂР°Р¶РµРЅ РѕС‚ СЃРµР±СЏ
-			if srcIP.String() == myVirtualIP {
-				return
-			}
-			// РџСЂРёРЅРёРјР°РµРј РїР°РєРµС‚С‹, Р°РґСЂРµСЃРѕРІР°РЅРЅС‹Рµ РЅР°С€РµРјСѓ VIP РёР»Рё 100.64.200.1 (РґРѕ СЃРѕРіР»Р°СЃРѕРІР°РЅРёСЏ)
-			// Instant ICMP echo response for 100% reliable ping
-			ihl := int(payload[0]&0x0F) * 4
-			if len(payload) >= ihl+8 && payload[9] == 1 && payload[ihl] == 8 {
-				if destIP.String() == myVirtualIP || destIP.String() == "100.64.200.1" {
-					respondICMPEcho(payload, srcAddr)
-				}
-			}
-
-			// Р—Р°РїРёСЃС‹РІР°РµРј РїР°РєРµС‚ РІ Wintun вЂ” Windows OS СЃР°РјР° РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ ICMP, TCP, UDP
-			// РќР• РїРµСЂРµС…РІР°С‚С‹РІР°РµРј ICMP РІСЂСѓС‡РЅСѓСЋ вЂ” РћРЎ РіРµРЅРµСЂРёСЂСѓРµС‚ Echo Reply СЃР°РјР°, РѕРЅ РІС‹С…РѕРґРёС‚ С‡РµСЂРµР· ReadPacket Рё РѕС‚РїСЂР°РІР»СЏРµС‚СЃСЏ РїРёСЂСѓ
-			atomic.AddUint64(&packetsRecvCount, 1)
+			// ВСЕ пакеты (TCP, UDP, ICMP и др.) записываем в Wintun —
+			// Windows OS сама обрабатывает TCP handshake, UDP сокеты, ICMP Reply
 			if tunDev != nil {
 				_ = tunDev.WritePacket(payload)
+				atomic.AddUint64(&packetsRecvCount, 1)
+				writeDebug(fmt.Sprintf("📥 TUN RX: %d bytes from %s", len(payload), srcAddr))
 			}
 		})
 	} else {
@@ -3043,6 +3030,7 @@ func startEngineFromConfig(c *config.Config) {
 						continue
 					}
 					destStr := destIP.String()
+					writeDebug(fmt.Sprintf("📤 Wintun TX: %d bytes to %s", len(packet), destStr))
 
 					// РРіРЅРѕСЂРёСЂСѓРµРј РјСѓР»СЊС‚РёРєР°СЃС‚ Windows (224.0.0.x, 239.255.x.x, 255.255.255.255) Рё РїРµС‚Р»Рё
 					if destIP.IsMulticast() || destIP.IsUnspecified() || destStr == "255.255.255.255" || destStr == myVirtualIP || destStr == "100.64.200.255" || destStr == "100.64.200.0" {
@@ -3725,7 +3713,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					if osName != "" {
 						plat = osName
 					} else {
-						plat = "рџ’» Windows"
+						plat = "Windows"
 					}
 				}
 				pFlag := p.CountryFlag
@@ -4030,7 +4018,7 @@ func publishCurrentState(ctx context.Context) {
 		AdvertisedRoutes: advSubnets,
 		AWG:              awgParams,
 		OS:               "windows",
-		Platform:         "рџЄџ Windows",
+		Platform:         "Windows",
 		CountryFlag:      network.LookupCountryFlag(ctx, ipStr),
 		NetworkKey:       activeKey,
 		Topic:            activeTopic,
@@ -4339,19 +4327,19 @@ func updateData() {
 					var statusDisplay string
 					if p.Online {
 						if p.DirectP2P {
-							icon = "рџџў"
+							icon = "[P2P]"
 							if p.Latency > 0 {
-								statusDisplay = fmt.Sprintf("вљЎ РџСЂСЏРјРѕР№ P2P (%v)", p.Latency.Round(time.Millisecond))
+								statusDisplay = fmt.Sprintf("Прямой P2P (%v)", p.Latency.Round(time.Millisecond))
 							} else {
-								statusDisplay = "вљЎ РџСЂСЏРјРѕР№ P2P (OK)"
+								statusDisplay = "Прямой P2P (OK)"
 							}
 						} else {
-							icon = "рџџЎ"
-							statusDisplay = "рџџЎ РџСЂРѕР±РёС‚РёРµ NAT..."
+							icon = "[NAT]"
+							statusDisplay = "Пробитие NAT..."
 						}
 					} else {
-						icon = "рџ”ґ"
-						statusDisplay = "рџ”ґ РћС„Р»Р°Р№РЅ"
+						icon = "[OFF]"
+						statusDisplay = "Офлайн"
 					}
 
 					var addrDisplay string
@@ -4362,21 +4350,21 @@ func updateData() {
 					} else if p.PublicIP != "" {
 						addrDisplay = fmt.Sprintf("WAN: %s", p.PublicIP)
 					} else {
-						addrDisplay = "LAN: вЂ”"
+						addrDisplay = "LAN: —"
 					}
 
 					var extraTags []string
 					if p.AWG != nil || p.DirectP2P {
-						extraTags = append(extraTags, "[рџ›ЎпёЏ AWG 2.0]")
+						extraTags = append(extraTags, "[AWG 2.0]")
 					}
 					if p.IsExitNode {
-						extraTags = append(extraTags, "[рџЊђ РЁР»СЋР·]")
+						extraTags = append(extraTags, "[Шлюз]")
 					}
 					if len(p.AdvertisedRoutes) > 0 {
-						extraTags = append(extraTags, fmt.Sprintf("[рџЏ  РЎРµС‚СЊ: %s]", strings.Join(p.AdvertisedRoutes, ", ")))
+						extraTags = append(extraTags, fmt.Sprintf("[Сеть: %s]", strings.Join(p.AdvertisedRoutes, ", ")))
 					}
 					if p.Online && p.AWG != nil && !awgParamsMatch(cachedAWGParams, p.AWG) {
-						extraTags = append(extraTags, "[вљ пёЏ AWG: Р Р°Р·Р»РёС‡Р°РµС‚СЃСЏ]")
+						extraTags = append(extraTags, "[AWG: Различается]")
 					}
 					extraInfo := ""
 					if len(extraTags) > 0 {
@@ -4385,19 +4373,24 @@ func updateData() {
 
 					platBadge := p.Platform
 					if platBadge == "" {
-						if p.OS != "" {
+						if p.OS == "windows" {
+							platBadge = "Windows"
+						} else if p.OS == "android" {
+							platBadge = "Android"
+						} else if p.OS == "linux" {
+							platBadge = "Linux"
+						} else if p.OS == "darwin" {
+							platBadge = "macOS"
+						} else if p.OS != "" {
 							platBadge = p.OS
 						} else {
-							platBadge = "рџ’» РЈСЃС‚СЂРѕР№СЃС‚РІРѕ"
+							platBadge = "Устройство"
 						}
 					}
-					flag := p.CountryFlag
-					if flag == "" {
-						flag = "рџЊђ"
-					}
+					platBadge = strings.TrimSpace(platBadge)
 
 					line1 := fmt.Sprintf("  %s %s [%s] (ID: %s)", icon, nameDisplay, platBadge, p.DeviceID)
-					line2 := fmt.Sprintf("     в””в”Ђ рџЊђ VIP: %s | %s | %s %s%s", vip, statusDisplay, flag, addrDisplay, extraInfo)
+					line2 := fmt.Sprintf("     └── VIP: %s | %s | %s%s", vip, statusDisplay, addrDisplay, extraInfo)
 
 					addListBoxItem(hListPeers, line1)
 					addListBoxItem(hListPeers, line2)

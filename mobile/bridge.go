@@ -175,6 +175,10 @@ func StartEngine(configYAML string, tunFd int) string {
 	if engineRunning {
 		if tunFd > 0 {
 			attachTUN(tunFd)
+			go func() {
+				time.Sleep(500 * time.Millisecond)
+				RefreshPublicIP()
+			}()
 		}
 		return "OK"
 	}
@@ -242,16 +246,21 @@ func StartEngine(configYAML string, tunFd int) string {
 	var puncher *network.UDPPuncher
 	puncher, _ = network.NewUDPPuncher(cfg.Network.UDPPort, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		if p, ok := globalRegistry.Get(remoteDevID); ok {
-			p.DirectP2P = true
+			p.DirectP2P = true // ВСЕГДА true при получении PONG!
 			p.ActiveEndpoint = fromAddr
 			p.STUNAddr = fromAddr
-			if rtt > 0 && rtt < 10*time.Second {
-				if p.Latency > 0 {
-					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
-				} else {
-					p.Latency = rtt
-				}
-				p.PingMs = p.Latency.Milliseconds()
+			if rtt > 0 {
+				p.PingMs = rtt.Milliseconds()
+			} else {
+				p.PingMs = 1
+			}
+			if p.PingMs <= 0 {
+				p.PingMs = 1
+			}
+			if p.Latency > 0 {
+				p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
+			} else {
+				p.Latency = rtt
 			}
 			p.Online = true
 			p.LastSeen = time.Now()
@@ -374,6 +383,8 @@ func StartEngine(configYAML string, tunFd int) string {
 					Timestamp:        time.Now(),
 					AWG:              awgParams,
 					NetworkKey:       activeKey,
+					OS:               "android",
+					Platform:         "Android",
 					Topic:            activeTopic,
 				}
 				_ = globalSigMgr.Send(ctx, payload)
@@ -615,6 +626,15 @@ func attachTUN(tunFd int) {
 							if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint && targetPeer.STUNAddr != targetPeer.LocalAddr {
 								_ = globalPuncher.SendDataPacket(targetPeer.STUNAddr, pkt)
 							}
+							logger.Debug().
+								Str("dst", destIP.String()).
+								Str("peer", targetPeer.DeviceID).
+								Int("size", len(pkt)).
+								Msg("📤 TUN TX: пакет отправлен пиру")
+						} else {
+							logger.Debug().
+								Str("dst", destIP.String()).
+								Msg("🚫 TUN TX: пир не найден для destination IP")
 						}
 					}
 				}
