@@ -1617,10 +1617,14 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           qrPayload = '[Interface]\nPrivateKey = ...\nAddress = 10.200.0.1/24\n';
         }
       } else {
-        descEl.innerHTML = 'Универсальное приглашение в P2P сеть NatBypass для других компьютеров и серверов.';
-        const devId = document.getElementById('userNameLabel').innerText || 'Device';
-        const stunIp = (document.getElementById('topStunLabel').innerText || '').replace('STUN: ', '');
-        qrPayload = `NatBypass|${devId}|${stunIp}|https://github.com/jamixm4-crypto/natbypass/releases/latest`;
+        descEl.innerHTML = 'Универсальное приглашение в P2P сеть NatBypass для других компьютеров и телефонов.';
+        if (currentActiveProfile) {
+          qrPayload = `natbypass://profile?id=${encodeURIComponent(currentActiveProfile.id)}&name=${encodeURIComponent(currentActiveProfile.name)}&topic=${encodeURIComponent(currentActiveProfile.mqtt_topic || 'natbypass/mesh/default')}&broker=${encodeURIComponent(currentActiveProfile.mqtt_broker || 'tcp://broker.emqx.io:1883')}${currentActiveProfile.network_key ? '&key=' + encodeURIComponent(currentActiveProfile.network_key) : ''}&awg=${encodeURIComponent(currentActiveProfile.awg_preset || 'dpi')}`;
+        } else {
+          const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'natbypass/mesh/default';
+          const cfgBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim() || 'tcp://broker.emqx.io:1883';
+          qrPayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
+        }
       }
 
       document.getElementById('qrRawText').value = qrPayload;

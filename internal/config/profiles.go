@@ -137,8 +137,9 @@ func (c *Config) SyncSignalingWithProfile(p *Profile) {
 	}
 
 	mqttParams := map[string]string{
-		"broker": mqttBroker,
-		"topic":  mqttTopic,
+		"broker":     mqttBroker,
+		"broker_url": mqttBroker,
+		"topic":      mqttTopic,
 	}
 	if p.MQTTUser != "" {
 		mqttParams["username"] = p.MQTTUser

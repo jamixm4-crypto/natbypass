@@ -1566,10 +1566,19 @@ func buildSignalingChannels(cfg *config.Config) ([]signaling.SignalingChannel, e
 
 		case "mqtt":
 			brokerURL := chCfg.Params["broker_url"]
+			if brokerURL == "" {
+				brokerURL = chCfg.Params["broker"]
+			}
 			topic := chCfg.Params["topic"]
 			clientID := chCfg.Params["client_id"]
 			username := chCfg.Params["username"]
+			if username == "" {
+				username = chCfg.Params["user"]
+			}
 			password := chCfg.Params["password"]
+			if password == "" {
+				password = chCfg.Params["pass"]
+			}
 			if brokerURL == "" || topic == "" {
 				continue
 			}
