@@ -192,6 +192,9 @@ func isWindowsServer() bool {
 // Это создаёт настоящее отдельное окно программы без вкладок и адресной строки,
 // что идеально для Windows Server и систем без установленного WebView2 Runtime.
 func tryOpenAppMode(url string, winWidth, winHeight int) bool {
+	userDataDir := filepath.Join(os.TempDir(), "NatBypass_Edge_UI_Profile")
+	dataDirArg := fmt.Sprintf("--user-data-dir=%s", userDataDir)
+
 	candidates := []string{
 		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Microsoft", "Edge", "Application", "msedge.exe"),
 		filepath.Join(os.Getenv("ProgramFiles"), "Microsoft", "Edge", "Application", "msedge.exe"),
@@ -208,7 +211,7 @@ func tryOpenAppMode(url string, winWidth, winHeight int) bool {
 		if _, err := os.Stat(exe); err == nil {
 			appArg := fmt.Sprintf("--app=%s", url)
 			sizeArg := fmt.Sprintf("--window-size=%d,%d", winWidth, winHeight)
-			cmd := exec.Command(exe, appArg, sizeArg, "--disable-plugins", "--disable-extensions", "--no-first-run", "--no-default-browser-check")
+			cmd := exec.Command(exe, appArg, sizeArg, dataDirArg, "--disable-plugins", "--disable-extensions", "--no-first-run", "--no-default-browser-check")
 			if err := cmd.Start(); err == nil {
 				// Запускаем установку фирменной иконки на окно Edge/Chrome
 				go applyWindowIconToApp()
@@ -267,13 +270,13 @@ func openAppWindow(port int) {
 	screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0)
 	screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1)
 
-	winWidth := 1180
-	winHeight := 750
-	if screenWidth > 0 && int(screenWidth) < winWidth+60 {
-		winWidth = int(screenWidth) - 60
+	winWidth := 1220
+	winHeight := 780
+	if screenWidth > 0 && int(screenWidth) < winWidth+40 {
+		winWidth = int(screenWidth) - 40
 	}
-	if screenHeight > 0 && int(screenHeight) < winHeight+60 {
-		winHeight = int(screenHeight) - 60
+	if screenHeight > 0 && int(screenHeight) < winHeight+40 {
+		winHeight = int(screenHeight) - 40
 	}
 
 	// Запускаем System Tray иконку в фоновом потоке

@@ -1825,41 +1825,32 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		TGProxy    string `json:"tg_proxy"`
 		AWGPreset  string `json:"awg_preset"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан ID профиля или ошибка JSON")
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка JSON: "+err.Error())
 		return
 	}
 
-	cfg, _ := config.Load(s.configPath)
-	if cfg == nil {
-		// Файл конфига ещё не существует — создаём дефолтный профиль и сохраняем
+	cfg, err := config.Load(s.configPath)
+	if err != nil || cfg == nil {
 		cfg = &config.Config{}
-		cfg.EnsureActiveProfile()
-		_ = config.Save(cfg, s.configPath, false)
 	}
+	active := cfg.EnsureActiveProfile()
 
 	var target *config.Profile
-	for i := range cfg.Profiles {
-		if cfg.Profiles[i].ID == req.ID {
-			if req.Name != "" {
-				cfg.Profiles[i].Name = req.Name
+	if req.ID != "" {
+		for i := range cfg.Profiles {
+			if cfg.Profiles[i].ID == req.ID {
+				target = &cfg.Profiles[i]
+				break
 			}
-			if req.MQTTBroker != "" {
-				cfg.Profiles[i].MQTTBroker = req.MQTTBroker
-			}
-			if req.MQTTTopic != "" {
-				cfg.Profiles[i].MQTTTopic = req.MQTTTopic
-			}
-			cfg.Profiles[i].MQTTUser = req.MQTTUser
-			cfg.Profiles[i].MQTTPass = req.MQTTPass
-			cfg.Profiles[i].TGToken = req.TGToken
-			cfg.Profiles[i].TGChatID = req.TGChatID
-			cfg.Profiles[i].TGProxy = req.TGProxy
-			if req.AWGPreset != "" {
-				cfg.Profiles[i].AWGPreset = req.AWGPreset
-			}
-			target = &cfg.Profiles[i]
-			break
+		}
+	}
+	// Fallback: если ID не найден или был "default" - используем активный или первый профиль
+	if target == nil {
+		if active != nil {
+			target = active
+		} else if len(cfg.Profiles) > 0 {
+			target = &cfg.Profiles[0]
 		}
 	}
 
@@ -1867,6 +1858,36 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		s.jsonResponse(w, http.StatusNotFound, nil, "профиль не найден")
 		return
 	}
+
+	if req.Name != "" {
+		target.Name = req.Name
+	}
+	if req.MQTTBroker != "" {
+		target.MQTTBroker = req.MQTTBroker
+	}
+	if req.MQTTTopic != "" {
+		target.MQTTTopic = req.MQTTTopic
+	}
+	if req.MQTTUser != "" {
+		target.MQTTUser = req.MQTTUser
+	}
+	if req.MQTTPass != "" {
+		target.MQTTPass = req.MQTTPass
+	}
+	if req.TGToken != "" {
+		target.TGToken = req.TGToken
+	}
+	if req.TGChatID != 0 {
+		target.TGChatID = req.TGChatID
+	}
+	if req.TGProxy != "" {
+		target.TGProxy = req.TGProxy
+	}
+	if req.AWGPreset != "" {
+		target.AWGPreset = req.AWGPreset
+	}
+
+	cfg.SyncSignalingWithProfile(target)
 
 	if target.ID == cfg.ActiveProfileID {
 		cfg.SyncSignalingWithProfile(target)
