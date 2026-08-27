@@ -218,8 +218,10 @@ func (c *Config) AddOrUpdateProfile(p Profile) *Profile {
 
 	found := false
 	for i := range c.Profiles {
-		if c.Profiles[i].ID == p.ID {
+		// Если обновляем существующий ID, либо импортируем первый профиль при наличии дефолтного
+		if c.Profiles[i].ID == p.ID || (len(c.Profiles) == 1 && (c.Profiles[i].Name == "Основная сеть" || c.Profiles[i].Name == p.Name)) {
 			c.Profiles[i] = p
+			c.ActiveProfileID = p.ID
 			found = true
 			break
 		}
@@ -322,8 +324,12 @@ func ImportProfileURI(raw string) (*Profile, error) {
 				tgChat, _ = strconv.ParseInt(chatStr, 10, 64)
 			}
 
+			id := q.Get("id")
+			if id == "" {
+				id = "p-" + GenerateRandomHex(4)
+			}
 			p := &Profile{
-				ID:         "p-" + GenerateRandomHex(4),
+				ID:         id,
 				Name:       name,
 				NetworkKey: q.Get("key"),
 				MQTTBroker: broker,

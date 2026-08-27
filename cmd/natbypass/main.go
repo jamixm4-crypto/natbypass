@@ -474,7 +474,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	registry.StartMonitor(engineCtx, 30*time.Second)
 
 	// Определяем топик из активного профиля (при наличии), иначе — уникальный на основе deviceID
+	hadProfiles := len(cfg.Profiles) > 0
 	activeProf := cfg.EnsureActiveProfile()
+	if !hadProfiles && activeProf != nil {
+		_ = config.Save(cfg, configFile, runtime.GOOS == "windows")
+	}
 	defaultTopic := fmt.Sprintf("natbypass/%s/peers", deviceID[:min8(len(deviceID), 8)])
 	if activeProf != nil && activeProf.MQTTTopic != "" {
 		defaultTopic = activeProf.MQTTTopic

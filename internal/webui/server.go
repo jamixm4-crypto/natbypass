@@ -1035,11 +1035,15 @@ func (s *Server) handleQRInvite(w http.ResponseWriter, r *http.Request) {
 
 	inviteURL := "https://github.com/jamixm4-crypto/natbypass/releases/latest"
 
-	cfg, _ := config.Load(s.configPath)
-	if cfg == nil {
+	cfg, err := config.Load(s.configPath)
+	if err != nil || cfg == nil {
 		cfg = &config.Config{}
 	}
+	hadProfiles := len(cfg.Profiles) > 0
 	activeProf := cfg.EnsureActiveProfile()
+	if (!hadProfiles || err != nil) && activeProf != nil {
+		_ = config.Save(cfg, s.configPath, false)
+	}
 	profileURI := ""
 	if activeProf != nil {
 		profileURI = config.ExportProfileURI(*activeProf)
@@ -1710,15 +1714,15 @@ func (s *Server) handleProfilesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg, err := config.Load(s.configPath)
-	firstLaunch := (err != nil || cfg == nil)
-	if firstLaunch {
+	if err != nil || cfg == nil {
 		cfg = &config.Config{}
 	}
+	hadProfiles := len(cfg.Profiles) > 0
 	active := cfg.EnsureActiveProfile()
 
-	// При первом запуске (нет файла конфига) — сразу сохраняем профиль на диск,
-	// иначе попытка редактировать/сохранить его вернёт «профиль не найден»
-	if firstLaunch && active != nil {
+	// Если в конфиге не было профилей — сразу сохраняем созданный постоянный профиль на диск,
+	// чтобы топик и ID были стабильными и одинаковыми во всех запросах
+	if (!hadProfiles || err != nil) && active != nil {
 		_ = config.Save(cfg, s.configPath, false)
 	}
 
@@ -1976,10 +1980,11 @@ func (s *Server) handleProfileExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.URL.Query().Get("id")
-	cfg, _ := config.Load(s.configPath)
-	if cfg == nil {
+	cfg, err := config.Load(s.configPath)
+	if err != nil || cfg == nil {
 		cfg = &config.Config{}
 	}
+	hadProfiles := len(cfg.Profiles) > 0
 
 	var target *config.Profile
 	if id != "" {
@@ -1992,6 +1997,9 @@ func (s *Server) handleProfileExport(w http.ResponseWriter, r *http.Request) {
 	}
 	if target == nil {
 		target = cfg.EnsureActiveProfile()
+	}
+	if (!hadProfiles || err != nil) && target != nil {
+		_ = config.Save(cfg, s.configPath, false)
 	}
 
 	uri := config.ExportProfileURI(*target)
