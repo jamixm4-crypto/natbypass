@@ -10,7 +10,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete old releases except latest
+      - name: Delete old releases except latest 3
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -22,20 +22,21 @@ jobs:
             });
 
             console.log(`Found ${releases.length} releases`);
-            for (const release of releases) {
-              if (release.tag_name !== 'v1.4.6') {
-                console.log(`Deleting release: ${release.name} (${release.tag_name}) ID: ${release.id}`);
-                try {
-                  await github.rest.repos.deleteRelease({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    release_id: release.id,
-                  });
-                  console.log(`Deleted release ${release.tag_name}`);
-                } catch (e) {
-                  console.error(`Failed to delete release ${release.tag_name}: ${e.message}`);
-                }
-              } else {
-                console.log(`Keeping latest release: ${release.tag_name}`);
+            const sorted = releases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            const keep = sorted.slice(0, 3);
+            const keepTags = new Set(keep.map(r => r.tag_name));
+            console.log(`Keeping releases: ${Array.from(keepTags).join(', ')}`);
+
+            for (const release of sorted.slice(3)) {
+              console.log(`Deleting old release: ${release.name} (${release.tag_name}) ID: ${release.id}`);
+              try {
+                await github.rest.repos.deleteRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                });
+                console.log(`Deleted release ${release.tag_name}`);
+              } catch (e) {
+                console.error(`Failed to delete release ${release.tag_name}: ${e.message}`);
               }
             }

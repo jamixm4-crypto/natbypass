@@ -122,17 +122,34 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.3.9"
+            [ -z "$TAG" ] && TAG="v1.5.2"
           fi
           echo "Attaching Android APK to release $TAG..."
+          
+          # Даем время параллельному воркфлоу релиза завершить публикацию
+          sleep 5
+          
           gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --draft=false --latest || true
           
           for apk in release_apk/*.apk; do
             if [ -f "$apk" ]; then
               fname=$(basename "$apk")
               echo "Uploading $fname..."
-              gh release delete-asset "${TAG}" "$fname" --yes 2>/dev/null || true
-              gh release upload "${TAG}" "$apk" --clobber
+              uploaded=0
+              for attempt in 1 2 3 4 5; do
+                if gh release upload "${TAG}" "$apk" --clobber; then
+                  echo "Successfully uploaded $fname on attempt $attempt"
+                  uploaded=1
+                  break
+                else
+                  echo "Upload attempt $attempt failed, retrying in 6s..."
+                  sleep 6
+                fi
+              done
+              if [ $uploaded -eq 0 ]; then
+                echo "Warning: Could not upload $fname after 5 attempts"
+              fi
             fi
           done
           gh release edit "${TAG}" --draft=false --latest --title "NatBypass ${TAG}" 2>/dev/null || true
+
