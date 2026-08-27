@@ -39,13 +39,47 @@ var globalLogs = &logRing{
 func (lr *logRing) Write(p []byte) (n int, err error) {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
-	msg := strings.TrimSpace(string(p))
-	if msg != "" {
-		if len(lr.lines) >= lr.max {
-			lr.lines = lr.lines[1:]
-		}
-		lr.lines = append(lr.lines, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg))
+	raw := strings.TrimSpace(string(p))
+	if raw == "" {
+		return len(p), nil
 	}
+
+	formatted := raw
+	// If zerolog JSON payload, format cleanly: "15:04:05 [INFO] Message (key=val)"
+	if strings.HasPrefix(raw, "{") && strings.HasSuffix(raw, "}") {
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(raw), &m); err == nil {
+			lvl := "INFO"
+			if l, ok := m["level"].(string); ok && l != "" {
+				lvl = strings.ToUpper(l)
+			}
+			msg := ""
+			if msgVal, ok := m["message"].(string); ok {
+				msg = msgVal
+			} else if msgVal, ok := m["msg"].(string); ok {
+				msg = msgVal
+			}
+
+			var extraParts []string
+			for k, v := range m {
+				if k != "level" && k != "time" && k != "message" && k != "msg" && k != "caller" {
+					extraParts = append(extraParts, fmt.Sprintf("%s=%v", k, v))
+				}
+			}
+			extraStr := ""
+			if len(extraParts) > 0 {
+				extraStr = " (" + strings.Join(extraParts, ", ") + ")"
+			}
+			formatted = fmt.Sprintf("[%s] [%s] %s%s", time.Now().Format("15:04:05"), lvl, msg, extraStr)
+		}
+	} else {
+		formatted = fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), raw)
+	}
+
+	if len(lr.lines) >= lr.max {
+		lr.lines = lr.lines[1:]
+	}
+	lr.lines = append(lr.lines, formatted)
 	return len(p), nil
 }
 

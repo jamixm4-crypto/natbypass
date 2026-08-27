@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.service
+package org.natbypass.app.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -53,16 +53,23 @@ class NatBypassVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        val action = intent?.action
+        when (action) {
+            ACTION_CONNECT -> {
+                connect()
+            }
             ACTION_DISCONNECT -> {
                 disconnect()
                 stopSelf()
             }
             else -> {
-                connect()
+                // If restarted by system with null intent or unknown action, do NOT auto-connect
+                if (!isRunning) {
+                    stopSelf()
+                }
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun connect() {
@@ -89,7 +96,6 @@ class NatBypassVpnService : VpnService() {
                 try { startForeground(NOTIFICATION_ID, notif) } catch (_: Throwable) {}
             }
 
-            // в”Ђв”Ђ WakeLock: PARTIAL_WAKE_LOCK СѓРґРµСЂР¶РёРІР°РµС‚ CPU РІ Р°РєС‚РёРІРЅРѕРј СЃРѕСЃС‚РѕСЏРЅРёРё РІ С„РѕРЅРµ
             try {
                 val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
                 wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NatBypass::P2PWakeLock").also { lock ->
@@ -99,7 +105,6 @@ class NatBypassVpnService : VpnService() {
                 Log.w(TAG, "WakeLock acquire error: ${e.message}")
             }
 
-            // в”Ђв”Ђ WifiLock: HIGH_PERF СЂРµР¶РёРј РґР»СЏ РїСЂРµРґРѕС‚РІСЂР°С‰РµРЅРёСЏ СЌРЅРµСЂРіРѕСЃР±РµСЂРµРіР°СЋС‰РµРіРѕ СЃРЅР° Wi-Fi
             try {
                 val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
                 @Suppress("DEPRECATION")
@@ -125,20 +130,13 @@ class NatBypassVpnService : VpnService() {
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
             val useExitNode = selectedExitNode.isNotEmpty()
 
-            // РЎРѕР·РґР°РµРј СЃРёСЃС‚РµРјРЅС‹Р№ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ TUN РёРЅС‚РµСЂС„РµР№СЃ (Split-Tunneling)
+            // Split-Tunneling: Mesh VPN
             val builder = Builder()
                 .setSession("NatBypass")
                 .addAddress(currentVip, 24)
                 .setMtu(1420)
                 .setBlocking(false)
                 .allowBypass()
-
-            // РСЃРєР»СЋС‡Р°РµРј СЃР°РјРѕ РїСЂРёР»РѕР¶РµРЅРёРµ NatBypass РёР· VPN РґР»СЏ РїСЂСЏРјРѕРіРѕ РґРѕСЃС‚СѓРїР° Рє STUN, MQTT Рё UDP-СЃРѕРєРµС‚Р°Рј Р±РµР· РїРµС‚РµР»СЊ
-            try {
-                builder.addDisallowedApplication(packageName)
-            } catch (e: Exception) {
-                Log.w(TAG, "addDisallowedApplication error: ${e.message}")
-            }
 
             try {
                 builder.allowFamily(android.system.OsConstants.AF_INET)
@@ -151,7 +149,6 @@ class NatBypassVpnService : VpnService() {
             }
 
             if (useExitNode) {
-                // Exit Node СЂРµР¶РёРј: РІРµСЃСЊ РёРЅС‚РµСЂРЅРµС‚-С‚СЂР°С„РёРє + DNS С‡РµСЂРµР· VPN
                 builder.addRoute("0.0.0.0", 0)
                 try {
                     builder.addDnsServer("1.1.1.1")
@@ -160,13 +157,11 @@ class NatBypassVpnService : VpnService() {
                     Log.w(TAG, "addDnsServer error: ${e.message}")
                 }
             } else {
-                // Mesh P2P СЂРµР¶РёРј: РўРћР›Р¬РљРћ РїРѕРґСЃРµС‚СЊ 100.64.200.0/24
-                // РќР• РґРѕР±Р°РІР»СЏРµРј DNS СЃРµСЂРІРµСЂС‹ вЂ” Android Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РјР°СЂС€СЂСѓС‚РёР·РёСЂСѓРµС‚ DNS С‡РµСЂРµР· VPN
-                // РµСЃР»Рё СѓРєР°Р·Р°С‚СЊ addDnsServer(), С‡С‚Рѕ СѓР±РёРІР°РµС‚ РёРЅС‚РµСЂРЅРµС‚ РІ split-tunnel СЂРµР¶РёРјРµ
+                // Route only virtual mesh subnet: 100.64.200.0/24
                 builder.addRoute("100.64.200.0", 24)
             }
 
-            // РђРЅРѕРЅСЃРёСЂРѕРІР°РЅРЅС‹Рµ РїРѕРґСЃРµС‚Рё (РЅР°РїСЂРёРјРµСЂ, 192.168.1.0/24)
+            // Advertised subnets
             val advSubnets = prefs.getString("adv_subnets", "") ?: ""
             if (advSubnets.isNotEmpty()) {
                 for (subnet in advSubnets.split(",")) {
@@ -193,7 +188,6 @@ class NatBypassVpnService : VpnService() {
             val fd = vpnInterface?.fd ?: -1
             Log.i(TAG, "VPN TUN adapter established! fd=$fd, VIP=$currentVip")
 
-            // Р—Р°РіСЂСѓР¶Р°РµРј РєРѕРЅС„РёРі Рё Р·Р°РїСѓСЃРєР°РµРј / РїСЂРёРІСЏР·С‹РІР°РµРј Go-РґРІРёР¶РѕРє
             val configFile = File(filesDir, "config.yaml")
             val configYaml = if (configFile.exists()) configFile.readText() else "{}"
 
@@ -201,7 +195,6 @@ class NatBypassVpnService : VpnService() {
 
             isRunning = true
 
-            // Р¤РѕРЅРѕРІС‹Р№ РјРѕРЅРёС‚РѕСЂРёРЅРі СЃРѕСЃС‚РѕСЏРЅРёСЏ
             serviceJob = scope.launch {
                 while (isActive) {
                     delay(3000)
@@ -309,12 +302,12 @@ class NatBypassVpnService : VpnService() {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        val pOpen = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_IMMUTABLE)
+        val pOpen = PendingIntent.getActivity(this, 0, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         val disconnectIntent = Intent(this, NatBypassVpnService::class.java).apply {
             action = ACTION_DISCONNECT
         }
-        val pDisconnect = PendingIntent.getService(this, 1, disconnectIntent, PendingIntent.FLAG_IMMUTABLE)
+        val pDisconnect = PendingIntent.getService(this, 1, disconnectIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_vpn_lock)
@@ -326,4 +319,3 @@ class NatBypassVpnService : VpnService() {
             .build()
     }
 }
-
