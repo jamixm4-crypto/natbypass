@@ -33,19 +33,19 @@ import (
 	"github.com/natbypass/natbypass/internal/wireguard"
 )
 
-// Р—Р°РїРѕР»РЅСЏРµС‚СЃСЏ РїСЂРё СЃР±РѕСЂРєРµ С‡РµСЂРµР· -ldflags -X
+// Заполняется при сборке через -ldflags -X
 var (
 	Version   = "1.2.7"
 	Commit    = "release"
 	BuildDate = "unknown"
 
-	// Р’С€РёС‚С‹Рµ СѓРјРѕР»С‡Р°РЅРёСЏ (Р·Р°РґР°СЋС‚СЃСЏ С‡РµСЂРµР· build-win.ps1 / build-linux.sh)
-	DefaultTgToken    = "" // РўРѕРєРµРЅ Telegram-Р±РѕС‚Р°
-	DefaultTgChatID   = "" // ID С‡Р°С‚Р°/РєР°РЅР°Р»Р° Telegram
-	DefaultMQTTBroker = "" // URL MQTT-Р±СЂРѕРєРµСЂР°
-	DefaultMQTTTopic  = "" // MQTT-С‚РѕРїРёРє
+	// Вшитые умолчания (задаются через build-win.ps1 / build-linux.sh)
+	DefaultTgToken    = "" // Токен Telegram-бота
+	DefaultTgChatID   = "" // ID чата/канала Telegram
+	DefaultMQTTBroker = "" // URL MQTT-брокера
+	DefaultMQTTTopic  = "" // MQTT-топик
 	DefaultWebhookURL = "" // URL HTTP Webhook
-	DefaultDeviceID   = "" // РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ СѓСЃС‚СЂРѕР№СЃС‚РІР°
+	DefaultDeviceID   = "" // дентификатор устройства
 	DefaultWebUIPort  = "8080"
 	DefaultWebUIUser  = "admin"
 	DefaultWebUIPass  = ""
@@ -61,12 +61,12 @@ var (
 )
 
 func main() {
-	// РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј СЂР°Р±РѕС‡СѓСЋ РґРёСЂРµРєС‚РѕСЂРёСЋ РЅР° РїР°РїРєСѓ СЃ РёСЃРїРѕР»РЅСЏРµРјС‹Рј С„Р°Р№Р»РѕРј (РІР°Р¶РЅРѕ РґР»СЏ Windows)
+	// Устанавливаем рабочую директорию на папку с исполняемым файлом (важно для Windows)
 	if exe, err := os.Executable(); err == nil {
 		_ = os.Chdir(filepath.Dir(exe))
 	}
 
-	// РџРµСЂРµС…РІР°С‚С‹РІР°РµРј Р»СЋР±СѓСЋ РїР°РЅРёРєСѓ Рё РїРёС€РµРј РІ Р»РѕРі-С„Р°Р№Р» вЂ” РІР°Р¶РЅРѕ РґР»СЏ windowsgui РіРґРµ РєРѕРЅСЃРѕР»Рё РЅРµС‚
+	// Перехватываем любую панику и пишем в лог-файл — важно для windowsgui где консоли нет
 	defer func() {
 		if r := recover(); r != nil {
 			_ = os.WriteFile("natbypass-crash.log",
@@ -75,13 +75,13 @@ func main() {
 		}
 	}()
 
-	// РРЅРёС†РёР°Р»РёР·РёСЂСѓРµРј Р»РѕРіРёСЂРѕРІР°РЅРёРµ вЂ” РЅР° Windows Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РїРёС€РµС‚ РІ natbypass.log СЂСЏРґРѕРј СЃ exe
+	// нициализируем логирование — на Windows автоматически пишет в natbypass.log рядом с exe
 	setupLogging("info", "")
 
-	// РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРёР№ Р·Р°РїСЂРѕСЃ РїСЂР°РІ РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° С‡РµСЂРµР· UAC РЅР° Windows РїСЂРё РѕР±С‹С‡РЅРѕРј Р·Р°РїСѓСЃРєРµ
+	// Автоматический запрос прав Администратора через UAC на Windows при обычном запуске
 	ensureAdminOnWindows()
 
-	// Р•СЃР»Рё РїСЂРѕС†РµСЃСЃ Р·Р°РїСѓС‰РµРЅ РїРѕРґ СѓРїСЂР°РІР»РµРЅРёРµРј Windows Service Manager
+	// Если процесс запущен под управлением Windows Service Manager
 	if daemon.IsWindowsService() {
 		err := daemon.RunService(func(ctx context.Context) error {
 			cfg, err := config.Load(configFile)
@@ -99,21 +99,21 @@ func main() {
 
 	rootCmd := &cobra.Command{
 		Use:   "natbypass",
-		Short: "NatBypass вЂ” РѕР±С…РѕРґ NAT Рё РѕСЂРіР°РЅРёР·Р°С†РёСЏ P2P-РґРѕСЃС‚СѓРїР°",
-		Long: fmt.Sprintf(`NatBypass v%s (%s) вЂ” РєСЂРѕСЃСЃРїР»Р°С‚С„РѕСЂРјРµРЅРЅС‹Р№ РёРЅСЃС‚СЂСѓРјРµРЅС‚ 
-РґР»СЏ РѕР±С…РѕРґР° NAT (РІРєР»СЋС‡Р°СЏ РґРІРѕР№РЅРѕР№ NAT / CGNAT) С‡РµСЂРµР· РјСѓР»СЊС‚РёРєР°РЅР°Р»СЊРЅСѓСЋ СЃРёРіРЅР°Р»РёР·Р°С†РёСЋ.
+		Short: "NatBypass — обход NAT и организация P2P-доступа",
+		Long: fmt.Sprintf(`NatBypass v%s (%s) — кроссплатформенный инструмент 
+для обхода NAT (включая двойной NAT / CGNAT) через мультиканальную сигнализацию.
 
-РџРѕРґРґРµСЂР¶РёРІР°РµРјС‹Рµ РєР°РЅР°Р»С‹: Telegram, MQTT, HTTP Webhook, DNS TXT
-РџРѕРґРґРµСЂР¶РёРІР°РµРјС‹Рµ РїР»Р°С‚С„РѕСЂРјС‹: Windows, Linux (amd64/arm64/mips/mipsle), Android, iOS`, Version, Commit),
+Поддерживаемые каналы: Telegram, MQTT, HTTP Webhook, DNS TXT
+Поддерживаемые платформы: Windows, Linux (amd64/arm64/mips/mipsle), Android, iOS`, Version, Commit),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РїСЂРё Р·Р°РїСѓСЃРєРµ Р±РµР· Р°СЂРіСѓРјРµРЅС‚РѕРІ (РґРІРѕР№РЅРѕР№ РєР»РёРє РїРѕ .exe) Р·Р°РїСѓСЃРєР°РµРј СЃРµСЂРІРёСЃ
+			// По умолчанию при запуске без аргументов (двойной клик по .exe) запускаем сервис
 			cfg, err := config.Load(configFile)
 			firstLaunch := (err != nil || cfg == nil)
 			if firstLaunch {
 				cfg = buildDefaultConfig()
 			}
 			applyBuiltinDefaults(cfg)
-			// РџСЂРё РїРµСЂРІРѕРј Р·Р°РїСѓСЃРєРµ СЃСЂР°Р·Сѓ СЃРѕС…СЂР°РЅСЏРµРј РєРѕРЅС„РёРі вЂ” С‡С‚РѕР±С‹ WebUI РјРѕРі СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ РїСЂРѕС„РёР»СЊ
+			// При первом запуске сразу сохраняем конфиг — чтобы WebUI мог редактировать профиль
 			if firstLaunch {
 				_ = config.Save(cfg, configFile, runtime.GOOS == "windows")
 			}
@@ -125,10 +125,10 @@ func main() {
 		},
 	}
 
-	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "config.yaml", "РїСѓС‚СЊ Рє config.yaml")
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "СѓСЂРѕРІРµРЅСЊ Р»РѕРіРёСЂРѕРІР°РЅРёСЏ: debug/info/warn/error")
-	rootCmd.PersistentFlags().BoolVar(&noWebUI, "no-webui", false, "РѕС‚РєР»СЋС‡РёС‚СЊ Web UI")
-	rootCmd.PersistentFlags().IntVar(&webUIPort, "port", 0, "РїРµСЂРµРѕРїСЂРµРґРµР»РёС‚СЊ РїРѕСЂС‚ Web UI")
+	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "config.yaml", "путь к config.yaml")
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "уровень логирования: debug/info/warn/error")
+	rootCmd.PersistentFlags().BoolVar(&noWebUI, "no-webui", false, "отключить Web UI")
+	rootCmd.PersistentFlags().IntVar(&webUIPort, "port", 0, "переопределить порт Web UI")
 
 	rootCmd.AddCommand(
 		newStartCmd(),
@@ -157,7 +157,7 @@ func main() {
 func newSetTopicCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set-topic [topic]",
-		Short: "РЈСЃС‚Р°РЅРѕРІРёС‚СЊ РЅРѕРІС‹Р№ MQTT С‚РѕРїРёРє Рё РїСЂРёРјРµРЅРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё",
+		Short: "Установить новый MQTT топик и применить настройки",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			newTopic := args[0]
@@ -191,16 +191,16 @@ func newSetTopicCmd() *cobra.Command {
 				})
 			}
 			if err := config.Save(cfg, cfgPath, runtime.GOOS == "windows"); err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° Р·Р°РїРёСЃРё %s: %w", cfgPath, err)
+				return fmt.Errorf("ошибка записи %s: %w", cfgPath, err)
 			}
-			fmt.Printf("вњ“ MQTT С‚РѕРїРёРє СѓСЃРїРµС€РЅРѕ РѕР±РЅРѕРІР»РµРЅ РЅР°: %s (С„Р°Р№Р»: %s)\n", newTopic, cfgPath)
+			fmt.Printf("✓ MQTT топик успешно обновлен на: %s (файл: %s)\n", newTopic, cfgPath)
 			if runtime.GOOS == "linux" {
 				if _, err := os.Stat("/etc/systemd/system/natbypass.service"); err == nil {
 					_ = exec.Command("systemctl", "restart", "natbypass").Run()
-					fmt.Println("вњ“ РЎР»СѓР¶Р±Р° systemd РїРµСЂРµР·Р°РїСѓС‰РµРЅР°.")
+					fmt.Println("✓ Служба systemd перезапущена.")
 				} else if _, err := os.Stat("/opt/etc/init.d/S99natbypass"); err == nil {
 					_ = exec.Command("/opt/etc/init.d/S99natbypass", "restart").Run()
-					fmt.Println("вњ“ РЎР»СѓР¶Р±Р° Keenetic Entware РїРµСЂРµР·Р°РїСѓС‰РµРЅР°.")
+					fmt.Println("✓ Служба Keenetic Entware перезапущена.")
 				}
 			}
 			return nil
@@ -212,7 +212,7 @@ func newSetTopicCmd() *cobra.Command {
 func newSetTelegramCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set-telegram [token] [chat_id]",
-		Short: "РЈСЃС‚Р°РЅРѕРІРёС‚СЊ С‚РѕРєРµРЅ Рё chat_id Telegram Р±РѕС‚Р°",
+		Short: "Установить токен и chat_id Telegram бота",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			token, chatID := args[0], args[1]
@@ -247,13 +247,13 @@ func newSetTelegramCmd() *cobra.Command {
 				})
 			}
 			if err := config.Save(cfg, cfgPath, runtime.GOOS == "windows"); err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° Р·Р°РїРёСЃРё %s: %w", cfgPath, err)
+				return fmt.Errorf("ошибка записи %s: %w", cfgPath, err)
 			}
-			fmt.Printf("вњ“ Telegram Р±РѕС‚ СѓСЃРїРµС€РЅРѕ РЅР°СЃС‚СЂРѕРµРЅ (С„Р°Р№Р»: %s)\n", cfgPath)
+			fmt.Printf("✓ Telegram бот успешно настроен (файл: %s)\n", cfgPath)
 			if runtime.GOOS == "linux" {
 				if _, err := os.Stat("/etc/systemd/system/natbypass.service"); err == nil {
 					_ = exec.Command("systemctl", "restart", "natbypass").Run()
-					fmt.Println("вњ“ РЎР»СѓР¶Р±Р° systemd РїРµСЂРµР·Р°РїСѓС‰РµРЅР°.")
+					fmt.Println("✓ Служба systemd перезапущена.")
 				}
 			}
 			return nil
@@ -265,7 +265,7 @@ func newSetTelegramCmd() *cobra.Command {
 func newStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "Р—Р°РїСѓСЃС‚РёС‚СЊ NatBypass (РѕСЃРЅРѕРІРЅРѕР№ С†РёРєР»)",
+		Short: "Запустить NatBypass (основной цикл)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configFile)
 			if err != nil {
@@ -273,7 +273,7 @@ func newStartCmd() *cobra.Command {
 					cfg = buildDefaultConfig()
 					ensureConfigFileExists(configFile)
 				} else {
-					return fmt.Errorf("РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РєРѕРЅС„РёРіР°: %w", err)
+					return fmt.Errorf("ошибка загрузки конфига: %w", err)
 				}
 			}
 			applyBuiltinDefaults(cfg)
@@ -284,15 +284,15 @@ func newStartCmd() *cobra.Command {
 			return runEngine(ctx, cfg, useTray)
 		},
 	}
-	cmd.Flags().BoolVarP(&useTray, "tray", "t", runtime.GOOS == "windows", "СЃРІРѕСЂР°С‡РёРІР°С‚СЊ РІ СЃРёСЃС‚РµРјРЅС‹Р№ С‚СЂРµР№ (Windows)")
+	cmd.Flags().BoolVarP(&useTray, "tray", "t", runtime.GOOS == "windows", "сворачивать в системный трей (Windows)")
 	return cmd
 }
 
-// в”Ђв”Ђ gui (Р·Р°РїСѓСЃРє СЃ С‚СЂРµРµРј РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// ── gui (запуск с треем по умолчанию) ──────────────────────────
 func newGuiCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "gui",
-		Short: "Р—Р°РїСѓСЃС‚РёС‚СЊ NatBypass РІ РіСЂР°С„РёС‡РµСЃРєРѕРј СЂРµР¶РёРјРµ СЃ РёРєРѕРЅРєРѕР№ РІ С‚СЂРµРµ",
+		Short: "Запустить NatBypass в графическом режиме с иконкой в трее",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configFile)
 			if err != nil {
@@ -309,76 +309,76 @@ func newGuiCmd() *cobra.Command {
 	}
 }
 
-// в”Ђв”Ђ service (Windows Service СѓРїСЂР°РІР»РµРЅРёРµ) в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// ── service (Windows Service управление) ────────────────────────
 func newServiceCmd() *cobra.Command {
 	svcCmd := &cobra.Command{
 		Use:   "service",
-		Short: "РЈРїСЂР°РІР»РµРЅРёРµ СЃР»СѓР¶Р±РѕР№ Windows (install, uninstall, start, stop, status)",
+		Short: "Управление службой Windows (install, uninstall, start, stop, status)",
 	}
 
 	installCmd := &cobra.Command{
 		Use:   "install",
-		Short: "РЈСЃС‚Р°РЅРѕРІРёС‚СЊ NatBypass РєР°Рє СЃРёСЃС‚РµРјРЅСѓСЋ СЃР»СѓР¶Р±Сѓ Windows",
+		Short: "Установить NatBypass как системную службу Windows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			err := daemon.InstallService(configFile)
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° СѓСЃС‚Р°РЅРѕРІРєРё СЃР»СѓР¶Р±С‹: %w", err)
+				return fmt.Errorf("ошибка установки службы: %w", err)
 			}
-			fmt.Println("вњ“ РЎР»СѓР¶Р±Р° NatBypass СѓСЃРїРµС€РЅРѕ СѓСЃС‚Р°РЅРѕРІР»РµРЅР° РІ Windows!")
-			fmt.Println("  РўРёРї Р·Р°РїСѓСЃРєР°: РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё")
-			fmt.Println("  Р”Р»СЏ Р·Р°РїСѓСЃРєР° РІС‹РїРѕР»РЅРёС‚Рµ: natbypass service start")
+			fmt.Println("✓ Служба NatBypass успешно установлена в Windows!")
+			fmt.Println("  Тип запуска: Автоматически")
+			fmt.Println("  Для запуска выполните: natbypass service start")
 			return nil
 		},
 	}
 
 	uninstallCmd := &cobra.Command{
 		Use:   "uninstall",
-		Short: "РЈРґР°Р»РёС‚СЊ СЃР»СѓР¶Р±Сѓ NatBypass РёР· Windows",
+		Short: "Удалить службу NatBypass из Windows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			err := daemon.UninstallService()
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ СЃР»СѓР¶Р±С‹: %w", err)
+				return fmt.Errorf("ошибка удаления службы: %w", err)
 			}
-			fmt.Println("вњ“ РЎР»СѓР¶Р±Р° NatBypass СѓРґР°Р»РµРЅР° РёР· СЃРёСЃС‚РµРјС‹.")
+			fmt.Println("✓ Служба NatBypass удалена из системы.")
 			return nil
 		},
 	}
 
 	startCmd := &cobra.Command{
 		Use:   "start",
-		Short: "Р—Р°РїСѓСЃС‚РёС‚СЊ СѓСЃС‚Р°РЅРѕРІР»РµРЅРЅСѓСЋ СЃР»СѓР¶Р±Сѓ Windows",
+		Short: "Запустить установленную службу Windows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			err := daemon.StartWindowsService()
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° Р·Р°РїСѓСЃРєР° СЃР»СѓР¶Р±С‹: %w", err)
+				return fmt.Errorf("ошибка запуска службы: %w", err)
 			}
-			fmt.Println("вњ“ РЎР»СѓР¶Р±Р° NatBypass Р·Р°РїСѓС‰РµРЅР°.")
+			fmt.Println("✓ Служба NatBypass запущена.")
 			return nil
 		},
 	}
 
 	stopCmd := &cobra.Command{
 		Use:   "stop",
-		Short: "РћСЃС‚Р°РЅРѕРІРёС‚СЊ СЃР»СѓР¶Р±Сѓ Windows",
+		Short: "Остановить службу Windows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			err := daemon.StopWindowsService()
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° РѕСЃС‚Р°РЅРѕРІРєРё СЃР»СѓР¶Р±С‹: %w", err)
+				return fmt.Errorf("ошибка остановки службы: %w", err)
 			}
-			fmt.Println("вњ“ РЎР»СѓР¶Р±Р° NatBypass РѕСЃС‚Р°РЅРѕРІР»РµРЅР°.")
+			fmt.Println("✓ Служба NatBypass остановлена.")
 			return nil
 		},
 	}
 
 	statusCmd := &cobra.Command{
 		Use:   "status",
-		Short: "РџСЂРѕРІРµСЂРёС‚СЊ СЃС‚Р°С‚СѓСЃ СЃР»СѓР¶Р±С‹ Windows",
+		Short: "Проверить статус службы Windows",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, err := daemon.QueryServiceStatus()
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ СЃС‚Р°С‚СѓСЃР° СЃР»СѓР¶Р±С‹: %w", err)
+				return fmt.Errorf("ошибка получения статуса службы: %w", err)
 			}
-			fmt.Printf("РЎС‚Р°С‚СѓСЃ СЃР»СѓР¶Р±С‹ Windows: %s\n", st)
+			fmt.Printf("Статус службы Windows: %s\n", st)
 			return nil
 		},
 	}
@@ -392,41 +392,41 @@ func newUpdateCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "РџСЂРѕРІРµСЂРёС‚СЊ Рё СѓСЃС‚Р°РЅРѕРІРёС‚СЊ РѕР±РЅРѕРІР»РµРЅРёРµ NatBypass СЃ GitHub",
+		Short: "Проверить и установить обновление NatBypass с GitHub",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Printf("рџ”Ќ РџСЂРѕРІРµСЂРєР° РѕР±РЅРѕРІР»РµРЅРёР№ (С‚РµРєСѓС‰Р°СЏ РІРµСЂСЃРёСЏ: %s)...\n", Version)
+			fmt.Printf("🔍 Проверка обновлений (текущая версия: %s)...\n", Version)
 			info, err := updater.CheckUpdate(context.Background(), Version)
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° РїСЂРѕРІРµСЂРєРё РѕР±РЅРѕРІР»РµРЅРёР№: %w", err)
+				return fmt.Errorf("ошибка проверки обновлений: %w", err)
 			}
 			if !info.HasUpdate && !force {
-				fmt.Printf("вњ… РЈ РІР°СЃ СѓСЃС‚Р°РЅРѕРІР»РµРЅР° Р°РєС‚СѓР°Р»СЊРЅР°СЏ РІРµСЂСЃРёСЏ (%s, СЂРµР»РёР·: %s)\n", Version, info.PublishedAt)
-				fmt.Println("рџ’Ў РСЃРїРѕР»СЊР·СѓР№С‚Рµ 'natbypass update --force' РґР»СЏ РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕР№ РїРµСЂРµСѓСЃС‚Р°РЅРѕРІРєРё СЃРІРµР¶РµРіРѕ Р±РёР»РґР°.")
+				fmt.Printf("✅ У вас установлена актуальная версия (%s, релиз: %s)\n", Version, info.PublishedAt)
+				fmt.Println("💡 спользуйте 'natbypass update --force' для принудительной переустановки свежего билда.")
 				return nil
 			}
 			if info.HasUpdate {
-				fmt.Printf("рџљЂ РќР°Р№РґРµРЅР° РЅРѕРІР°СЏ РІРµСЂСЃРёСЏ: %s (РѕРїСѓР±Р»РёРєРѕРІР°РЅР°: %s)\n", info.LatestVersion, info.PublishedAt)
+				fmt.Printf("🚀 Найдена новая версия: %s (опубликована: %s)\n", info.LatestVersion, info.PublishedAt)
 			} else {
-				fmt.Printf("рџ”„ РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕРµ РѕР±РЅРѕРІР»РµРЅРёРµ РґРѕ РїРѕСЃР»РµРґРЅРµРіРѕ Р±РёР»РґР° СЂРµР»РёР·Р° (%s, РѕРїСѓР±Р»РёРєРѕРІР°РЅ: %s)\n", info.LatestVersion, info.PublishedAt)
+				fmt.Printf("🔄 Принудительное обновление до последнего билда релиза (%s, опубликован: %s)\n", info.LatestVersion, info.PublishedAt)
 			}
-			fmt.Printf("рџ“¦ Р¤Р°Р№Р» РґР»СЏ РІР°С€РµР№ СЃРёСЃС‚РµРјС‹: %s (%d KB)\n", info.AssetName, info.AssetSize/1024)
+			fmt.Printf("📦 Файл для вашей системы: %s (%d KB)\n", info.AssetName, info.AssetSize/1024)
 			if info.ReleaseNotes != "" {
-				fmt.Printf("\nрџ“ќ РћРїРёСЃР°РЅРёРµ РёР·РјРµРЅРµРЅРёР№:\n%s\n\n", info.ReleaseNotes)
+				fmt.Printf("\n📝 Описание изменений:\n%s\n\n", info.ReleaseNotes)
 			}
-			fmt.Println(">> РЎРєР°С‡РёРІР°РЅРёРµ Рё РїСЂРёРјРµРЅРµРЅРёРµ РѕР±РЅРѕРІР»РµРЅРёСЏ...")
+			fmt.Println(">> Скачивание и применение обновления...")
 			err = updater.ApplyUpdate(context.Background(), info.AssetURL)
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° РїСЂРёРјРµРЅРµРЅРёСЏ РѕР±РЅРѕРІР»РµРЅРёСЏ: %w", err)
+				return fmt.Errorf("ошибка применения обновления: %w", err)
 			}
-			fmt.Println("рџЋ‰ РћР±РЅРѕРІР»РµРЅРёРµ СѓСЃРїРµС€РЅРѕ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ! РЎР»СѓР¶Р±Р° РїРµСЂРµР·Р°РїСѓС‰РµРЅР°.")
+			fmt.Println("🎉 Обновление успешно установлено! Служба перезапущена.")
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ РїРµСЂРµСѓСЃС‚Р°РЅРѕРІРёС‚СЊ РїРѕСЃР»РµРґРЅРёР№ Р±РёР»Рґ, РґР°Р¶Рµ РµСЃР»Рё РІРµСЂСЃРёРё СЃРѕРІРїР°РґР°СЋС‚")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "принудительно переустановить последний билд, даже если версии совпадают")
 	return cmd
 }
 
-// в”Ђв”Ђ РћСЃРЅРѕРІРЅРѕР№ РґРІРёР¶РѕРє в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// ── Основной движок ───────────────────────────────────────────
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	port := cfg.WebUI.Port
 	if webUIPort > 0 {
@@ -438,7 +438,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	if runtime.GOOS == "windows" {
 		if !acquireSingleInstanceMutex(port) {
-			log.Warn().Msg("вљ пёЏ Р­РєР·РµРјРїР»СЏСЂ NatBypass СѓР¶Рµ Р·Р°РїСѓС‰РµРЅ. РћС‚РєСЂС‹РІР°РµРј СЃСѓС‰РµСЃС‚РІСѓСЋС‰СѓСЋ РїР°РЅРµР»СЊ СѓРїСЂР°РІР»РµРЅРёСЏ...")
+			log.Warn().Msg("⚠️ Экземпляр NatBypass уже запущен. Открываем существующую панель управления...")
 			return nil
 		}
 		defer releaseSingleInstanceMutex()
@@ -449,13 +449,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		Str("version", Version).
 		Str("commit", Commit).
 		Str("config", configFile).
-		Msg("Р—Р°РїСѓСЃРє NatBypass")
+		Msg("Запуск NatBypass")
 
 	pubKey, privKey, err := loadOrGenerateKeys(cfg)
 	if err != nil {
-		return fmt.Errorf("РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РєР»СЋС‡РµР№: %w", err)
+		return fmt.Errorf("ошибка загрузки ключей: %w", err)
 	}
-	log.Info().Str("public_key", crypto.KeyToHex(pubKey)).Msg("NaCl РєР»СЋС‡Рё Р·Р°РіСЂСѓР¶РµРЅС‹")
+	log.Info().Str("public_key", crypto.KeyToHex(pubKey)).Msg("NaCl ключи загружены")
 
 	deviceID := cfg.App.DeviceID
 	if deviceID == "" {
@@ -465,7 +465,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			deviceID = generateDeviceID(pubKey)
 		}
 	}
-	log.Info().Str("device_id", deviceID).Msg("РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ СѓСЃС‚СЂРѕР№СЃС‚РІР°")
+	log.Info().Str("device_id", deviceID).Msg("дентификатор устройства")
 
 	engineCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -473,7 +473,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	registry := peer.NewRegistry()
 	registry.StartMonitor(engineCtx, 30*time.Second)
 
-	// РћРїСЂРµРґРµР»СЏРµРј С‚РѕРїРёРє РёР· Р°РєС‚РёРІРЅРѕРіРѕ РїСЂРѕС„РёР»СЏ (РїСЂРё РЅР°Р»РёС‡РёРё), РёРЅР°С‡Рµ вЂ” СѓРЅРёРєР°Р»СЊРЅС‹Р№ РЅР° РѕСЃРЅРѕРІРµ deviceID
+	// Определяем топик из активного профиля (при наличии), иначе — уникальный на основе deviceID
 	activeProf := cfg.EnsureActiveProfile()
 	defaultTopic := fmt.Sprintf("natbypass/%s/peers", deviceID[:min8(len(deviceID), 8)])
 	if activeProf != nil && activeProf.MQTTTopic != "" {
@@ -482,13 +482,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	channels, err := buildSignalingChannels(cfg)
 	if err != nil {
-		log.Warn().Err(err).Msg("РћС€РёР±РєР° РїР°СЂСЃРёРЅРіР° РєР°РЅР°Р»РѕРІ, РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ СЂРµР·РµСЂРІРЅС‹Р№ РєР°РЅР°Р»")
+		log.Warn().Err(err).Msg("Ошибка парсинга каналов, используется резервный канал")
 	}
 	if len(channels) == 0 {
-		log.Info().Str("topic", defaultTopic).Msg("вљ™пёЏ РЎРёРіРЅР°Р»СЊРЅС‹Рµ РєР°РЅР°Р»С‹ РЅРµ РЅР°СЃС‚СЂРѕРµРЅС‹. РСЃРїРѕР»СЊР·СѓСЋ РїРµСЂСЃРѕРЅР°Р»СЊРЅС‹Р№ С‚РѕРїРёРє MQTT.")
+		log.Info().Str("topic", defaultTopic).Msg("⚙️ Сигнальные каналы не настроены. спользую персональный топик MQTT.")
 		channels = append(channels, signaling.NewMQTTChannel("tcp://broker.emqx.io:1883", defaultTopic, deviceID, "", ""))
 	} else {
-		// РџСЂРёРјРµРЅСЏРµРј С‚РѕРїРёРє Р°РєС‚РёРІРЅРѕРіРѕ РїСЂРѕС„РёР»СЏ РєРѕ РІСЃРµРј MQTT-РєР°РЅР°Р»Р°Рј РїСЂРё СЃС‚Р°СЂС‚Рµ
+		// Применяем топик активного профиля ко всем MQTT-каналам при старте
 		if activeProf != nil && activeProf.MQTTTopic != "" {
 			for _, ch := range channels {
 				if mqCh, ok := ch.(*signaling.MQTTChannel); ok {
@@ -498,7 +498,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	}
 	sigMgr := signaling.NewFallbackManager(channels)
-	log.Info().Int("channels", len(channels)).Str("current", sigMgr.CurrentChannel()).Str("topic", defaultTopic).Msg("РЎРёРіРЅР°Р»СЊРЅС‹Рµ РєР°РЅР°Р»С‹ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅС‹")
+	log.Info().Int("channels", len(channels)).Str("current", sigMgr.CurrentChannel()).Str("topic", defaultTopic).Msg("Сигнальные каналы инициализированы")
 
 	port = cfg.WebUI.Port
 	if webUIPort > 0 {
@@ -508,7 +508,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		port = 8080
 	}
 
-	// рџљЂ РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРѕРµ СЃРѕР·РґР°РЅРёРµ РІРёСЂС‚СѓР°Р»СЊРЅРѕРіРѕ СЃРµС‚РµРІРѕРіРѕ РёРЅС‚РµСЂС„РµР№СЃР° (nb0 РЅР° Linux / NatBypass РЅР° Windows)
+	// 🚀 Автоматическое создание виртуального сетевого интерфейса (nb0 на Linux / NatBypass на Windows)
 	myVIPNum := 1
 	for _, b := range []byte(deviceID) {
 		myVIPNum = (myVIPNum*31 + int(b)) % 250
@@ -522,17 +522,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	if !noWebUI {
 		uiServer = webui.NewServer(port, cfg.WebUI.Username, cfg.WebUI.Password, registry, sigMgr)
 		uiServer.SetConfigPath(configFile)
-		uiServer.SetAppState(deviceID, "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ...", "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ...", myVirtualIP)
+		uiServer.SetAppState(deviceID, "Определяется...", "Определяется...", myVirtualIP)
 		uiServer.SetVirtualIP(myVirtualIP)
 		uiServer.SetDeviceName(deviceID)
 		uiServer.SetVersion(Version)
-		uiServer.AddEvent("info", "NatBypass Р·Р°РїСѓС‰РµРЅ", "version="+Version)
+		uiServer.AddEvent("info", "NatBypass запущен", "version="+Version)
 
 		uiServer.SetOnProfileSwitch(func(p *config.Profile) error {
 			if p == nil {
 				return nil
 			}
-			log.Info().Str("profile", p.Name).Str("topic", p.MQTTTopic).Msg("вљЎ Р”РёРЅР°РјРёС‡РµСЃРєРѕРµ РїРµСЂРµРєР»СЋС‡РµРЅРёРµ РїСЂРѕС„РёР»СЏ СЃРµС‚Рё")
+			log.Info().Str("profile", p.Name).Str("topic", p.MQTTTopic).Msg("⚡ Динамическое переключение профиля сети")
 			if sigMgr != nil && p.MQTTTopic != "" {
 				sigMgr.UpdateMQTTTopic(p.MQTTTopic)
 			}
@@ -542,7 +542,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 		go func() {
 			if err := uiServer.Start(engineCtx); err != nil {
-				log.Error().Err(err).Msg("Web UI РѕСЃС‚Р°РЅРѕРІР»РµРЅ")
+				log.Error().Err(err).Msg("Web UI остановлен")
 			}
 		}()
 		if runtime.GOOS == "windows" {
@@ -556,26 +556,26 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	}
 	tunDev, tErr := tunnel.CreateAdapter(adapterName, myVirtualIP)
 	if tErr == nil {
-		log.Info().Str("adapter", adapterName).Str("vip", myVirtualIP).Msg("рџ›ЎпёЏ Р’РёСЂС‚СѓР°Р»СЊРЅС‹Р№ СЃРµС‚РµРІРѕР№ РёРЅС‚РµСЂС„РµР№СЃ РїРѕРґРЅСЏС‚! РџСЂСЏРјРѕР№ РґРѕСЃС‚СѓРї Рє СѓСЃС‚СЂРѕР№СЃС‚РІСѓ Р°РєС‚РёРІРёСЂРѕРІР°РЅ")
+		log.Info().Str("adapter", adapterName).Str("vip", myVirtualIP).Msg("🛡️ Виртуальный сетевой интерфейс поднят! Прямой доступ к устройству активирован")
 		if uiServer != nil {
-			uiServer.AddEvent("info", "РЎРµС‚РµРІРѕР№ РёРЅС‚РµСЂС„РµР№СЃ "+adapterName+" РїРѕРґРЅСЏС‚", "IP: "+myVirtualIP+"/24")
+			uiServer.AddEvent("info", "Сетевой интерфейс "+adapterName+" поднят", "IP: "+myVirtualIP+"/24")
 		}
 	} else {
-		log.Warn().Err(tErr).Msg("РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРЅСЏС‚СЊ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ РёРЅС‚РµСЂС„РµР№СЃ TUN (С‚СЂРµР±СѓСЋС‚СЃСЏ РїСЂР°РІР° root РёР»Рё Р·Р°РіСЂСѓР¶РµРЅРЅС‹Р№ РјРѕРґСѓР»СЊ tun)")
+		log.Warn().Err(tErr).Msg("Не удалось поднять виртуальный интерфейс TUN (требуются права root или загруженный модуль tun)")
 	}
 
 	var puncher *network.UDPPuncher
-	// РСЃРїРѕР»СЊР·СѓРµРј РїРѕСЂС‚ 47832 РґР»СЏ РїСЂРѕР±РёРІРєРё NAT вЂ” РѕС‚РґРµР»СЊРЅС‹Р№ РѕС‚ WireGuard (51820),
-	// С‡С‚РѕР±С‹ РёР·Р±РµР¶Р°С‚СЊ РєРѕРЅС„Р»РёРєС‚Р° РїРѕСЂС‚РѕРІ Рё СЃРѕС…СЂР°РЅРёС‚СЊ РїСЂР°РІРёР»СЊРЅС‹Р№ STUN-Р°РґСЂРµСЃ РІ РјР°СЏРєРµ.
+	// спользуем порт 47832 для пробивки NAT — отдельный от WireGuard (51820),
+	// чтобы избежать конфликта портов и сохранить правильный STUN-адрес в маяке.
 	puncher, err = network.NewUDPPuncher(47832, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
-		log.Info().Str("peer", remoteDevID).Dur("rtt", rtt).Str("from", fromAddr).Msg("вљЎ [P2P Direct UDP] РџРћР”РўР’Р•Р Р–Р”Р•РќРћ! РџСЂСЏРјРѕР№ UDP-РїРёРЅРі")
+		log.Info().Str("peer", remoteDevID).Dur("rtt", rtt).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг")
 		if p, ok := registry.Get(remoteDevID); ok {
 			p.DirectP2P = true
-			// РћР±РЅРѕРІР»СЏРµРј ActiveEndpoint Рё STUNAddr СЂРµР°Р»СЊРЅС‹Рј Р°РґСЂРµСЃРѕРј РёСЃС‚РѕС‡РЅРёРєР° UDP-РїР°РєРµС‚Р°.
-			// fromAddr вЂ” СЌС‚Рѕ Р Р•РђР›Р¬РќР«Р™ Р°РґСЂРµСЃ РїРёСЂР° Р·Р° NAT, РѕРЅ С‚РѕС‡РЅРµРµ С‡РµРј STUNAddr РёР· РјР°СЏРєР°
-			// (РѕСЃРѕР±РµРЅРЅРѕ РїСЂРё symmetric NAT РіРґРµ mapped port СЂР°Р·РЅС‹Р№ РґР»СЏ РєР°Р¶РґРѕРіРѕ destination).
+			// Обновляем ActiveEndpoint и STUNAddr реальным адресом источника UDP-пакета.
+			// fromAddr — это РЕАЛЬНЫЙ адрес пира за NAT, он точнее чем STUNAddr из маяка
+			// (особенно при symmetric NAT где mapped port разный для каждого destination).
 			p.ActiveEndpoint = fromAddr
-			p.STUNAddr = fromAddr // в†ђ РєР»СЋС‡РµРІРѕРµ: С‚РµРїРµСЂСЊ keepalive Р±СѓРґРµС‚ РґРѕР»Р±РёС‚СЊ РїСЂР°РІРёР»СЊРЅС‹Р№ РїРѕСЂС‚
+			p.STUNAddr = fromAddr // ← ключевое: теперь keepalive будет долбить правильный порт
 			if rtt > 0 && rtt < 10*time.Second {
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
@@ -588,7 +588,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			p.LastSeen = time.Now()
 			registry.Upsert(p)
 
-			// Р’СЃС‚СЂРµС‡РЅС‹Р№ Р·РѕРЅРґ РЅР° РѕР±РЅР°СЂСѓР¶РµРЅРЅС‹Р№ СЃРѕРєРµС‚ РґР»СЏ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРЅРѕРіРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ СЃРѕ СЃС‚РѕСЂРѕРЅС‹ СЃРјР°СЂС‚С„РѕРЅР°/РєР»РёРµРЅС‚Р°
+			// Встречный зонд на обнаруженный сокет для гарантированного подтверждения со стороны смартфона/клиента
 			if puncher != nil {
 				go func(targetAddr string) {
 					for i := 0; i < 3; i++ {
@@ -600,7 +600,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	})
 	if err == nil {
-		log.Info().Int("port", puncher.LocalPort()).Msg("UDPPuncher Р°РєС‚РёРІРµРЅ")
+		log.Info().Int("port", puncher.LocalPort()).Msg("UDPPuncher активен")
 		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			if len(payload) < 20 {
 				return
@@ -615,7 +615,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		})
 	}
 
-	// рџ“Ў РџРѕРґРїРёСЃРєР° РЅР° СЂРµР»РµР№ С‚СѓРЅРЅРµР»СЊРЅС‹С… РїР°РєРµС‚РѕРІ С‡РµСЂРµР· MQTT РґР»СЏ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРЅРѕРіРѕ P2P
+	// 📡 Подписка на релей туннельных пакетов через MQTT для гарантированного P2P
 	for _, ch := range channels {
 		if mqCh, isMq := ch.(*signaling.MQTTChannel); isMq {
 			mqCh.SubscribeTunnelData(deviceID, func(pkt []byte) {
@@ -640,7 +640,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	}
 
-	// Р¤РѕРЅРѕРІС‹Р№ РїРѕС‚РѕРє С‡С‚РµРЅРёСЏ РёСЃС…РѕРґСЏС‰РёС… IP-РїР°РєРµС‚РѕРІ РёР· СЃРµС‚РµРІРѕРіРѕ СЃС‚РµРєР° РћРЎ Рё РїРµСЂРµСЃС‹Р»РєР° РїРёСЂР°Рј
+	// Фоновый поток чтения исходящих IP-пакетов из сетевого стека ОС и пересылка пирам
 	if tunDev != nil {
 		go func() {
 			for {
@@ -689,11 +689,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}()
 	}
 
-	// Р¤РѕРЅРѕРІС‹Р№ С†РёРєР» РїРµСЂРёРѕРґРёС‡РµСЃРєРѕРіРѕ РїСЂРѕР±РёС‚РёСЏ NAT Рё РїРѕРґРґРµСЂР¶Р°РЅРёСЏ СЃРѕРєРµС‚РѕРІ Р¶РёРІС‹РјРё (KeepAlive)
+	// Фоновый цикл периодического пробития NAT и поддержания сокетов живыми (KeepAlive)
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
-		// Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅР°СЏ С„СѓРЅРєС†РёСЏ: 3 РїСЂРѕР±С‹ РЅР° РѕРґРёРЅ Р°РґСЂРµСЃ СЃ РёРЅС‚РµСЂРІР°Р»РѕРј 150РјСЃ
+		// Вспомогательная функция: 3 пробы на один адрес с интервалом 150мс
 		probe3 := func(addr string) {
 			if addr == "" {
 				return
@@ -741,7 +741,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	}()
 
-	// рџЏ  LAN Broadcast Discovery (Р»РѕРєР°Р»СЊРЅС‹Р№ РїРѕРёСЃРє Р·Р° <0.1СЃ)
+	// 🏠 LAN Broadcast Discovery (локальный поиск за <0.1с)
 	go func() {
 		lAddr, _ := net.ResolveUDPAddr("udp4", ":51821")
 		conn, err := net.ListenUDP("udp4", lAddr)
@@ -755,9 +755,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				parts := strings.Split(string(buf[:n]), "|")
 				if len(parts) >= 2 && parts[0] == "NATBYPASS_LAN" && parts[1] != deviceID {
-					log.Info().Str("peer", parts[1]).Str("addr", src.String()).Msg("рџЏ  [LAN Discovery] РћР±РЅР°СЂСѓР¶РµРЅ Р»РѕРєР°Р»СЊРЅС‹Р№ РїРёСЂ")
-					if puncher != nil {
-						puncher.SendHolePunchProbe(src.String())
+					peerID := parts[1]
+					p, exists := registry.Get(peerID)
+					if !exists || !p.Online || !p.DirectP2P {
+						log.Info().Str("peer", peerID).Str("addr", src.String()).Msg("🏠 [LAN Discovery] Обнаружен локальный пир в сети")
+					}
+					if puncher != nil && len(parts) >= 3 && parts[2] != "" {
+						_ = puncher.SendHolePunchProbe(parts[2])
 					}
 				}
 			}
@@ -777,12 +781,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	}
 
-	// Р¤РѕРЅРѕРІРѕРµ РѕРїСЂРµРґРµР»РµРЅРёРµ IP Рё STUN вЂ” РїРѕСЃР»Рµ СѓСЃРїРµС…Р° СЃСЂР°Р·Сѓ РїСѓР±Р»РёРєСѓРµРј РјР°СЏРє СЃРѕ СЃРІРµР¶РёРј STUN-Р°РґСЂРµСЃРѕРј
+	// Фоновое определение IP и STUN — после успеха сразу публикуем маяк со свежим STUN-адресом
 	go func() {
 		if ip, err := ipDisc.GetPublicIPCached(engineCtx, 5*time.Minute); err == nil {
 			publicIP = ip
-			log.Info().Str("ip", publicIP.String()).Msg("РџСѓР±Р»РёС‡РЅС‹Р№ IP РѕРїСЂРµРґРµР»С‘РЅ")
-			triggerPublish() // СЃСЂР°Р·Сѓ РїСѓР±Р»РёРєСѓРµРј СЃ СЂРµР°Р»СЊРЅС‹Рј IP
+			log.Info().Str("ip", publicIP.String()).Msg("Публичный IP определён")
+			triggerPublish() // сразу публикуем с реальным IP
 		}
 
 		if v6 := network.GetPublicIPv6(engineCtx); v6 != "" {
@@ -791,23 +795,23 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				puncherPort = puncher.LocalPort()
 			}
 			ipv6Addr = fmt.Sprintf("[%s]:%d", v6, puncherPort)
-			log.Info().Str("ipv6", ipv6Addr).Msg("Р“Р»РѕР±Р°Р»СЊРЅС‹Р№ IPv6 Р°РґСЂРµСЃ РѕРїСЂРµРґРµР»С‘РЅ (P2P Р±РµР· CGNAT РґР»СЏ РјРѕР±РёР»СЊРЅС‹С… СЃРµС‚РµР№)")
+			log.Info().Str("ipv6", ipv6Addr).Msg("Глобальный IPv6 адрес определён (P2P без CGNAT для мобильных сетей)")
 			triggerPublish()
 		}
 
 		if puncher != nil {
 			if sIP, sPort, sErr := puncher.DiscoverMappedAddress(engineCtx); sErr == nil && sIP != nil {
 				stunAddr = fmt.Sprintf("%s:%d", sIP.String(), sPort)
-				log.Info().Str("stun_addr", stunAddr).Msg("STUN СЃРѕРєРµС‚ РѕРїСЂРµРґРµР»С‘РЅ С‡РµСЂРµР· UDPPuncher")
-				triggerPublish() // СЃСЂР°Р·Сѓ РїСѓР±Р»РёРєСѓРµРј СЃРѕ STUN-Р°РґСЂРµСЃРѕРј вЂ” РєСЂРёС‚РёС‡РµСЃРєРё РІР°Р¶РЅРѕ РґР»СЏ hole punch!
+				log.Info().Str("stun_addr", stunAddr).Msg("STUN сокет определён через UDPPuncher")
+				triggerPublish() // сразу публикуем со STUN-адресом — критически важно для hole punch!
 			}
 		}
 		if stunAddr == "" {
 			stunClient := network.NewSTUNClient(cfg.Network.StunServers)
 			if stunIP, stunPort, stunErr := stunClient.GetMappedAddress(engineCtx); stunErr == nil {
 				stunAddr = fmt.Sprintf("%s:%d", stunIP.String(), stunPort)
-				log.Info().Str("stun_addr", stunAddr).Msg("STUN Р°РґСЂРµСЃ РѕРїСЂРµРґРµР»С‘РЅ")
-				triggerPublish() // РїСѓР±Р»РёРєСѓРµРј Рё РїРѕ СЂРµР·РµСЂРІРЅРѕРјСѓ STUN
+				log.Info().Str("stun_addr", stunAddr).Msg("STUN адрес определён")
+				triggerPublish() // публикуем и по резервному STUN
 			}
 		}
 
@@ -815,7 +819,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			go func() {
 				upnpClient := network.NewUPnPClient()
 				if err := upnpClient.AddPortMapping(engineCtx, 47832, 47832, "UDP", "NatBypass P2P Puncher", 3600); err == nil {
-					log.Info().Int("port", 47832).Msg("вњ… [UPnP] РџРѕСЂС‚ 47832 UDP СѓСЃРїРµС€РЅРѕ РѕС‚РєСЂС‹С‚ РЅР° СЂРѕСѓС‚РµСЂРµ (Full Cone P2P Р°РєС‚РёРІРµРЅ)")
+					log.Info().Int("port", 47832).Msg("✅ [UPnP] Порт 47832 UDP успешно открыт на роутере (Full Cone P2P активен)")
 				}
 				if cfg.WireGuard.ListenPort > 0 {
 					_ = upnpClient.AddPortMapping(engineCtx, cfg.WireGuard.ListenPort, cfg.WireGuard.ListenPort, "UDP", "NatBypass WireGuard", 3600)
@@ -845,7 +849,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		publishInterval = 8 * time.Second
 	}
 
-	// РњРіРЅРѕРІРµРЅРЅС‹Рµ СЃС‚Р°СЂС‚РѕРІС‹Рµ Р°РЅРѕРЅСЃС‹
+	// Мгновенные стартовые анонсы
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		triggerPublish()
@@ -855,7 +859,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		triggerPublish()
 	}()
 
-	// Р¦РёРєР» РїСѓР±Р»РёРєР°С†РёРё Р°РЅРѕРЅСЃРѕРІ
+	// Цикл публикации анонсов
 	go func() {
 		ticker := time.NewTicker(publishInterval)
 		defer ticker.Stop()
@@ -892,8 +896,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				lanIP := network.GetLocalLANIP()
 				localAddr := ""
 				if lanIP != "" {
-					// РСЃРїРѕР»СЊР·СѓРµРј РїРѕСЂС‚ puncher (47832), Р° РЅРµ wgPort вЂ” wgPort=0 РµСЃР»Рё WireGuard РІС‹РєР»СЋС‡РµРЅ,
-					// Р° РґС‹СЂСЏРІРёС‚СЊ NAT РЅР°РґРѕ РёРјРµРЅРЅРѕ С‡РµСЂРµР· РїРѕСЂС‚, РЅР° РєРѕС‚РѕСЂРѕРј СЃР»СѓС€Р°РµС‚ puncher
+					// спользуем порт puncher (47832), а не wgPort — wgPort=0 если WireGuard выключен,
+					// а дырявить NAT надо именно через порт, на котором слушает puncher
 					puncherPort := 47832
 					if puncher != nil {
 						puncherPort = puncher.LocalPort()
@@ -931,19 +935,26 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				_ = sigMgr.Send(engineCtx, payload)
 
-				// LAN Broadcast Ping
+				// LAN Broadcast Ping (умеренно, раз в несколько циклов)
 				if bcastAddr, bErr := net.ResolveUDPAddr("udp4", "255.255.255.255:51821"); bErr == nil {
-					bConn, bConnErr := net.DialUDP("udp4", nil, bcastAddr)
-					if bConnErr == nil {
-						bConn.Write([]byte(fmt.Sprintf("NATBYPASS_LAN|%s|%s", deviceID, stunAddr)))
-						bConn.Close()
+					pPort := 47832
+					if puncher != nil {
+						pPort = puncher.LocalPort()
+					}
+					localTarget := fmt.Sprintf("%s:%d", publicIP.String(), pPort)
+					if stunAddr != "" {
+						localTarget = stunAddr
+					}
+					if bConn, bConnErr := net.DialUDP("udp4", nil, bcastAddr); bConnErr == nil {
+						_, _ = bConn.Write([]byte(fmt.Sprintf("NATBYPASS_LAN|%s|%s", deviceID, localTarget)))
+						_ = bConn.Close()
 					}
 				}
 			}
 		}
 	}()
 
-	// Р¦РёРєР» РїСЂРёРµРјР°
+	// Цикл приема
 	inCh, err := sigMgr.Receive(engineCtx)
 	if err == nil {
 		go func() {
@@ -983,10 +994,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					}
 
 					if p.Offline || p.Leave {
-						log.Info().Str("peer", p.DeviceID).Msg("рџ”ґ РЈР·РµР» РѕС‚РєР»СЋС‡РёР»СЃСЏ РѕС‚ СЃРµС‚Рё (Leave beacon)")
+						log.Info().Str("peer", p.DeviceID).Msg("🔴 Узел отключился от сети (Leave beacon)")
 						registry.Delete(p.DeviceID)
 						if uiServer != nil {
-							uiServer.AddEvent("peer_offline", "РЈР·РµР» "+p.DeviceID+" РѕС‚РєР»СЋС‡РёР»СЃСЏ", "")
+							uiServer.AddEvent("peer_offline", "Узел "+p.DeviceID+" отключился", "")
 						}
 						continue
 					}
@@ -1012,7 +1023,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						if osName != "" {
 							plat = osName
 						} else {
-							plat = "рџ’» РЈСЃС‚СЂРѕР№СЃС‚РІРѕ"
+							plat = "💻 Устройство"
 						}
 					}
 					pFlag := p.CountryFlag
@@ -1045,20 +1056,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						Channel:          p.Channel,
 					})
 
-					log.Info().Str("peer", p.DeviceID).Str("vip", peerVIP).Str("stun", p.STUNAddr).Msg("рџ“Ґ [P2P Signal] РћР±РЅР°СЂСѓР¶РµРЅ РїРёСЂ РІ СЃРёРіРЅР°Р»СЊРЅРѕР№ СЃРµС‚Рё")
+					log.Info().Str("peer", p.DeviceID).Str("vip", peerVIP).Str("stun", p.STUNAddr).Msg("📥 [P2P Signal] Обнаружен пир в сигнальной сети")
 					if uiServer != nil {
-						uiServer.AddEvent("peer_online", "РћР±РЅР°СЂСѓР¶РµРЅ СѓР·РµР»: "+p.DeviceID, "VIP: "+peerVIP)
+						uiServer.AddEvent("peer_online", "Обнаружен узел: "+p.DeviceID, "VIP: "+peerVIP)
 					}
 
-					// РќРµРјРµРґР»РµРЅРЅС‹Р№ burst hole-punch Рє РїРёСЂСѓ + РІСЃС‚СЂРµС‡РЅР°СЏ РїСѓР±Р»РёРєР°С†РёСЏ РЅР°С€РµРіРѕ РјР°СЏРєР°
+					// Немедленный burst hole-punch к пиру + встречная публикация нашего маяка
 					if puncher != nil {
 						go func(peer *signaling.Payload) {
-							// РЎС‚СЂРѕРёРј СЃРїРёСЃРѕРє Р°РґСЂРµСЃРѕРІ РґР»СЏ РїСЂРѕР±РёРІРєРё:
-							// 1. STUNAddr вЂ” STUN-mapped Р°РґСЂРµСЃ РїРѕСЂС‚Р° puncher
-							// 2. IPv6Addr вЂ” РїСЂСЏРјРѕР№ РіР»РѕР±Р°Р»СЊРЅС‹Р№ IPv6 Р°РґСЂРµСЃ (Р±РµР· CGNAT)
-							// 3. LocalAddr вЂ” LAN IP РїРёСЂР°
-							// 4. PublicIP:47832 (Windows default) Рё PublicIP:51820 (Mobile/Linux default)
-							// 5. PublicIP:WGPort вЂ” РµСЃР»Рё WireGuard РІРєР»СЋС‡РµРЅ Сѓ РїРёСЂР°
+							// Строим список адресов для пробивки:
+							// 1. STUNAddr — STUN-mapped адрес порта puncher
+							// 2. IPv6Addr — прямой глобальный IPv6 адрес (без CGNAT)
+							// 3. LocalAddr — LAN IP пира
+							// 4. PublicIP:47832 (Windows default) и PublicIP:51820 (Mobile/Linux default)
+							// 5. PublicIP:WGPort — если WireGuard включен у пира
 							addrs := []string{peer.STUNAddr, peer.LocalAddr}
 							if peer.IPv6Addr != "" {
 								addrs = append(addrs, peer.IPv6Addr)
@@ -1070,7 +1081,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									addrs = append(addrs, fmt.Sprintf("%s:%d", peer.PublicIP, peer.WGPort))
 								}
 							}
-							// 5 СЃРµСЂРёР№ СЃ РёРЅС‚РµСЂРІР°Р»РѕРј 200РјСЃ = 1 СЃРµРєСѓРЅРґР° Р°РєС‚РёРІРЅРѕР№ РїСЂРѕР±РёРІРєРё
+							// 5 серий с интервалом 200мс = 1 секунда активной пробивки
 							for burst := 0; burst < 5; burst++ {
 								for _, addr := range addrs {
 									if addr != "" {
@@ -1082,7 +1093,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}(p)
-						// РџСѓР±Р»РёРєСѓРµРј РЅР°С€ СЃРІРµР¶РёР№ РјР°СЏРє вЂ” РїРёСЂ РїРѕР»СѓС‡РёС‚ РЅР°С€ STUN Рё СЃРјРѕР¶РµС‚ РїСЂРѕР±РёС‚СЊСЃСЏ Рє РЅР°Рј
+						// Публикуем наш свежий маяк — пир получит наш STUN и сможет пробиться к нам
 						triggerPublish()
 					}
 				}
@@ -1090,17 +1101,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}()
 	}
 
-	// SIGHUP РїРµСЂРµР·Р°РіСЂСѓР·РєР° РєРѕРЅС„РёРіР°
+	// SIGHUP перезагрузка конфига
 	sighupCh := make(chan os.Signal, 1)
 	signal.Notify(sighupCh, syscall.SIGHUP)
 	go func() {
 		for range sighupCh {
-			log.Info().Msg("SIGHUP: РїРµСЂРµР·Р°РіСЂСѓР·РєР° РєРѕРЅС„РёРіР°...")
+			log.Info().Msg("SIGHUP: перезагрузка конфига...")
 			config.Reload(cfg, configFile)
 		}
 	}()
 
-	// Р•СЃР»Рё РІРєР»СЋС‡РµРЅ СЂРµР¶РёРј С‚СЂРµСЏ (РЅР° Windows)
+	// Если включен режим трея (на Windows)
 	if enableTray && runtime.GOOS == "windows" {
 		trayApp := tray.NewTray(tray.TrayOptions{
 			WebUIPort:  port,
@@ -1120,21 +1131,21 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			GetStatusText: func() string {
 				ch := sigMgr.CurrentChannel()
 				if ch == "" {
-					ch = "РЅРµС‚"
+					ch = "нет"
 				}
-				return fmt.Sprintf("рџ’Ў РЎС‚Р°С‚СѓСЃ: РћРЅР»Р°Р№РЅ (РљР°РЅР°Р»: %s)", ch)
+				return fmt.Sprintf("💡 Статус: Онлайн (Канал: %s)", ch)
 			},
 		})
-		log.Info().Msg("Р—Р°РїСѓС‰РµРЅ СЃРёСЃС‚РµРјРЅС‹Р№ С‚СЂРµР№ Windows")
+		log.Info().Msg("Запущен системный трей Windows")
 		return trayApp.Run(engineCtx)
 	}
 
-	// РљРѕРЅСЃРѕР»СЊРЅС‹Р№ СЂРµР¶РёРј (РѕР¶РёРґР°РЅРёРµ SIGINT/SIGTERM)
+	// Консольный режим (ожидание SIGINT/SIGTERM)
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	log.Info().Msg("Р—Р°РІРµСЂС€РµРЅРёРµ СЂР°Р±РѕС‚С‹...")
+	log.Info().Msg("Завершение работы...")
 	cancel()
 	time.Sleep(300 * time.Millisecond)
 	return nil
@@ -1144,28 +1155,28 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 func newStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "РћСЃС‚Р°РЅРѕРІРёС‚СЊ СЂР°Р±РѕС‚Р°СЋС‰РёР№ РґРµРјРѕРЅ",
+		Short: "Остановить работающий демон",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configFile)
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РєРѕРЅС„РёРіР°: %w", err)
+				return fmt.Errorf("ошибка загрузки конфига: %w", err)
 			}
 			data, err := os.ReadFile(cfg.Daemon.PidFile)
 			if err != nil {
-				return fmt.Errorf("PID С„Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ (%s): РґРµРјРѕРЅ РЅРµ Р·Р°РїСѓС‰РµРЅ?", cfg.Daemon.PidFile)
+				return fmt.Errorf("PID файл не найден (%s): демон не запущен?", cfg.Daemon.PidFile)
 			}
 			pid, err := strconv.Atoi(string(data))
 			if err != nil {
-				return fmt.Errorf("РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ PID: %w", err)
+				return fmt.Errorf("некорректный PID: %w", err)
 			}
 			proc, err := os.FindProcess(pid)
 			if err != nil {
-				return fmt.Errorf("РїСЂРѕС†РµСЃСЃ РЅРµ РЅР°Р№РґРµРЅ: %w", err)
+				return fmt.Errorf("процесс не найден: %w", err)
 			}
 			if err := proc.Signal(syscall.SIGTERM); err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° РѕС‚РїСЂР°РІРєРё SIGTERM: %w", err)
+				return fmt.Errorf("ошибка отправки SIGTERM: %w", err)
 			}
-			fmt.Printf("РЎРёРіРЅР°Р» SIGTERM РѕС‚РїСЂР°РІР»РµРЅ РїСЂРѕС†РµСЃСЃСѓ %d\n", pid)
+			fmt.Printf("Сигнал SIGTERM отправлен процессу %d\n", pid)
 			return nil
 		},
 	}
@@ -1175,24 +1186,24 @@ func newStopCmd() *cobra.Command {
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "РџРѕРєР°Р·Р°С‚СЊ СЃС‚Р°С‚СѓСЃ СЂР°Р±РѕС‚Р°СЋС‰РµРіРѕ РґРµРјРѕРЅР°",
+		Short: "Показать статус работающего демона",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configFile)
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РєРѕРЅС„РёРіР°: %w", err)
+				return fmt.Errorf("ошибка загрузки конфига: %w", err)
 			}
 			data, err := os.ReadFile(cfg.Daemon.PidFile)
 			if err != nil {
-				fmt.Println("РЎС‚Р°С‚СѓСЃ: РќР• Р—РђРџРЈР©Р•Рќ")
+				fmt.Println("Статус: НЕ ЗАПУЩЕН")
 				return nil
 			}
 			pid, _ := strconv.Atoi(string(data))
 			proc, err := os.FindProcess(pid)
 			if err != nil || proc.Signal(syscall.Signal(0)) != nil {
-				fmt.Printf("РЎС‚Р°С‚СѓСЃ: РћРЎРўРђРќРћР’Р›Р•Рќ (РїРѕСЃР»РµРґРЅРёР№ PID: %d)\n", pid)
+				fmt.Printf("Статус: ОСТАНОВЛЕН (последний PID: %d)\n", pid)
 				return nil
 			}
-			fmt.Printf("РЎС‚Р°С‚СѓСЃ: Р—РђРџРЈР©Р•Рќ (PID: %d)\n", pid)
+			fmt.Printf("Статус: ЗАПУЩЕН (PID: %d)\n", pid)
 			fmt.Printf("Web UI: http://localhost:%d\n", cfg.WebUI.Port)
 			return nil
 		},
@@ -1203,17 +1214,17 @@ func newStatusCmd() *cobra.Command {
 func newKeygenCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "keygen",
-		Short: "РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ NaCl РєР»СЋС‡РµРІСѓСЋ РїР°СЂСѓ",
+		Short: "Сгенерировать NaCl ключевую пару",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pub, priv, err := crypto.GenerateKeyPair()
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° РіРµРЅРµСЂР°С†РёРё РєР»СЋС‡РµР№: %w", err)
+				return fmt.Errorf("ошибка генерации ключей: %w", err)
 			}
-			fmt.Println("# NaCl/Box РєР»СЋС‡РµРІР°СЏ РїР°СЂР° (X25519 + XSalsa20-Poly1305)")
+			fmt.Println("# NaCl/Box ключевая пара (X25519 + XSalsa20-Poly1305)")
 			fmt.Printf("public_key:  %s\n", crypto.KeyToHex(pub))
 			fmt.Printf("private_key: %s\n", crypto.KeyToHex(priv))
 			fmt.Println("")
-			fmt.Println("# Р”РѕР±Р°РІСЊС‚Рµ РІ config.yaml СЂР°Р·РґРµР» crypto:")
+			fmt.Println("# Добавьте в config.yaml раздел crypto:")
 			fmt.Printf("# crypto:\n#   public_key: \"%s\"\n#   private_key: \"%s\"\n",
 				crypto.KeyToHex(pub), crypto.KeyToHex(priv))
 			return nil
@@ -1225,18 +1236,18 @@ func newKeygenCmd() *cobra.Command {
 func newWGCmd() *cobra.Command {
 	wgCmd := &cobra.Command{
 		Use:   "wg",
-		Short: "РћРїРµСЂР°С†РёРё СЃ WireGuard",
+		Short: "Операции с WireGuard",
 	}
 
 	wgKeygenCmd := &cobra.Command{
 		Use:   "keygen",
-		Short: "РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ WireGuard РєР»СЋС‡РµРІСѓСЋ РїР°СЂСѓ",
+		Short: "Сгенерировать WireGuard ключевую пару",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kp, err := wireguard.GenerateKeyPair()
 			if err != nil {
-				return fmt.Errorf("РѕС€РёР±РєР° РіРµРЅРµСЂР°С†РёРё WG РєР»СЋС‡РµР№: %w", err)
+				return fmt.Errorf("ошибка генерации WG ключей: %w", err)
 			}
-			fmt.Println("# WireGuard РєР»СЋС‡РµРІР°СЏ РїР°СЂР°")
+			fmt.Println("# WireGuard ключевая пара")
 			fmt.Printf("PrivateKey = %s\n", kp.PrivateKey)
 			fmt.Printf("PublicKey  = %s\n", kp.PublicKey)
 			return nil
@@ -1245,7 +1256,7 @@ func newWGCmd() *cobra.Command {
 
 	wgConfigCmd := &cobra.Command{
 		Use:   "config",
-		Short: "РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ WireGuard mesh РєРѕРЅС„РёРі",
+		Short: "Сгенерировать WireGuard mesh конфиг",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kp, err := wireguard.GenerateKeyPair()
 			if err != nil {
@@ -1276,13 +1287,13 @@ func newWGCmd() *cobra.Command {
 func newInstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "РЈСЃС‚Р°РЅРѕРІРёС‚СЊ РєР°Рє СЃРёСЃС‚РµРјРЅС‹Р№ СЃРµСЂРІРёСЃ (Linux: systemd, procd, entware)",
+		Short: "Установить как системный сервис (Linux: systemd, procd, entware)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svcType, _ := cmd.Flags().GetString("service")
 			return installService(svcType)
 		},
 	}
-	cmd.Flags().String("service", "systemd", "С‚РёРї СЃРµСЂРІРёСЃР°: systemd|procd|entware")
+	cmd.Flags().String("service", "systemd", "тип сервиса: systemd|procd|entware")
 	return cmd
 }
 
@@ -1296,7 +1307,7 @@ func installService(svcType string) error {
 	switch svcType {
 	case "systemd":
 		unit := fmt.Sprintf(`[Unit]
-Description=NatBypass вЂ” РѕР±С…РѕРґ NAT Рё P2P-РґРѕСЃС‚СѓРї
+Description=NatBypass — обход NAT и P2P-доступ
 After=network-online.target
 Wants=network-online.target
 
@@ -1316,19 +1327,19 @@ WantedBy=multi-user.target
 		if err := os.WriteFile("/etc/systemd/system/natbypass.service", []byte(unit), 0644); err != nil {
 			return err
 		}
-		fmt.Println("вњ“ systemd unit СѓСЃС‚Р°РЅРѕРІР»РµРЅ: /etc/systemd/system/natbypass.service")
-		fmt.Println("Р’С‹РїРѕР»РЅРёС‚Рµ: systemctl daemon-reload && systemctl enable --now natbypass")
+		fmt.Println("✓ systemd unit установлен: /etc/systemd/system/natbypass.service")
+		fmt.Println("Выполните: systemctl daemon-reload && systemctl enable --now natbypass")
 
 	case "procd":
-		fmt.Println("Р”Р»СЏ OpenWrt: СЃРєРѕРїРёСЂСѓР№С‚Рµ scripts/init/natbypass.procd РІ /etc/init.d/natbypass")
-		fmt.Println("Р—Р°С‚РµРј: chmod +x /etc/init.d/natbypass && /etc/init.d/natbypass enable && /etc/init.d/natbypass start")
+		fmt.Println("Для OpenWrt: скопируйте scripts/init/natbypass.procd в /etc/init.d/natbypass")
+		fmt.Println("Затем: chmod +x /etc/init.d/natbypass && /etc/init.d/natbypass enable && /etc/init.d/natbypass start")
 
 	case "entware":
-		fmt.Println("Р”Р»СЏ Keenetic/Entware: СЃРєРѕРїРёСЂСѓР№С‚Рµ scripts/init/S99natbypass РІ /opt/etc/init.d/S99natbypass")
-		fmt.Println("Р—Р°С‚РµРј: chmod +x /opt/etc/init.d/S99natbypass && /opt/etc/init.d/S99natbypass start")
+		fmt.Println("Для Keenetic/Entware: скопируйте scripts/init/S99natbypass в /opt/etc/init.d/S99natbypass")
+		fmt.Println("Затем: chmod +x /opt/etc/init.d/S99natbypass && /opt/etc/init.d/S99natbypass start")
 
 	default:
-		return fmt.Errorf("РЅРµРёР·РІРµСЃС‚РЅС‹Р№ С‚РёРї СЃРµСЂРІРёСЃР°: %s", svcType)
+		return fmt.Errorf("неизвестный тип сервиса: %s", svcType)
 	}
 	return nil
 }
@@ -1337,23 +1348,23 @@ WantedBy=multi-user.target
 func newAntGravityCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "antigravity",
-		Short: "рџљЂ Easter Egg",
+		Short: "🚀 Easter Egg",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf(`
        .---.
       /     \
       \.@-@./       NatBypass v%s
-      /` + "`" + `\_/` + "`" + `\      РћР±С…РѕРґРёРј РіСЂР°РІРёС‚Р°С†РёСЋ NAT!
+      /` + "`" + `\_/` + "`" + `\      Обходим гравитацию NAT!
      //  _  \\
-    | \     / |     Р’РґРѕС…РЅРѕРІР»РµРЅРѕ: import antigravity (Python)
+    | \     / |     Вдохновлено: import antigravity (Python)
    /` + "`" + `\_` + "`" + `Y` + "`" + `_/` + "`" + `\    
-  /  |  |  |  \    Р РµР¶РёРј РЅРµРІРµСЃРѕРјРѕСЃС‚Рё: РђРљРўРР’РР РћР’РђРќ
-  ` + "`" + `--|--|--` + "`" + `    Р’СЃРµ РїР°РєРµС‚С‹ С‚РµРїРµСЂСЊ Р»РµС‚СЏС‚ РЅР°РїСЂСЏРјСѓСЋ!
+  /  |  |  |  \    Режим невесомости: АКТВРОВАН
+  ` + "`" + `--|--|--` + "`" + `    Все пакеты теперь летят напрямую!
 
-  "Р›СЋР±РѕР№ РґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂРѕРґРІРёРЅСѓС‚С‹Р№ NAT
-   РЅРµРѕС‚Р»РёС‡РёРј РѕС‚ СЃС‚РµРЅС‹." вЂ” РђСЂС‚СѓСЂ РљР»Р°СЂРє (РїРѕС‡С‚Рё)
+  "Любой достаточно продвинутый NAT
+   неотличим от стены." — Артур Кларк (почти)
 
-  double NAT? CGNAT? РќРµ РїСЂРѕР±Р»РµРјР°!   рџ›ё
+  double NAT? CGNAT? Не проблема!   🛸
 `, Version)
 		},
 	}
@@ -1363,23 +1374,23 @@ func newAntGravityCmd() *cobra.Command {
 func newKonamiCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "konami",
-		Short: "рџЋ® God Mode",
+		Short: "🎮 God Mode",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Print(`
-  в†‘ в†‘ в†“ в†“ в†ђ в†’ в†ђ в†’ B A  вЂ”  РљРћР” Р’Р’Р•Р”РЃРќ!
+  ↑ ↑ ↓ ↓ ← → ← → B A  —  КОД ВВЕДЁН!
   в•”в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•—
-  в•‘       Р Р•Р–РРњ Р‘РћР“Рђ РђРљРўРР’РР РћР’РђРќ       в•‘
+  ║       РЕЖМ БОГА АКТВРОВАН       ║
   в• в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•Ј
-  в•‘  РЎРєСЂС‹С‚С‹Рµ РЅР°СЃС‚СЂРѕР№РєРё NatBypass:      в•‘
+  ║  Скрытые настройки NatBypass:      ║
   в•‘                                    в•‘
-  в•‘  --paranoid     РўСЂРѕР№РЅРѕРµ С€РёС„СЂРѕРІР°РЅРёРµ в•‘
-  в•‘  --ghost        Р‘РµР· Р»РѕРіРѕРІ РІРѕРѕР±С‰Рµ   в•‘
-  в•‘  --turbo        РРЅС‚РµСЂРІР°Р» 1 СЃРµРє     в•‘
-  в•‘  --mesh-all     РЎРѕРµРґРёРЅРёС‚СЊ РІСЃРµС…     в•‘
-  в•‘  --obfs4        РћР±С„СѓСЃРєР°С†РёСЏ С‚СЂР°С„РёРєР° в•‘
-  в•‘  --chaos-mode   РЎР»СѓС‡Р°Р№РЅС‹Р№ РєР°РЅР°Р»    в•‘
+  ║  --paranoid     Тройное шифрование ║
+  ║  --ghost        Без логов вообще   ║
+  ║  --turbo        нтервал 1 сек     ║
+  ║  --mesh-all     Соединить всех     ║
+  ║  --obfs4        Обфускация трафика ║
+  ║  --chaos-mode   Случайный канал    ║
   в•‘                                    в•‘
-  в•‘  (СЌС‚Рё С„Р»Р°РіРё СЃСѓС‰РµСЃС‚РІСѓСЋС‚ РІ РјРµС‡С‚Р°С…)   в•‘
+  ║  (эти флаги существуют в мечтах)   ║
   в•љв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ќ
 `)
 		},
@@ -1390,7 +1401,7 @@ func newKonamiCmd() *cobra.Command {
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "РџРѕРєР°Р·Р°С‚СЊ РІРµСЂСЃРёСЋ",
+		Short: "Показать версию",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("NatBypass %s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
 		},
@@ -1401,51 +1412,51 @@ func newVersionCmd() *cobra.Command {
 func newDiagCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "diag",
-		Short: "Р—Р°РїСѓСЃС‚РёС‚СЊ РіР»СѓР±РѕРєСѓСЋ Р°РїРїР°СЂР°С‚РЅСѓСЋ Рё СЃРёСЃС‚РµРјРЅСѓСЋ РґРёР°РіРЅРѕСЃС‚РёРєСѓ РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ",
+		Short: "Запустить глубокую аппаратную и системную диагностику оборудования",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println("================================================================")
-			fmt.Println("       рџ©є NatBypass вЂ” РќРёР·РєРѕСѓСЂРѕРІРЅРµРІР°СЏ РґРёР°РіРЅРѕСЃС‚РёРєР° СЃРёСЃС‚РµРјС‹        ")
+			fmt.Println("       🩺 NatBypass — Низкоуровневая диагностика системы        ")
 			fmt.Println("================================================================")
 			fmt.Println()
 
 			rep := diagnostic.RunFullDiagnostics()
-			fmt.Printf("РҐРѕСЃС‚: %s | РћРЎ: %s | РђСЂС…РёС‚РµРєС‚СѓСЂР°: %s\n", rep.Hostname, rep.OS, rep.Arch)
-			fmt.Printf("РџСЂР°РІР° РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°: %v\n\n", rep.IsAdmin)
+			fmt.Printf("Хост: %s | ОС: %s | Архитектура: %s\n", rep.Hostname, rep.OS, rep.Arch)
+			fmt.Printf("Права Администратора: %v\n\n", rep.IsAdmin)
 
 			for i, item := range rep.Items {
-				statusIcon := "рџџў"
+				statusIcon := "🟢"
 				if !item.Passed {
-					statusIcon = "рџ”ґ"
+					statusIcon = "🔴"
 				}
 				fmt.Printf("[%d/8] %s %s (%d ms)\n", i+1, statusIcon, item.Name, item.Elapsed.Milliseconds())
 				fmt.Printf("      %s\n", item.Message)
 				if item.Details != "" {
-					fmt.Printf("      РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё: %s\n", item.Details)
+					fmt.Printf("      Подробности: %s\n", item.Details)
 				}
 				fmt.Println()
 			}
 
 			fmt.Println("================================================================")
-			fmt.Println("    вљЎ RFC 4787 / STUN РђРЅР°Р»РёР· С‚РёРїР° NAT Рё С€Р°РЅСЃРѕРІ DirectP2P      ")
+			fmt.Println("    ⚡ RFC 4787 / STUN Анализ типа NAT и шансов DirectP2P      ")
 			fmt.Println("================================================================")
-			fmt.Println("РўРµСЃС‚РёСЂРѕРІР°РЅРёРµ С‚СЂР°РЅСЃР»СЏС†РёРё РїРѕСЂС‚РѕРІ...")
+			fmt.Println("Тестирование трансляции портов...")
 
 			natInfo, err := diagnostic.ClassifyNATBehavior()
 			if err != nil {
-				fmt.Printf("вљ пёЏ РћС€РёР±РєР° С‚РµСЃС‚РёСЂРѕРІР°РЅРёСЏ NAT: %v\n", err)
+				fmt.Printf("⚠️ Ошибка тестирования NAT: %v\n", err)
 			} else {
-				fmt.Printf("вЂў Р’РЅРµС€РЅРёР№ IP Р°РґСЂРµСЃ:      %s\n", natInfo.PublicIP)
-				fmt.Printf("вЂў РўРёРї NAT СЂРѕСѓС‚РµСЂР°:       %s\n", natInfo.NATType)
-				fmt.Printf("вЂў РџРѕРІРµРґРµРЅРёРµ РїРѕСЂС‚РѕРІ (EIM):%s\n", natInfo.MappingType)
-				fmt.Printf("вЂў Р’РµСЂРѕСЏС‚РЅРѕСЃС‚СЊ DirectP2P: %s\n", natInfo.P2PFeasibility)
-				fmt.Printf("вЂў Р РµРєРѕРјРµРЅРґР°С†РёСЏ:          %s\n", natInfo.Recommendation)
+				fmt.Printf("• Внешний IP адрес:      %s\n", natInfo.PublicIP)
+				fmt.Printf("• Тип NAT роутера:       %s\n", natInfo.NATType)
+				fmt.Printf("• Поведение портов (EIM):%s\n", natInfo.MappingType)
+				fmt.Printf("• Вероятность DirectP2P: %s\n", natInfo.P2PFeasibility)
+				fmt.Printf("• Рекомендация:          %s\n", natInfo.Recommendation)
 			}
 
 			fmt.Println("================================================================")
 			if rep.AllPassed {
-				fmt.Println("вњ… Р’СЃРµ Р±Р°Р·РѕРІС‹Рµ С‚РµСЃС‚С‹ РїСЂРѕР№РґРµРЅС‹! РћР±РѕСЂСѓРґРѕРІР°РЅРёРµ Рё СЃРµС‚СЊ РіРѕС‚РѕРІС‹ Рє СЂР°Р±РѕС‚Рµ.")
+				fmt.Println("✅ Все базовые тесты пройдены! Оборудование и сеть готовы к работе.")
 			} else {
-				fmt.Println("вљ пёЏ РћР±РЅР°СЂСѓР¶РµРЅС‹ СЃРёСЃС‚РµРјРЅС‹Рµ Р·Р°РјРµС‡Р°РЅРёСЏ. РћР·РЅР°РєРѕРјСЊС‚РµСЃСЊ СЃ РїРѕРґСЃРєР°Р·РєР°РјРё РІС‹С€Рµ.")
+				fmt.Println("⚠️ Обнаружены системные замечания. Ознакомьтесь с подсказками выше.")
 			}
 			fmt.Println("================================================================")
 		},
@@ -1493,11 +1504,11 @@ func loadOrGenerateKeys(cfg *config.Config) ([32]byte, [32]byte, error) {
 	if cfg.Crypto.PublicKey != "" && cfg.Crypto.PrivateKey != "" {
 		pub, err := crypto.HexToKey(cfg.Crypto.PublicKey)
 		if err != nil {
-			return [32]byte{}, [32]byte{}, fmt.Errorf("РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїСѓР±Р»РёС‡РЅС‹Р№ РєР»СЋС‡: %w", err)
+			return [32]byte{}, [32]byte{}, fmt.Errorf("некорректный публичный ключ: %w", err)
 		}
 		priv, err := crypto.HexToKey(cfg.Crypto.PrivateKey)
 		if err != nil {
-			return [32]byte{}, [32]byte{}, fmt.Errorf("РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїСЂРёРІР°С‚РЅС‹Р№ РєР»СЋС‡: %w", err)
+			return [32]byte{}, [32]byte{}, fmt.Errorf("некорректный приватный ключ: %w", err)
 		}
 		return pub, priv, nil
 	}
@@ -1694,7 +1705,7 @@ func ensureConfigFileExists(path string) {
 	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		sample := `# ============================================================
-# NatBypass вЂ” РљРѕРЅС„РёРіСѓСЂР°С†РёРѕРЅРЅС‹Р№ С„Р°Р№Р»
+# NatBypass — Конфигурационный файл
 # ============================================================
 
 app:
@@ -1726,8 +1737,8 @@ signaling:
       priority: 1
       enabled: false
       params:
-        token: ""      # Р’СЃС‚Р°РІСЊС‚Рµ С‚РѕРєРµРЅ РѕС‚ @BotFather (РЅР°РїСЂРёРјРµСЂ: 7123456789:AAF...)
-        chat_id: ""    # ID РїСЂРёРІР°С‚РЅРѕР№ РіСЂСѓРїРїС‹/РєР°РЅР°Р»Р° (РЅР°РїСЂРёРјРµСЂ: -1001234567890)
+        token: ""      # Вставьте токен от @BotFather (например: 7123456789:AAF...)
+        chat_id: ""    # ID приватной группы/канала (например: -1001234567890)
     - type: "mqtt"
       priority: 2
       enabled: true

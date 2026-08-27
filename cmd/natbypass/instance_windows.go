@@ -311,8 +311,8 @@ func openAppWindow(port int) {
 		}
 
 		defer func() {
+			defer func() { recover() }()
 			w.Destroy()
-			os.Exit(0)
 		}()
 
 		hwnd := uintptr(w.Window())

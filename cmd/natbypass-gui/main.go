@@ -195,7 +195,7 @@ const (
 	ODS_SELECTED = 0x0001
 )
 
-// Р¦РІРµС‚РѕРІР°СЏ РїР°Р»РёС‚СЂР° Slate Dark (Modern Fluent Theme)
+// Цветовая палитра Slate Dark (Modern Fluent Theme)
 const (
 	COLOR_BG        = 0x18120D // #0D1218
 	COLOR_SIDEBAR   = 0x221A15 // #151A22
@@ -270,7 +270,7 @@ type MSG struct {
 	Pt      POINT
 }
 
-// Р“Р»РѕР±Р°Р»СЊРЅС‹Рµ РїРѕСЃС‚РѕСЏРЅРЅС‹Рµ GDI СЂРµСЃСѓСЂСЃС‹ (СЃРѕР·РґР°СЋС‚СЃСЏ 1 СЂР°Р· РїСЂРё СЃС‚Р°СЂС‚Рµ, 0 СѓС‚РµС‡РµРє)
+// Глобальные постоянные GDI ресурсы (создаются 1 раз при старте, 0 утечек)
 var (
 	hMainWnd     uintptr
 	hAppIcon     uintptr
@@ -303,7 +303,7 @@ var (
 	currentTab = 0
 	tabPages   [6][]uintptr
 
-	// Р’РєР»Р°РґРєР° 0: РћР±Р·РѕСЂ
+	// Вкладка 0: Обзор
 	hLblStatus            uintptr
 	hLblIpInfo            uintptr
 	hLblChannels          uintptr
@@ -320,7 +320,7 @@ var (
 	activeSubnetRoutes    = make(map[string]string)
 	activeSubnetRoutesMu  sync.RWMutex
 
-	// Р’РєР»Р°РґРєР° 1: РџСЂРѕС„РёР»Рё СЃРµС‚РµР№
+	// Вкладка 1: Профили сетей
 	hListProfiles   uintptr
 	hBtnProfSwitch  uintptr
 	hBtnProfQR      uintptr
@@ -336,7 +336,7 @@ var (
 	activeQRBitmap  [][]bool
 	activeQRText    string
 
-	// Р’РєР»Р°РґРєР° 2: AmneziaWG
+	// Вкладка 2: AmneziaWG
 	hBtnAwgStd        uintptr
 	hBtnAwgDpi        uintptr
 	hBtnAwgStealth    uintptr
@@ -358,7 +358,7 @@ var (
 	hBtnSaveAwg       uintptr
 	hBtnOpenAwgClient uintptr
 
-	// Р’РєР»Р°РґРєР° 2: РќР°СЃС‚СЂРѕР№РєРё
+	// Вкладка 2: Настройки
 	hEditMyNick      uintptr
 	hBtnModeParallel uintptr
 	hBtnModeMQTT     uintptr
@@ -378,12 +378,12 @@ var (
 	hBtnToggleDiag   uintptr
 	hBtnSaveCfg      uintptr
 
-	// Р’РєР»Р°РґРєР° 3: Р”РёР°РіРЅРѕСЃС‚РёРєР°
+	// Вкладка 3: Диагностика
 	hBtnRunDiag   uintptr
 	hBtnDumpStack uintptr
 	hEditDiagLog  uintptr
 
-	// РЎС‚Р°СЂС‚РѕРІС‹Р№ СЌРєСЂР°РЅ (Startup / Splash)
+	// Стартовый экран (Startup / Splash)
 	hSplashTitle   uintptr
 	hSplashSub     uintptr
 	hSplashStep1   uintptr
@@ -395,14 +395,14 @@ var (
 	splashTicks    int  = 0
 	isSplashActive bool = true
 
-	// Р’РєР»Р°РґРєР° 4: Р›РѕРіРё
+	// Вкладка 4: Логи
 	hEditLogs    uintptr
 	hBtnClrLogs  uintptr
 	hBtnSaveLogs uintptr
 
 	allControls []uintptr
 
-	// Р”РІРёР¶РѕРє Рё СЃРµС‚РµРІРѕРµ СЃРѕСЃС‚РѕСЏРЅРёРµ
+	// Движок и сетевое состояние
 	configPath       string
 	cfg              *config.Config
 	registry         *peer.Registry
@@ -440,7 +440,7 @@ var (
 	isShuttingDown   int32
 	tgMuted          bool
 
-	// РЎС‚Р°С‚РёСЃС‚РёРєР° РґРµР±Р°РіРіРµСЂР°
+	// Статистика дебаггера
 	startTime        time.Time
 	packetsSentCount uint64
 	packetsRecvCount uint64
@@ -448,7 +448,7 @@ var (
 	debugLogMu       sync.Mutex
 	singleMutex      uintptr
 
-	// РЎРѕСЃС‚РѕСЏРЅРёРµ РјРѕРґР°Р»СЊРЅРѕРіРѕ РґРёР°Р»РѕРіР° Р·Р°РєР»Р°РґРѕРє
+	// Состояние модального диалога закладок
 	dlgResultText string
 	dlgResultOK   bool
 	dlgFinished   bool
@@ -458,7 +458,7 @@ var (
 const (
 	ID_TIMER_POLL = 1001
 
-	// РќР°РІРёРіР°С†РёСЏ
+	// Навигация
 	ID_NAV_DASHBOARD = 3001
 	ID_NAV_PROFILES  = 3002
 	ID_NAV_AWG       = 3003
@@ -466,7 +466,7 @@ const (
 	ID_NAV_DIAG      = 3005
 	ID_NAV_LOGS      = 3006
 
-	// Р”РµР№СЃС‚РІРёСЏ
+	// Действия
 	ID_BTN_VPN             = 4001
 	ID_BTN_REFRESH         = 4002
 	ID_BTN_MANAGE_PROFILES = 4003
@@ -501,7 +501,7 @@ const (
 	ID_BTN_MQ_ECL          = 4054
 	ID_BTN_CHECK_UPDATE    = 4055
 
-	// РџСЂРѕС„РёР»Рё
+	// Профили
 	ID_BTN_PROF_SWITCH = 4060
 	ID_BTN_PROF_CREATE = 4061
 	ID_BTN_PROF_SAVE   = 4062
@@ -520,8 +520,8 @@ func initDebugLog() {
 		}
 	}
 	writeDebug("==================================================================")
-	writeDebug(fmt.Sprintf("рџљЂ NatBypass GUI Р—Р°РїСѓС‰РµРЅ | PID: %d | Р’СЂРµРјСЏ: %s", os.Getpid(), time.Now().Format("2006-01-02 15:04:05.000")))
-	writeDebug(fmt.Sprintf("вљ™пёЏ OS: Windows %s | Arch: %s | CPU: %d", runtime.GOOS, runtime.GOARCH, runtime.NumCPU()))
+	writeDebug(fmt.Sprintf("🚀 NatBypass GUI Запущен | PID: %d | Время: %s", os.Getpid(), time.Now().Format("2006-01-02 15:04:05.000")))
+	writeDebug(fmt.Sprintf("⚙️ OS: Windows %s | Arch: %s | CPU: %d", runtime.GOOS, runtime.GOARCH, runtime.NumCPU()))
 	writeDebug("==================================================================")
 }
 
@@ -551,7 +551,7 @@ func writeDebug(msg string) {
 	}
 }
 
-// startSystemWatchdog вЂ” С„РѕРЅРѕРІС‹Р№ СЃС‚РѕСЂРѕР¶РµРІРѕР№ С‚Р°Р№РјРµСЂ РґР»СЏ РјРѕРЅРёС‚РѕСЂРёРЅРіР° Р·РґРѕСЂРѕРІСЊСЏ Рё РїСЂРµРґРѕС‚РІСЂР°С‰РµРЅРёСЏ РґРµРґР»РѕРєРѕРІ
+// startSystemWatchdog — фоновый сторожевой таймер для мониторинга здоровья и предотвращения дедлоков
 func startSystemWatchdog() {
 	go func() {
 		defer func() {
@@ -590,19 +590,19 @@ func startSystemWatchdog() {
 				}
 			}
 
-			hbMsg := fmt.Sprintf("рџ©є [WATCHDOG] Uptime: %v | Goroutines: %d | RAM Alloc: %.1f MB | Peers: %d (P2P: %d) | Pkts In/Out: %d/%d",
+			hbMsg := fmt.Sprintf("🩺 [WATCHDOG] Uptime: %v | Goroutines: %d | RAM Alloc: %.1f MB | Peers: %d (P2P: %d) | Pkts In/Out: %d/%d",
 				uptime, grCount, float64(m.Alloc)/(1024*1024), peersCount, directCount, pIn, pOut)
 			writeDebug(hbMsg)
 
-			// Р•СЃР»Рё РєРѕР»РёС‡РµСЃС‚РІРѕ РіРѕСЂСѓС‚РёРЅ Р°РЅРѕРјР°Р»СЊРЅРѕ РІРµР»РёРєРѕ (> 200), Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃР±СЂР°СЃС‹РІР°РµРј СЃС‚РµРєС‚СЂРµР№СЃ РІ Р»РѕРі
+			// Если количество горутин аномально велико (> 200), автоматически сбрасываем стектрейс в лог
 			if grCount > 200 {
-				writeDebug(fmt.Sprintf("вљ пёЏ WARNING: High goroutine count (%d)! Dumping stack:\r\n%s", grCount, string(debug.Stack())))
+				writeDebug(fmt.Sprintf("⚠️ WARNING: High goroutine count (%d)! Dumping stack:\r\n%s", grCount, string(debug.Stack())))
 			}
 		}
 	}()
 }
 
-// cleanStaleInstances Р·Р°РІРµСЂС€Р°РµС‚ Р·Р°РІРёСЃС€РёРµ РїСЂРµРґС‹РґСѓС‰РёРµ РїСЂРѕС†РµСЃСЃС‹ NatBypass
+// cleanStaleInstances завершает зависшие предыдущие процессы NatBypass
 func cleanStaleInstances() {
 	defer func() { recover() }()
 	myPID := uint32(os.Getpid())
@@ -633,7 +633,7 @@ func cleanStaleInstances() {
 		return
 	}
 
-	// 1. РџРѕСЃС‹Р»Р°РµРј WM_CLOSE РґР»СЏ РїР»Р°РІРЅРѕРіРѕ Р·Р°РІРµСЂС€РµРЅРёСЏ (РїСЂРµРґРѕС‚РІСЂР°С‰Р°РµС‚ Р·Р°РІРёСЃС€РёРµ С…СѓРєРё User32 Рё GDI-Р±Р»РѕРєРёСЂРѕРІРєРё)
+	// 1. Посылаем WM_CLOSE для плавного завершения (предотвращает зависшие хуки User32 и GDI-блокировки)
 	cb := windows.NewCallback(func(hwnd, lParam uintptr) uintptr {
 		var pid uint32
 		procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
@@ -647,15 +647,15 @@ func cleanStaleInstances() {
 	})
 	procEnumWindows.Call(cb, 0)
 
-	// Р”Р°РµРј 300РјСЃ РЅР° РєРѕСЂСЂРµРєС‚РЅРѕРµ Р·Р°РєСЂС‹С‚РёРµ СЂРµСЃСѓСЂСЃРѕРІ
+	// Даем 300мс на корректное закрытие ресурсов
 	time.Sleep(300 * time.Millisecond)
 
-	// 2. РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ Р·Р°РІРµСЂС€Р°РµРј РїСЂРѕС†РµСЃСЃС‹, РµСЃР»Рё РѕРЅРё РЅРµ Р·Р°РєСЂС‹Р»РёСЃСЊ СЃР°РјРё
+	// 2. Принудительно завершаем процессы, если они не закрылись сами
 	for _, pid := range stalePIDs {
 		if hProc, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid); err == nil {
 			_ = windows.TerminateProcess(hProc, 0)
 			windows.CloseHandle(hProc)
-			writeDebug(fmt.Sprintf("рџ§№ РћС‡РёС‰РµРЅ РїСЂРµРґС‹РґСѓС‰РёР№ Р·Р°РІРёСЃС€РёР№ РїСЂРѕС†РµСЃСЃ PID: %d", pid))
+			writeDebug(fmt.Sprintf("🧹 Очищен предыдущий зависший процесс PID: %d", pid))
 		}
 	}
 }
@@ -687,7 +687,7 @@ func main() {
 
 	initDebugLog()
 
-	// 1. РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ РµРґРёРЅРѕРіРѕ СЌРєР·РµРјРїР»СЏСЂР° (Single Instance Protection)
+	// 1. нициализация единого экземпляра (Single Instance Protection)
 	mutName, _ := windows.UTF16PtrFromString("Global\\NatBypass_SingleInstance_Mutex_App")
 	hMut, _, _ := procCreateMutexW.Call(0, 1, uintptr(unsafe.Pointer(mutName)))
 	if windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
@@ -702,18 +702,18 @@ func main() {
 	}
 	singleMutex = hMut
 
-	// 2. РћС‡РёСЃС‚РєР° Р·Р°РІРёСЃС€РёС… Р·РѕРјР±Рё-РїСЂРѕС†РµСЃСЃРѕРІ РїСЂРµРґС‹РґСѓС‰РёС… Р°РІР°СЂРёР№РЅС‹С… Р·Р°РїСѓСЃРєРѕРІ
+	// 2. Очистка зависших зомби-процессов предыдущих аварийных запусков
 	cleanStaleInstances()
 
-	// Р—Р°РїСѓСЃРє СЃС‚РѕСЂРѕР¶РµРІРѕРіРѕ С‚Р°Р№РјРµСЂР° РґРµР±Р°РіРіРµСЂР°
+	// Запуск сторожевого таймера дебаггера
 	startSystemWatchdog()
 
 	cfgFile := flag.String("config", "config.yaml", "Path to config.yaml")
 	flag.Parse()
 	configPath = *cfgFile
-	writeDebug("Р—Р°РіСЂСѓР·РєР° РєРѕРЅС„РёРіСѓСЂР°С†РёРё: " + configPath)
+	writeDebug("Загрузка конфигурации: " + configPath)
 
-	// 2. РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ Common Controls
+	// 2. нициализация Common Controls
 	type INITCOMMONCONTROLSEX struct {
 		DwSize uint32
 		DwICC  uint32
@@ -723,12 +723,12 @@ func main() {
 		DwICC:  0x00000008 | 0x00000001,
 	}
 	procInitCommonControlsEx.Call(uintptr(unsafe.Pointer(&icex)))
-	writeDebug("CommonControls РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅС‹")
+	writeDebug("CommonControls инициализированы")
 
-	// 3. Р—Р°РіСЂСѓР·РєР° РєРѕРЅС„РёРіСѓСЂР°С†РёРё
+	// 3. Загрузка конфигурации
 	loadedCfg, err := config.Load(configPath)
 	if err != nil {
-		writeDebug("РљРѕРЅС„РёРі РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё, РёСЃРїРѕР»СЊР·СѓРµРј РґРµС„РѕР»С‚С‹: " + err.Error())
+		writeDebug("Конфиг не найден или ошибка загрузки, используем дефолты: " + err.Error())
 		loadedCfg = &config.Config{
 			App: config.AppConfig{
 				Name:            "NatBypass",
@@ -752,7 +752,7 @@ func main() {
 			},
 		}
 	} else {
-		writeDebug("РљРѕРЅС„РёРі СѓСЃРїРµС€РЅРѕ Р·Р°РіСЂСѓР¶РµРЅ РёР· " + configPath)
+		writeDebug("Конфиг успешно загружен из " + configPath)
 	}
 	cfg = loadedCfg
 	if cfg.App.AddressBook == nil {
@@ -773,10 +773,10 @@ func main() {
 	}
 	cachedAWGParams = wireguard.DefaultAWGParams()
 
-	// 4. РЎРѕР·РґР°РЅРёРµ РїРѕСЃС‚РѕСЏРЅРЅС‹С… СЂРµСЃСѓСЂСЃРѕРІ GDI, РёРєРѕРЅРѕРє Рё РєСѓСЂСЃРѕСЂР°
+	// 4. Создание постоянных ресурсов GDI, иконок и курсора
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	hCursor, _, _ = procLoadCursorW.Call(0, 32512) // IDC_ARROW
-	hAppIcon, _, _ = procLoadIconW.Call(hInstance, 1) // Р’СЃС‚СЂРѕРµРЅРЅР°СЏ РёРєРѕРЅРєР°
+	hAppIcon, _, _ = procLoadIconW.Call(hInstance, 1) // Встроенная иконка
 	if hAppIcon == 0 {
 		hAppIcon, _, _ = procLoadIconW.Call(0, 32512)
 	}
@@ -801,11 +801,11 @@ func main() {
 	hFontHeader = createFont("Segoe UI", 17, 700)
 	hFontTitle = createFont("Segoe UI", 21, 700)
 	hFontMono = createFont("Consolas", 13, 400)
-	writeDebug("GDI СЂРµСЃСѓСЂСЃС‹ Рё С€СЂРёС„С‚С‹ СЃРѕР·РґР°РЅС‹")
+	writeDebug("GDI ресурсы и шрифты созданы")
 
-	// 5. Р РµРіРёСЃС‚СЂР°С†РёСЏ РєР»Р°СЃСЃР° РѕРєРЅР°
+	// 5. Регистрация класса окна
 	className, _ := windows.UTF16PtrFromString("NatBypassModernAppClass")
-	windowTitle, _ := windows.UTF16PtrFromString("NatBypass вЂ” P2P Mesh РЎРµС‚СЊ & AmneziaWG 2.0")
+	windowTitle, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Сеть & AmneziaWG 2.0")
 
 	wc := WNDCLASSEXW{
 		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),
@@ -819,9 +819,9 @@ func main() {
 		HIconSm:       hAppIcon,
 	}
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
-	writeDebug("РљР»Р°СЃСЃ РѕРєРЅР° Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ")
+	writeDebug("Класс окна зарегистрирован")
 
-	// 6. РЎРѕР·РґР°РЅРёРµ РіР»Р°РІРЅРѕРіРѕ РѕРєРЅР° (С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Р№ РїСЂРµРјРёР°Р»СЊРЅС‹Р№ СЂР°Р·РјРµСЂ Р±РµР· РґРµС„РѕСЂРјР°С†РёРё РєРѕРЅС‚СЂРѕР»РѕРІ)
+	// 6. Создание главного окна (фиксированный премиальный размер без деформации контролов)
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
@@ -831,34 +831,34 @@ func main() {
 		0, 0, hInstance, 0,
 	)
 	hMainWnd = hwnd
-	writeDebug(fmt.Sprintf("Р“Р»Р°РІРЅРѕРµ РѕРєРЅРѕ СЃРѕР·РґР°РЅРѕ, HWND=0x%X", hMainWnd))
+	writeDebug(fmt.Sprintf("Главное окно создано, HWND=0x%X", hMainWnd))
 
 	procSendMessageW.Call(hMainWnd, 0x0080, 1, hAppIcon)
 	procSendMessageW.Call(hMainWnd, 0x0080, 0, hAppIcon)
 
-	// DWM Dark Mode Р·Р°РіРѕР»РѕРІРѕРє
+	// DWM Dark Mode заголовок
 	darkMode := int32(1)
 	procDwmSetWindowAttribute.Call(hMainWnd, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
-	// РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ РёРєРѕРЅРєРё РІ СЃРёСЃС‚РµРјРЅРѕРј С‚СЂРµРµ Windows
+	// нициализация иконки в системном трее Windows
 	initTrayIcon(hMainWnd, hAppIcon)
 
-	// РџРѕСЃС‚СЂРѕРµРЅРёРµ СЌР»РµРјРµРЅС‚РѕРІ РЅР°С‚РёРІРЅРѕРіРѕ РёРЅС‚РµСЂС„РµР№СЃР° Windows (Pure Win32 GDI Controls)
-	writeDebug("РќР°С‡Р°Р»Рѕ РїРѕСЃС‚СЂРѕРµРЅРёСЏ UI buildModernUI()...")
+	// Построение элементов нативного интерфейса Windows (Pure Win32 GDI Controls)
+	writeDebug("Начало построения UI buildModernUI()...")
 	buildModernUI(hInstance)
 
-	// РџРѕРєР°Р·С‹РІР°РµРј РЅР°С‚РёРІРЅРѕРµ РіР»Р°РІРЅРѕРµ РѕРєРЅРѕ Win32
+	// Показываем нативное главное окно Win32
 	procShowWindow.Call(hMainWnd, SW_SHOW)
 	procUpdateWindow.Call(hMainWnd)
 	procSetForegroundWindow.Call(hMainWnd)
 	procSetTimer.Call(hMainWnd, ID_TIMER_POLL, 1000, 0)
 
-	// Р—Р°РїСѓСЃРє СЃРµС‚РµРІРѕРіРѕ СЏРґСЂР° РЅР°РїСЂСЏРјСѓСЋ РёР· РїР°СЂР°РјРµС‚СЂРѕРІ cfg
-	writeDebug("Р—Р°РїСѓСЃРє СЃРµС‚РµРІРѕРіРѕ СЏРґСЂР° NatBypass Mesh...")
+	// Запуск сетевого ядра напрямую из параметров cfg
+	writeDebug("Запуск сетевого ядра NatBypass Mesh...")
 	go startEngineFromConfig(cfg)
 
-	// Р¦РёРєР» СЃРѕРѕР±С‰РµРЅРёР№ Windows (UI thread)
-	writeDebug("РЎРµС‚РµРІРѕРµ СЏРґСЂРѕ Рё РЅР°С‚РёРІРЅС‹Р№ Win32 GUI Р°РєС‚РёРІРЅС‹, РІС…РѕРґ РІ С†РёРєР» СЃРѕР±С‹С‚РёР№...")
+	// Цикл сообщений Windows (UI thread)
+	writeDebug("Сетевое ядро и нативный Win32 GUI активны, вход в цикл событий...")
 	var msg MSG
 	for {
 		ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
@@ -869,14 +869,14 @@ func main() {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
 
-	writeDebug("Р—Р°РІРµСЂС€РµРЅРёРµ СЂР°Р±РѕС‚С‹...")
+	writeDebug("Завершение работы...")
 	exitApp()
 }
 
 func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 	defer func() {
 		if r := recover(); r != nil {
-			writeDebug(fmt.Sprintf("вљ пёЏ Panic РІ wndProc (msg=0x%X): %v", msg, r))
+			writeDebug(fmt.Sprintf("⚠️ Panic в wndProc (msg=0x%X): %v", msg, r))
 		}
 	}()
 
@@ -984,9 +984,9 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 			procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 			hMenu, _, _ := procCreatePopupMenu.Call()
 
-			titleStr, _ := syscall.UTF16PtrFromString("рџЊђ РћС‚РєСЂС‹С‚СЊ NatBypass")
-			syncStr, _ := syscall.UTF16PtrFromString("вљЎ РћР±РЅРѕРІРёС‚СЊ СЃРѕРєРµС‚С‹ P2P")
-			exitStr, _ := syscall.UTF16PtrFromString("рџљЄ Р’С‹С…РѕРґ")
+			titleStr, _ := syscall.UTF16PtrFromString("🌐 Открыть NatBypass")
+			syncStr, _ := syscall.UTF16PtrFromString("⚡ Обновить сокеты P2P")
+			exitStr, _ := syscall.UTF16PtrFromString("🚪 Выход")
 
 			procAppendMenuW.Call(hMenu, 0, 1001, uintptr(unsafe.Pointer(titleStr)))
 			procAppendMenuW.Call(hMenu, 0, 1002, uintptr(unsafe.Pointer(syncStr)))
@@ -1057,33 +1057,33 @@ func removeTrayIcon(hwnd uintptr) {
 	procShell_NotifyIconW.Call(NIM_DELETE, uintptr(unsafe.Pointer(&nid)))
 }
 
-// exitApp вЂ” РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРЅРѕРµ РјРіРЅРѕРІРµРЅРЅРѕРµ Р·Р°РІРµСЂС€РµРЅРёРµ РїСЂРѕС†РµСЃСЃР° Р±РµР· Р·Р°РІРёСЃР°РЅРёР№
+// exitApp — гарантированное мгновенное завершение процесса без зависаний
 func exitApp() {
 	if !atomic.CompareAndSwapInt32(&isShuttingDown, 0, 1) {
 		return
 	}
 
-	writeDebug("рџ›‘ Р—Р°РІРµСЂС€РµРЅРёРµ СЂР°Р±РѕС‚С‹ РїСЂРёР»РѕР¶РµРЅРёСЏ...")
+	writeDebug("🛑 Завершение работы приложения...")
 
-	// 1. РњРіРЅРѕРІРµРЅРЅРѕ СЃРєСЂС‹РІР°РµРј РѕРєРЅРѕ РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Рё СѓР±РёСЂР°РµРј РёРєРѕРЅРєСѓ РёР· С‚СЂРµСЏ
+	// 1. Мгновенно скрываем окно от пользователя и убираем иконку из трея
 	removeTrayIcon(hMainWnd)
 	procKillTimer.Call(hMainWnd, ID_TIMER_POLL)
 	procShowWindow.Call(hMainWnd, SW_HIDE)
 
-	// 2. Р—Р°РєСЂС‹РІР°РµРј РґРµСЃРєСЂРёРїС‚РѕСЂ РµРґРёРЅРѕРіРѕ РјСЊСЋС‚РµРєСЃР°
+	// 2. Закрываем дескриптор единого мьютекса
 	if singleMutex != 0 {
 		procCloseHandle.Call(singleMutex)
 	}
 
-	writeDebug("вњ“ NatBypass РїСЂРѕС†РµСЃСЃ РїРѕР»РЅРѕСЃС‚СЊСЋ РѕСЃС‚Р°РЅРѕРІР»РµРЅ.")
+	writeDebug("✓ NatBypass процесс полностью остановлен.")
 	if debugLogFile != nil {
 		_ = debugLogFile.Close()
 	}
 
-	// 3. РћС‚РїСЂР°РІР»СЏРµРј РїСЂРѕС‰Р°Р»СЊРЅС‹Р№ РјР°СЏРє РІС‹С…РѕРґР° РґСЂСѓРіРёРј СѓР·Р»Р°Рј СЃРµС‚Рё
+	// 3. Отправляем прощальный маяк выхода другим узлам сети
 	broadcastGoodbye()
 
-	// 4. Р‘С‹СЃС‚СЂР°СЏ РѕСЃС‚Р°РЅРѕРІРєР° СЃРѕРєРµС‚РѕРІ Рё РјРѕРјРµРЅС‚Р°Р»СЊРЅС‹Р№ РІС‹С…РѕРґ
+	// 4. Быстрая остановка сокетов и моментальный выход
 	go func() {
 		stopEngine()
 	}()
@@ -1263,18 +1263,18 @@ func handleCommand(id uint16) {
 		toggleVPNManual()
 
 	case ID_BTN_REFRESH:
-		addLog("вљЎ РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕРµ РѕР±РЅРѕРІР»РµРЅРёРµ STUN СЃРѕРєРµС‚Р° Рё РІРЅРµС€РЅРµРіРѕ IP...")
+		addLog("⚡ Принудительное обновление STUN сокета и внешнего IP...")
 		go func() {
 			if ipDisc != nil {
 				if ip, err := ipDisc.GetPublicIP(context.Background()); err == nil {
 					myPublicIP = ip.String()
-					addLog("вњ“ РџСѓР±Р»РёС‡РЅС‹Р№ IP РѕР±РЅРѕРІР»РµРЅ: " + myPublicIP)
+					addLog("✓ Публичный IP обновлен: " + myPublicIP)
 				}
 			}
 			if udpPuncher != nil {
 				if extIP, port, err := udpPuncher.DiscoverMappedAddress(context.Background()); err == nil {
 					mySTUNAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
-					addLog("вњ“ STUN UDP Hole Punch СЃРѕРєРµС‚: " + mySTUNAddr)
+					addLog("✓ STUN UDP Hole Punch сокет: " + mySTUNAddr)
 				}
 			}
 			triggerPublish()
@@ -1286,33 +1286,33 @@ func handleCommand(id uint16) {
 	case ID_BTN_AWG_STD:
 		setAWGPreset(wireguard.AWGParams{Enabled: true, Jc: 0, Jmin: 0, Jmax: 0, S1: 0, S2: 0, H1: 1, H2: 2, H3: 3, H4: 4})
 		setActiveAWGPresetButton(ID_BTN_AWG_STD)
-		addLog("рџ›ЎпёЏ Р’С‹Р±СЂР°РЅ РїСЂРµСЃРµС‚: рџџў РЎС‚Р°РЅРґР°СЂС‚РЅС‹Р№ WireGuard")
+		addLog("🛡️ Выбран пресет: 🟢 Стандартный WireGuard")
 
 	case ID_BTN_AWG_DPI:
 		setAWGPreset(wireguard.DefaultAWGParams())
 		setActiveAWGPresetButton(ID_BTN_AWG_DPI)
-		addLog("рџ›ЎпёЏ Р’С‹Р±СЂР°РЅ РїСЂРµСЃРµС‚: рџџЎ РћР±С…РѕРґ DPI (AmneziaWG 2.0)")
+		addLog("🛡️ Выбран пресет: 🟡 Обход DPI (AmneziaWG 2.0)")
 
 	case ID_BTN_AWG_STEALTH:
 		randP := wireguard.GenerateRandomAWGParams()
 		setAWGPreset(randP)
 		setActiveAWGPresetButton(ID_BTN_AWG_STEALTH)
-		addLog("рџ›ЎпёЏ Р’С‹Р±СЂР°РЅ РїСЂРµСЃРµС‚: рџ”ґ РњР°РєСЃРёРјР°Р»СЊРЅР°СЏ СЃРєСЂС‹С‚РЅРѕСЃС‚СЊ")
+		addLog("🛡️ Выбран пресет: 🔴 Максимальная скрытность")
 
 	case ID_BTN_RAND_AWG:
 		randP := wireguard.GenerateRandomAWGParams()
 		setAWGPreset(randP)
 		setActiveAWGPresetButton(ID_BTN_AWG_STEALTH)
-		addLog("рџЋІ РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅС‹ РЅРѕРІС‹Рµ СѓРЅРёРєР°Р»СЊРЅС‹Рµ СЃРёРіРЅР°С‚СѓСЂС‹ AWG")
+		addLog("🎲 Сгенерированы новые уникальные сигнатуры AWG")
 
 	case ID_BTN_COPY_AWG:
 		conf := getControlText(hEditAwgConf)
 		copyToClipboard(conf)
-		addLog("рџ“‹ РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ AmneziaWG СЃРєРѕРїРёСЂРѕРІР°РЅР° РІ Р±СѓС„РµСЂ РѕР±РјРµРЅР°")
-		buttonLabels[ID_BTN_COPY_AWG] = "вњ“ РЎРљРћРџРР РћР’РђРќРћ Р’ Р‘РЈР¤Р•Р  РћР‘РњР•РќРђ!"
+		addLog("📋 Конфигурация AmneziaWG скопирована в буфер обмена")
+		buttonLabels[ID_BTN_COPY_AWG] = "✓ СКОПРОВАНО В БУФЕР ОБМЕНА!"
 		procInvalidateRect.Call(hBtnCopyAwg, 0, 1)
 		time.AfterFunc(2*time.Second, func() {
-			buttonLabels[ID_BTN_COPY_AWG] = "рџ“‹ РЎРєРѕРїРёСЂРѕРІР°С‚СЊ РєРѕРЅС„РёРі"
+			buttonLabels[ID_BTN_COPY_AWG] = "📋 Скопировать конфиг"
 			procInvalidateRect.Call(hBtnCopyAwg, 0, 1)
 		})
 
@@ -1320,16 +1320,16 @@ func handleCommand(id uint16) {
 		conf := getControlText(hEditAwgConf)
 		confFile := "natbypass.conf"
 		if err := os.WriteFile(confFile, []byte(conf), 0644); err == nil {
-			addLog("рџ’ѕ РљРѕРЅС„РёРі СѓСЃРїРµС€РЅРѕ СЃРѕС…СЂР°РЅРµРЅ РІ С„Р°Р№Р»: " + confFile)
-			writeDebug("РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ СЃРѕС…СЂР°РЅРµРЅР° РІ " + confFile)
-			buttonLabels[ID_BTN_SAVE_AWG] = "вњ“ РЎРћРҐР РђРќР•РќРћ Р’ natbypass.conf!"
+			addLog("💾 Конфиг успешно сохранен в файл: " + confFile)
+			writeDebug("Конфигурация сохранена в " + confFile)
+			buttonLabels[ID_BTN_SAVE_AWG] = "✓ СОХРАНЕНО В natbypass.conf!"
 			procInvalidateRect.Call(hBtnSaveAwg, 0, 1)
 			_ = exec.Command("explorer.exe", "/select,"+confFile).Start()
 		} else {
-			addLog("вќЊ РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РєРѕРЅС„РёРіР°: " + err.Error())
+			addLog("❌ Ошибка сохранения конфига: " + err.Error())
 		}
 		time.AfterFunc(2*time.Second, func() {
-			buttonLabels[ID_BTN_SAVE_AWG] = "рџ’ѕ РЎРѕС…СЂР°РЅРёС‚СЊ РІ natbypass.conf"
+			buttonLabels[ID_BTN_SAVE_AWG] = "💾 Сохранить в natbypass.conf"
 			procInvalidateRect.Call(hBtnSaveAwg, 0, 1)
 		})
 
@@ -1337,9 +1337,9 @@ func handleCommand(id uint16) {
 		amneziaPath := `C:\Program Files\AmneziaVPN\AmneziaVPN.exe`
 		if _, err := os.Stat(amneziaPath); err == nil {
 			_ = exec.Command(amneziaPath).Start()
-			addLog("рџљЂ Р—Р°РїСѓС‰РµРЅ РєР»РёРµРЅС‚ AmneziaVPN")
+			addLog("🚀 Запущен клиент AmneziaVPN")
 		} else {
-			addLog("рџ’Ў AmneziaVPN РЅРµ РЅР°Р№РґРµРЅ РїРѕ РїСѓС‚Рё РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ. РЎРєР°С‡Р°Р№С‚Рµ РµРіРѕ СЃ github.com/amnezia-vpn/amneziawg-windows-client")
+			addLog("💡 AmneziaVPN не найден по пути по умолчанию. Скачайте его с github.com/amnezia-vpn/amneziawg-windows-client")
 		}
 
 	case ID_BTN_SYNC_AWG:
@@ -1359,7 +1359,7 @@ func handleCommand(id uint16) {
 
 			renderAWGTextFromUI()
 			saveConfig()
-			addLog(fmt.Sprintf("рџ”„ РќР°СЃС‚СЂРѕР№РєРё AmneziaWG 2.0 СѓСЃРїРµС€РЅРѕ РїСЂРёРјРµРЅРµРЅС‹ СЃ СѓР·Р»Р° [%s] Рё СЃРѕС…СЂР°РЅРµРЅС‹!", targetName))
+			addLog(fmt.Sprintf("🔄 Настройки AmneziaWG 2.0 успешно применены с узла [%s] и сохранены!", targetName))
 			writeDebug(fmt.Sprintf("AmneziaWG 2.0 synced from peer [%s]", targetName))
 
 			syncAWGPeerParams = nil
@@ -1377,13 +1377,13 @@ func handleCommand(id uint16) {
 	case ID_BTN_TOGGLE_LOGS:
 		saveLogsToDisk = !saveLogsToDisk
 		if saveLogsToDisk {
-			buttonLabels[ID_BTN_TOGGLE_LOGS] = "рџ’ѕ Р—Р°РїРёСЃСЊ Р»РѕРіРѕРІ РЅР° РґРёСЃРє: Р’РљР›"
+			buttonLabels[ID_BTN_TOGGLE_LOGS] = "💾 Запись логов на диск: ВКЛ"
 			buttonTypes[ID_BTN_TOGGLE_LOGS] = "green"
-			addLog("рџ’ѕ Р—Р°РїРёСЃСЊ РѕС‚Р»Р°РґРѕС‡РЅС‹С… Р»РѕРіРѕРІ РЅР° РґРёСЃРє Р’РљР›Р®Р§Р•РќРђ (natbypass_debug.log)")
+			addLog("💾 Запись отладочных логов на диск ВКЛЮЧЕНА (natbypass_debug.log)")
 		} else {
-			buttonLabels[ID_BTN_TOGGLE_LOGS] = "рџ’ѕ Р—Р°РїРёСЃСЊ Р»РѕРіРѕРІ РЅР° РґРёСЃРє: Р’Р«РљР›"
+			buttonLabels[ID_BTN_TOGGLE_LOGS] = "💾 Запись логов на диск: ВЫКЛ"
 			buttonTypes[ID_BTN_TOGGLE_LOGS] = "normal"
-			addLog("рџ’ѕ Р—Р°РїРёСЃСЊ РѕС‚Р»Р°РґРѕС‡РЅС‹С… Р»РѕРіРѕРІ РЅР° РґРёСЃРє Р’Р«РљР›Р®Р§Р•РќРђ")
+			addLog("💾 Запись отладочных логов на диск ВЫКЛЮЧЕНА")
 		}
 		procInvalidateRect.Call(hBtnToggleLogs, 0, 1)
 		saveConfigFromUI()
@@ -1392,9 +1392,9 @@ func handleCommand(id uint16) {
 		showDiagnostics = !showDiagnostics
 		applyDiagnosticsVisibility()
 		if showDiagnostics {
-			addLog("рџ©є Р’РєР»Р°РґРєР° Р”РёР°РіРЅРѕСЃС‚РёРєР° Р’РљР›Р®Р§Р•РќРђ")
+			addLog("🩺 Вкладка Диагностика ВКЛЮЧЕНА")
 		} else {
-			addLog("рџ©є Р’РєР»Р°РґРєР° Р”РёР°РіРЅРѕСЃС‚РёРєР° Р’Р«РљР›Р®Р§Р•РќРђ")
+			addLog("🩺 Вкладка Диагностика ВЫКЛЮЧЕНА")
 		}
 		saveConfigFromUI()
 
@@ -1402,50 +1402,50 @@ func handleCommand(id uint16) {
 		saveConfig()
 
 	case ID_BTN_CHECK_UPDATE:
-		addLog("рџ”Ќ РџСЂРѕРІРµСЂРєР° РѕР±РЅРѕРІР»РµРЅРёР№ РЅР° GitHub Releases...")
+		addLog("🔍 Проверка обновлений на GitHub Releases...")
 		go func() {
 			info, err := updater.CheckUpdate(context.Background(), Version)
 			if err != nil {
-				addLog("вќЊ РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё РѕР±РЅРѕРІР»РµРЅРёР№: " + err.Error())
+				addLog("❌ Ошибка проверки обновлений: " + err.Error())
 				return
 			}
 			if !info.HasUpdate {
-				addLog(fmt.Sprintf("вњ… РЈ РІР°СЃ СѓСЃС‚Р°РЅРѕРІР»РµРЅР° СЃР°РјР°СЏ СЃРІРµР¶Р°СЏ РІРµСЂСЃРёСЏ (%s)", Version))
+				addLog(fmt.Sprintf("✅ У вас установлена самая свежая версия (%s)", Version))
 				return
 			}
-			addLog(fmt.Sprintf("рџљЂ Р”РѕСЃС‚СѓРїРЅР° РЅРѕРІР°СЏ РІРµСЂСЃРёСЏ: %s! Р—Р°РїСѓСЃРє СЃРєР°С‡РёРІР°РЅРёСЏ Рё РѕР±РЅРѕРІР»РµРЅРёСЏ...", info.LatestVersion))
+			addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Запуск скачивания и обновления...", info.LatestVersion))
 			if err := updater.ApplyUpdate(context.Background(), info.AssetURL); err != nil {
-				addLog("вќЊ РћС€РёР±РєР° РїСЂРёРјРµРЅРµРЅРёСЏ РѕР±РЅРѕРІР»РµРЅРёСЏ: " + err.Error())
+				addLog("❌ Ошибка применения обновления: " + err.Error())
 			}
 		}()
 
 	case ID_BTN_MODE_PARALLEL:
 		setSigModeUI("parallel")
-		addLog("рџЋЇ Р’С‹Р±СЂР°РЅ СЂРµР¶РёРј: рџ”„ РџР°СЂР°Р»Р»РµР»СЊРЅРѕ (MQTT + Telegram)")
+		addLog("🎯 Выбран режим: 🔄 Параллельно (MQTT + Telegram)")
 
 	case ID_BTN_MODE_MQTT:
 		setSigModeUI("mqtt_only")
-		addLog("рџЋЇ Р’С‹Р±СЂР°РЅ СЂРµР¶РёРј: вљЎ РўРѕР»СЊРєРѕ MQTT")
+		addLog("🎯 Выбран режим: ⚡ Только MQTT")
 
 	case ID_BTN_MODE_TG:
 		setSigModeUI("tg_only")
-		addLog("рџЋЇ Р’С‹Р±СЂР°РЅ СЂРµР¶РёРј: рџ’¬ РўРѕР»СЊРєРѕ Telegram")
+		addLog("🎯 Выбран режим: 💬 Только Telegram")
 
 	case ID_BTN_MQ_EMQX:
 		setControlText(hEditMqttBr, "tcp://broker.emqx.io:1883")
-		addLog("вљЎ Р’С‹Р±СЂР°РЅ Р±СЂРѕРєРµСЂ: EMQX Public (tcp://broker.emqx.io:1883)")
+		addLog("⚡ Выбран брокер: EMQX Public (tcp://broker.emqx.io:1883)")
 
 	case ID_BTN_MQ_HIVE:
 		setControlText(hEditMqttBr, "tcp://broker.hivemq.com:1883")
-		addLog("вљЎ Р’С‹Р±СЂР°РЅ Р±СЂРѕРєРµСЂ: HiveMQ Public (tcp://broker.hivemq.com:1883)")
+		addLog("⚡ Выбран брокер: HiveMQ Public (tcp://broker.hivemq.com:1883)")
 
 	case ID_BTN_MQ_MOSQ:
 		setControlText(hEditMqttBr, "tcp://test.mosquitto.org:1883")
-		addLog("вљЎ Р’С‹Р±СЂР°РЅ Р±СЂРѕРєРµСЂ: Mosquitto Public (tcp://test.mosquitto.org:1883)")
+		addLog("⚡ Выбран брокер: Mosquitto Public (tcp://test.mosquitto.org:1883)")
 
 	case ID_BTN_MQ_ECL:
 		setControlText(hEditMqttBr, "tcp://mqtt.eclipseprojects.io:1883")
-		addLog("вљЎ Р’С‹Р±СЂР°РЅ Р±СЂРѕРєРµСЂ: Eclipse Foundation (tcp://mqtt.eclipseprojects.io:1883)")
+		addLog("⚡ Выбран брокер: Eclipse Foundation (tcp://mqtt.eclipseprojects.io:1883)")
 
 	case ID_BTN_RUN_DIAG:
 		runDiag()
@@ -1469,22 +1469,22 @@ func handleCommand(id uint16) {
 			cfg.Network.AllowExitNode = allowExitNode
 		}
 		if allowExitNode {
-			buttonLabels[ID_BTN_ALLOW_EXIT] = "рџЊђ Р Р°Р·СЂРµС€РёС‚СЊ РІС‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· РјРµРЅСЏ: Р’РљР›"
+			buttonLabels[ID_BTN_ALLOW_EXIT] = "🌐 Разрешить выход в интернет через меня: ВКЛ"
 			buttonTypes[ID_BTN_ALLOW_EXIT] = "green"
 			go func() {
 				if err := tunnel.EnableHostIPForwarding(); err != nil {
-					addLog("вљ пёЏ РћС€РёР±РєР° РІРєР»СЋС‡РµРЅРёСЏ IP Forwarding: " + err.Error())
+					addLog("⚠️ Ошибка включения IP Forwarding: " + err.Error())
 					writeDebug("EnableHostIPForwarding error: " + err.Error())
 				} else {
-					addLog("рџЊђ IP Forwarding РІРєР»СЋС‡РµРЅ РЅР° РёРЅС‚РµСЂС„РµР№СЃРµ 'NatBypass'")
+					addLog("🌐 IP Forwarding включен на интерфейсе 'NatBypass'")
 					writeDebug("EnableHostIPForwarding OK")
 				}
 			}()
-			addLog("рџЊђ Р Р°Р·СЂРµС€РµРЅ РІС‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· СЌС‚Рѕ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ (Exit Node Р°РєС‚РёРІРµРЅ)")
+			addLog("🌐 Разрешен выход в интернет через это устройство (Exit Node активен)")
 		} else {
-			buttonLabels[ID_BTN_ALLOW_EXIT] = "рџЊђ Р Р°Р·СЂРµС€РёС‚СЊ РІС‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· РјРµРЅСЏ: Р’Р«РљР›"
+			buttonLabels[ID_BTN_ALLOW_EXIT] = "🌐 Разрешить выход в интернет через меня: ВЫКЛ"
 			buttonTypes[ID_BTN_ALLOW_EXIT] = "normal"
-			addLog("рџЊђ Р’С‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· СЌС‚Рѕ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ РѕС‚РєР»СЋС‡РµРЅ")
+			addLog("🌐 Выход в интернет через это устройство отключен")
 		}
 		procInvalidateRect.Call(hBtnAllowExit, 0, 1)
 		saveConfigFromUI()
@@ -1499,7 +1499,7 @@ func handleCommand(id uint16) {
 	case ID_BTN_ADD_LOCAL_SUBNET:
 		localSubnets := network.GetLocalSubnets()
 		if len(localSubnets) == 0 {
-			addLog("вљ пёЏ Р›РѕРєР°Р»СЊРЅС‹Рµ Р°РєС‚РёРІРЅС‹Рµ РїРѕРґСЃРµС‚Рё РЅРµ РѕР±РЅР°СЂСѓР¶РµРЅС‹")
+			addLog("⚠️ Локальные активные подсети не обнаружены")
 			return
 		}
 		curText := strings.TrimSpace(getControlText(hEditAdvSubnets))
@@ -1525,23 +1525,23 @@ func handleCommand(id uint16) {
 		if len(added) > 0 {
 			newText := strings.Join(parts, ", ")
 			setControlText(hEditAdvSubnets, newText)
-			addLog("рџЏ  Р”РѕР±Р°РІР»РµРЅР° Р»РѕРєР°Р»СЊРЅР°СЏ РїРѕРґСЃРµС‚СЊ: " + strings.Join(added, ", "))
+			addLog("🏠 Добавлена локальная подсеть: " + strings.Join(added, ", "))
 			saveConfigFromUI()
 		} else {
-			addLog("рџ’Ў Р’СЃРµ РѕР±РЅР°СЂСѓР¶РµРЅРЅС‹Рµ Р»РѕРєР°Р»СЊРЅС‹Рµ РїРѕРґСЃРµС‚Рё СѓР¶Рµ РґРѕР±Р°РІР»РµРЅС‹ (" + strings.Join(localSubnets, ", ") + ")")
+			addLog("💡 Все обнаруженные локальные подсети уже добавлены (" + strings.Join(localSubnets, ", ") + ")")
 		}
 	}
 }
 
 func handleBookmarkPeer() {
 	if registry == nil {
-		addLog("вљ пёЏ РЎРµС‚РµРІРѕР№ СЂРµРµСЃС‚СЂ РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ")
+		addLog("⚠️ Сетевой реестр не инициализирован")
 		return
 	}
 
 	peers := registry.List()
 	if len(peers) == 0 {
-		addLog("вљ пёЏ РќРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… РїРёСЂРѕРІ РІ СЃРµС‚Рё РґР»СЏ РґРѕР±Р°РІР»РµРЅРёСЏ РІ Р·Р°РєР»Р°РґРєРё")
+		addLog("⚠️ Нет доступных пиров в сети для добавления в закладки")
 		return
 	}
 
@@ -1552,7 +1552,7 @@ func handleBookmarkPeer() {
 		if len(peers) == 1 {
 			idx = 0
 		} else {
-			addLog("рџ’Ў Р’С‹Р±РµСЂРёС‚Рµ СѓСЃС‚СЂРѕР№СЃС‚РІРѕ РёР· СЃРїРёСЃРєР° РІС‹С€Рµ Рё РЅР°Р¶РјРёС‚Рµ 'Р—Р°РґР°С‚СЊ РёРјСЏ / Р’ Р·Р°РєР»Р°РґРєРё'")
+			addLog("💡 Выберите устройство из списка выше и нажмите 'Задать имя / В закладки'")
 			return
 		}
 	}
@@ -1575,10 +1575,10 @@ func handleBookmarkPeer() {
 	addressBookMu.Lock()
 	if trimmed != "" {
 		addressBook[targetPeer.DeviceID] = trimmed
-		addLog(fmt.Sprintf("в­ђ РЈСЃС‚СЂРѕР№СЃС‚РІСѓ %s РїСЂРёСЃРІРѕРµРЅРѕ РёРјСЏ '%s' (СЃРѕС…СЂР°РЅРµРЅРѕ РІ Р·Р°РєР»Р°РґРєРё)", targetPeer.DeviceID, trimmed))
+		addLog(fmt.Sprintf("⭐ Устройству %s присвоено имя '%s' (сохранено в закладки)", targetPeer.DeviceID, trimmed))
 	} else {
 		delete(addressBook, targetPeer.DeviceID)
-		addLog(fmt.Sprintf("рџ—‘ Р—Р°РєР»Р°РґРєР° РґР»СЏ СѓСЃС‚СЂРѕР№СЃС‚РІР° %s СѓРґР°Р»РµРЅР°", targetPeer.DeviceID))
+		addLog(fmt.Sprintf("🗑 Закладка для устройства %s удалена", targetPeer.DeviceID))
 	}
 	if cfg != nil {
 		cfg.App.AddressBook = addressBook
@@ -1592,7 +1592,7 @@ func handleBookmarkPeer() {
 
 func handleExitNodeSelect() {
 	if registry == nil {
-		addLog("вљ пёЏ РЎРµС‚РµРІРѕР№ СЂРµРµСЃС‚СЂ РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ")
+		addLog("⚠️ Сетевой реестр не инициализирован")
 		return
 	}
 
@@ -1610,14 +1610,14 @@ func handleExitNodeSelect() {
 			}
 			activeExitNodeID = ""
 			activeExitVIP = ""
-			buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "рџЊђ Р’С‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚: Р›РѕРєР°Р»СЊРЅС‹Р№ (РћС‚РєР»СЋС‡РµРЅ)"
+			buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
 			buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
 			if hBtnExitNodeSelect != 0 {
 				procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 			}
-			addLog("рџЊђ Р’ СЃРµС‚Рё РЅРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… Exit Node СѓСЃС‚СЂРѕР№СЃС‚РІ. РњР°СЂС€СЂСѓС‚ СЃР±СЂРѕС€РµРЅ РЅР° Р»РѕРєР°Р»СЊРЅС‹Р№.")
+			addLog("🌐 В сети нет доступных Exit Node устройств. Маршрут сброшен на локальный.")
 		} else {
-			addLog("рџ’Ў Р’ СЃРµС‚Рё РїРѕРєР° РЅРµС‚ СѓСЃС‚СЂРѕР№СЃС‚РІ СЃ РІРєР»СЋС‡РµРЅРЅС‹Рј Exit Node. Р’РєР»СЋС‡РёС‚Рµ Exit Node РЅР° СѓРґР°Р»РµРЅРЅРѕРј СѓСЃС‚СЂРѕР№СЃС‚РІРµ.")
+			addLog("💡 В сети пока нет устройств с включенным Exit Node. Включите Exit Node на удаленном устройстве.")
 		}
 		return
 	}
@@ -1637,12 +1637,12 @@ func handleExitNodeSelect() {
 		}
 		activeExitNodeID = ""
 		activeExitVIP = ""
-		buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "рџЊђ Р’С‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚: Р›РѕРєР°Р»СЊРЅС‹Р№ (РћС‚РєР»СЋС‡РµРЅ)"
+		buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
 		buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
 		if hBtnExitNodeSelect != 0 {
 			procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 		}
-		addLog("рџЊђ Р’С‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· Exit Node РѕС‚РєР»СЋС‡РµРЅ. Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ РёРЅС‚РµСЂРЅРµС‚-С€Р»СЋР·.")
+		addLog("🌐 Выход в интернет через Exit Node отключен. Восстановлен стандартный интернет-шлюз.")
 		writeDebug("Exit Node disabled, restored default gateway")
 		return
 	}
@@ -1662,7 +1662,7 @@ func handleExitNodeSelect() {
 	activeExitVIP = targetVIP
 
 	if err := tunnel.EnableExitNodeRouting(targetVIP); err != nil {
-		addLog("вќЊ РћС€РёР±РєР° РЅР°СЃС‚СЂРѕР№РєРё РјР°СЂС€СЂСѓС‚РёР·Р°С†РёРё С‡РµСЂРµР· Exit Node: " + err.Error())
+		addLog("❌ Ошибка настройки маршрутизации через Exit Node: " + err.Error())
 		writeDebug("EnableExitNodeRouting error: " + err.Error())
 	} else {
 		addressBookMu.RLock()
@@ -1670,18 +1670,18 @@ func handleExitNodeSelect() {
 		addressBookMu.RUnlock()
 		peerDisplay := targetPeer.Nickname
 		if bm != "" {
-			peerDisplay = "в­ђ " + bm
+			peerDisplay = "[*] " + bm
 		} else if peerDisplay == "" {
 			peerDisplay = targetPeer.DeviceID
 		}
 
-		buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("рџџў РЁР»СЋР·: [%s] (%s)", peerDisplay, targetVIP)
+		buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("🟢 Шлюз: [%s] (%s)", peerDisplay, targetVIP)
 		buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "green"
 		if hBtnExitNodeSelect != 0 {
 			procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 		}
 
-		msg := fmt.Sprintf("рџЊђ Р’РµСЃСЊ РёРЅС‚РµСЂРЅРµС‚-С‚СЂР°С„РёРє РїРµСЂРµРЅР°РїСЂР°РІР»РµРЅ С‡РµСЂРµР· Exit Node: [%s] (%s)", peerDisplay, targetVIP)
+		msg := fmt.Sprintf("🌐 Весь интернет-трафик перенаправлен через Exit Node: [%s] (%s)", peerDisplay, targetVIP)
 		addLog(msg)
 		writeDebug(msg)
 	}
@@ -1689,13 +1689,13 @@ func handleExitNodeSelect() {
 
 func handleToggleSubnetRoute() {
 	if registry == nil {
-		addLog("вљ пёЏ РЎРµС‚РµРІРѕР№ СЂРµРµСЃС‚СЂ РЅРµ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ")
+		addLog("⚠️ Сетевой реестр не инициализирован")
 		return
 	}
 
 	peers := registry.List()
 	if len(peers) == 0 {
-		addLog("вљ пёЏ РќРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… РїРёСЂРѕРІ РІ СЃРµС‚Рё")
+		addLog("⚠️ Нет доступных пиров в сети")
 		return
 	}
 
@@ -1721,20 +1721,20 @@ func handleToggleSubnetRoute() {
 		if len(activeSubnetRoutes) > 0 {
 			for cidr, vip := range activeSubnetRoutes {
 				_ = tunnel.RemoveSubnetRoute(cidr, vip)
-				addLog(fmt.Sprintf("рџЏ  РњР°СЂС€СЂСѓС‚ Рє РїРѕРґСЃРµС‚Рё %s С‡РµСЂРµР· %s СѓРґР°Р»РµРЅ", cidr, vip))
+				addLog(fmt.Sprintf("🏠 Маршрут к подсети %s через %s удален", cidr, vip))
 			}
 			activeSubnetRoutes = make(map[string]string)
-			buttonLabels[ID_BTN_TOGGLE_SUBNET] = "рџЏ  РџРѕРґРєР»СЋС‡РёС‚СЊ РїРѕРґСЃРµС‚СЊ РїРёСЂР°"
+			buttonLabels[ID_BTN_TOGGLE_SUBNET] = "🏠 Подключить подсеть пира"
 			buttonTypes[ID_BTN_TOGGLE_SUBNET] = "normal"
 			if hBtnToggleSubnetRoute != 0 {
 				procInvalidateRect.Call(hBtnToggleSubnetRoute, 0, 1)
 			}
 			activeSubnetRoutesMu.Unlock()
-			addLog("рџЏ  Р’СЃРµ РјР°СЂС€СЂСѓС‚С‹ Рє РїРѕРґСЃРµС‚СЏРј РѕС‚РєР»СЋС‡РµРЅС‹")
+			addLog("🏠 Все маршруты к подсетям отключены")
 			return
 		}
 		activeSubnetRoutesMu.Unlock()
-		addLog("рџ’Ў Р’ СЃРµС‚Рё РЅРµС‚ РїРёСЂРѕРІ СЃ Р°РЅРѕРЅСЃРёСЂРѕРІР°РЅРЅС‹РјРё Р»РѕРєР°Р»СЊРЅС‹РјРё РїРѕРґСЃРµС‚СЏРјРё.")
+		addLog("💡 В сети нет пиров с анонсированными локальными подсетями.")
 		return
 	}
 
@@ -1757,17 +1757,17 @@ func handleToggleSubnetRoute() {
 	if allActive {
 		for _, cidr := range targetPeer.AdvertisedRoutes {
 			if err := tunnel.RemoveSubnetRoute(cidr, vip); err != nil {
-				addLog(fmt.Sprintf("вљ пёЏ РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ РјР°СЂС€СЂСѓС‚Р° Рє %s: %s", cidr, err.Error()))
+				addLog(fmt.Sprintf("⚠️ Ошибка удаления маршрута к %s: %s", cidr, err.Error()))
 			} else {
-				addLog(fmt.Sprintf("рџЏ  РњР°СЂС€СЂСѓС‚ Рє РїРѕРґСЃРµС‚Рё %s С‡РµСЂРµР· %s СѓРґР°Р»РµРЅ", cidr, vip))
+				addLog(fmt.Sprintf("🏠 Маршрут к подсети %s через %s удален", cidr, vip))
 			}
 			delete(activeSubnetRoutes, cidr)
 		}
 		if len(activeSubnetRoutes) == 0 {
-			buttonLabels[ID_BTN_TOGGLE_SUBNET] = "рџЏ  РџРѕРґРєР»СЋС‡РёС‚СЊ РїРѕРґСЃРµС‚СЊ РїРёСЂР°"
+			buttonLabels[ID_BTN_TOGGLE_SUBNET] = "🏠 Подключить подсеть пира"
 			buttonTypes[ID_BTN_TOGGLE_SUBNET] = "normal"
 		} else {
-			buttonLabels[ID_BTN_TOGGLE_SUBNET] = fmt.Sprintf("рџџў РџРѕРґСЃРµС‚Рё: %d Р°РєС‚РёРІРЅС‹С…", len(activeSubnetRoutes))
+			buttonLabels[ID_BTN_TOGGLE_SUBNET] = fmt.Sprintf("🟢 Подсети: %d активных", len(activeSubnetRoutes))
 			buttonTypes[ID_BTN_TOGGLE_SUBNET] = "green"
 		}
 		if hBtnToggleSubnetRoute != 0 {
@@ -1776,13 +1776,13 @@ func handleToggleSubnetRoute() {
 	} else {
 		for _, cidr := range targetPeer.AdvertisedRoutes {
 			if err := tunnel.AddSubnetRoute(cidr, vip); err != nil {
-				addLog(fmt.Sprintf("вќЊ РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РјР°СЂС€СЂСѓС‚Р° Рє %s С‡РµСЂРµР· %s: %s", cidr, vip, err.Error()))
+				addLog(fmt.Sprintf("❌ Ошибка добавления маршрута к %s через %s: %s", cidr, vip, err.Error()))
 			} else {
 				activeSubnetRoutes[cidr] = vip
-				addLog(fmt.Sprintf("рџЏ  Р”РѕР±Р°РІР»РµРЅ РјР°СЂС€СЂСѓС‚ Рє РїРѕРґСЃРµС‚Рё %s С‡РµСЂРµР· %s (%s)", cidr, targetPeer.Nickname, vip))
+				addLog(fmt.Sprintf("🏠 Добавлен маршрут к подсети %s через %s (%s)", cidr, targetPeer.Nickname, vip))
 			}
 		}
-		buttonLabels[ID_BTN_TOGGLE_SUBNET] = fmt.Sprintf("рџџў РџРѕРґСЃРµС‚СЊ: %s (Р’РљР›)", strings.Join(targetPeer.AdvertisedRoutes, ", "))
+		buttonLabels[ID_BTN_TOGGLE_SUBNET] = fmt.Sprintf("🟢 Подсеть: %s (ВКЛ)", strings.Join(targetPeer.AdvertisedRoutes, ", "))
 		buttonTypes[ID_BTN_TOGGLE_SUBNET] = "green"
 		if hBtnToggleSubnetRoute != 0 {
 			procInvalidateRect.Call(hBtnToggleSubnetRoute, 0, 1)
@@ -1793,7 +1793,7 @@ func handleToggleSubnetRoute() {
 func showBookmarkDialog(peerID, currentName string) (string, bool) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	dlgClassName, _ := windows.UTF16PtrFromString("NatBypassBookmarkDlgClass")
-	dlgTitle, _ := windows.UTF16PtrFromString("в­ђ Р—Р°РґР°С‚СЊ РёРјСЏ СѓСЃС‚СЂРѕР№СЃС‚РІСѓ (Р—Р°РєР»Р°РґРєР°)")
+	dlgTitle, _ := windows.UTF16PtrFromString("⭐ Задать имя устройству (Закладка)")
 
 	dlgWc := WNDCLASSEXW{
 		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),
@@ -1808,7 +1808,7 @@ func showBookmarkDialog(peerID, currentName string) (string, bool) {
 	}
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&dlgWc)))
 
-	// Р’С‹С‡РёСЃР»СЏРµРј РїРѕР·РёС†РёСЋ РїРѕ С†РµРЅС‚СЂСѓ СЂРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ РѕРєРЅР°
+	// Вычисляем позицию по центру родительского окна
 	var parentRc RECT
 	procGetWindowRect.Call(hMainWnd, uintptr(unsafe.Pointer(&parentRc)))
 	dlgW := int32(480)
@@ -1839,22 +1839,22 @@ func showBookmarkDialog(peerID, currentName string) (string, bool) {
 	darkMode := int32(1)
 	procDwmSetWindowAttribute.Call(hDlg, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
-	// Р”РѕР±Р°РІР»СЏРµРј РєРѕРЅС‚СЂРѕР»С‹ РґРёР°Р»РѕРіР°
-	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("РЈСЃС‚СЂРѕР№СЃС‚РІРѕ ID: %s", peerID), 20, 16, 440, 22, hFontBold)
-	_ = createLabelOn(hDlg, hInstance, "РџРѕРЅСЏС‚РЅРѕРµ РёРјСЏ (РЅР°РїСЂРёРјРµСЂ: Р”РѕРјР°С€РЅРёР№ РџРљ, РќРѕСѓС‚Р±СѓРє, РЎРµСЂРІРµСЂ):", 20, 44, 440, 20, hFontNormal)
+	// Добавляем контролы диалога
+	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("Устройство ID: %s", peerID), 20, 16, 440, 22, hFontBold)
+	_ = createLabelOn(hDlg, hInstance, "Понятное имя (например: Домашний ПК, Ноутбук, Сервер):", 20, 44, 440, 20, hFontNormal)
 	hDlgEdit = createEditOn(hDlg, hInstance, currentName, 20, 72, 425, 30, false, false, hFontNormal)
 
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "в­ђ РЎРѕС…СЂР°РЅРёС‚СЊ", 20, 126, 140, 38, 5001, "primary")
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "рџ—‘ РћС‡РёСЃС‚РёС‚СЊ", 170, 126, 130, 38, 5002, "normal")
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "РћС‚РјРµРЅР°", 310, 126, 135, 38, 5003, "normal")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "⭐ Сохранить", 20, 126, 140, 38, 5001, "primary")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "🗑 Очистить", 170, 126, 130, 38, 5002, "normal")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "Отмена", 310, 126, 135, 38, 5003, "normal")
 
 	procShowWindow.Call(hDlg, SW_SHOW)
 	procSetForegroundWindow.Call(hDlg)
 	procSetFocus.Call(hDlgEdit)
-	// Р’С‹РґРµР»СЏРµРј РІРµСЃСЊ С‚РµРєСЃС‚ РІ РїРѕР»Рµ РІРІРѕРґР°
+	// Выделяем весь текст в поле ввода
 	procSendMessageW.Call(hDlgEdit, 0x00B1, 0, uintptr(^uint32(0)))
 
-	// Р‘Р»РѕРєРёСЂСѓРµРј РіР»Р°РІРЅРѕРµ РѕРєРЅРѕ РЅР° РІСЂРµРјСЏ РјРѕРґР°Р»СЊРЅРѕРіРѕ РґРёР°Р»РѕРіР°
+	// Блокируем главное окно на время модального диалога
 	procEnableWindow.Call(hMainWnd, 0)
 
 	var msg MSG
@@ -1863,7 +1863,7 @@ func showBookmarkDialog(peerID, currentName string) (string, bool) {
 		if int32(ret) <= 0 {
 			break
 		}
-		// РћР±СЂР°Р±РѕС‚РєР° РєР»Р°РІРёС€ Enter Рё Esc
+		// Обработка клавиш Enter и Esc
 		if msg.Message == 0x0100 { // WM_KEYDOWN
 			if msg.WParam == 0x0D { // VK_RETURN
 				dlgResultText = getControlText(hDlgEdit)
@@ -1880,7 +1880,7 @@ func showBookmarkDialog(peerID, currentName string) (string, bool) {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
 
-	// Р Р°Р·Р±Р»РѕРєРёСЂСѓРµРј РіР»Р°РІРЅРѕРµ РѕРєРЅРѕ
+	// Разблокируем главное окно
 	procEnableWindow.Call(hMainWnd, 1)
 	procSetForegroundWindow.Call(hMainWnd)
 	procDestroyWindow.Call(hDlg)
@@ -1918,17 +1918,17 @@ func bookmarkDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		return hBrushInput
 	case WM_COMMAND:
 		id := LOWORD(wParam)
-		if id == 5001 { // РЎРѕС…СЂР°РЅРёС‚СЊ
+		if id == 5001 { // Сохранить
 			dlgResultText = getControlText(hDlgEdit)
 			dlgResultOK = true
 			dlgFinished = true
 			return 0
-		} else if id == 5002 { // РћС‡РёСЃС‚РёС‚СЊ
+		} else if id == 5002 { // Очистить
 			dlgResultText = ""
 			dlgResultOK = true
 			dlgFinished = true
 			return 0
-		} else if id == 5003 { // РћС‚РјРµРЅР°
+		} else if id == 5003 { // Отмена
 			dlgResultOK = false
 			dlgFinished = true
 			return 0
@@ -1955,12 +1955,12 @@ func refreshProfilesUI() {
 
 	var selectedIndex int = 0
 	for i, p := range cfg.Profiles {
-		prefix := "вљЄ [РќРµР°РєС‚РёРІРЅР°]  "
+		prefix := "⚪ [Неактивна]  "
 		if p.ID == cfg.ActiveProfileID || (active != nil && p.ID == active.ID) {
-			prefix = "рџџў [вњ“ РђРљРўРР’РќРђ] "
+			prefix = "🟢 [✓ АКТВНА] "
 			selectedIndex = i
 		}
-		itemText := fmt.Sprintf("%sвЂў %s  |  РўРѕРїРёРє: %s  |  Р‘СЂРѕРєРµСЂ: %s", prefix, p.Name, p.MQTTTopic, p.MQTTBroker)
+		itemText := fmt.Sprintf("%s• %s  |  Топик: %s  |  Брокер: %s", prefix, p.Name, p.MQTTTopic, p.MQTTBroker)
 		wText, _ := syscall.UTF16PtrFromString(itemText)
 		procSendMessageW.Call(hListProfiles, 0x0180 /* LB_ADDSTRING */, 0, uintptr(unsafe.Pointer(wText)))
 	}
@@ -1999,7 +1999,7 @@ func handleProfileSwitch() {
 	p := cfg.Profiles[idx]
 	target, err := cfg.SwitchProfile(p.ID)
 	if err != nil {
-		addLog("вќЊ РћС€РёР±РєР° РїРµСЂРµРєР»СЋС‡РµРЅРёСЏ: " + err.Error())
+		addLog("❌ Ошибка переключения: " + err.Error())
 		return
 	}
 	_ = config.Save(cfg, configPath, false)
@@ -2021,7 +2021,7 @@ func handleProfileSwitch() {
 	}
 
 	refreshProfilesUI()
-	addLog(fmt.Sprintf("рџџў РђРєС‚РёРІРЅС‹Р№ РїСЂРѕС„РёР»СЊ РїРµСЂРµРєР»СЋС‡РµРЅ РЅР° В«%sВ» (РўРѕРїРёРє: %s)", target.Name, target.MQTTTopic))
+	addLog(fmt.Sprintf("🟢 Активный профиль переключен на «%s» (Топик: %s)", target.Name, target.MQTTTopic))
 }
 
 func handleProfileCreate() {
@@ -2030,7 +2030,7 @@ func handleProfileCreate() {
 	}
 	newProf := config.Profile{
 		ID:         "p-" + config.GenerateRandomHex(4),
-		Name:       fmt.Sprintf("РЎРµС‚СЊ #%d", len(cfg.Profiles)+1),
+		Name:       fmt.Sprintf("Сеть #%d", len(cfg.Profiles)+1),
 		NetworkKey: config.GenerateRandomHex(16),
 		MQTTBroker: "tcp://broker.emqx.io:1883",
 		MQTTTopic:  "natbypass/mesh/" + config.GenerateRandomHex(8),
@@ -2056,7 +2056,7 @@ func handleProfileCreate() {
 	}
 
 	refreshProfilesUI()
-	addLog(fmt.Sprintf("вњ… РЎРѕР·РґР°РЅ Рё РїРѕРґРєР»СЋС‡РµРЅ РЅРѕРІС‹Р№ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё В«%sВ»", saved.Name))
+	addLog(fmt.Sprintf("✅ Создан и подключен новый профиль сети «%s»", saved.Name))
 }
 
 func handleProfileSave() {
@@ -2103,14 +2103,14 @@ func handleProfileSave() {
 	}
 
 	refreshProfilesUI()
-	addLog(fmt.Sprintf("рџ’ѕ РќР°СЃС‚СЂРѕР№РєРё РїСЂРѕС„РёР»СЏ В«%sВ» СЃРѕС…СЂР°РЅРµРЅС‹", p.Name))
+	addLog(fmt.Sprintf("💾 Настройки профиля «%s» сохранены", p.Name))
 }
 
 func handleProfileDelete() {
 	if cfg == nil || len(cfg.Profiles) <= 1 {
 		procMessageBoxW.Call(hMainWnd,
-			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ РµРґРёРЅСЃС‚РІРµРЅРЅС‹Р№ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё."))),
-			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("РЈРґР°Р»РµРЅРёРµ РїСЂРѕС„РёР»СЏ"))),
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Нельзя удалить единственный профиль сети."))),
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Удаление профиля"))),
 			0x00000030 /* MB_ICONWARNING */)
 		return
 	}
@@ -2122,8 +2122,8 @@ func handleProfileDelete() {
 	p := cfg.Profiles[idx]
 
 	ret, _, _ := procMessageBoxW.Call(hMainWnd,
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(fmt.Sprintf("РЈРґР°Р»РёС‚СЊ РїСЂРѕС„РёР»СЊ В«%sВ»? РЎРІСЏР·СЊ СЃ СѓС‡Р°СЃС‚РЅРёРєР°РјРё СЌС‚РѕР№ СЃРµС‚Рё Р±СѓРґРµС‚ СЂР°Р·РѕСЂРІР°РЅР°.", p.Name)))),
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ СѓРґР°Р»РµРЅРёСЏ"))),
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(fmt.Sprintf("Удалить профиль «%s»? Связь с участниками этой сети будет разорвана.", p.Name)))),
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Подтверждение удаления"))),
 		0x00000004 /* MB_YESNO */|0x00000030 /* MB_ICONWARNING */)
 	if ret != 6 /* IDYES */ {
 		return
@@ -2154,7 +2154,7 @@ func handleProfileDelete() {
 	}
 
 	refreshProfilesUI()
-	addLog(fmt.Sprintf("рџ—‘пёЏ РџСЂРѕС„РёР»СЊ В«%sВ» СѓСЃРїРµС€РЅРѕ СѓРґР°Р»РµРЅ", p.Name))
+	addLog(fmt.Sprintf("🗑️ Профиль «%s» успешно удален", p.Name))
 }
 
 func handleProfileExport() {
@@ -2169,11 +2169,11 @@ func handleProfileExport() {
 	p := cfg.Profiles[idx]
 	uri := config.ExportProfileURI(p)
 	copyToClipboard(uri)
-	addLog(fmt.Sprintf("вњ“ РЎСЃС‹Р»РєР° РЅР° СЃРµС‚СЊ В«%sВ» СЃРєРѕРїРёСЂРѕРІР°РЅР° РІ Р±СѓС„РµСЂ РѕР±РјРµРЅР°: %s", p.Name, uri))
-	buttonLabels[ID_BTN_PROF_EXPORT] = "вњ“ РЎРљРћРџРР РћР’РђРќРћ!"
+	addLog(fmt.Sprintf("✓ Ссылка на сеть «%s» скопирована в буфер обмена: %s", p.Name, uri))
+	buttonLabels[ID_BTN_PROF_EXPORT] = "✓ СКОПРОВАНО!"
 	procInvalidateRect.Call(hBtnProfExport, 0, 1)
 	time.AfterFunc(2*time.Second, func() {
-		buttonLabels[ID_BTN_PROF_EXPORT] = "рџ”— РЎРєРѕРїРёСЂРѕРІР°С‚СЊ СЃСЃС‹Р»РєСѓ"
+		buttonLabels[ID_BTN_PROF_EXPORT] = "🔗 Скопировать ссылку"
 		procInvalidateRect.Call(hBtnProfExport, 0, 1)
 	})
 }
@@ -2186,8 +2186,8 @@ func handleProfileImport() {
 	parsed, err := config.ImportProfileURI(strings.TrimSpace(uri))
 	if err != nil {
 		procMessageBoxW.Call(hMainWnd,
-			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("РќРµРєРѕСЂСЂРµРєС‚РЅР°СЏ СЃСЃС‹Р»РєР° РїСЂРѕС„РёР»СЏ: "+err.Error()))),
-			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("РћС€РёР±РєР° РёРјРїРѕСЂС‚Р°"))),
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Некорректная ссылка профиля: "+err.Error()))),
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Ошибка импорта"))),
 			0x00000010 /* MB_ICONERROR */)
 		return
 	}
@@ -2214,13 +2214,13 @@ func handleProfileImport() {
 	}
 
 	refreshProfilesUI()
-	addLog(fmt.Sprintf("рџ“Ґ РЈСЃРїРµС€РЅРѕ РёРјРїРѕСЂС‚РёСЂРѕРІР°РЅ Рё Р°РєС‚РёРІРёСЂРѕРІР°РЅ РїСЂРѕС„РёР»СЊ В«%sВ» (РўРѕРїРёРє: %s)", saved.Name, saved.MQTTTopic))
+	addLog(fmt.Sprintf("📥 Успешно импортирован и активирован профиль «%s» (Топик: %s)", saved.Name, saved.MQTTTopic))
 }
 
 func showProfileImportDialog() (string, bool) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	dlgClassName, _ := windows.UTF16PtrFromString("NatBypassImportDlgClass")
-	dlgTitle, _ := windows.UTF16PtrFromString("РРјРїРѕСЂС‚ РїСЂРѕС„РёР»СЏ P2P СЃРµС‚Рё")
+	dlgTitle, _ := windows.UTF16PtrFromString("мпорт профиля P2P сети")
 
 	dlgWc := WNDCLASSEXW{
 		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),
@@ -2264,13 +2264,13 @@ func showProfileImportDialog() (string, bool) {
 	darkMode := int32(1)
 	procDwmSetWindowAttribute.Call(hDlg, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
-	_ = createLabelOn(hDlg, hInstance, "рџ“Ґ РРјРїРѕСЂС‚ P2P СЃРµС‚Рё NatBypass", 20, 16, 480, 22, hFontBold)
-	_ = createLabelOn(hDlg, hInstance, "Р’СЃС‚Р°РІСЊС‚Рµ СЃСЃС‹Р»РєСѓ natbypass://profile?... РїРѕР»СѓС‡РµРЅРЅСѓСЋ СЃ РґСЂСѓРіРѕРіРѕ СѓСЃС‚СЂРѕР№СЃС‚РІР°:", 20, 44, 480, 20, hFontNormal)
+	_ = createLabelOn(hDlg, hInstance, "📥 мпорт P2P сети NatBypass", 20, 16, 480, 22, hFontBold)
+	_ = createLabelOn(hDlg, hInstance, "Вставьте ссылку natbypass://profile?... полученную с другого устройства:", 20, 44, 480, 20, hFontNormal)
 	hDlgEdit = createEditOn(hDlg, hInstance, "", 20, 72, 465, 30, false, false, hFontNormal)
 
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "рџ“Ґ РРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ", 20, 126, 160, 38, 5001, "primary")
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "рџ—‘ РћС‡РёСЃС‚РёС‚СЊ", 190, 126, 130, 38, 5002, "normal")
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "РћС‚РјРµРЅР°", 330, 126, 155, 38, 5003, "normal")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "📥 мпортировать", 20, 126, 160, 38, 5001, "primary")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "🗑 Очистить", 190, 126, 130, 38, 5002, "normal")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "Отмена", 330, 126, 155, 38, 5003, "normal")
 
 	procShowWindow.Call(hDlg, SW_SHOW)
 	procSetForegroundWindow.Call(hDlg)
@@ -2323,7 +2323,7 @@ func handleProfileQR() {
 		return
 	}
 	uri := config.ExportProfileURI(*target)
-	showQRCodeModal("QR-РєРѕРґ СЃРµС‚Рё: "+target.Name, uri)
+	showQRCodeModal("QR-код сети: "+target.Name, uri)
 }
 
 func showQRCodeModal(title, qrText string) {
@@ -2331,7 +2331,7 @@ func showQRCodeModal(title, qrText string) {
 	if err != nil {
 		copyToClipboard(qrText)
 		procMessageBoxW.Call(hMainWnd,
-			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("РЎСЃС‹Р»РєР° СЃРєРѕРїРёСЂРѕРІР°РЅР° РІ Р±СѓС„РµСЂ РѕР±РјРµРЅР°:\n"+qrText))),
+			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Ссылка скопирована в буфер обмена:\n"+qrText))),
 			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(title))),
 			0x00000040 /* MB_ICONINFORMATION */)
 		return
@@ -2384,10 +2384,10 @@ func showQRCodeModal(title, qrText string) {
 	procDwmSetWindowAttribute.Call(hDlg, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
 	_ = createLabelOn(hDlg, hInstance, title, 20, 16, 360, 22, hFontBold)
-	_ = createLabelOn(hDlg, hInstance, "РћС‚СЃРєР°РЅРёСЂСѓР№С‚Рµ РєР°РјРµСЂРѕР№ РІ РїСЂРёР»РѕР¶РµРЅРёРё NatBypass РЅР° С‚РµР»РµС„РѕРЅРµ:", 20, 42, 360, 18, hFontNormal)
+	_ = createLabelOn(hDlg, hInstance, "Отсканируйте камерой в приложении NatBypass на телефоне:", 20, 42, 360, 18, hFontNormal)
 
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "рџ“‹ РЎРєРѕРїРёСЂРѕРІР°С‚СЊ СЃСЃС‹Р»РєСѓ", 30, 390, 190, 36, 5001, "primary")
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "Р—Р°РєСЂС‹С‚СЊ", 230, 390, 135, 36, 5002, "normal")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "📋 Скопировать ссылку", 30, 390, 190, 36, 5001, "primary")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "Закрыть", 230, 390, 135, 36, 5002, "normal")
 
 	procShowWindow.Call(hDlg, SW_SHOW)
 	procSetForegroundWindow.Call(hDlg)
@@ -2425,12 +2425,12 @@ func qrDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
 		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&rc)), hBrushBg)
 
-		// Р‘РµР»Р°СЏ РєР°СЂС‚РѕС‡РєР° РїРѕРґ QR-РєРѕРґ
+		// Белая карточка под QR-код
 		qrCardRc := RECT{Left: 55, Top: 70, Right: 345, Bottom: 360}
 		hBrushWhite, _, _ := procCreateSolidBrush.Call(0x00FFFFFF)
 		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&qrCardRc)), hBrushWhite)
 
-		// РћС‚СЂРёСЃРѕРІРєР° QR РјР°С‚СЂРёС†С‹
+		// Отрисовка QR матрицы
 		if len(activeQRBitmap) > 0 {
 			hBrushBlack, _, _ := procCreateSolidBrush.Call(0x00000000)
 			modCount := len(activeQRBitmap)
@@ -2472,11 +2472,11 @@ func qrDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 
 	case WM_COMMAND:
 		id := LOWORD(wParam)
-		if id == 5001 { // РЎРєРѕРїРёСЂРѕРІР°С‚СЊ
+		if id == 5001 { // Скопировать
 			copyToClipboard(activeQRText)
 			dlgFinished = true
 			return 0
-		} else if id == 5002 { // Р—Р°РєСЂС‹С‚СЊ
+		} else if id == 5002 { // Закрыть
 			dlgFinished = true
 			return 0
 		}
@@ -2492,11 +2492,11 @@ func qrDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 func applyDiagnosticsVisibility() {
 	if showDiagnostics {
 		procShowWindow.Call(navButtons[4], uintptr(SW_SHOW))
-		buttonLabels[ID_BTN_TOGGLE_DIAG] = "рџ©є Р’РєР»Р°РґРєР° Р”РёР°РіРЅРѕСЃС‚РёРєР°: Р’РљР›"
+		buttonLabels[ID_BTN_TOGGLE_DIAG] = "🩺 Вкладка Диагностика: ВКЛ"
 		buttonTypes[ID_BTN_TOGGLE_DIAG] = "green"
 	} else {
 		procShowWindow.Call(navButtons[4], uintptr(SW_HIDE))
-		buttonLabels[ID_BTN_TOGGLE_DIAG] = "рџ©є Р’РєР»Р°РґРєР° Р”РёР°РіРЅРѕСЃС‚РёРєР°: Р’Р«РљР›"
+		buttonLabels[ID_BTN_TOGGLE_DIAG] = "🩺 Вкладка Диагностика: ВЫКЛ"
 		buttonTypes[ID_BTN_TOGGLE_DIAG] = "normal"
 		if currentTab == 4 {
 			selectTab(0)
@@ -2552,16 +2552,16 @@ func setActiveAWGPresetButton(activeID uint32) {
 }
 
 func buildModernUI(hInstance uintptr) {
-	lblLogo := createLabel(hInstance, "рџ›ё NatBypass", 20, 24, 180, 30, hFontTitle)
-	lblVer := createLabel(hInstance, "Desktop Client вЂў P2P Mesh", 20, 56, 180, 20, hFontNormal)
+	lblLogo := createLabel(hInstance, "🛸 NatBypass", 20, 24, 180, 30, hFontTitle)
+	lblVer := createLabel(hInstance, "Desktop Client • P2P Mesh", 20, 56, 180, 20, hFontNormal)
 
 	navTitles := []string{
-		"рџљЂ  РћР±Р·РѕСЂ Рё РЎРµС‚СЊ",
-		"рџЊђ  РЎРµС‚Рё & РџСЂРѕС„РёР»Рё",
-		"рџ›ЎпёЏ  AmneziaWG 2.0",
-		"вљ™пёЏ  РќР°СЃС‚СЂРѕР№РєРё",
-		"рџ©є  Р”РёР°РіРЅРѕСЃС‚РёРєР°",
-		"рџ“‹  Р–СѓСЂРЅР°Р» СЃРѕР±С‹С‚РёР№",
+		"🚀  Обзор и Сеть",
+		"🌐  Сети & Профили",
+		"🛡️  AmneziaWG 2.0",
+		"⚙️  Настройки",
+		"🩺  Диагностика",
+		"📋  Журнал событий",
 	}
 	navIDs := []uint32{ID_NAV_DASHBOARD, ID_NAV_PROFILES, ID_NAV_AWG, ID_NAV_SETTINGS, ID_NAV_DIAG, ID_NAV_LOGS}
 
@@ -2577,51 +2577,51 @@ func buildModernUI(hInstance uintptr) {
 	cx := 244
 	cw := 790
 
-	// РЎРўР РђРќРР¦Рђ 0: РћР‘Р—РћР 
-	hLblStatus = createLabel(hInstance, "рџџЎ РџРћРРЎРљ РЈРЎРўР РћР™РЎРўР’ Р’ РЎР•РўР...", cx, 20, cw, 26, hFontTitle)
-	hLblIpInfo = createLabel(hInstance, "РЈСЃС‚СЂРѕР№СЃС‚РІРѕ: РћРїСЂРµРґРµР»РµРЅРёРµ... | Р’РЅРµС€РЅРёР№ IP: вЂ” | STUN: вЂ”", cx, 48, cw, 20, hFontNormal)
-	hLblChannels = createLabel(hInstance, "рџ“Ў РЎРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р»: РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ...", cx, 70, cw, 20, hFontNormal)
+	// СТРАНЦА 0: ОБЗОР
+	hLblStatus = createLabel(hInstance, "🟡 ПОСК УСТРОЙСТВ В СЕТ...", cx, 20, cw, 26, hFontTitle)
+	hLblIpInfo = createLabel(hInstance, "Устройство: Определение... | Внешний IP: — | STUN: —", cx, 48, cw, 20, hFontNormal)
+	hLblChannels = createLabel(hInstance, "📡 Сигнальный канал: нициализация...", cx, 70, cw, 20, hFontNormal)
 
-	hBtnVpn = createOwnerDrawButton(hInstance, "рџ”ґ РћР–РР”РђРќРР• РЎР’РЇР—Р (РџРѕРёСЃРє СѓСЃС‚СЂРѕР№СЃС‚РІ РІ СЃРµС‚Рё...)", cx, 96, 330, 38, ID_BTN_VPN, "red")
-	hBtnRefresh = createOwnerDrawButton(hInstance, "вљЎ РћР±РЅРѕРІРёС‚СЊ IP", cx+340, 96, 130, 38, ID_BTN_REFRESH, "normal")
-	hBtnManageProfiles = createOwnerDrawButton(hInstance, "рџЊђ РџСЂРѕС„РёР»Рё СЃРµС‚Рё...", cx+478, 96, 150, 38, ID_BTN_MANAGE_PROFILES, "normal")
-	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "в­ђ Р’ Р·Р°РєР»Р°РґРєРё", cx+636, 96, 154, 38, ID_BTN_BOOKMARK_PEER, "normal")
+	hBtnVpn = createOwnerDrawButton(hInstance, "🔴 ОЖДАНЕ СВЯЗ (Поиск устройств в сети...)", cx, 96, 330, 38, ID_BTN_VPN, "red")
+	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить IP", cx+340, 96, 130, 38, ID_BTN_REFRESH, "normal")
+	hBtnManageProfiles = createOwnerDrawButton(hInstance, "🌐 Профили сети...", cx+478, 96, 150, 38, ID_BTN_MANAGE_PROFILES, "normal")
+	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ В закладки", cx+636, 96, 154, 38, ID_BTN_BOOKMARK_PEER, "normal")
 
-	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "рџЊђ Р’С‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚: Р›РѕРєР°Р»СЊРЅС‹Р№ (РћС‚РєР»СЋС‡РµРЅ)", cx, 140, 385, 40, ID_BTN_EXIT_NODE_SELECT, "normal")
-	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "рџЏ  РџРѕРґРєР»СЋС‡РёС‚СЊ РїРѕРґСЃРµС‚СЊ РїРёСЂР°", cx+395, 140, 395, 40, ID_BTN_TOGGLE_SUBNET, "normal")
+	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "🌐 Выход в интернет: Локальный (Отключен)", cx, 140, 385, 40, ID_BTN_EXIT_NODE_SELECT, "normal")
+	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+395, 140, 395, 40, ID_BTN_TOGGLE_SUBNET, "normal")
 
-	lblPeersTitle := createLabel(hInstance, "рџ‘Ґ РЈСЃС‚СЂРѕР№СЃС‚РІР° РІ РІР°С€РµР№ СЃРµС‚Рё (РџСЂСЏРјРѕР№ P2P СЃС‚Р°С‚СѓСЃ Рё Р°РґСЂРµСЃРЅР°СЏ РєРЅРёРіР°):", cx, 188, cw, 22, hFontHeader)
+	lblPeersTitle := createLabel(hInstance, "👥 Устройства в вашей сети (Прямой P2P статус и адресная книга):", cx, 188, cw, 22, hFontHeader)
 	hListPeers = createListBox(hInstance, cx, 214, cw, 460, hFontNormal)
 
 	tabPages[0] = []uintptr{hLblStatus, hLblIpInfo, hLblChannels, hBtnVpn, hBtnRefresh, hBtnManageProfiles, hBtnBookmarkPeer, hBtnExitNodeSelect, hBtnToggleSubnetRoute, lblPeersTitle, hListPeers}
-	writeDebug("buildModernUI: СЃС‚СЂР°РЅРёС†Р° 0 СЃРѕР·РґР°РЅР°")
+	writeDebug("buildModernUI: страница 0 создана")
 
-	// РЎРўР РђРќРР¦Рђ 1: РЈРџР РђР’Р›Р•РќРР• РџР РћР¤РР›РЇРњР P2P РЎР•РўР•Р™
-	lblProfTitle := createLabel(hInstance, "рџЊђ РЈРїСЂР°РІР»РµРЅРёРµ РїСЂРѕС„РёР»СЏРјРё P2P СЃРµС‚РµР№ (Mesh Profiles)", cx, 20, cw, 28, hFontTitle)
-	lblProfDesc := createLabel(hInstance, "РљР°Р¶РґС‹Р№ РїСЂРѕС„РёР»СЊ вЂ” СЌС‚Рѕ РѕС‚РґРµР»СЊРЅР°СЏ РёР·РѕР»РёСЂРѕРІР°РЅРЅР°СЏ СЃРµС‚СЊ. Р’С‹Р±РёСЂР°Р№С‚Рµ СЃРµС‚СЊ РёР»Рё СЃРѕР·РґР°РІР°Р№С‚Рµ РЅРѕРІС‹Рµ.", cx, 48, cw, 20, hFontNormal)
+	// СТРАНЦА 1: УПРАВЛЕНЕ ПРОФЛЯМ P2P СЕТЕЙ
+	lblProfTitle := createLabel(hInstance, "🌐 Управление профилями P2P сетей (Mesh Profiles)", cx, 20, cw, 28, hFontTitle)
+	lblProfDesc := createLabel(hInstance, "Каждый профиль — это отдельная изолированная сеть. Выбирайте сеть или создавайте новые.", cx, 48, cw, 20, hFontNormal)
 
 	hListProfiles = createListBox(hInstance, cx, 74, cw, 220, hFontNormal)
 
-	hBtnProfSwitch = createOwnerDrawButton(hInstance, "вљЎ РџРѕРґРєР»СЋС‡РёС‚СЊ СЃРµС‚СЊ", cx, 304, 185, 36, ID_BTN_PROF_SWITCH, "green")
-	hBtnProfQR = createOwnerDrawButton(hInstance, "рџ“± QR-РєРѕРґ", cx+195, 304, 150, 36, ID_BTN_PROF_QR, "primary")
-	hBtnProfCreate = createOwnerDrawButton(hInstance, "вћ• РќРѕРІР°СЏ СЃРµС‚СЊ", cx+355, 304, 180, 36, ID_BTN_PROF_CREATE, "normal")
-	hBtnProfImport = createOwnerDrawButton(hInstance, "рџ“Ґ РРјРїРѕСЂС‚", cx+545, 304, 245, 36, ID_BTN_PROF_IMPORT, "normal")
+	hBtnProfSwitch = createOwnerDrawButton(hInstance, "⚡ Подключить сеть", cx, 304, 185, 36, ID_BTN_PROF_SWITCH, "green")
+	hBtnProfQR = createOwnerDrawButton(hInstance, "📱 QR-код", cx+195, 304, 150, 36, ID_BTN_PROF_QR, "primary")
+	hBtnProfCreate = createOwnerDrawButton(hInstance, "➕ Новая сеть", cx+355, 304, 180, 36, ID_BTN_PROF_CREATE, "normal")
+	hBtnProfImport = createOwnerDrawButton(hInstance, "📥 мпорт", cx+545, 304, 245, 36, ID_BTN_PROF_IMPORT, "normal")
 
-	lblProfEditHead := createLabel(hInstance, "вљ™пёЏ РџР°СЂР°РјРµС‚СЂС‹ РІС‹Р±СЂР°РЅРЅРѕР№ СЃРµС‚Рё (Р РµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ):", cx, 350, cw, 22, hFontHeader)
+	lblProfEditHead := createLabel(hInstance, "⚙️ Параметры выбранной сети (Редактирование):", cx, 350, cw, 22, hFontHeader)
 
-	lblProfName := createLabel(hInstance, "РќР°Р·РІР°РЅРёРµ СЃРµС‚Рё:", cx, 380, 160, 20, hFontBold)
+	lblProfName := createLabel(hInstance, "Название сети:", cx, 380, 160, 20, hFontBold)
 	hEditProfName = createEdit(hInstance, "", cx+170, 376, 340, 28, false, false, hFontNormal)
 
-	hBtnProfExport = createOwnerDrawButton(hInstance, "рџ”— РЎРєРѕРїРёСЂРѕРІР°С‚СЊ СЃСЃС‹Р»РєСѓ", cx+520, 376, 270, 28, ID_BTN_PROF_EXPORT, "normal")
+	hBtnProfExport = createOwnerDrawButton(hInstance, "🔗 Скопировать ссылку", cx+520, 376, 270, 28, ID_BTN_PROF_EXPORT, "normal")
 
-	lblProfTopic := createLabel(hInstance, "MQTT РўРѕРїРёРє (СЃРµРєСЂРµС‚):", cx, 416, 160, 20, hFontBold)
+	lblProfTopic := createLabel(hInstance, "MQTT Топик (секрет):", cx, 416, 160, 20, hFontBold)
 	hEditProfTopic = createEdit(hInstance, "", cx+170, 412, 620, 28, false, false, hFontNormal)
 
-	lblProfBroker := createLabel(hInstance, "MQTT Р‘СЂРѕРєРµСЂ:", cx, 452, 160, 20, hFontBold)
+	lblProfBroker := createLabel(hInstance, "MQTT Брокер:", cx, 452, 160, 20, hFontBold)
 	hEditProfBroker = createEdit(hInstance, "", cx+170, 448, 620, 28, false, false, hFontNormal)
 
-	hBtnProfSave = createOwnerDrawButton(hInstance, "рџ’ѕ РЎРѕС…СЂР°РЅРёС‚СЊ РёР·РјРµРЅРµРЅРёСЏ РїСЂРѕС„РёР»СЏ", cx+170, 492, 340, 38, ID_BTN_PROF_SAVE, "primary")
-	hBtnProfDelete = createOwnerDrawButton(hInstance, "рџ—‘пёЏ РЈРґР°Р»РёС‚СЊ СЌС‚Сѓ СЃРµС‚СЊ", cx+520, 492, 270, 38, ID_BTN_PROF_DELETE, "red")
+	hBtnProfSave = createOwnerDrawButton(hInstance, "💾 Сохранить изменения профиля", cx+170, 492, 340, 38, ID_BTN_PROF_SAVE, "primary")
+	hBtnProfDelete = createOwnerDrawButton(hInstance, "🗑️ Удалить эту сеть", cx+520, 492, 270, 38, ID_BTN_PROF_DELETE, "red")
 
 	tabPages[1] = []uintptr{
 		lblProfTitle, lblProfDesc, hListProfiles,
@@ -2630,18 +2630,18 @@ func buildModernUI(hInstance uintptr) {
 		lblProfTopic, hEditProfTopic, lblProfBroker, hEditProfBroker,
 		hBtnProfSave, hBtnProfDelete,
 	}
-	writeDebug("buildModernUI: СЃС‚СЂР°РЅРёС†Р° 1 СЃРѕР·РґР°РЅР°")
+	writeDebug("buildModernUI: страница 1 создана")
 
-	// РЎРўР РђРќРР¦Рђ 2: AMNEZIAWG 2.0
-	lblAwgTitle := createLabel(hInstance, "рџ›ЎпёЏ AmneziaWG 2.0 вЂ” Р—Р°С‰РёС‚Р° РѕС‚ Р±Р»РѕРєРёСЂРѕРІРѕРє DPI", cx, 20, cw, 28, hFontTitle)
-	lblAwgDesc := createLabel(hInstance, "РњР°СЃРєРёСЂСѓРµС‚ РїСЂРѕС‚РѕРєРѕР» WireGuard РјСѓСЃРѕСЂРЅС‹РјРё РїР°РєРµС‚Р°РјРё Рё Р·Р°РіРѕР»РѕРІРєР°РјРё (РўРЎРџРЈ / Р РљРќ).", cx, 48, cw, 20, hFontNormal)
+	// СТРАНЦА 2: AMNEZIAWG 2.0
+	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 2.0 — Защита от блокировок DPI", cx, 20, cw, 28, hFontTitle)
+	lblAwgDesc := createLabel(hInstance, "Маскирует протокол WireGuard мусорными пакетами и заголовками (ТСПУ / РКН).", cx, 48, cw, 20, hFontNormal)
 
-	hBtnAwgStd = createOwnerDrawButton(hInstance, "рџџў РЎС‚Р°РЅРґР°СЂС‚РЅС‹Р№ WG", cx, 78, 190, 36, ID_BTN_AWG_STD, "normal")
-	hBtnAwgDpi = createOwnerDrawButton(hInstance, "рџџЎ РћР±С…РѕРґ DPI (AWG)", cx+200, 78, 190, 36, ID_BTN_AWG_DPI, "primary")
-	hBtnAwgStealth = createOwnerDrawButton(hInstance, "рџ”ґ РЎРєСЂС‹С‚РЅС‹Р№ СЂРµР¶РёРј", cx+400, 78, 190, 36, ID_BTN_AWG_STEALTH, "normal")
-	hBtnRandomAwg = createOwnerDrawButton(hInstance, "рџЋІ РЎР»СѓС‡Р°Р№РЅС‹Рµ РєР»СЋС‡Рё", cx+600, 78, 190, 36, ID_BTN_RAND_AWG, "normal")
+	hBtnAwgStd = createOwnerDrawButton(hInstance, "🟢 Стандартный WG", cx, 78, 190, 36, ID_BTN_AWG_STD, "normal")
+	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🟡 Обход DPI (AWG)", cx+200, 78, 190, 36, ID_BTN_AWG_DPI, "primary")
+	hBtnAwgStealth = createOwnerDrawButton(hInstance, "🔴 Скрытный режим", cx+400, 78, 190, 36, ID_BTN_AWG_STEALTH, "normal")
+	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайные ключи", cx+600, 78, 190, 36, ID_BTN_RAND_AWG, "normal")
 
-	lblJc := createLabel(hInstance, "Jc (РјСѓСЃРѕСЂ):", cx, 128, 75, 20, hFontNormal)
+	lblJc := createLabel(hInstance, "Jc (мусор):", cx, 128, 75, 20, hFontNormal)
 	hEditAwgJc = createEdit(hInstance, "4", cx+80, 124, 55, 28, false, false, hFontNormal)
 
 	lblJmin := createLabel(hInstance, "Jmin:", cx+150, 128, 45, 20, hFontNormal)
@@ -2668,12 +2668,12 @@ func buildModernUI(hInstance uintptr) {
 	lblH4 := createLabel(hInstance, "H4 (Data):", cx+615, 166, 70, 20, hFontNormal)
 	hEditAwgH4 = createEdit(hInstance, "1122334455", cx+690, 162, 100, 28, false, false, hFontNormal)
 
-	lblConfTitle := createLabel(hInstance, "рџ“„ Р“РѕС‚РѕРІС‹Р№ РєРѕРЅС„РёРі AmneziaWG (РЎРєРѕРїРёСЂСѓР№С‚Рµ РІ Amnezia VPN РёР»Рё РЅР° СЂРѕСѓС‚РµСЂ):", cx, 200, cw, 22, hFontHeader)
+	lblConfTitle := createLabel(hInstance, "📄 Готовый конфиг AmneziaWG (Скопируйте в Amnezia VPN или на роутер):", cx, 200, cw, 22, hFontHeader)
 	hEditAwgConf = createEdit(hInstance, "", cx, 226, cw, 390, true, true, hFontMono)
 
-	hBtnCopyAwg = createOwnerDrawButton(hInstance, "рџ“‹ РЎРєРѕРїРёСЂРѕРІР°С‚СЊ РєРѕРЅС„РёРі", cx, 626, 240, 40, ID_BTN_COPY_AWG, "primary")
-	hBtnSaveAwg = createOwnerDrawButton(hInstance, "рџ’ѕ РЎРѕС…СЂР°РЅРёС‚СЊ РІ natbypass.conf", cx+250, 626, 270, 40, ID_BTN_SAVE_AWG, "normal")
-	hBtnOpenAwgClient = createOwnerDrawButton(hInstance, "рџљЂ РћС‚РєСЂС‹С‚СЊ Amnezia", cx+530, 626, 260, 40, ID_BTN_OPEN_AWG_CLIENT, "normal")
+	hBtnCopyAwg = createOwnerDrawButton(hInstance, "📋 Скопировать конфиг", cx, 626, 240, 40, ID_BTN_COPY_AWG, "primary")
+	hBtnSaveAwg = createOwnerDrawButton(hInstance, "💾 Сохранить в natbypass.conf", cx+250, 626, 270, 40, ID_BTN_SAVE_AWG, "normal")
+	hBtnOpenAwgClient = createOwnerDrawButton(hInstance, "🚀 Открыть Amnezia", cx+530, 626, 260, 40, ID_BTN_OPEN_AWG_CLIENT, "normal")
 
 	tabPages[2] = []uintptr{
 		lblAwgTitle, lblAwgDesc, hBtnAwgStd, hBtnAwgDpi, hBtnAwgStealth, hBtnRandomAwg,
@@ -2681,82 +2681,82 @@ func buildModernUI(hInstance uintptr) {
 		lblH1, hEditAwgH1, lblH2, hEditAwgH2, lblH3, hEditAwgH3, lblH4, hEditAwgH4,
 		lblConfTitle, hEditAwgConf, hBtnCopyAwg, hBtnSaveAwg, hBtnOpenAwgClient,
 	}
-	writeDebug("buildModernUI: СЃС‚СЂР°РЅРёС†Р° 2 СЃРѕР·РґР°РЅР°")
+	writeDebug("buildModernUI: страница 2 создана")
 
-	// РЎРўР РђРќРР¦Рђ 3: РќРђРЎРўР РћР™РљР
-	lblSetTitle := createLabel(hInstance, "вљ™пёЏ РЎРёРіРЅР°Р»СЊРЅС‹Рµ РєР°РЅР°Р»С‹ & РќР°СЃС‚СЂРѕР№РєРё РїСЂРёР»РѕР¶РµРЅРёСЏ", cx, 20, cw, 28, hFontTitle)
+	// СТРАНЦА 3: НАСТРОЙК
+	lblSetTitle := createLabel(hInstance, "⚙️ Сигнальные каналы & Настройки приложения", cx, 20, cw, 28, hFontTitle)
 
-	lblNick := createLabel(hInstance, "рџЏ·пёЏ Р’Р°С€Рµ РёРјСЏ / РќРёРєРЅРµР№Рј:", cx, 52, 200, 20, hFontBold)
+	lblNick := createLabel(hInstance, "🏷️ Ваше имя / Никнейм:", cx, 52, 200, 20, hFontBold)
 	hEditMyNick = createEdit(hInstance, myNick, cx+210, 48, 400, 28, false, false, hFontNormal)
-	lblNickHint := createLabel(hInstance, "рџ’Ў РРјСЏ, РєРѕС‚РѕСЂРѕРµ СѓРІРёРґСЏС‚ РґСЂСѓРіРёРµ СѓС‡Р°СЃС‚РЅРёРєРё СЃРµС‚Рё (РЅР°РїСЂРёРјРµСЂ: Р”РѕРјР°С€РЅРёР№ РџРљ, РќРѕСѓС‚Р±СѓРє)", cx+210, 78, 570, 18, hFontNormal)
+	lblNickHint := createLabel(hInstance, "💡 мя, которое увидят другие участники сети (например: Домашний ПК, Ноутбук)", cx+210, 78, 570, 18, hFontNormal)
 
-	lblMode := createLabel(hInstance, "рџЋЇ Р РµР¶РёРј СЂР°Р±РѕС‚С‹ РєР°РЅР°Р»РѕРІ:", cx, 100, 200, 20, hFontBold)
-	hBtnModeParallel = createOwnerDrawButton(hInstance, "рџ”„ РџР°СЂР°Р»Р»РµР»СЊРЅРѕ (MQTT+TG)", cx+210, 96, 255, 32, ID_BTN_MODE_PARALLEL, "primary")
-	hBtnModeMQTT = createOwnerDrawButton(hInstance, "вљЎ РўРѕР»СЊРєРѕ MQTT", cx+475, 96, 150, 32, ID_BTN_MODE_MQTT, "normal")
-	hBtnModeTG = createOwnerDrawButton(hInstance, "рџ’¬ РўРѕР»СЊРєРѕ Telegram", cx+635, 96, 155, 32, ID_BTN_MODE_TG, "normal")
+	lblMode := createLabel(hInstance, "🎯 Режим работы каналов:", cx, 100, 200, 20, hFontBold)
+	hBtnModeParallel = createOwnerDrawButton(hInstance, "🔄 Параллельно (MQTT+TG)", cx+210, 96, 255, 32, ID_BTN_MODE_PARALLEL, "primary")
+	hBtnModeMQTT = createOwnerDrawButton(hInstance, "⚡ Только MQTT", cx+475, 96, 150, 32, ID_BTN_MODE_MQTT, "normal")
+	hBtnModeTG = createOwnerDrawButton(hInstance, "💬 Только Telegram", cx+635, 96, 155, 32, ID_BTN_MODE_TG, "normal")
 
-	lblMqHead := createLabel(hInstance, "вљЎ MQTT Р‘СЂРѕРєРµСЂ:", cx, 134, cw, 22, hFontHeader)
-	lblMqBr := createLabel(hInstance, "URL Р‘СЂРѕРєРµСЂР°:", cx, 158, 200, 20, hFontNormal)
+	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", cx, 134, cw, 22, hFontHeader)
+	lblMqBr := createLabel(hInstance, "URL Брокера:", cx, 158, 200, 20, hFontNormal)
 	hEditMqttBr = createEdit(hInstance, "tcp://broker.emqx.io:1883", cx+210, 154, 400, 28, false, false, hFontNormal)
-	hBtnTestMqtt = createOwnerDrawButton(hInstance, "рџ§Є РџСЂРѕРІРµСЂРёС‚СЊ MQTT", cx+620, 152, 170, 32, ID_BTN_TEST_MQTT, "normal")
+	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+620, 152, 170, 32, ID_BTN_TEST_MQTT, "normal")
 
-	lblMqPresets := createLabel(hInstance, "РџСЂРµСЃРµС‚С‹:", cx+210, 186, 65, 18, hFontNormal)
-	hBtnMqEMQX := createOwnerDrawButton(hInstance, "вљЎ EMQX", cx+280, 184, 85, 22, ID_BTN_MQ_EMQX, "normal")
-	hBtnMqHive := createOwnerDrawButton(hInstance, "вљЎ HiveMQ", cx+370, 184, 95, 22, ID_BTN_MQ_HIVE, "normal")
-	hBtnMqMosq := createOwnerDrawButton(hInstance, "вљЎ Mosquitto", cx+470, 184, 110, 22, ID_BTN_MQ_MOSQ, "normal")
-	hBtnMqEcl := createOwnerDrawButton(hInstance, "вљЎ Eclipse", cx+585, 184, 90, 22, ID_BTN_MQ_ECL, "normal")
+	lblMqPresets := createLabel(hInstance, "Пресеты:", cx+210, 186, 65, 18, hFontNormal)
+	hBtnMqEMQX := createOwnerDrawButton(hInstance, "⚡ EMQX", cx+280, 184, 85, 22, ID_BTN_MQ_EMQX, "normal")
+	hBtnMqHive := createOwnerDrawButton(hInstance, "⚡ HiveMQ", cx+370, 184, 95, 22, ID_BTN_MQ_HIVE, "normal")
+	hBtnMqMosq := createOwnerDrawButton(hInstance, "⚡ Mosquitto", cx+470, 184, 110, 22, ID_BTN_MQ_MOSQ, "normal")
+	hBtnMqEcl := createOwnerDrawButton(hInstance, "⚡ Eclipse", cx+585, 184, 90, 22, ID_BTN_MQ_ECL, "normal")
 
-	lblMqTp := createLabel(hInstance, "РЈРЅРёРєР°Р»СЊРЅС‹Р№ С‚РѕРїРёРє:", cx, 212, 200, 20, hFontNormal)
+	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 212, 200, 20, hFontNormal)
 	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 208, 400, 28, false, false, hFontNormal)
-	lblMqTopicHint := createLabel(hInstance, "рџ”’ Р—Р°РґР°Р№С‚Рµ СѓРЅРёРєР°Р»СЊРЅС‹Р№ СЃРµРєСЂРµС‚РЅС‹Р№ С‚РѕРїРёРє (РєР»СЋС‡ РІР°С€РµР№ СЃРµС‚Рё), РЅР°РїСЂРёРјРµСЂ: mynet/supersecret/2029", cx+210, 238, 570, 18, hFontNormal)
+	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: mynet/supersecret/2029", cx+210, 238, 570, 18, hFontNormal)
 
-	lblTgHead := createLabel(hInstance, "рџ’¬ Telegram Bot API:", cx, 260, cw, 22, hFontHeader)
-	lblTgToken := createLabel(hInstance, "РўРѕРєРµРЅ Р±РѕС‚Р° (@BotFather):", cx, 284, 200, 20, hFontNormal)
+	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 260, cw, 22, hFontHeader)
+	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 284, 200, 20, hFontNormal)
 	hEditTgToken = createEdit(hInstance, "", cx+210, 280, 400, 28, false, false, hFontNormal)
-	hBtnTestTg = createOwnerDrawButton(hInstance, "рџ§Є РџСЂРѕРІРµСЂРёС‚СЊ Р±РѕС‚", cx+620, 278, 170, 32, ID_BTN_TEST_TG, "normal")
+	hBtnTestTg = createOwnerDrawButton(hInstance, "🧪 Проверить бот", cx+620, 278, 170, 32, ID_BTN_TEST_TG, "normal")
 
-	lblTgChat := createLabel(hInstance, "Chat ID (Р›РЎ РёР»Рё Р“СЂСѓРїРїР°):", cx, 314, 200, 20, hFontNormal)
+	lblTgChat := createLabel(hInstance, "Chat ID (ЛС или Группа):", cx, 314, 200, 20, hFontNormal)
 	hEditTgChat = createEdit(hInstance, "", cx+210, 310, 400, 28, false, false, hFontNormal)
-	lblTgHint := createLabel(hInstance, "рџ’Ў РќР°СЃС‚СЂРѕР№РєР°: 1) РЎРѕР·РґР°Р№С‚Рµ Р±РѕС‚Р° РІ @BotFather  2) РЈР·РЅР°Р№С‚Рµ Chat ID С‡РµСЂРµР· @userinfobot  3) Р”РѕР±Р°РІСЊС‚Рµ Р±РѕС‚РѕРІ РІСЃРµС… РџРљ РІ РѕРґРЅСѓ РіСЂСѓРїРїСѓ!", cx, 340, cw, 18, hFontNormal)
+	lblTgHint := createLabel(hInstance, "💡 Настройка: 1) Создайте бота в @BotFather  2) Узнайте Chat ID через @userinfobot  3) Добавьте ботов всех ПК в одну группу!", cx, 340, cw, 18, hFontNormal)
 
-	lblExitHead := createLabel(hInstance, "рџЊђ РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ & РЁР»СЋР· (Exit Node & Р›РѕРєР°Р»СЊРЅС‹Рµ РїРѕРґСЃРµС‚Рё):", cx, 366, cw, 22, hFontHeader)
-	exitText := "рџЊђ Р Р°Р·СЂРµС€РёС‚СЊ РІС‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· РјРµРЅСЏ: Р’Р«РљР›"
+	lblExitHead := createLabel(hInstance, "🌐 Маршрутизация & Шлюз (Exit Node & Локальные подсети):", cx, 366, cw, 22, hFontHeader)
+	exitText := "🌐 Разрешить выход в интернет через меня: ВЫКЛ"
 	exitType := "normal"
 	if allowExitNode {
-		exitText = "рџЊђ Р Р°Р·СЂРµС€РёС‚СЊ РІС‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· РјРµРЅСЏ: Р’РљР›"
+		exitText = "🌐 Разрешить выход в интернет через меня: ВКЛ"
 		exitType = "green"
 	}
 	hBtnAllowExit = createOwnerDrawButton(hInstance, exitText, cx, 390, 385, 34, ID_BTN_ALLOW_EXIT, exitType)
 
 	localSubnets := network.GetLocalSubnets()
-	addSubnetBtnText := "вћ• Р”РѕР±Р°РІРёС‚СЊ РјРѕСЋ СЃРµС‚СЊ"
+	addSubnetBtnText := "➕ Добавить мою сеть"
 	if len(localSubnets) > 0 {
-		addSubnetBtnText = fmt.Sprintf("вћ• Р”РѕР±Р°РІРёС‚СЊ РјРѕСЋ СЃРµС‚СЊ: %s", localSubnets[0])
+		addSubnetBtnText = fmt.Sprintf("➕ Добавить мою сеть: %s", localSubnets[0])
 	}
 	hBtnAddLocalSubnet = createOwnerDrawButton(hInstance, addSubnetBtnText, cx+395, 390, 395, 34, ID_BTN_ADD_LOCAL_SUBNET, "normal")
 
-	lblAdvSubnets := createLabel(hInstance, "рџЏ  Р›РѕРєР°Р»СЊРЅС‹Рµ РїРѕРґСЃРµС‚Рё РґР»СЏ РѕР±С‰РµРіРѕ РґРѕСЃС‚СѓРїР° (РЅР°РїСЂ. 192.168.1.0/24):", cx, 432, 470, 20, hFontNormal)
+	lblAdvSubnets := createLabel(hInstance, "🏠 Локальные подсети для общего доступа (напр. 192.168.1.0/24):", cx, 432, 470, 20, hFontNormal)
 	hEditAdvSubnets = createEdit(hInstance, "", cx+480, 428, 310, 28, false, false, hFontNormal)
 
-	lblSysHead := createLabel(hInstance, "рџ› пёЏ РЎРёСЃС‚РµРјРЅС‹Рµ С„СѓРЅРєС†РёРё & РРЅС‚РµСЂС„РµР№СЃ:", cx, 464, cw, 22, hFontHeader)
-	logsText := "рџ’ѕ Р—Р°РїРёСЃСЊ Р»РѕРіРѕРІ РЅР° РґРёСЃРє: Р’Р«РљР›"
+	lblSysHead := createLabel(hInstance, "🛠️ Системные функции & нтерфейс:", cx, 464, cw, 22, hFontHeader)
+	logsText := "💾 Запись логов на диск: ВЫКЛ"
 	logsType := "normal"
 	if saveLogsToDisk {
-		logsText = "рџ’ѕ Р—Р°РїРёСЃСЊ Р»РѕРіРѕРІ РЅР° РґРёСЃРє: Р’РљР›"
+		logsText = "💾 Запись логов на диск: ВКЛ"
 		logsType = "green"
 	}
 	hBtnToggleLogs = createOwnerDrawButton(hInstance, logsText, cx, 488, 385, 34, ID_BTN_TOGGLE_LOGS, logsType)
 
-	diagText := "рџ©є Р’РєР»Р°РґРєР° Р”РёР°РіРЅРѕСЃС‚РёРєР°: Р’РљР›"
+	diagText := "🩺 Вкладка Диагностика: ВКЛ"
 	diagType := "green"
 	if !showDiagnostics {
-		diagText = "рџ©є Р’РєР»Р°РґРєР° Р”РёР°РіРЅРѕСЃС‚РёРєР°: Р’Р«РљР›"
+		diagText = "🩺 Вкладка Диагностика: ВЫКЛ"
 		diagType = "normal"
 	}
 	hBtnToggleDiag = createOwnerDrawButton(hInstance, diagText, cx+395, 488, 395, 34, ID_BTN_TOGGLE_DIAG, diagType)
 
-	hBtnSaveCfg = createOwnerDrawButton(hInstance, "рџ’ѕ РЎРѕС…СЂР°РЅРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё РІ config.yaml", cx+145, 536, 500, 42, ID_BTN_SAVE_CFG, "primary")
-	hBtnCheckUpdate := createOwnerDrawButton(hInstance, "рџљЂ РџСЂРѕРІРµСЂРёС‚СЊ Рё РѕР±РЅРѕРІРёС‚СЊ NatBypass СЃ GitHub", cx+145, 588, 500, 38, ID_BTN_CHECK_UPDATE, "green")
+	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx+145, 536, 500, 42, ID_BTN_SAVE_CFG, "primary")
+	hBtnCheckUpdate := createOwnerDrawButton(hInstance, "🚀 Проверить и обновить NatBypass с GitHub", cx+145, 588, 500, 38, ID_BTN_CHECK_UPDATE, "green")
 
 	tabPages[3] = []uintptr{
 		lblSetTitle, lblNick, hEditMyNick, lblNickHint, lblMode, hBtnModeParallel, hBtnModeMQTT, hBtnModeTG,
@@ -2765,38 +2765,38 @@ func buildModernUI(hInstance uintptr) {
 		lblExitHead, hBtnAllowExit, hBtnAddLocalSubnet, lblAdvSubnets, hEditAdvSubnets,
 		lblSysHead, hBtnToggleLogs, hBtnToggleDiag, hBtnSaveCfg, hBtnCheckUpdate,
 	}
-	writeDebug("buildModernUI: СЃС‚СЂР°РЅРёС†Р° 3 СЃРѕР·РґР°РЅР°")
+	writeDebug("buildModernUI: страница 3 создана")
 
-	// РЎРўР РђРќРР¦Рђ 4: Р”РРђР“РќРћРЎРўРРљРђ
-	lblDiagTitle := createLabel(hInstance, "рџ©є Р”РёР°РіРЅРѕСЃС‚РёРєР° СЃРІСЏР·РЅРѕСЃС‚Рё & Р”РµР±Р°РіРіРµСЂ РїР°РјСЏС‚Рё", cx, 36, cw, 28, hFontTitle)
-	hBtnRunDiag = createOwnerDrawButton(hInstance, "рџ”„ РљРѕРјРїР»РµРєСЃРЅС‹Р№ С‚РµСЃС‚ СЃРµС‚Рё", cx, 75, 240, 40, ID_BTN_RUN_DIAG, "primary")
-	hBtnDumpStack = createOwnerDrawButton(hInstance, "вљЎ РЎРЅРёРјРѕРє РїР°РјСЏС‚Рё Рё РїРѕС‚РѕРєРѕРІ", cx+250, 75, 240, 40, ID_BTN_DUMP_STACK, "normal")
-	hEditDiagLog = createEdit(hInstance, "РќР°Р¶РјРёС‚Рµ РєРЅРѕРїРєСѓ РІС‹С€Рµ РґР»СЏ РєРѕРјРїР»РµРєСЃРЅРѕР№ РїСЂРѕРІРµСЂРєРё СЃРµС‚Рё Рё РґРѕСЃС‚СѓРїРЅРѕСЃС‚Рё РїРёСЂРѕРІ...", cx, 130, cw, 520, true, true, hFontMono)
+	// СТРАНЦА 4: ДАГНОСТКА
+	lblDiagTitle := createLabel(hInstance, "🩺 Диагностика связности & Дебаггер памяти", cx, 36, cw, 28, hFontTitle)
+	hBtnRunDiag = createOwnerDrawButton(hInstance, "🔄 Комплексный тест сети", cx, 75, 240, 40, ID_BTN_RUN_DIAG, "primary")
+	hBtnDumpStack = createOwnerDrawButton(hInstance, "⚡ Снимок памяти и потоков", cx+250, 75, 240, 40, ID_BTN_DUMP_STACK, "normal")
+	hEditDiagLog = createEdit(hInstance, "Нажмите кнопку выше для комплексной проверки сети и доступности пиров...", cx, 130, cw, 520, true, true, hFontMono)
 
 	tabPages[4] = []uintptr{lblDiagTitle, hBtnRunDiag, hBtnDumpStack, hEditDiagLog}
-	writeDebug("buildModernUI: СЃС‚СЂР°РЅРёС†Р° 4 СЃРѕР·РґР°РЅР°")
+	writeDebug("buildModernUI: страница 4 создана")
 
-	// РЎРўР РђРќРР¦Рђ 5: Р–РЈР РќРђР› РЎРћР‘Р«РўРР™
-	lblLogTitle := createLabel(hInstance, "рџ“‹ Р–СѓСЂРЅР°Р» СЃРѕР±С‹С‚РёР№ РІ СЂРµР°Р»СЊРЅРѕРј РІСЂРµРјРµРЅРё", cx, 36, cw-260, 28, hFontTitle)
-	hBtnSaveLogs = createOwnerDrawButton(hInstance, "рџ’ѕ Р­РєСЃРїРѕСЂС‚ Р»РѕРіР°", cx+cw-250, 36, 120, 32, ID_BTN_SAVE_LOGS, "primary")
-	hBtnClrLogs = createOwnerDrawButton(hInstance, "рџ—‘ РћС‡РёСЃС‚РёС‚СЊ", cx+cw-120, 36, 120, 32, ID_BTN_CLR_LOGS, "normal")
+	// СТРАНЦА 5: ЖУРНАЛ СОБЫТЙ
+	lblLogTitle := createLabel(hInstance, "📋 Журнал событий в реальном времени", cx, 36, cw-260, 28, hFontTitle)
+	hBtnSaveLogs = createOwnerDrawButton(hInstance, "💾 Экспорт лога", cx+cw-250, 36, 120, 32, ID_BTN_SAVE_LOGS, "primary")
+	hBtnClrLogs = createOwnerDrawButton(hInstance, "🗑 Очистить", cx+cw-120, 36, 120, 32, ID_BTN_CLR_LOGS, "normal")
 	hEditLogs = createEdit(hInstance, "", cx, 75, cw, 575, true, true, hFontMono)
 
 	tabPages[5] = []uintptr{lblLogTitle, hBtnSaveLogs, hBtnClrLogs, hEditLogs}
-	writeDebug("buildModernUI: СЃС‚СЂР°РЅРёС†Р° 5 СЃРѕР·РґР°РЅР°")
+	writeDebug("buildModernUI: страница 5 создана")
 
-	// РЎРўРђР РўРћР’Р«Р™ Р­РљР РђРќ (STARTUP / SPLASH OVERLAY)
-	hSplashTitle = createLabel(hInstance, "рџ›ё NatBypass P2P Mesh Engine", cx+40, 50, cw-80, 36, hFontTitle)
-	hSplashSub = createLabel(hInstance, "РђРІС‚РѕРЅРѕРјРЅР°СЏ P2P mesh-СЃРµС‚СЊ РЅРѕРІРѕРіРѕ РїРѕРєРѕР»РµРЅРёСЏ вЂў РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ...", cx+40, 92, cw-80, 22, hFontNormal)
-	hSplashStep1 = createLabel(hInstance, "рџџў [ 1/4 ] рџ§№ РћС‡РёСЃС‚РєР° СЃС‚Р°СЂС‹С… СЃРµСЃСЃРёР№ Рё С„РѕРЅРѕРІС‹С… РїСЂРѕС†РµСЃСЃРѕРІ вЂ” Р—Р°РІРµСЂС€РµРЅРѕ", cx+60, 160, cw-120, 24, hFontHeader)
-	hSplashStep2 = createLabel(hInstance, "рџџЎ [ 2/4 ] рџ›ЎпёЏ РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ РІРёСЂС‚СѓР°Р»СЊРЅРѕРіРѕ СЃРµС‚РµРІРѕРіРѕ Р°РґР°РїС‚РµСЂР° Wintun...", cx+60, 205, cw-120, 24, hFontHeader)
-	hSplashStep3 = createLabel(hInstance, "рџџЎ [ 3/4 ] рџЊђ РћРїСЂРµРґРµР»РµРЅРёРµ РІРЅРµС€РЅРµРіРѕ IP Рё РїРѕСЃС‚РѕСЏРЅРЅРѕРіРѕ STUN СЃРѕРєРµС‚Р°...", cx+60, 250, cw-120, 24, hFontHeader)
-	hSplashStep4 = createLabel(hInstance, "рџџЎ [ 4/4 ] вљЎ РџРѕРґРєР»СЋС‡РµРЅРёРµ РєР°РЅР°Р»РѕРІ СЃРёРіРЅР°Р»РёР·Р°С†РёРё (MQTT + Telegram)...", cx+60, 295, cw-120, 24, hFontHeader)
-	hSplashBar = createLabel(hInstance, "рџљЂ Р—Р°РїСѓСЃРє СЃРµС‚РµРІРѕРіРѕ СЏРґСЂР°... РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РїРѕРґРѕР¶РґРёС‚Рµ...", cx+40, 380, cw-80, 26, hFontBold)
+	// СТАРТОВЫЙ ЭКРАН (STARTUP / SPLASH OVERLAY)
+	hSplashTitle = createLabel(hInstance, "🛸 NatBypass P2P Mesh Engine", cx+40, 50, cw-80, 36, hFontTitle)
+	hSplashSub = createLabel(hInstance, "Автономная P2P mesh-сеть нового поколения • нициализация...", cx+40, 92, cw-80, 22, hFontNormal)
+	hSplashStep1 = createLabel(hInstance, "🟢 [ 1/4 ] 🧹 Очистка старых сессий и фоновых процессов — Завершено", cx+60, 160, cw-120, 24, hFontHeader)
+	hSplashStep2 = createLabel(hInstance, "🟡 [ 2/4 ] 🛡️ нициализация виртуального сетевого адаптера Wintun...", cx+60, 205, cw-120, 24, hFontHeader)
+	hSplashStep3 = createLabel(hInstance, "🟡 [ 3/4 ] 🌐 Определение внешнего IP и постоянного STUN сокета...", cx+60, 250, cw-120, 24, hFontHeader)
+	hSplashStep4 = createLabel(hInstance, "🟡 [ 4/4 ] ⚡ Подключение каналов сигнализации (MQTT + Telegram)...", cx+60, 295, cw-120, 24, hFontHeader)
+	hSplashBar = createLabel(hInstance, "🚀 Запуск сетевого ядра... Пожалуйста, подождите...", cx+40, 380, cw-80, 26, hFontBold)
 
 	splashControls = []uintptr{hSplashTitle, hSplashSub, hSplashStep1, hSplashStep2, hSplashStep3, hSplashStep4, hSplashBar}
 
-	// РЎРєСЂС‹РІР°РµРј СЃРїР»СЌС€-РєРѕРЅС‚СЂРѕР»С‹ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ
+	// Скрываем сплэш-контролы по умолчанию
 	for _, h := range splashControls {
 		procShowWindow.Call(h, uintptr(SW_HIDE))
 	}
@@ -2804,9 +2804,9 @@ func buildModernUI(hInstance uintptr) {
 	fillConfigFields()
 	renderAWGTextFromUI()
 	applyDiagnosticsVisibility()
-	writeDebug("buildModernUI: fillConfigFields Рё renderAWGText Р·Р°РІРµСЂС€РµРЅС‹")
+	writeDebug("buildModernUI: fillConfigFields и renderAWGText завершены")
 
-	// РџРµСЂРµРєР»СЋС‡Р°РµРј РЅР° Р°РєС‚РёРІРЅСѓСЋ СЃС‚СЂР°РЅРёС†Сѓ 0 (РћР±Р·РѕСЂ) Рё СЃРєСЂС‹РІР°РµРј РѕСЃС‚Р°Р»СЊРЅС‹Рµ
+	// Переключаем на активную страницу 0 (Обзор) и скрываем остальные
 	selectTab(0)
 }
 
@@ -2893,13 +2893,13 @@ func selectTab(index int) {
 func toggleVPNManual() {
 	vpnConnected = !vpnConnected
 	if vpnConnected {
-		buttonLabels[ID_BTN_VPN] = fmt.Sprintf("рџџў РџРћР”РљР›Р®Р§Р•РќРћ (Р’Р°С€ IP: %s)", myVirtualIP)
+		buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 ПОДКЛЮЧЕНО (Ваш IP: %s)", myVirtualIP)
 		buttonTypes[ID_BTN_VPN] = "green"
-		addLog(fmt.Sprintf("рџџў РўСѓРЅРЅРµР»СЊ РІРєР»СЋС‡РµРЅ РІСЂСѓС‡РЅСѓСЋ (IP: %s/24)", myVirtualIP))
+		addLog(fmt.Sprintf("🟢 Туннель включен вручную (IP: %s/24)", myVirtualIP))
 	} else {
-		buttonLabels[ID_BTN_VPN] = "рџ”ґ РћРўРљР›Р®Р§Р•РќРћ (РќР°Р¶РјРёС‚Рµ РґР»СЏ РІРєР»СЋС‡РµРЅРёСЏ)"
+		buttonLabels[ID_BTN_VPN] = "🔴 ОТКЛЮЧЕНО (Нажмите для включения)"
 		buttonTypes[ID_BTN_VPN] = "red"
-		addLog("рџ”ґ РўСѓРЅРЅРµР»СЊ РѕС‚РєР»СЋС‡РµРЅ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј")
+		addLog("🔴 Туннель отключен пользователем")
 	}
 	procInvalidateRect.Call(hBtnVpn, 0, 1)
 }
@@ -2914,7 +2914,7 @@ func startEngineFromConfig(c *config.Config) {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 
-	writeDebug("Р—Р°РїСѓСЃРє С„РѕРЅРѕРІРѕРіРѕ СЃРµС‚РµРІРѕРіРѕ СЏРґСЂР°...")
+	writeDebug("Запуск фонового сетевого ядра...")
 	ctx, cancel := context.WithCancel(context.Background())
 	engineCtx = ctx
 	engineCancel = cancel
@@ -2923,7 +2923,7 @@ func startEngineFromConfig(c *config.Config) {
 	var err error
 	myPubKey, myPrivKey, err = crypto.GenerateKeyPair()
 	if err != nil {
-		addLog("вљ пёЏ РћС€РёР±РєР° РіРµРЅРµСЂР°С†РёРё РєР»СЋС‡РµР№: " + err.Error())
+		addLog("⚠️ Ошибка генерации ключей: " + err.Error())
 	}
 	pubHex := crypto.KeyToHex(myPubKey)
 	hn, _ := os.Hostname()
@@ -2931,7 +2931,7 @@ func startEngineFromConfig(c *config.Config) {
 		hn = "Win"
 	}
 	myDevID = fmt.Sprintf("%s-%s", hn, pubHex[:6])
-	writeDebug("РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ СѓСЃС‚СЂРѕР№СЃС‚РІР°: " + myDevID)
+	writeDebug("Сгенерирован идентификатор устройства: " + myDevID)
 
 	if wgKP, wgErr := wireguard.GenerateKeyPair(); wgErr == nil {
 		myWGPubKey = wgKP.PublicKey
@@ -2941,7 +2941,7 @@ func startEngineFromConfig(c *config.Config) {
 	registry = peer.NewRegistry()
 	registry.StartMonitor(ctx, 2*time.Minute)
 
-	// Р—Р°РїСѓСЃРє РІСЃС‚СЂРѕРµРЅРЅРѕРіРѕ СЃРѕРІСЂРµРјРµРЅРЅРѕРіРѕ Glassmorphism Web UI РјРіРЅРѕРІРµРЅРЅРѕ
+	// Запуск встроенного современного Glassmorphism Web UI мгновенно
 	webPort := 8080
 	if c.WebUI.Port > 0 {
 		webPort = c.WebUI.Port
@@ -2952,13 +2952,13 @@ func startEngineFromConfig(c *config.Config) {
 	uiServer.SetConfigPath(configPath)
 	go func() {
 		if err := uiServer.Start(ctx); err != nil {
-			writeDebug("Web UI СЃРµСЂРІРµСЂ: " + err.Error())
+			writeDebug("Web UI сервер: " + err.Error())
 		}
 	}()
 
-	// РЎРѕР·РґР°РЅРёРµ СЂРµР°Р»СЊРЅРѕРіРѕ UDP Hole Punching СЃРѕРєРµС‚Р°
-	// РџРѕСЂС‚ Р±РµСЂС‘С‚СЃСЏ РёР· РєРѕРЅС„РёРіР° (Network.UDPPort). РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ 0 = OS РЅР°Р·РЅР°С‡Р°РµС‚ СЃР»СѓС‡Р°Р№РЅС‹Р№ РїРѕСЂС‚.
-	// Р­С‚Рѕ РєСЂРёС‚РёС‡РЅРѕ С‡С‚РѕР±С‹ РЅРµ РєРѕРЅС„Р»РёРєС‚РѕРІР°С‚СЊ СЃ Р»РѕРєР°Р»СЊРЅС‹Рј AWG/WireGuard РЅР° РїРѕСЂС‚Сѓ 51820.
+	// Создание реального UDP Hole Punching сокета
+	// Порт берётся из конфига (Network.UDPPort). По умолчанию 0 = OS назначает случайный порт.
+	// Это критично чтобы не конфликтовать с локальным AWG/WireGuard на порту 51820.
 	udpListenPort := c.Network.UDPPort
 	puncher, err := network.NewUDPPuncher(udpListenPort, myDevID, c.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		atomic.AddUint64(&packetsRecvCount, 1)
@@ -2979,16 +2979,16 @@ func startEngineFromConfig(c *config.Config) {
 			p.Online = true
 			p.LastSeen = time.Now()
 			registry.Upsert(p)
-			msg := fmt.Sprintf("вљЎ [P2P Direct UDP] РџРћР”РўР’Р•Р Р–Р”Р•РќРћ! РџСЂСЏРјРѕР№ UDP-РїРёРЅРі РґРѕ %s (%s): %v! NAT РїСЂРѕР±РёС‚ СЃРѕРєРµС‚-РІ-СЃРѕРєРµС‚!", remoteDevID, fromAddr, p.Latency.Round(time.Millisecond))
+			msg := fmt.Sprintf("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг до %s (%s): %v! NAT пробит сокет-в-сокет!", remoteDevID, fromAddr, p.Latency.Round(time.Millisecond))
 			addLog(msg)
 			writeDebug(msg)
 		}
 	})
 	if err == nil {
 		udpPuncher = puncher
-		writeDebug(fmt.Sprintf("UDPPuncher СЃР»СѓС€Р°РµС‚ Р»РѕРєР°Р»СЊРЅС‹Р№ UDP РїРѕСЂС‚ :%d", puncher.LocalPort()))
+		writeDebug(fmt.Sprintf("UDPPuncher слушает локальный UDP порт :%d", puncher.LocalPort()))
 
-		// РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ РІС…РѕРґСЏС‰РёС… IP-РїР°РєРµС‚РѕРІ С‚СѓРЅРЅРµР»СЏ РЅР°РїСЂСЏРјСѓСЋ РІ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ Р°РґР°РїС‚РµСЂ Windows
+		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
 				puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			if len(payload) < 20 {
 				return
@@ -2997,7 +2997,7 @@ func startEngineFromConfig(c *config.Config) {
 			if srcIP != nil && srcIP.String() == myVirtualIP {
 				return // Защита от петель
 			}
-			// ВСЕ пакеты (TCP, UDP, ICMP и др.) записываем в Wintun —
+			//   (TCP, UDP, ICMP  .)   Wintun 
 			// Windows OS сама обрабатывает TCP handshake, UDP сокеты, ICMP Reply
 			if tunDev != nil {
 				_ = tunDev.WritePacket(payload)
@@ -3006,19 +3006,19 @@ func startEngineFromConfig(c *config.Config) {
 			}
 		})
 	} else {
-		writeDebug("РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ UDPPuncher: " + err.Error())
+		writeDebug("Ошибка создания UDPPuncher: " + err.Error())
 	}
 
-	// рџљЂ РђР’РўРћРњРђРўРР§Р•РЎРљРћР• РџРћР”РќРЇРўРР• Р’РР РўРЈРђР›Р¬РќРћР“Рћ РЎР•РўР•Р’РћР“Рћ РђР”РђРџРўР•Р Рђ WINDOWS (Wintun TUN)
+	// 🚀 АВТОМАТЧЕСКОЕ ПОДНЯТЕ ВРТУАЛЬНОГО СЕТЕВОГО АДАПТЕРА WINDOWS (Wintun TUN)
 	go func() {
 		tDev, tErr := tunnel.CreateAdapter("NatBypass", myVirtualIP)
 		if tErr == nil {
 			tunDev = tDev
-			msg := fmt.Sprintf("рџ›ЎпёЏ Р’РёСЂС‚СѓР°Р»СЊРЅС‹Р№ СЃРµС‚РµРІРѕР№ Р°РґР°РїС‚РµСЂ Windows 'NatBypass' Р°РєС‚РёРІРµРЅ! (IP: %s/24)", myVirtualIP)
+			msg := fmt.Sprintf("🛡️ Виртуальный сетевой адаптер Windows 'NatBypass' активен! (IP: %s/24)", myVirtualIP)
 			addLog(msg)
 			writeDebug(msg)
 
-			// Р¤РѕРЅРѕРІС‹Р№ РїРѕС‚РѕРє С‡С‚РµРЅРёСЏ РёСЃС…РѕРґСЏС‰РёС… IP-РїР°РєРµС‚РѕРІ РёР· СЃРµС‚РµРІРѕРіРѕ СЃС‚РµРєР° Windows Рё РѕС‚РїСЂР°РІРєР° РїРёСЂР°Рј
+			// Фоновый поток чтения исходящих IP-пакетов из сетевого стека Windows и отправка пирам
 			for {
 				select {
 				case <-ctx.Done():
@@ -3036,7 +3036,7 @@ func startEngineFromConfig(c *config.Config) {
 					destStr := destIP.String()
 					writeDebug(fmt.Sprintf("📤 Wintun TX: %d bytes to %s", len(packet), destStr))
 
-					// РРіРЅРѕСЂРёСЂСѓРµРј РјСѓР»СЊС‚РёРєР°СЃС‚ Windows (224.0.0.x, 239.255.x.x, 255.255.255.255) Рё РїРµС‚Р»Рё
+					// гнорируем мультикаст Windows (224.0.0.x, 239.255.x.x, 255.255.255.255) и петли
 					if destIP.IsMulticast() || destIP.IsUnspecified() || destStr == "255.255.255.255" || destStr == myVirtualIP || destStr == "100.64.200.255" || destStr == "100.64.200.0" {
 						continue
 					}
@@ -3045,7 +3045,7 @@ func startEngineFromConfig(c *config.Config) {
 						peers := registry.List()
 						var targetPeer *peer.Peer
 
-						// 1. РџСЂСЏРјРѕРµ СЃРѕРІРїР°РґРµРЅРёРµ РїРѕ VirtualIP (РЅР°РїСЂРёРјРµСЂ, 100.64.200.2)
+						// 1. Прямое совпадение по VirtualIP (например, 100.64.200.2)
 						for _, p := range peers {
 							if p.DeviceID != myDevID && p.VirtualIP == destStr {
 								targetPeer = p
@@ -3053,7 +3053,7 @@ func startEngineFromConfig(c *config.Config) {
 							}
 						}
 
-						// 2. РњР°СЂС€СЂСѓС‚ Рє РїРѕРґСЃРµС‚Рё РїРёСЂР° (РЅР°РїСЂРёРјРµСЂ, 192.168.1.0/24 РёР»Рё 10.0.0.0/8)
+						// 2. Маршрут к подсети пира (например, 192.168.1.0/24 или 10.0.0.0/8)
 						if targetPeer == nil {
 							for _, p := range peers {
 								if p.DeviceID == myDevID {
@@ -3071,14 +3071,14 @@ func startEngineFromConfig(c *config.Config) {
 							}
 						}
 
-						// 3. РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ С‡РµСЂРµР· Exit Node
+						// 3. Маршрутизация через Exit Node
 						if targetPeer == nil && activeExitNodeID != "" {
 							if ep, ok := registry.Get(activeExitNodeID); ok && ep.Online {
 								targetPeer = ep
 							}
 						}
 
-						// 4. Fallback РґР»СЏ mesh-СЃРµС‚Рё РёР· 1 СѓРґР°Р»РµРЅРЅРѕРіРѕ СѓР·Р»Р° (С‚РѕР»СЊРєРѕ РґР»СЏ 100.64.200.x)
+						// 4. Fallback для mesh-сети из 1 удаленного узла (только для 100.64.200.x)
 						if targetPeer == nil && len(peers) == 1 && strings.HasPrefix(destStr, "100.64.200.") {
 							if peers[0].DeviceID != myDevID {
 								targetPeer = peers[0]
@@ -3098,7 +3098,7 @@ func startEngineFromConfig(c *config.Config) {
 								_ = udpPuncher.SendDataPacket(targetPeer.STUNAddr, packet)
 								atomic.AddUint64(&packetsSentCount, 1)
 							}
-							// РђСЃРёРЅС…СЂРѕРЅРЅС‹Р№ РЅРµР±Р»РѕРєРёСЂСѓСЋС‰РёР№ СЂРµР»РµР№ С‡РµСЂРµР· MQTT
+							// Асинхронный неблокирующий релей через MQTT
 							if activeMQTT != nil {
 								pktCopy := make([]byte, len(packet))
 								copy(pktCopy, packet)
@@ -3112,7 +3112,7 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}
 		} else {
-			warnMsg := fmt.Sprintf("вљ пёЏ Wintun Р°РґР°РїС‚РµСЂ: %s (Р”Р»СЏ РїРѕР»РЅРѕРіРѕ ping Р·Р°РїСѓСЃС‚РёС‚Рµ РѕС‚ РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°)", tErr.Error())
+			warnMsg := fmt.Sprintf("⚠️ Wintun адаптер: %s (Для полного ping запустите от Администратора)", tErr.Error())
 			addLog(warnMsg)
 			writeDebug(warnMsg)
 		}
@@ -3149,7 +3149,7 @@ func startEngineFromConfig(c *config.Config) {
 	}
 	modeStr := "parallel"
 	if tgEnabled && !mqEnabled {
-		modeStr = "parallel" // РђРІС‚Рѕ-РІРєР»СЋС‡РµРЅРёРµ MQTT РґР»СЏ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРЅРѕР№ P2P РґРѕСЃС‚Р°РІРєРё Р±РµР· РѕРіСЂР°РЅРёС‡РµРЅРёР№ TG
+		modeStr = "parallel" // Авто-включение MQTT для гарантированной P2P доставки без ограничений TG
 	} else if mqEnabled && !tgEnabled {
 		modeStr = "mqtt_only"
 	}
@@ -3158,24 +3158,24 @@ func startEngineFromConfig(c *config.Config) {
 
 	ipDisc = network.NewDiscoverer(c.Network.IPApis, 3*time.Second)
 
-	// РђСЃРёРЅС…СЂРѕРЅРЅРѕРµ РѕРїСЂРµРґРµР»РµРЅРёРµ IP Рё STUN РЅР° РѕСЃРЅРѕРІРЅРѕРј РїРѕСЃС‚РѕСЏРЅРЅРѕРј СЃРѕРєРµС‚Рµ
+	// Асинхронное определение IP и STUN на основном постоянном сокете
 	go func() {
-		writeDebug("РћРїСЂРµРґРµР»РµРЅРёРµ РІРЅРµС€РЅРµРіРѕ IP Рё STUN СЃРѕРєРµС‚Р°...")
+		writeDebug("Определение внешнего IP и STUN сокета...")
 		if ip, err := ipDisc.GetPublicIPCached(ctx, 5*time.Minute); err == nil {
 			myPublicIP = ip.String()
-			writeDebug("Р’РЅРµС€РЅРёР№ РїСѓР±Р»РёС‡РЅС‹Р№ IP: " + myPublicIP)
+			writeDebug("Внешний публичный IP: " + myPublicIP)
 		}
 		if udpPuncher != nil {
 			if extIP, port, err := udpPuncher.DiscoverMappedAddress(ctx); err == nil {
 				mySTUNAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
-				writeDebug("STUN СЃРѕРєРµС‚ РЅР° РїРѕСЃС‚РѕСЏРЅРЅРѕРј РїРѕСЂС‚Сѓ: " + mySTUNAddr)
+				writeDebug("STUN сокет на постоянном порту: " + mySTUNAddr)
 			}
 		}
-		addLog(fmt.Sprintf("вњ“ РЇРґСЂРѕ Р·Р°РїСѓС‰РµРЅРѕ. РЈСЃС‚СЂРѕР№СЃС‚РІРѕ: %s | Р’РёСЂС‚СѓР°Р»СЊРЅС‹Р№ IP: %s | STUN: %s", myDevID, myVirtualIP, mySTUNAddr))
+		addLog(fmt.Sprintf("✓ Ядро запущено. Устройство: %s | Виртуальный IP: %s | STUN: %s", myDevID, myVirtualIP, mySTUNAddr))
 		triggerPublish()
 	}()
 
-	// Р¤РѕРЅРѕРІС‹Р№ С†РёРєР» РїСѓР±Р»РёРєР°С†РёРё Р°РЅРѕРЅСЃРѕРІ (РєР°Р¶РґС‹Рµ 10 СЃРµРєСѓРЅРґ)
+	// Фоновый цикл публикации анонсов (каждые 10 секунд)
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -3191,8 +3191,8 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}()
 
-	// Р¤РѕРЅРѕРІС‹Р№ С†РёРєР» РїСЂСЏРјРѕР№ РѕС‚РїСЂР°РІРєРё UDP Hole Punch РїР°РєРµС‚РѕРІ (РєР°Р¶РґС‹Рµ 15 СЃРµРєСѓРЅРґ)
-	// РџСЂРѕРІРµСЂСЏРµРј С‚РѕР»СЊРєРѕ В«Р»СѓС‡С€РёР№В» СЌРЅРґРїРѕРёРЅС‚ РїРёСЂР° вЂ” РЅРµ СЂР°СЃСЃС‹Р»Р°РµРј 5 РїР°РєРµС‚РѕРІ РѕРґРЅРѕРІСЂРµРјРµРЅРЅРѕ
+	// Фоновый цикл прямой отправки UDP Hole Punch пакетов (каждые 15 секунд)
+	// Проверяем только «лучший» эндпоинт пира — не рассылаем 5 пакетов одновременно
 	go func() {
 		probeTicker := time.NewTicker(45 * time.Second)
 		defer probeTicker.Stop()
@@ -3204,8 +3204,8 @@ func startEngineFromConfig(c *config.Config) {
 				if udpPuncher != nil && registry != nil {
 					peers := registry.List()
 					for _, p := range peers {
-						// РџСЂРёРѕСЂРёС‚РµС‚: ActiveEndpoint > STUNAddr > LocalAddr
-						// РќРµ С€Р»С‘Рј СЃСЂР°Р·Сѓ РїРѕ 5 Р°РґСЂРµСЃР°Рј вЂ” СЌС‚Рѕ СЃРѕР·РґР°С‘С‚ С€С‚РѕСЂРј
+						// Приоритет: ActiveEndpoint > STUNAddr > LocalAddr
+						// Не шлём сразу по 5 адресам — это создаёт шторм
 						target := p.ActiveEndpoint
 						if target == "" {
 							target = p.STUNAddr
@@ -3222,7 +3222,7 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}()
 
-	// Р¤РѕРЅРѕРІС‹Р№ РјРѕРЅРёС‚РѕСЂ РЅРµР°РєС‚РёРІРЅС‹С… СѓР·Р»РѕРІ
+	// Фоновый монитор неактивных узлов
 	go func() {
 		monitorTicker := time.NewTicker(5 * time.Second)
 		defer monitorTicker.Stop()
@@ -3239,13 +3239,13 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}()
 
-	// Р¤РѕРЅРѕРІС‹Р№ Р»РѕРєР°Р»СЊРЅС‹Р№ С€РёСЂРѕРєРѕРІРµС‰Р°С‚РµР»СЊРЅС‹Р№ РїРѕРёСЃРє РїРёСЂРѕРІ РІ LAN
+	// Фоновый локальный широковещательный поиск пиров в LAN
 	startLANBroadcastDiscovery(ctx)
 
-	addLog("рџ›ё NatBypass P2P Mesh РґРІРёР¶РѕРє РіРѕС‚РѕРІ Рє СЂР°Р±РѕС‚Рµ")
+	addLog("🛸 NatBypass P2P Mesh движок готов к работе")
 }
 
-// startLANBroadcastDiscovery РјРіРЅРѕРІРµРЅРЅРѕ РЅР°С…РѕРґРёС‚ РІСЃРµ СѓСЃС‚СЂРѕР№СЃС‚РІР° NatBypass РІ Р»РѕРєР°Р»СЊРЅРѕР№ СЃРµС‚Рё / Wi-Fi Р±РµР· СЃРµСЂРІРµСЂРѕРІ
+// startLANBroadcastDiscovery мгновенно находит все устройства NatBypass в локальной сети / Wi-Fi без серверов
 func startLANBroadcastDiscovery(ctx context.Context) {
 	broadcastAddr, err := net.ResolveUDPAddr("udp4", "255.255.255.255:51821")
 	if err != nil {
@@ -3259,14 +3259,14 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 
 	listenConn, err := net.ListenUDP("udp4", listenAddr)
 	if err != nil {
-		writeDebug("LAN Broadcast СЃР»СѓС€Р°С‚РµР»СЊ Р·Р°РЅСЏС‚ РёР»Рё РЅРµРґРѕСЃС‚СѓРїРµРЅ: " + err.Error())
+		writeDebug("LAN Broadcast слушатель занят или недоступен: " + err.Error())
 		return
 	}
 
-	writeDebug("рџЏ  LAN Broadcast Discovery Р·Р°РїСѓС‰РµРЅ РЅР° РїРѕСЂС‚Сѓ :51821 (РјРіРЅРѕРІРµРЅРЅС‹Р№ Р»РѕРєР°Р»СЊРЅС‹Р№ РїРѕРёСЃРє)")
-	addLog("рџЏ  Р—Р°РїСѓС‰РµРЅ Р»РѕРєР°Р»СЊРЅС‹Р№ LAN РїРѕРёСЃРє РїРёСЂРѕРІ (РїРѕСЂС‚ :51821)")
+	writeDebug("🏠 LAN Broadcast Discovery запущен на порту :51821 (мгновенный локальный поиск)")
+	addLog("🏠 Запущен локальный LAN поиск пиров (порт :51821)")
 
-	// 1. РџРѕС‚РѕРє СЃР»СѓС€Р°С‚РµР»СЏ Р»РѕРєР°Р»СЊРЅС‹С… LAN Р°РЅРѕРЅСЃРѕРІ
+	// 1. Поток слушателя локальных LAN анонсов
 	go func() {
 		defer listenConn.Close()
 		buf := make([]byte, 4096)
@@ -3355,7 +3355,7 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					if nick != "" {
 						nameInfo = fmt.Sprintf("%s (%s)", nick, p.DeviceID)
 					}
-					msg := fmt.Sprintf("рџ“Ґ [LAN Broadcast] РњРіРЅРѕРІРµРЅРЅРѕ РѕР±РЅР°СЂСѓР¶РµРЅ Р»РѕРєР°Р»СЊРЅС‹Р№ РїРёСЂ %s (%s)", nameInfo, lanAddr)
+					msg := fmt.Sprintf("📥 [LAN Broadcast] Мгновенно обнаружен локальный пир %s (%s)", nameInfo, lanAddr)
 					addLog(msg)
 					writeDebug(msg)
 
@@ -3368,7 +3368,7 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 		}
 	}()
 
-	// 2. РџРµСЂРёРѕРґРёС‡РµСЃРєР°СЏ РѕС‚РїСЂР°РІРєР° Р°РЅРѕРЅСЃР° РІ Р»РѕРєР°Р»СЊРЅСѓСЋ СЃРµС‚СЊ РєР°Р¶РґС‹Рµ 30 СЃРµРєСѓРЅРґ (РЅРµ 4 СЃ вЂ” С‡С‚РѕР±С‹ РЅРµ РїРµСЂРµРіСЂСѓР¶Р°С‚СЊ СЂРѕСѓС‚РµСЂ)
+	// 2. Периодическая отправка анонса в локальную сеть каждые 30 секунд (не 4 с — чтобы не перегружать роутер)
 	go func() {
 		ticker := time.NewTicker(120 * time.Second)
 		defer ticker.Stop()
@@ -3489,7 +3489,7 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 }
 
 func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mqBroker, mqTopic string) {
-	// РџСЂРё РїРµСЂРµСЃС‚СЂРѕР№РєРµ РєР°РЅР°Р»РѕРІ РѕС‡РёС‰Р°РµРј СЃРїРёСЃРѕРє РїРёСЂРѕРІ, С‡С‚РѕР±С‹ РёСЃРєР»СЋС‡РёС‚СЊ РїРѕРєР°Р· РЅРµР°РєС‚СѓР°Р»СЊРЅС‹С… СѓСЃС‚СЂРѕР№СЃС‚РІ
+	// При перестройке каналов очищаем список пиров, чтобы исключить показ неактуальных устройств
 	if registry != nil {
 		registry.ClearAll()
 	}
@@ -3510,34 +3510,34 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 	useMQTT := true
 	useTG := false
 
-	if modeText == "tg_only" || strings.Contains(modeText, "РўРѕР»СЊРєРѕ Telegram") {
+	if modeText == "tg_only" || strings.Contains(modeText, "Только Telegram") {
 		useMQTT = false
 		useTG = true
 		sigMode = "tg_only"
-		activeChannelStr = "РўРѕР»СЊРєРѕ Telegram Bot API"
-	} else if modeText == "mqtt_only" || strings.Contains(modeText, "РўРѕР»СЊРєРѕ MQTT") {
+		activeChannelStr = "Только Telegram Bot API"
+	} else if modeText == "mqtt_only" || strings.Contains(modeText, "Только MQTT") {
 		useMQTT = true
 		useTG = false
 		sigMode = "mqtt_only"
-		activeChannelStr = "РўРѕР»СЊРєРѕ MQTT (" + mqBroker + ")"
+		activeChannelStr = "Только MQTT (" + mqBroker + ")"
 	} else {
 		useMQTT = true
 		useTG = tgToken != "" && tgChat != ""
 		sigMode = "parallel"
-		activeChannelStr = "РџР°СЂР°Р»Р»РµР»СЊРЅРѕ: MQTT + Telegram"
+		activeChannelStr = "Параллельно: MQTT + Telegram"
 	}
 
-	writeDebug(fmt.Sprintf("РџРµСЂРµСЃС‚СЂРѕР№РєР° СЃРёРіРЅР°Р»СЊРЅС‹С… РєР°РЅР°Р»РѕРІ: Р РµР¶РёРј=%s, useTG=%t, useMQTT=%t", sigMode, useTG, useMQTT))
+	writeDebug(fmt.Sprintf("Перестройка сигнальных каналов: Режим=%s, useTG=%t, useMQTT=%t", sigMode, useTG, useMQTT))
 
 	if useTG && (tgToken == "" || tgChat == "") {
-		addLog("вљ пёЏ Telegram РІС‹Р±СЂР°РЅ РІ СЂРµР¶РёРјРµ, РЅРѕ С‚РѕРєРµРЅ РёР»Рё Chat ID РЅРµ Р·Р°РїРѕР»РЅРµРЅС‹!")
+		addLog("⚠️ Telegram выбран в режиме, но токен или Chat ID не заполнены!")
 	}
 
 	if useTG && tgToken != "" && tgChat != "" {
 		tgCh := signaling.NewTelegramChannel(tgToken, tgChat, "")
 		sigChannels = append(sigChannels, tgCh)
-		addLog(fmt.Sprintf("вњ“ РџРѕРґРєР»СЋС‡РµРЅ СЃРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р»: Telegram (Р§Р°С‚: %s)", tgChat))
-		writeDebug(fmt.Sprintf("Р—Р°РїСѓСЃРє СЃР»СѓС€Р°С‚РµР»СЏ Telegram (Chat: %s)...", tgChat))
+		addLog(fmt.Sprintf("✓ Подключен сигнальный канал: Telegram (Чат: %s)", tgChat))
+		writeDebug(fmt.Sprintf("Запуск слушателя Telegram (Chat: %s)...", tgChat))
 		startChannelReceiver(ctx, tgCh, "Telegram")
 	}
 
@@ -3545,11 +3545,11 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 		mqttCh := signaling.NewMQTTChannel(mqBroker, mqTopic, myDevID+"-"+crypto.KeyToHex(myPubKey)[:4], "", "")
 		activeMQTT = mqttCh
 		sigChannels = append(sigChannels, mqttCh)
-		addLog(fmt.Sprintf("вњ“ РџРѕРґРєР»СЋС‡РµРЅ СЃРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р»: MQTT (%s / С‚РѕРїРёРє: %s)", mqBroker, mqTopic))
-		writeDebug(fmt.Sprintf("Р—Р°РїСѓСЃРє СЃР»СѓС€Р°С‚РµР»СЏ MQTT (%s, Topic: %s)...", mqBroker, mqTopic))
+		addLog(fmt.Sprintf("✓ Подключен сигнальный канал: MQTT (%s / топик: %s)", mqBroker, mqTopic))
+		writeDebug(fmt.Sprintf("Запуск слушателя MQTT (%s, Topic: %s)...", mqBroker, mqTopic))
 		startChannelReceiver(ctx, mqttCh, "MQTT")
 
-		// Р‘С‹СЃС‚СЂС‹Р№ СЂРµР»РµР№ РїР°РєРµС‚РѕРІ С‚СѓРЅРЅРµР»СЏ С‡РµСЂРµР· MQTT (РіР°СЂР°РЅС‚РёСЂСѓРµС‚ СЃРєРІРѕР·РЅРѕР№ РїРёРЅРі РїСЂРё Р»СЋР±РѕРј С‚РёРїРµ NAT/VPN)
+		// Быстрый релей пакетов туннеля через MQTT (гарантирует сквозной пинг при любом типе NAT/VPN)
 		mqttCh.SubscribeTunnelData(myDevID, func(pkt []byte) {
 			if len(pkt) < 20 {
 				return
@@ -3559,13 +3559,13 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 			if srcIP == nil || destIP == nil {
 				return
 			}
-			// Р—Р°С‰РёС‚Р° РѕС‚ РїРµС‚РµР»СЊ
+			// Защита от петель
 			if srcIP.String() == myVirtualIP {
 				return
 			}
 			_ = destIP
 
-			// Р’СЃРµ РїР°РєРµС‚С‹ РёРґСѓС‚ РїСЂСЏРјРѕ РІ Wintun вЂ” OS СЃР°РјР° РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ ICMP, TCP, UDP
+			// Все пакеты идут прямо в Wintun — OS сама обрабатывает ICMP, TCP, UDP
 			atomic.AddUint64(&packetsRecvCount, 1)
 			if tunDev != nil {
 				_ = tunDev.WritePacket(pkt)
@@ -3584,7 +3584,7 @@ func getLocalLANIP() string {
 			if ip4 := ipNet.IP.To4(); ip4 != nil {
 				ipStr := ip4.String()
 				if strings.HasPrefix(ipStr, "10.200.") {
-					continue // РџСЂРѕРїСѓСЃРєР°РµРј СЃРѕР±СЃС‚РІРµРЅРЅС‹Р№ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ mesh-РёРЅС‚РµСЂС„РµР№СЃ NatBypass
+					continue // Пропускаем собственный виртуальный mesh-интерфейс NatBypass
 				}
 				if strings.HasPrefix(ipStr, "192.168.") || strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "172.") {
 					return ipStr
@@ -3598,8 +3598,8 @@ func getLocalLANIP() string {
 func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, name string) {
 	inCh, err := ch.Receive(ctx)
 	if err != nil {
-		addLog(fmt.Sprintf("вќЊ РћС€РёР±РєР° Р·Р°РїСѓСЃРєР° СЃР»СѓС€Р°С‚РµР»СЏ %s: %s", name, err.Error()))
-		writeDebug(fmt.Sprintf("РћС€РёР±РєР° СЃР»СѓС€Р°С‚РµР»СЏ %s: %s", name, err.Error()))
+		addLog(fmt.Sprintf("❌ Ошибка запуска слушателя %s: %s", name, err.Error()))
+		writeDebug(fmt.Sprintf("Ошибка слушателя %s: %s", name, err.Error()))
 		return
 	}
 
@@ -3663,8 +3663,8 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					if p.Nickname != "" {
 						nameInfo = fmt.Sprintf("%s (%s)", p.Nickname, p.DeviceID)
 					}
-					writeDebug(fmt.Sprintf("РЈР·РµР» %s РѕС‚РєР»СЋС‡РёР»СЃСЏ РѕС‚ СЃРµС‚Рё (Leave beacon)", nameInfo))
-					addLog(fmt.Sprintf("рџ”ґ РЈР·РµР» %s РѕС‚РєР»СЋС‡РёР»СЃСЏ РѕС‚ СЃРµС‚Рё", nameInfo))
+					writeDebug(fmt.Sprintf("Узел %s отключился от сети (Leave beacon)", nameInfo))
+					addLog(fmt.Sprintf("🔴 Узел %s отключился от сети", nameInfo))
 					if registry != nil {
 						registry.Delete(p.DeviceID)
 					}
@@ -3694,18 +3694,18 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					}
 					activeExitNodeID = ""
 					activeExitVIP = ""
-					buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "рџЊђ Р’С‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚: Р›РѕРєР°Р»СЊРЅС‹Р№ (РћС‚РєР»СЋС‡РµРЅ)"
+					buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
 					buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
 					if hBtnExitNodeSelect != 0 {
 						procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 					}
 
-					alertMsg := fmt.Sprintf("вљ пёЏ Р’РЅРёРјР°РЅРёРµ: РЈСЃС‚СЂРѕР№СЃС‚РІРѕ %s Р·Р°РїСЂРµС‚РёР»Рѕ РІС‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· СЃРµР±СЏ. РњР°СЂС€СЂСѓС‚ СЃР±СЂРѕС€РµРЅ РЅР° СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ РёРЅС‚РµСЂРЅРµС‚.", peerName)
+					alertMsg := fmt.Sprintf("⚠️ Внимание: Устройство %s запретило выход в интернет через себя. Маршрут сброшен на стандартный интернет.", peerName)
 					addLog(alertMsg)
 					writeDebug(alertMsg)
 
 					go func(msgText string) {
-						titlePtr, _ := windows.UTF16PtrFromString("NatBypass вЂ” РР·РјРµРЅРµРЅРёРµ РјР°СЂС€СЂСѓС‚Р°")
+						titlePtr, _ := windows.UTF16PtrFromString("NatBypass — зменение маршрута")
 						textPtr, _ := windows.UTF16PtrFromString(msgText)
 						procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(textPtr)), uintptr(unsafe.Pointer(titlePtr)), 0x00000030 /* MB_ICONWARNING */ | 0x00040000 /* MB_TOPMOST */)
 					}(alertMsg)
@@ -3749,11 +3749,11 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				if nick != "" {
 					nameInfo = fmt.Sprintf("%s (%s)", nick, p.DeviceID)
 				}
-				msg := fmt.Sprintf("рџ“Ґ [%s] РЎРёРіРЅР°Р» РѕС‚ %s (VIP: %s | STUN: %s | LAN: %s)", name, nameInfo, peerVIP, p.STUNAddr, p.LocalAddr)
+				msg := fmt.Sprintf("📥 [%s] Сигнал от %s (VIP: %s | STUN: %s | LAN: %s)", name, nameInfo, peerVIP, p.STUNAddr, p.LocalAddr)
 				addLog(msg)
 				writeDebug(msg)
 
-				// РќРµРјРµРґР»РµРЅРЅРѕ РїРѕСЃС‹Р»Р°РµРј РїСЂСЏРјРѕР№ UDP-РїР°РєРµС‚ РґР»СЏ РїСЂРѕР±РёС‚РёСЏ СЃРѕРєРµС‚Р°
+				// Немедленно посылаем прямой UDP-пакет для пробития сокета
 				if udpPuncher != nil {
 					if p.STUNAddr != "" {
 						_ = udpPuncher.SendHolePunchProbe(p.STUNAddr)
@@ -3770,14 +3770,14 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					}
 				}
 
-				// РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРѕРµ РґРёРЅР°РјРёС‡РµСЃРєРѕРµ P2P СЃРѕРіР»Р°СЃРѕРІР°РЅРёРµ IP-Р°РґСЂРµСЃРѕРІ
+				// Автоматическое динамическое P2P согласование IP-адресов
 				negotiateVirtualIP()
 			}
 		}
 	}()
 }
 
-// handleICMPEcho РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ РІС…РѕРґСЏС‰РёР№ ICMP Echo Request (Type 8, Code 0)
+// handleICMPEcho обрабатывает входящий ICMP Echo Request (Type 8, Code 0)
 func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
 	if len(payload) < 20 {
 		return
@@ -3831,18 +3831,18 @@ func unusedOldICMP(payload []byte) {
 		return
 	}
 
-	// Р—Р°С‰РёС‚Р° РѕС‚ РїРµС‚РµР»СЊ: РёРіРЅРѕСЂРёСЂСѓРµРј РїР°РєРµС‚С‹ РѕС‚ СЃРѕР±СЃС‚РІРµРЅРЅРѕРіРѕ Р°РґСЂРµСЃР°
+	// Защита от петель: игнорируем пакеты от собственного адреса
 	if srcIP.String() == myVirtualIP {
 		return
 	}
 
-	// РџСЂРёРЅРёРјР°РµРј С‚РѕР»СЊРєРѕ РїР°РєРµС‚С‹, Р°РґСЂРµСЃРѕРІР°РЅРЅС‹Рµ РЅР° РЅР°С€ С‚РµРєСѓС‰РёР№ VIP РёР»Рё Р±Р°Р·РѕРІС‹Р№ 100.64.200.1
+	// Принимаем только пакеты, адресованные на наш текущий VIP или базовый 100.64.200.1
 	if destIP.String() != myVirtualIP && destIP.String() != "100.64.200.1" {
 		return
 	}
 
-	// Р•СЃР»Рё РїР°РєРµС‚ Р±С‹Р» Р°РґСЂРµСЃРѕРІР°РЅ 100.64.200.1 РґРѕ РґРёРЅР°РјРёС‡РµСЃРєРѕРіРѕ РїРµСЂРµСЃРѕРіР»Р°СЃРѕРІР°РЅРёСЏ Р°РґСЂРµСЃРѕРІ,
-	// РєРѕСЂСЂРµРєС‚РёСЂСѓРµРј Destination IP РЅР° Р°РєС‚СѓР°Р»СЊРЅС‹Р№ myVirtualIP Рё РїРµСЂРµСЃС‡РёС‚С‹РІР°РµРј IPv4 РєРѕРЅС‚СЂРѕР»СЊРЅСѓСЋ СЃСѓРјРјСѓ
+	// Если пакет был адресован 100.64.200.1 до динамического пересогласования адресов,
+	// корректируем Destination IP на актуальный myVirtualIP и пересчитываем IPv4 контрольную сумму
 	if destIP.String() != myVirtualIP {
 		myIPBytes := net.ParseIP(myVirtualIP).To4()
 		if myIPBytes != nil {
@@ -3857,13 +3857,13 @@ func unusedOldICMP(payload []byte) {
 
 	atomic.AddUint64(&packetsRecvCount, 1)
 
-	// Р—Р°РїРёСЃС‹РІР°РµРј РїР°РєРµС‚ РІ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ Р°РґР°РїС‚РµСЂ Wintun РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё СЃРµС‚РµРІС‹Рј СЃС‚РµРєРѕРј Windows
+	// Записываем пакет в виртуальный адаптер Wintun для обработки сетевым стеком Windows
 	if tunDev != nil {
 		_ = tunDev.WritePacket(payload)
 	}
 }
 
-// negotiateVirtualIP РґРёРЅР°РјРёС‡РµСЃРєРё СЂР°Р·СЂРµС€Р°РµС‚ РєРѕРЅС„Р»РёРєС‚С‹ IP Р°РґСЂРµСЃРѕРІ РјРµР¶РґСѓ СѓР·Р»Р°РјРё
+// negotiateVirtualIP динамически разрешает конфликты IP адресов между узлами
 func negotiateVirtualIP() {
 	if registry == nil {
 		return
@@ -3889,7 +3889,7 @@ func negotiateVirtualIP() {
 					break
 				}
 			}
-			logMsg := fmt.Sprintf("рџ¤ќ [P2P РЎРѕРіР»Р°СЃРѕРІР°РЅРёРµ] РЈСЂРµРіСѓР»РёСЂРѕРІР°РЅ РєРѕРЅС„Р»РёРєС‚ IP: РЈСЃС‚СЂРѕР№СЃС‚РІРѕ %s СѓСЃС‚СѓРїРёР»Рѕ %s Рё РїСЂРёРЅСЏР»Рѕ %s (Сѓ РїРёСЂР° %s: %s)", myDevID, oldIP, myVirtualIP, conflictDev, oldIP)
+			logMsg := fmt.Sprintf("🤝 [P2P Согласование] Урегулирован конфликт IP: Устройство %s уступило %s и приняло %s (у пира %s: %s)", myDevID, oldIP, myVirtualIP, conflictDev, oldIP)
 			addLog(logMsg)
 			writeDebug(logMsg)
 
@@ -3914,7 +3914,7 @@ func triggerPublish() {
 
 func publishCurrentState(ctx context.Context) {
 	ipStr := myPublicIP
-	if ipStr == "" || ipStr == "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ..." {
+	if ipStr == "" || ipStr == "Определяется..." {
 		ipStr = "0.0.0.0"
 	}
 
@@ -4034,7 +4034,7 @@ func publishCurrentState(ctx context.Context) {
 		uiServer.SetDeviceName(myNick)
 	}
 
-	// рџ”Ќ РџСЂРѕРІРµСЂСЏРµРј, РµСЃС‚СЊ Р»Рё Р°РєС‚РёРІРЅС‹Рµ РїРѕРґРєР»СЋС‡РµРЅРЅС‹Рµ РїРёСЂС‹ (РїСЂСЏРјРѕР№ P2P РёР»Рё СЃРІРµР¶РёР№ РјР°СЏРє < 30 СЃРµРє)
+	// 🔍 Проверяем, есть ли активные подключенные пиры (прямой P2P или свежий маяк < 30 сек)
 	hasDirectConnectedPeers := false
 	if registry != nil {
 		for _, p := range registry.List() {
@@ -4048,21 +4048,21 @@ func publishCurrentState(ctx context.Context) {
 	if hasDirectConnectedPeers {
 		if !tgMuted {
 			tgMuted = true
-			msg := "рџ’¤ [Telegram] РџСЂСЏРјРѕРµ СЃРѕРµРґРёРЅРµРЅРёРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРѕ! РћС‚РїСЂР°РІРєР° РІ Telegram РїСЂРёРѕСЃС‚Р°РЅРѕРІР»РµРЅР° РґР»СЏ СЌРєРѕРЅРѕРјРёРё СЃРѕРѕР±С‰РµРЅРёР№."
+			msg := "💤 [Telegram] Прямое соединение установлено! Отправка в Telegram приостановлена для экономии сообщений."
 			addLog(msg)
 			writeDebug(msg)
 		}
 	} else {
 		if tgMuted {
 			tgMuted = false
-			msg := "вљЎ [Telegram] РЎРІСЏР·СЊ СЃ РїРёСЂР°РјРё РѕР±РѕСЂРІР°Р»Р°СЃСЊ! Telegram РєР°РЅР°Р» РІРѕР·РѕР±РЅРѕРІРёР» РѕС‚РїСЂР°РІРєСѓ РјР°СЏРєРѕРІ."
+			msg := "⚡ [Telegram] Связь с пирами оборвалась! Telegram канал возобновил отправку маяков."
 			addLog(msg)
 			writeDebug(msg)
 		}
 	}
 
 	for _, ch := range sigChannels {
-		// Р•СЃР»Рё РїРёСЂС‹ РїРѕРґРєР»СЋС‡РµРЅС‹ Рё РєР°РЅР°Р» Telegram вЂ” РЅРµ СЃРїР°РјРёРј РІ С‡Р°С‚/РіСЂСѓРїРїСѓ
+		// Если пиры подключены и канал Telegram — не спамим в чат/группу
 		if ch.Name() == "telegram" && hasDirectConnectedPeers {
 			continue
 		}
@@ -4072,11 +4072,11 @@ func publishCurrentState(ctx context.Context) {
 			defer sendCancel()
 			if err := c.Send(sendCtx, payload); err == nil {
 				atomic.AddUint64(&packetsSentCount, 1)
-				msg := fmt.Sprintf("рџ“¤ [%s] РћС‚РїСЂР°РІР»РµРЅ Р°РЅРѕРЅСЃ РІ СЃРµС‚СЊ (VIP: %s | STUN: %s | LAN: %s)", c.Name(), myVirtualIP, mySTUNAddr, localAddr)
+				msg := fmt.Sprintf("📤 [%s] Отправлен анонс в сеть (VIP: %s | STUN: %s | LAN: %s)", c.Name(), myVirtualIP, mySTUNAddr, localAddr)
 				addLog(msg)
 				writeDebug(msg)
 			} else {
-				errMsg := fmt.Sprintf("вљ пёЏ [%s] РћС€РёР±РєР° РѕС‚РїСЂР°РІРєРё: %s", c.Name(), err.Error())
+				errMsg := fmt.Sprintf("⚠️ [%s] Ошибка отправки: %s", c.Name(), err.Error())
 				addLog(errMsg)
 				writeDebug(errMsg)
 			}
@@ -4136,18 +4136,18 @@ func awgParamsMatch(local wireguard.AWGParams, remote *signaling.AWGParams) bool
 		local.H4 == uint32(h4)
 }
 
-// updateData РІС‹Р·С‹РІР°РµС‚СЃСЏ СЃС‚СЂРѕРіРѕ РЅР° РіР»Р°РІРЅРѕРј UI РїРѕС‚РѕРєРµ РІ С‚Р°Р№РјРµСЂРµ
+// updateData вызывается строго на главном UI потоке в таймере
 func updateData() {
 	if isSplashActive {
 		splashTicks++
 		if tunDev != nil {
-			setControlText(hSplashStep2, fmt.Sprintf("рџџў [ 2/4 ] рџ›ЎпёЏ Р’РёСЂС‚СѓР°Р»СЊРЅС‹Р№ Р°РґР°РїС‚РµСЂ 'NatBypass' Р°РєС‚РёРІРµРЅ (%s/24)", myVirtualIP))
+			setControlText(hSplashStep2, fmt.Sprintf("🟢 [ 2/4 ] 🛡️ Виртуальный адаптер 'NatBypass' активен (%s/24)", myVirtualIP))
 		}
-		if myPublicIP != "" && myPublicIP != "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ..." {
-			setControlText(hSplashStep3, fmt.Sprintf("рџџў [ 3/4 ] рџЊђ Р’РЅРµС€РЅРёР№ IP: %s (STUN: %s)", myPublicIP, mySTUNAddr))
+		if myPublicIP != "" && myPublicIP != "Определяется..." {
+			setControlText(hSplashStep3, fmt.Sprintf("🟢 [ 3/4 ] 🌐 Внешний IP: %s (STUN: %s)", myPublicIP, mySTUNAddr))
 		}
 		if len(sigChannels) > 0 {
-			setControlText(hSplashStep4, fmt.Sprintf("рџџў [ 4/4 ] вљЎ РЎРёРіРЅР°Р»СЊРЅС‹Рµ РєР°РЅР°Р»С‹ РїРѕРґРєР»СЋС‡РµРЅС‹ (%s)", activeChannelStr))
+			setControlText(hSplashStep4, fmt.Sprintf("🟢 [ 4/4 ] ⚡ Сигнальные каналы подключены (%s)", activeChannelStr))
 		}
 
 		if splashTicks >= 2 {
@@ -4158,28 +4158,28 @@ func updateData() {
 
 	ipStr := myPublicIP
 	if ipStr == "" {
-		ipStr = "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ..."
+		ipStr = "Определяется..."
 	}
 	stunStr := mySTUNAddr
 	if stunStr == "" {
-		stunStr = "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ..."
+		stunStr = "Определяется..."
 	}
 
 	devTitle := myDevID
 	if myNick != "" {
 		devTitle = fmt.Sprintf("%s (%s)", myNick, myDevID)
 	}
-	activeProfName := "РћСЃРЅРѕРІРЅР°СЏ СЃРµС‚СЊ"
+	activeProfName := "Основная сеть"
 	if cfg != nil {
 		active := cfg.EnsureActiveProfile()
 		if active != nil {
 			activeProfName = active.Name
 		}
 	}
-	infoText := fmt.Sprintf("РЎРµС‚СЊ: рџџў [%s] | %s | VIP: %s | Р’РЅРµС€РЅРёР№ IP: %s", activeProfName, devTitle, myVirtualIP, ipStr)
+	infoText := fmt.Sprintf("Сеть: 🟢 [%s] | %s | VIP: %s | Внешний IP: %s", activeProfName, devTitle, myVirtualIP, ipStr)
 	setControlText(hLblIpInfo, infoText)
 
-	chText := fmt.Sprintf("рџ“Ў РђРєС‚РёРІРЅС‹Р№ СЂРµР¶РёРј: %s", activeChannelStr)
+	chText := fmt.Sprintf("📡 Активный режим: %s", activeChannelStr)
 	setControlText(hLblChannels, chText)
 
 	onlineCount := 0
@@ -4208,7 +4208,7 @@ func updateData() {
 						bm := addressBook[p.DeviceID]
 						addressBookMu.RUnlock()
 						if bm != "" {
-							mismatchPeerName = "в­ђ " + bm
+							mismatchPeerName = "[*] " + bm
 						} else if strings.TrimSpace(p.Nickname) != "" {
 							mismatchPeerName = strings.TrimSpace(p.Nickname)
 						} else {
@@ -4226,7 +4226,7 @@ func updateData() {
 		if mismatchPeer != nil && mismatchPeer.AWG != nil {
 			syncAWGPeerParams = mismatchPeer.AWG
 			syncAWGPeerName = mismatchPeerName
-			syncBtnLabel := fmt.Sprintf("рџ”„ РџСЂРёРјРµРЅРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё AmneziaWG СЃ СѓР·Р»Р° [%s]", mismatchPeerName)
+			syncBtnLabel := fmt.Sprintf("🔄 Применить настройки AmneziaWG с узла [%s]", mismatchPeerName)
 			buttonLabels[ID_BTN_SYNC_AWG] = syncBtnLabel
 			buttonTypes[ID_BTN_SYNC_AWG] = "yellow"
 			if currentTab == 1 && !isSplashActive && hBtnSyncAwg != 0 {
@@ -4241,7 +4241,7 @@ func updateData() {
 			}
 		}
 
-		// РђРІС‚РѕРјР°С‚РёС‡РµСЃРєР°СЏ РїСЂРѕРІРµСЂРєР° СЃРѕСЃС‚РѕСЏРЅРёСЏ РІС‹Р±СЂР°РЅРЅРѕРіРѕ Exit Node
+		// Автоматическая проверка состояния выбранного Exit Node
 		if activeExitNodeID != "" {
 			peer, ok := registry.Get(activeExitNodeID)
 			if !ok || !peer.Online || !peer.IsExitNode {
@@ -4251,12 +4251,12 @@ func updateData() {
 				oldID := activeExitNodeID
 				activeExitNodeID = ""
 				activeExitVIP = ""
-				buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "рџЊђ Р’С‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚: Р›РѕРєР°Р»СЊРЅС‹Р№ (РћС‚РєР»СЋС‡РµРЅ)"
+				buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
 				buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
 				if hBtnExitNodeSelect != 0 {
 					procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 				}
-				msg := fmt.Sprintf("вљ пёЏ Exit Node [%s] СЃС‚Р°Р» РЅРµРґРѕСЃС‚СѓРїРµРЅ РёР»Рё РѕС‚РєР»СЋС‡РёР» С€Р»СЋР·. РњР°СЂС€СЂСѓС‚ СЃР±СЂРѕС€РµРЅ РЅР° СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ РёРЅС‚РµСЂРЅРµС‚.", oldID)
+				msg := fmt.Sprintf("⚠️ Exit Node [%s] стал недоступен или отключил шлюз. Маршрут сброшен на стандартный интернет.", oldID)
 				addLog(msg)
 				writeDebug(msg)
 			} else {
@@ -4265,11 +4265,11 @@ func updateData() {
 				addressBookMu.RUnlock()
 				peerDisplay := peer.Nickname
 				if bm != "" {
-					peerDisplay = "в­ђ " + bm
+					peerDisplay = "[*] " + bm
 				} else if peerDisplay == "" {
 					peerDisplay = peer.DeviceID
 				}
-				buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("рџџў РЁР»СЋР·: [%s] (%s)", peerDisplay, activeExitVIP)
+				buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("🟢 Шлюз: [%s] (%s)", peerDisplay, activeExitVIP)
 				buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "green"
 				if hBtnExitNodeSelect != 0 {
 					procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
@@ -4277,27 +4277,27 @@ func updateData() {
 			}
 		}
 
-		// Р РµР°Р»СЊРЅР°СЏ РІРµСЂРёС„РёРєР°С†РёСЏ СЃС‚Р°С‚СѓСЃР° РїСЂСЏРјРѕРіРѕ СЃРѕРµРґРёРЅРµРЅРёСЏ
+		// Реальная верификация статуса прямого соединения
 		if directP2PCount > 0 {
 			vpnConnected = true
 			pingStr := ""
 			if minRTT > 0 {
-				pingStr = fmt.Sprintf(" | РџРёРЅРі: %v", minRTT.Round(time.Millisecond))
+				pingStr = fmt.Sprintf(" | Пинг: %v", minRTT.Round(time.Millisecond))
 			}
-			setControlText(hLblStatus, fmt.Sprintf("рџџў РџР РЇРњРђРЇ P2P РЎР’РЇР—Р¬ РђРљРўРР’РќРђ (%d РїРёСЂ(РѕРІ)%s)", directP2PCount, pingStr))
-			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("рџџў РџРћР”РљР›Р®Р§Р•РќРћ (РџСЂСЏРјРѕР№ P2P | VIP: %s%s)", myVirtualIP, pingStr)
+			setControlText(hLblStatus, fmt.Sprintf("🟢 ПРЯМАЯ P2P СВЯЗЬ АКТВНА (%d пир(ов)%s)", directP2PCount, pingStr))
+			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 ПОДКЛЮЧЕНО (Прямой P2P | VIP: %s%s)", myVirtualIP, pingStr)
 			buttonTypes[ID_BTN_VPN] = "green"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else if onlineCount > 0 {
 			vpnConnected = false
-			setControlText(hLblStatus, fmt.Sprintf("рџџЎ РЎРР“РќРђР› Р’ РЎР•РўР (РРґС‘С‚ РїСЂСЏРјРѕРµ UDP РїСЂРѕР±РёС‚РёРµ NAT РґРѕ %d РїРёСЂРѕРІ...)", onlineCount))
-			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("рџџЎ РџР РћР‘РРўРР• NAT (РџРѕРїС‹С‚РєР° РїСЂСЏРјРѕРіРѕ СЃРѕРєРµС‚Р°... | VIP: %s)", myVirtualIP)
+			setControlText(hLblStatus, fmt.Sprintf("🟡 СГНАЛ В СЕТ (дёт прямое UDP пробитие NAT до %d пиров...)", onlineCount))
+			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟡 ПРОБТЕ NAT (Попытка прямого сокета... | VIP: %s)", myVirtualIP)
 			buttonTypes[ID_BTN_VPN] = "yellow"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else {
 			vpnConnected = false
-			setControlText(hLblStatus, "рџџЎ РџРћРРЎРљ РЈРЎРўР РћР™РЎРўР’ Р’ РЎР•РўР...")
-			buttonLabels[ID_BTN_VPN] = "рџ”ґ РћР–РР”РђРќРР• РЎР’РЇР—Р (0 РїРёСЂРѕРІ РѕРЅР»Р°Р№РЅ)"
+			setControlText(hLblStatus, "🟡 ПОСК УСТРОЙСТВ В СЕТ...")
+			buttonLabels[ID_BTN_VPN] = "🔴 ОЖДАНЕ СВЯЗ (0 пиров онлайн)"
 			buttonTypes[ID_BTN_VPN] = "red"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		}
@@ -4306,7 +4306,7 @@ func updateData() {
 			lastPeersHash = currentHash
 			procSendMessageW.Call(hListPeers, 0x0184, 0, 0)
 			if len(peers) == 0 {
-				addListBoxItem(hListPeers, "  рџ“Ў РћР¶РёРґР°РЅРёРµ РїРѕРґРєР»СЋС‡РµРЅРёСЏ РґСЂСѓРіРёС… СѓСЃС‚СЂРѕР№СЃС‚РІ... (0 РїРёСЂРѕРІ РѕРЅР»Р°Р№РЅ)")
+				addListBoxItem(hListPeers, "  📡 Ожидание подключения других устройств... (0 пиров онлайн)")
 			} else {
 				for _, p := range peers {
 					addressBookMu.RLock()
@@ -4315,7 +4315,7 @@ func updateData() {
 
 					var nameDisplay string
 					if isBookmarked && strings.TrimSpace(bookmarkedName) != "" {
-						nameDisplay = fmt.Sprintf("[в­ђ %s]", strings.TrimSpace(bookmarkedName))
+						nameDisplay = fmt.Sprintf("[[*] %s]", strings.TrimSpace(bookmarkedName))
 					} else if strings.TrimSpace(p.Nickname) != "" {
 						nameDisplay = fmt.Sprintf("[%s]", strings.TrimSpace(p.Nickname))
 					} else {
@@ -4365,10 +4365,10 @@ func updateData() {
 						extraTags = append(extraTags, "[Шлюз]")
 					}
 					if len(p.AdvertisedRoutes) > 0 {
-						extraTags = append(extraTags, fmt.Sprintf("[Сеть: %s]", strings.Join(p.AdvertisedRoutes, ", ")))
+						extraTags = append(extraTags, fmt.Sprintf("[: %s]", strings.Join(p.AdvertisedRoutes, ", ")))
 					}
 					if p.Online && p.AWG != nil && !awgParamsMatch(cachedAWGParams, p.AWG) {
-						extraTags = append(extraTags, "[AWG: Различается]")
+						extraTags = append(extraTags, "[AWG: ]")
 					}
 					extraInfo := ""
 					if len(extraTags) > 0 {
@@ -4429,7 +4429,7 @@ func flushLogsToUI() {
 func renderAWGTextFromUI() {
 	defer func() {
 		if r := recover(); r != nil {
-			writeDebug(fmt.Sprintf("вљ пёЏ Panic inside renderAWGTextFromUI: %v", r))
+			writeDebug(fmt.Sprintf("⚠️ Panic inside renderAWGTextFromUI: %v", r))
 		}
 	}()
 
@@ -4458,7 +4458,7 @@ func renderAWGTextFromUI() {
 
 	privKeyDisplay := myWGPrivKey
 	if privKeyDisplay == "" {
-		privKeyDisplay = "(РљР»СЋС‡ РіРµРЅРµСЂРёСЂСѓРµС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РїСЂРё Р·Р°РїСѓСЃРєРµ)"
+		privKeyDisplay = "(Ключ генерируется автоматически при запуске)"
 	}
 
 	var wgPeers []wireguard.WGPeer
@@ -4519,11 +4519,11 @@ func setAWGPreset(p wireguard.AWGParams) {
 func fillConfigFields() {
 	defer func() {
 		if r := recover(); r != nil {
-			writeDebug(fmt.Sprintf("вљ пёЏ Panic in fillConfigFields: %v", r))
+			writeDebug(fmt.Sprintf("⚠️ Panic in fillConfigFields: %v", r))
 		}
 	}()
 
-	writeDebug("Р’С‹Р·РѕРІ fillConfigFields()...")
+	writeDebug("Вызов fillConfigFields()...")
 	if cfg != nil {
 		if hEditMyNick != 0 {
 			setControlText(hEditMyNick, cfg.App.DeviceName)
@@ -4532,10 +4532,10 @@ func fillConfigFields() {
 		allowExitNode = cfg.Network.AllowExitNode
 		if hBtnAllowExit != 0 {
 			if allowExitNode {
-				buttonLabels[ID_BTN_ALLOW_EXIT] = "рџЊђ Р Р°Р·СЂРµС€РёС‚СЊ РІС‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· РјРµРЅСЏ: Р’РљР›"
+				buttonLabels[ID_BTN_ALLOW_EXIT] = "🌐 Разрешить выход в интернет через меня: ВКЛ"
 				buttonTypes[ID_BTN_ALLOW_EXIT] = "green"
 			} else {
-				buttonLabels[ID_BTN_ALLOW_EXIT] = "рџЊђ Р Р°Р·СЂРµС€РёС‚СЊ РІС‹С…РѕРґ РІ РёРЅС‚РµСЂРЅРµС‚ С‡РµСЂРµР· РјРµРЅСЏ: Р’Р«РљР›"
+				buttonLabels[ID_BTN_ALLOW_EXIT] = "🌐 Разрешить выход в интернет через меня: ВЫКЛ"
 				buttonTypes[ID_BTN_ALLOW_EXIT] = "normal"
 			}
 			procInvalidateRect.Call(hBtnAllowExit, 0, 1)
@@ -4751,18 +4751,18 @@ func saveConfigFromUI() {
 	}
 
 	if err := config.Save(cfg, configPath, false); err != nil {
-		msg := fmt.Sprintf("вљ пёЏ РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РєРѕРЅС„РёРіР°: %v", err)
+		msg := fmt.Sprintf("⚠️ Ошибка сохранения конфига: %v", err)
 		addLog(msg)
 		writeDebug(msg)
 	} else {
-		msg := "рџ’ѕ РќР°СЃС‚СЂРѕР№РєРё СЃРѕС…СЂР°РЅРµРЅС‹ РІ " + configPath
+		msg := "💾 Настройки сохранены в " + configPath
 		addLog(msg)
 		writeDebug(msg)
 	}
 
 	refreshProfilesUI()
 
-	// РћС‡РёСЃС‚РєР° СѓСЃС‚Р°СЂРµРІС€РёС… РїРёСЂРѕРІ РїСЂРё СЃРјРµРЅРµ РєРѕРЅС„РёРіСѓСЂР°С†РёРё / С‚РѕРїРёРєР°
+	// Очистка устаревших пиров при смене конфигурации / топика
 	if registry != nil {
 		registry.ClearAll()
 	}
@@ -4776,11 +4776,11 @@ func saveConfigFromUI() {
 
 func saveConfig() {
 	saveConfigFromUI()
-	buttonLabels[ID_BTN_SAVE_CFG] = "вњ“ РќРђРЎРўР РћР™РљР РЎРћРҐР РђРќР•РќР«!"
+	buttonLabels[ID_BTN_SAVE_CFG] = "✓ НАСТРОЙК СОХРАНЕНЫ!"
 	procInvalidateRect.Call(hBtnSaveCfg, 0, 1)
 
 	time.AfterFunc(2*time.Second, func() {
-		buttonLabels[ID_BTN_SAVE_CFG] = "рџ’ѕ РЎРѕС…СЂР°РЅРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё РІ config.yaml"
+		buttonLabels[ID_BTN_SAVE_CFG] = "💾 Сохранить настройки в config.yaml"
 		procInvalidateRect.Call(hBtnSaveCfg, 0, 1)
 	})
 }
@@ -4789,17 +4789,17 @@ func testTelegram() {
 	tok := strings.TrimSpace(getControlText(hEditTgToken))
 	chat := strings.TrimSpace(getControlText(hEditTgChat))
 	if tok == "" {
-		addLog("вљ пёЏ Р’РІРµРґРёС‚Рµ С‚РѕРєРµРЅ Р±РѕС‚Р°")
+		addLog("⚠️ Введите токен бота")
 		return
 	}
-	buttonLabels[ID_BTN_TEST_TG] = "вЏі РџСЂРѕРІРµСЂРєР°..."
+	buttonLabels[ID_BTN_TEST_TG] = "⏳ Проверка..."
 	procInvalidateRect.Call(hBtnTestTg, 0, 1)
-	addLog("вЏі РџСЂРѕРІРµСЂРєР° Telegram Bot API...")
-	writeDebug("РўРµСЃС‚РёСЂРѕРІР°РЅРёРµ Telegram Bot API...")
+	addLog("⏳ Проверка Telegram Bot API...")
+	writeDebug("Тестирование Telegram Bot API...")
 	go func() {
 		ch := signaling.NewTelegramChannel(tok, chat, "")
 		if ch.IsAvailable(context.Background()) {
-			addLog("вњ… РЈСЃРїРµС…! Telegram Р±РѕС‚ Р°РєС‚РёРІРµРЅ Рё РѕС‚РІРµС‡Р°РµС‚ РЅР° Р·Р°РїСЂРѕСЃС‹.")
+			addLog("✅ Успех! Telegram бот активен и отвечает на запросы.")
 			writeDebug("Telegram bot is available!")
 			if chat != "" {
 				testPayload := &signaling.Payload{
@@ -4813,24 +4813,24 @@ func testTelegram() {
 					Timestamp:  time.Now(),
 				}
 				if sendErr := ch.Send(context.Background(), testPayload); sendErr == nil {
-					succMsg := fmt.Sprintf("вњ“ РўРµСЃС‚РѕРІС‹Р№ РїР°РєРµС‚ СѓСЃРїРµС€РЅРѕ РѕС‚РїСЂР°РІР»РµРЅ РІ С‡Р°С‚ %s", chat)
+					succMsg := fmt.Sprintf("✓ Тестовый пакет успешно отправлен в чат %s", chat)
 					addLog(succMsg)
 					writeDebug(succMsg)
 				} else {
-					failMsg := fmt.Sprintf("вљ пёЏ Р‘РѕС‚ Р°РєС‚РёРІРµРЅ, РЅРѕ РѕС‚РїСЂР°РІРєР° РІ С‡Р°С‚ %s РІРµСЂРЅСѓР»Р°: %s", chat, sendErr.Error())
+					failMsg := fmt.Sprintf("⚠️ Бот активен, но отправка в чат %s вернула: %s", chat, sendErr.Error())
 					addLog(failMsg)
 					writeDebug(failMsg)
 				}
 			}
-			buttonLabels[ID_BTN_TEST_TG] = "вњ… Р‘РѕС‚ Р°РєС‚РёРІРµРЅ"
+			buttonLabels[ID_BTN_TEST_TG] = "✅ Бот активен"
 		} else {
-			addLog("вќЊ РћС€РёР±РєР°: РЅРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє Telegram API.")
+			addLog("❌ Ошибка: не удалось подключиться к Telegram API.")
 			writeDebug("Telegram bot check FAILED")
-			buttonLabels[ID_BTN_TEST_TG] = "вќЊ РћС€РёР±РєР°"
+			buttonLabels[ID_BTN_TEST_TG] = "❌ Ошибка"
 		}
 		procInvalidateRect.Call(hBtnTestTg, 0, 1)
 		time.AfterFunc(3*time.Second, func() {
-			buttonLabels[ID_BTN_TEST_TG] = "рџ§Є РџСЂРѕРІРµСЂРёС‚СЊ Р±РѕС‚"
+			buttonLabels[ID_BTN_TEST_TG] = "🧪 Проверить бот"
 			procInvalidateRect.Call(hBtnTestTg, 0, 1)
 		})
 	}()
@@ -4838,40 +4838,40 @@ func testTelegram() {
 
 func testMQTT() {
 	br := strings.TrimSpace(getControlText(hEditMqttBr))
-	buttonLabels[ID_BTN_TEST_MQTT] = "вЏі РџСЂРѕРІРµСЂРєР°..."
+	buttonLabels[ID_BTN_TEST_MQTT] = "⏳ Проверка..."
 	procInvalidateRect.Call(hBtnTestMqtt, 0, 1)
-	addLog("вЏі РџСЂРѕРІРµСЂРєР° MQTT Р±СЂРѕРєРµСЂР°...")
-	writeDebug("РўРµСЃС‚РёСЂРѕРІР°РЅРёРµ MQTT Р±СЂРѕРєРµСЂР°: " + br)
+	addLog("⏳ Проверка MQTT брокера...")
+	writeDebug("Тестирование MQTT брокера: " + br)
 	go func() {
 		ch := signaling.NewMQTTChannel(br, "test", "tester-"+strconv.Itoa(int(time.Now().UnixNano()%10000)), "", "")
 		if ch.IsAvailable(context.Background()) {
-			addLog("вњ… РЈСЃРїРµС…! MQTT Р±СЂРѕРєРµСЂ РґРѕСЃС‚СѓРїРµРЅ.")
+			addLog("✅ Успех! MQTT брокер доступен.")
 			writeDebug("MQTT broker is available!")
-			buttonLabels[ID_BTN_TEST_MQTT] = "вњ… Р”РѕСЃС‚СѓРїРµРЅ"
+			buttonLabels[ID_BTN_TEST_MQTT] = "✅ Доступен"
 		} else {
-			addLog("вќЊ РћС€РёР±РєР°: MQTT Р±СЂРѕРєРµСЂ РЅРµРґРѕСЃС‚СѓРїРµРЅ.")
+			addLog("❌ Ошибка: MQTT брокер недоступен.")
 			writeDebug("MQTT broker check FAILED")
-			buttonLabels[ID_BTN_TEST_MQTT] = "вќЊ РќРµРґРѕСЃС‚СѓРїРµРЅ"
+			buttonLabels[ID_BTN_TEST_MQTT] = "❌ Недоступен"
 		}
 		procInvalidateRect.Call(hBtnTestMqtt, 0, 1)
 		time.AfterFunc(3*time.Second, func() {
-			buttonLabels[ID_BTN_TEST_MQTT] = "рџ§Є РџСЂРѕРІРµСЂРёС‚СЊ MQTT"
+			buttonLabels[ID_BTN_TEST_MQTT] = "🧪 Проверить MQTT"
 			procInvalidateRect.Call(hBtnTestMqtt, 0, 1)
 		})
 	}()
 }
 
 func runDiag() {
-	buttonLabels[ID_BTN_RUN_DIAG] = "вЏі Р’С‹РїРѕР»РЅСЏРµС‚СЃСЏ РґРёР°РіРЅРѕСЃС‚РёРєР°..."
+	buttonLabels[ID_BTN_RUN_DIAG] = "⏳ Выполняется диагностика..."
 	procInvalidateRect.Call(hBtnRunDiag, 0, 1)
-	setControlText(hEditDiagLog, "вЏі Р’С‹РїРѕР»РЅСЏРµС‚СЃСЏ РєРѕРјРїР»РµРєСЃРЅР°СЏ РїСЂРѕРІРµСЂРєР° СЃРІСЏР·РЅРѕСЃС‚Рё СЃРµС‚Рё...\r\n")
-	writeDebug("Р—Р°РїСѓСЃРє СЃРёСЃС‚РµРјРЅРѕР№ РґРёР°РіРЅРѕСЃС‚РёРєРё СЃРµС‚Рё...")
+	setControlText(hEditDiagLog, "⏳ Выполняется комплексная проверка связности сети...\r\n")
+	writeDebug("Запуск системной диагностики сети...")
 	go func() {
 		res := "в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ\r\n"
-		res += "              РЎРРЎРўР•РњРќРђРЇ Р”РРђР“РќРћРЎРўРРљРђ & Р”Р•Р‘РђР“Р“Р•Р  NATBYPASS            \r\n"
+		res += "              ССТЕМНАЯ ДАГНОСТКА & ДЕБАГГЕР NATBYPASS            \r\n"
 		res += "в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ\r\n\r\n"
 
-		// 1. РРЅС‚РµСЂРЅРµС‚
+		// 1. нтернет
 		internetOK := false
 		testHosts := []string{"77.88.8.8:53", "8.8.8.8:53", "1.1.1.1:53"}
 		for _, h := range testHosts {
@@ -4883,29 +4883,29 @@ func runDiag() {
 			}
 		}
 		if internetOK {
-			res += "вњ… 1. РЎРµС‚СЊ РРЅС‚РµСЂРЅРµС‚: Р”РћРЎРўРЈРџРќРђ (DNS 1.1.1.1/8.8.8.8 РѕС‚РІРµС‡Р°РµС‚)\r\n"
+			res += "✅ 1. Сеть нтернет: ДОСТУПНА (DNS 1.1.1.1/8.8.8.8 отвечает)\r\n"
 		} else {
-			res += "вљ пёЏ 1. РЎРµС‚СЊ РРЅС‚РµСЂРЅРµС‚: РћРіСЂР°РЅРёС‡РµРЅР° (РїСЂРѕРІРµСЂСЊС‚Рµ С€Р»СЋР·)\r\n"
+			res += "⚠️ 1. Сеть нтернет: Ограничена (проверьте шлюз)\r\n"
 		}
 
-		// 2. IP Р°РґСЂРµСЃР°
+		// 2. IP адреса
 		lanIP := getLocalLANIP()
-		res += fmt.Sprintf("рџЏ  2. Р›РѕРєР°Р»СЊРЅС‹Р№ LAN IP: %s (РџРѕСЂС‚ :51820 РѕС‚РєСЂС‹С‚)\r\n", lanIP)
+		res += fmt.Sprintf("🏠 2. Локальный LAN IP: %s (Порт :51820 открыт)\r\n", lanIP)
 
 		if myPublicIP != "" && myPublicIP != "0.0.0.0" {
-			res += fmt.Sprintf("рџЊђ 3. Р’РЅРµС€РЅРёР№ РїСѓР±Р»РёС‡РЅС‹Р№ IP: %s\r\n", myPublicIP)
+			res += fmt.Sprintf("🌐 3. Внешний публичный IP: %s\r\n", myPublicIP)
 		} else {
-			res += "вљ пёЏ 3. Р’РЅРµС€РЅРёР№ РїСѓР±Р»РёС‡РЅС‹Р№ IP: РћР¶РёРґР°РЅРёРµ РѕС‚РІРµС‚Р° STUN...\r\n"
+			res += "⚠️ 3. Внешний публичный IP: Ожидание ответа STUN...\r\n"
 		}
 
 		// 3. STUN Hole Punch
 		if mySTUNAddr != "" {
-			res += fmt.Sprintf("вљЎ 4. STUN UDP РЎРѕРєРµС‚: %s (РџСЂСЏРјРѕР№ Hole Punching Р°РєС‚РёРІРµРЅ)\r\n", mySTUNAddr)
+			res += fmt.Sprintf("⚡ 4. STUN UDP Сокет: %s (Прямой Hole Punching активен)\r\n", mySTUNAddr)
 		} else {
-			res += "вљ пёЏ 4. STUN UDP РЎРѕРєРµС‚: РћР¶РёРґР°РЅРёРµ СЃРІСЏР·С‹РІР°РЅРёСЏ СЃРѕРєРµС‚Р°...\r\n"
+			res += "⚠️ 4. STUN UDP Сокет: Ожидание связывания сокета...\r\n"
 		}
 
-		// 4. РџРёСЂС‹
+		// 4. Пиры
 		peersCount := 0
 		directP2PCount := 0
 		if registry != nil {
@@ -4917,31 +4917,31 @@ func runDiag() {
 				}
 			}
 		}
-		res += fmt.Sprintf("рџ‘Ґ 5. РЈСЃС‚СЂРѕР№СЃС‚РІ РІ СЃРёРіРЅР°Р»СЊРЅРѕР№ СЃРµС‚Рё: %d (Р’Р°С€ IP РІ Mesh: %s)\r\n", peersCount, myVirtualIP)
-		res += fmt.Sprintf("рџљЂ 6. РџСЂРѕР±РёС‚С‹С… РїСЂСЏРјС‹С… UDP СЃРѕРєРµС‚РѕРІ: %d РёР· %d\r\n", directP2PCount, peersCount)
+		res += fmt.Sprintf("👥 5. Устройств в сигнальной сети: %d (Ваш IP в Mesh: %s)\r\n", peersCount, myVirtualIP)
+		res += fmt.Sprintf("🚀 6. Пробитых прямых UDP сокетов: %d из %d\r\n", directP2PCount, peersCount)
 
-		// 5. РЎРёРіРЅР°Р»С‹ Рё СЃС‚Р°С‚РёСЃС‚РёРєР°
+		// 5. Сигналы и статистика
 		pIn := atomic.LoadUint64(&packetsRecvCount)
 		pOut := atomic.LoadUint64(&packetsSentCount)
-		res += fmt.Sprintf("рџ“Ў 7. РђРєС‚РёРІРЅС‹Р№ СЂРµР¶РёРј: %s\r\n", activeChannelStr)
-		res += fmt.Sprintf("рџ“Љ 8. РџР°РєРµС‚РѕРІ РѕС‚РїСЂР°РІР»РµРЅРѕ/РїСЂРёРЅСЏС‚Рѕ: %d / %d\r\n", pOut, pIn)
-		res += fmt.Sprintf("вЏ±пёЏ 9. Р’СЂРµРјСЏ РЅРµРїСЂРµСЂС‹РІРЅРѕР№ СЂР°Р±РѕС‚С‹ РїСЂРѕС†РµСЃСЃР°: %v\r\n\r\n", time.Since(startTime).Round(time.Second))
+		res += fmt.Sprintf("📡 7. Активный режим: %s\r\n", activeChannelStr)
+		res += fmt.Sprintf("📊 8. Пакетов отправлено/принято: %d / %d\r\n", pOut, pIn)
+		res += fmt.Sprintf("⏱️ 9. Время непрерывной работы процесса: %v\r\n\r\n", time.Since(startTime).Round(time.Second))
 
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		res += fmt.Sprintf("рџ§  10. РџРѕС‚РѕРєРё Рё РїР°РјСЏС‚СЊ: %d Р“РѕСЂСѓС‚РёРЅ | %.2f MB RAM | GC Р¦РёРєР»РѕРІ: %d\r\n\r\n", runtime.NumGoroutine(), float64(m.Alloc)/(1024*1024), m.NumGC)
-		res += "вњ“ РљРѕРјРїР»РµРєСЃРЅР°СЏ РїСЂРѕРІРµСЂРєР° СѓСЃРїРµС€РЅРѕ Р·Р°РІРµСЂС€РµРЅР°."
+		res += fmt.Sprintf("🧠 10. Потоки и память: %d Горутин | %.2f MB RAM | GC Циклов: %d\r\n\r\n", runtime.NumGoroutine(), float64(m.Alloc)/(1024*1024), m.NumGC)
+		res += "✓ Комплексная проверка успешно завершена."
 
 		setControlText(hEditDiagLog, res)
-		addLog("рџ©є РљРѕРјРїР»РµРєСЃРЅР°СЏ РґРёР°РіРЅРѕСЃС‚РёРєР° СЃРёСЃС‚РµРјС‹ СѓСЃРїРµС€РЅРѕ РІС‹РїРѕР»РЅРµРЅР°")
-		writeDebug("Р РµР·СѓР»СЊС‚Р°С‚ РґРёР°РіРЅРѕСЃС‚РёРєРё:\r\n" + res)
+		addLog("🩺 Комплексная диагностика системы успешно выполнена")
+		writeDebug("Результат диагностики:\r\n" + res)
 
-		buttonLabels[ID_BTN_RUN_DIAG] = "рџ”„ Р—Р°РїСѓСЃС‚РёС‚СЊ РїРѕРІС‚РѕСЂРЅРѕ"
+		buttonLabels[ID_BTN_RUN_DIAG] = "🔄 Запустить повторно"
 		procInvalidateRect.Call(hBtnRunDiag, 0, 1)
 	}()
 }
 
-// dumpGoroutineStack вЂ” РјРіРЅРѕРІРµРЅРЅС‹Р№ СЃРЅРёРјРѕРє РІСЃРµС… РїРѕС‚РѕРєРѕРІ Рё РіРѕСЂСѓС‚РёРЅ
+// dumpGoroutineStack — мгновенный снимок всех потоков и горутин
 func dumpGoroutineStack() {
 	buf := make([]byte, 65536)
 	n := runtime.Stack(buf, true)
@@ -4951,9 +4951,9 @@ func dumpGoroutineStack() {
 	runtime.ReadMemStats(&m)
 
 	header := fmt.Sprintf("в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ\r\n"+
-		"           РЎРќРРњРћРљ РЎРўР•РљРђ РџРћРўРћРљРћР’ & РџРђРњРЇРўР (GOROUTINE DUMP)           \r\n"+
+		"           СНМОК СТЕКА ПОТОКОВ & ПАМЯТ (GOROUTINE DUMP)           \r\n"+
 		"в•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђв•ђ\r\n"+
-		"Р’СЂРµРјСЏ: %s | Р“РѕСЂСѓС‚РёРЅ: %d | Р’С‹РґРµР»РµРЅРѕ RAM: %.2f MB | Sys RAM: %.2f MB\r\n\r\n",
+		"Время: %s | Горутин: %d | Выделено RAM: %.2f MB | Sys RAM: %.2f MB\r\n\r\n",
 		time.Now().Format("2006-01-02 15:04:05.000"), runtime.NumGoroutine(),
 		float64(m.Alloc)/(1024*1024), float64(m.Sys)/(1024*1024))
 
@@ -4963,13 +4963,13 @@ func dumpGoroutineStack() {
 	dumpFile := fmt.Sprintf("natbypass_stack_%d.log", time.Now().Unix())
 	_ = os.WriteFile(dumpFile, []byte(fullDump), 0644)
 
-	addLog("вљЎ РЎРЅРёРјРѕРє РїРѕС‚РѕРєРѕРІ Рё РїР°РјСЏС‚Рё СЃРѕС…СЂР°РЅРµРЅ РІ " + dumpFile)
-	writeDebug("РЎРЅРёРјРѕРє РїРѕС‚РѕРєРѕРІ СЃРѕС…СЂР°РЅРµРЅ РІ " + dumpFile)
+	addLog("⚡ Снимок потоков и памяти сохранен в " + dumpFile)
+	writeDebug("Снимок потоков сохранен в " + dumpFile)
 
-	buttonLabels[ID_BTN_DUMP_STACK] = "вњ“ РЎРќРРњРћРљ Р“РћРўРћР’!"
+	buttonLabels[ID_BTN_DUMP_STACK] = "✓ СНМОК ГОТОВ!"
 	procInvalidateRect.Call(hBtnDumpStack, 0, 1)
 	time.AfterFunc(2*time.Second, func() {
-		buttonLabels[ID_BTN_DUMP_STACK] = "вљЎ РЎРЅРёРјРѕРє РїР°РјСЏС‚Рё Рё РїРѕС‚РѕРєРѕРІ"
+		buttonLabels[ID_BTN_DUMP_STACK] = "⚡ Снимок памяти и потоков"
 		procInvalidateRect.Call(hBtnDumpStack, 0, 1)
 	})
 }
@@ -4982,11 +4982,11 @@ func saveLogsToFile() {
 	fileName := fmt.Sprintf("natbypass_events_%d.log", time.Now().Unix())
 	_ = os.WriteFile(fileName, []byte(allLogs), 0644)
 
-	addLog("рџ’ѕ Р–СѓСЂРЅР°Р» СЃРѕР±С‹С‚РёР№ СѓСЃРїРµС€РЅРѕ СЌРєСЃРїРѕСЂС‚РёСЂРѕРІР°РЅ РІ " + fileName)
-	buttonLabels[ID_BTN_SAVE_LOGS] = "вњ“ Р­РљРЎРџРћР РўРР РћР’РђРќРћ!"
+	addLog("💾 Журнал событий успешно экспортирован в " + fileName)
+	buttonLabels[ID_BTN_SAVE_LOGS] = "✓ ЭКСПОРТРОВАНО!"
 	procInvalidateRect.Call(hBtnSaveLogs, 0, 1)
 	time.AfterFunc(2*time.Second, func() {
-		buttonLabels[ID_BTN_SAVE_LOGS] = "рџ’ѕ Р­РєСЃРїРѕСЂС‚ Р»РѕРіР°"
+		buttonLabels[ID_BTN_SAVE_LOGS] = "💾 Экспорт лога"
 		procInvalidateRect.Call(hBtnSaveLogs, 0, 1)
 	})
 }

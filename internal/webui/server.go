@@ -1,4 +1,4 @@
-﻿package webui
+package webui
 
 import (
 	"context"
@@ -33,14 +33,14 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-// Response вЂ” СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ JSON-РѕС‚РІРµС‚ API
+// Response — стандартный JSON-ответ API
 type Response struct {
 	Ok    bool        `json:"ok"`
 	Data  interface{} `json:"data,omitempty"`
 	Error string      `json:"error,omitempty"`
 }
 
-// AppState вЂ” СЃРѕСЃС‚РѕСЏРЅРёРµ РїСЂРёР»РѕР¶РµРЅРёСЏ РґР»СЏ СЃС‚Р°С‚СѓСЃ-СЌРЅРґРїРѕРёРЅС‚Р°
+// AppState — состояние приложения для статус-эндпоинта
 type AppState struct {
 	DeviceID       string    `json:"device_id"`
 	VirtualIP      string    `json:"virtual_ip"`
@@ -51,7 +51,7 @@ type AppState struct {
 	StartedAt      time.Time `json:"started_at"`
 }
 
-// EventEntry вЂ” Р·Р°РїРёСЃСЊ РІ Р¶СѓСЂРЅР°Р»Рµ СЃРѕР±С‹С‚РёР№ NatBypass
+// EventEntry — запись в журнале событий NatBypass
 type EventEntry struct {
 	Time    time.Time `json:"time"`
 	Type    string    `json:"type"`   // peer_online, peer_offline, channel_switch, ip_change, info, warn, error
@@ -59,7 +59,7 @@ type EventEntry struct {
 	Detail  string    `json:"detail,omitempty"`
 }
 
-// Server вЂ” РІСЃС‚СЂРѕРµРЅРЅС‹Р№ Web UI HTTP-СЃРµСЂРІРµСЂ
+// Server — встроенный Web UI HTTP-сервер
 type Server struct {
 	port       int
 	user       string
@@ -77,12 +77,12 @@ type Server struct {
 	onProfileSwitch func(p *config.Profile) error
 }
 
-// SetOnProfileSwitch СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ РєРѕР»Р±СЌРє РґР»СЏ РїРµСЂРµРєР»СЋС‡РµРЅРёСЏ РїСЂРѕС„РёР»СЏ
+// SetOnProfileSwitch устанавливает колбэк для переключения профиля
 func (s *Server) SetOnProfileSwitch(cb func(p *config.Profile) error) {
 	s.onProfileSwitch = cb
 }
 
-// NewServer СЃРѕР·РґР°С‘С‚ РЅРѕРІС‹Р№ СЌРєР·РµРјРїР»СЏСЂ Web UI СЃРµСЂРІРµСЂР°
+// NewServer создаёт новый экземпляр Web UI сервера
 func NewServer(port int, user, password string, registry *peer.Registry, sigMgr *signaling.FallbackManager) *Server {
 	return &Server{
 		port:       port,
@@ -98,14 +98,14 @@ func NewServer(port int, user, password string, registry *peer.Registry, sigMgr 
 	}
 }
 
-// SetConfigPath Р·Р°РґР°РµС‚ РїСѓС‚СЊ Рє С„Р°Р№Р»Сѓ РєРѕРЅС„РёРіСѓСЂР°С†РёРё
+// SetConfigPath задает путь к файлу конфигурации
 func (s *Server) SetConfigPath(path string) {
 	if path != "" {
 		s.configPath = path
 	}
 }
 
-// SetAppState РѕР±РЅРѕРІР»СЏРµС‚ СЃРѕСЃС‚РѕСЏРЅРёРµ РїСЂРёР»РѕР¶РµРЅРёСЏ (РІС‹Р·С‹РІР°РµС‚СЃСЏ РёР· main)
+// SetAppState обновляет состояние приложения (вызывается из main)
 func (s *Server) SetAppState(deviceID, publicIP, stunAddr string, virtualIP ...string) {
 	if s.state != nil {
 		s.state.DeviceID = deviceID
@@ -117,34 +117,34 @@ func (s *Server) SetAppState(deviceID, publicIP, stunAddr string, virtualIP ...s
 	}
 }
 
-// SetVirtualIP Р·Р°РґР°С‘С‚ РІРёСЂС‚СѓР°Р»СЊРЅС‹Р№ IP Р°РґСЂРµСЃ РЅРѕРґС‹ РІ СЃРµС‚Рё (100.64.200.x)
+// SetVirtualIP задаёт виртуальный IP адрес ноды в сети (100.64.200.x)
 func (s *Server) SetVirtualIP(vip string) {
 	if s.state != nil {
 		s.state.VirtualIP = vip
 	}
 }
 
-// SetDeviceName Р·Р°РґР°С‘С‚ С‡РµР»РѕРІРµРєРѕС‡РёС‚Р°РµРјРѕРµ РёРјСЏ СѓСЃС‚СЂРѕР№СЃС‚РІР°
+// SetDeviceName задаёт человекочитаемое имя устройства
 func (s *Server) SetDeviceName(name string) {
 	s.deviceName = name
 }
 
-// SetVersion Р·Р°РґР°С‘С‚ С‚РµРєСѓС‰СѓСЋ РІРµСЂСЃРёСЋ РїСЂРёР»РѕР¶РµРЅРёСЏ
+// SetVersion задаёт текущую версию приложения
 func (s *Server) SetVersion(v string) {
 	s.version = v
 }
 
-// GetDeviceName РІРѕР·РІСЂР°С‰Р°РµС‚ С‚РµРєСѓС‰РµРµ РёРјСЏ СѓСЃС‚СЂРѕР№СЃС‚РІР°
+// GetDeviceName возвращает текущее имя устройства
 func (s *Server) GetDeviceName() string {
 	return s.deviceName
 }
 
-// GetPort РІРѕР·РІСЂР°С‰Р°РµС‚ Р°РєС‚СѓР°Р»СЊРЅС‹Р№ РїРѕСЂС‚, РЅР° РєРѕС‚РѕСЂРѕРј СЂР°Р±РѕС‚Р°РµС‚ СЃРµСЂРІРµСЂ
+// GetPort возвращает актуальный порт, на котором работает сервер
 func (s *Server) GetPort() int {
 	return s.port
 }
 
-// AddEvent РґРѕР±Р°РІР»СЏРµС‚ СЃРѕР±С‹С‚РёРµ РІ РєРѕР»СЊС†РµРІРѕР№ Р±СѓС„РµСЂ (РґРѕ 200 Р·Р°РїРёСЃРµР№)
+// AddEvent добавляет событие в кольцевой буфер (до 200 записей)
 func (s *Server) AddEvent(eventType, message, detail string) {
 	s.eventsMu.Lock()
 	defer s.eventsMu.Unlock()
@@ -160,12 +160,12 @@ func (s *Server) AddEvent(eventType, message, detail string) {
 	}
 }
 
-// Port РІРѕР·РІСЂР°С‰Р°РµС‚ С‚РµРєСѓС‰РёР№ РїРѕСЂС‚ СЃРµСЂРІРµСЂР°
+// Port возвращает текущий порт сервера
 func (s *Server) Port() int {
 	return s.port
 }
 
-// Start Р·Р°РїСѓСЃРєР°РµС‚ HTTP-СЃРµСЂРІРµСЂ Рё Р¶РґС‘С‚ РѕС‚РјРµРЅС‹ РєРѕРЅС‚РµРєСЃС‚Р° (СЃ Р°РІС‚Рѕ-РїРµСЂРµР±РѕСЂРѕРј РїРѕСЂС‚Р° РїСЂРё Р·Р°РЅСЏС‚РѕСЃС‚Рё)
+// Start запускает HTTP-сервер и ждёт отмены контекста (с авто-перебором порта при занятости)
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
@@ -181,10 +181,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/awg/config", s.handleAWGConfig)
 	mux.HandleFunc("/api/awg/random-params", s.handleAWGRandomParams)
 	mux.HandleFunc("/api/restart", s.handleRestart)
-	// РўРµСЃС‚ РїРѕРґРєР»СЋС‡РµРЅРёР№
+	// Тест подключений
 	mux.HandleFunc("/api/test/telegram", s.handleTestTelegram)
 	mux.HandleFunc("/api/test/mqtt", s.handleTestMQTT)
-	// РќРѕРІС‹Рµ UX-СЌРЅРґРїРѕРёРЅС‚С‹
+	// Новые UX-эндпоинты
 	mux.HandleFunc("/api/dashboard", s.handleDashboard)
 	mux.HandleFunc("/api/analytics", s.handleAnalytics)
 	mux.HandleFunc("/api/diagnose", s.handleDiagnose)
@@ -203,11 +203,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/icon.png", s.handleIconPng)
 	mux.HandleFunc("/manifest.json", s.handleManifest)
 	mux.HandleFunc("/api/settings/save", s.handleSettingsSave)
-	// РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРѕРµ РѕР±РЅРѕРІР»РµРЅРёРµ
+	// Автоматическое обновление
 	mux.HandleFunc("/api/update/check", s.handleUpdateCheck)
 	mux.HandleFunc("/api/update/apply", s.handleUpdateApply)
 	mux.HandleFunc("/api/update/status", s.handleUpdateStatus)
-	// РџСЂРѕС„РёР»Рё СЃРµС‚Рё (Multi-Profile Mesh Networks)
+	// Профили сети (Multi-Profile Mesh Networks)
 	mux.HandleFunc("/api/profiles", s.handleProfilesList)
 	mux.HandleFunc("/api/profiles/create", s.handleProfileCreate)
 	mux.HandleFunc("/api/profiles/update", s.handleProfileUpdate)
@@ -218,7 +218,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	handler := s.corsMiddleware(s.authMiddleware(mux))
 
-	// РС‰РµРј СЃРІРѕР±РѕРґРЅС‹Р№ РїРѕСЂС‚, РЅР°С‡РёРЅР°СЏ СЃ s.port (РґРѕ +20 РїРѕСЂС‚РѕРІ)
+	// щем свободный порт, начиная с s.port (до +20 портов)
 	var listener net.Listener
 	var err error
 	initialPort := s.port
@@ -237,7 +237,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if listener == nil {
 		listener, err = net.Listen("tcp", "0.0.0.0:0")
 		if err != nil {
-			return fmt.Errorf("РЅРµ СѓРґР°Р»РѕСЃСЊ РЅР°Р№С‚Рё СЃРІРѕР±РѕРґРЅС‹Р№ РїРѕСЂС‚ РґР»СЏ Web UI: %w", err)
+			return fmt.Errorf("не удалось найти свободный порт для Web UI: %w", err)
 		}
 		s.port = listener.Addr().(*net.TCPAddr).Port
 	}
@@ -255,18 +255,18 @@ func (s *Server) Start(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.srv.Shutdown(shutdownCtx); err != nil {
-			slog.Error("РћС€РёР±РєР° РѕСЃС‚Р°РЅРѕРІРєРё Web UI СЃРµСЂРІРµСЂР°", "err", err)
+			slog.Error("Ошибка остановки Web UI сервера", "err", err)
 		}
 	}()
 
-	slog.Info("Web UI Р·Р°РїСѓС‰РµРЅ", "url", fmt.Sprintf("http://localhost:%d", s.port))
+	slog.Info("Web UI запущен", "url", fmt.Sprintf("http://localhost:%d", s.port))
 	if err := s.srv.Serve(listener); err != nil && err != http.ErrServerClosed {
-		return fmt.Errorf("РѕС€РёР±РєР° Web UI СЃРµСЂРІРµСЂР°: %w", err)
+		return fmt.Errorf("ошибка Web UI сервера: %w", err)
 	}
 	return nil
 }
 
-// authMiddleware вЂ” HTTP Basic Auth Р·Р°С‰РёС‚Р° (Р°РєС‚РёРІРЅР° С‚РѕР»СЊРєРѕ РµСЃР»Рё Р·Р°РґР°РЅ РїР°СЂРѕР»СЊ)
+// authMiddleware — HTTP Basic Auth защита (активна только если задан пароль)
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.password == "" || r.URL.Path == "/api/qr/image" {
@@ -288,7 +288,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// corsMiddleware вЂ” CORS Р·Р°РіРѕР»РѕРІРєРё
+// corsMiddleware — CORS заголовки
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -303,7 +303,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// jsonResponse РѕС‚РїСЂР°РІР»СЏРµС‚ СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ JSON-РѕС‚РІРµС‚
+// jsonResponse отправляет стандартный JSON-ответ
 func (s *Server) jsonResponse(w http.ResponseWriter, status int, data interface{}, errStr string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -314,11 +314,11 @@ func (s *Server) jsonResponse(w http.ResponseWriter, status int, data interface{
 		Error: errStr,
 	}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		slog.Error("РћС€РёР±РєР° СЃРµСЂРёР°Р»РёР·Р°С†РёРё JSON", "err", err)
+		slog.Error("Ошибка сериализации JSON", "err", err)
 	}
 }
 
-// handleIndex вЂ” РіР»Р°РІРЅР°СЏ СЃС‚СЂР°РЅРёС†Р°
+// handleIndex — главная страница
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -337,7 +337,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var activePeers []*peer.Peer
@@ -348,7 +348,7 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 		}
 		peerIndex := 2
 		for _, p := range s.registry.List() {
-			// РќРµ РїРѕРєР°Р·С‹РІР°РµРј СЃРІРѕР№ СЃРѕР±СЃС‚РІРµРЅРЅС‹Р№ РџРљ РІ СЃРїРёСЃРєРµ СѓРґР°Р»РµРЅРЅС‹С… РїРёСЂРѕРІ
+			// Не показываем свой собственный ПК в списке удаленных пиров
 			if myID != "" && p.DeviceID == myID {
 				continue
 			}
@@ -367,10 +367,10 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, activePeers, "")
 }
 
-// handleStatus вЂ” GET /api/status вЂ” СЃС‚Р°С‚СѓСЃ РїСЂРёР»РѕР¶РµРЅРёСЏ
+// handleStatus — GET /api/status — статус приложения
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
@@ -400,61 +400,61 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, status, "")
 }
 
-// handleRefreshIP вЂ” POST /api/refresh-ip вЂ” РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕРµ РѕР±РЅРѕРІР»РµРЅРёРµ IP
+// handleRefreshIP — POST /api/refresh-ip — принудительное обновление IP
 func (s *Server) handleRefreshIP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
-	slog.Info("Р—Р°РїСЂРѕСЃ РЅР° РѕР±РЅРѕРІР»РµРЅРёРµ IP С‡РµСЂРµР· Web UI")
-	s.jsonResponse(w, http.StatusOK, map[string]string{"message": "РћР±РЅРѕРІР»РµРЅРёРµ IP Р·Р°РїСѓС‰РµРЅРѕ"}, "")
+	slog.Info("Запрос на обновление IP через Web UI")
+	s.jsonResponse(w, http.StatusOK, map[string]string{"message": "Обновление IP запущено"}, "")
 }
 
-// handleChannelSwitch вЂ” POST /api/channel/switch вЂ” СЃРјРµРЅР° РєР°РЅР°Р»Р°
+// handleChannelSwitch — POST /api/channel/switch — смена канала
 func (s *Server) handleChannelSwitch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ JSON")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "некорректный JSON")
 		return
 	}
 	if req.Name == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РёРјСЏ РєР°РЅР°Р»Р° РЅРµ Р·Р°РґР°РЅРѕ")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "имя канала не задано")
 		return
 	}
 	if req.Name == "parallel" {
 		if s.state != nil {
 			s.state.CurrentChannel = "parallel"
 		}
-		s.AddEvent("info", "РЎРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р»: РџР°СЂР°Р»Р»РµР»СЊРЅС‹Р№ (MQTT + Telegram)", "")
-		slog.Info("РџРµСЂРµРєР»СЋС‡С‘РЅ СЃРёРіРЅР°Р»СЊРЅС‹Р№ СЂРµР¶РёРј", "channel", "parallel")
+		s.AddEvent("info", "Сигнальный канал: Параллельный (MQTT + Telegram)", "")
+		slog.Info("Переключён сигнальный режим", "channel", "parallel")
 		s.jsonResponse(w, http.StatusOK, map[string]string{"channel": "parallel"}, "")
 		return
 	}
 
 	if s.sigMgr != nil {
 		if err := s.sigMgr.SwitchTo(req.Name); err != nil {
-			// Р•СЃР»Рё РєР°РЅР°Р» РЅРµ РЅР°Р№РґРµРЅ, РІСЃРµ СЂР°РІРЅРѕ СѓСЃС‚Р°РЅР°РІР»РёРІР°РµРј СЂРµР¶РёРј
-			slog.Warn("РљР°РЅР°Р» РЅРµ РЅР°Р№РґРµРЅ РІ FallbackManager", "name", req.Name)
+			// Если канал не найден, все равно устанавливаем режим
+			slog.Warn("Канал не найден в FallbackManager", "name", req.Name)
 		}
 	}
 	if s.state != nil {
 		s.state.CurrentChannel = req.Name
 	}
-	s.AddEvent("info", fmt.Sprintf("РЎРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р» РїРµСЂРµРєР»СЋС‡РµРЅ РЅР°: %s", req.Name), "")
-	slog.Info("РџРµСЂРµРєР»СЋС‡С‘РЅ СЃРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р»", "channel", req.Name)
+	s.AddEvent("info", fmt.Sprintf("Сигнальный канал переключен на: %s", req.Name), "")
+	slog.Info("Переключён сигнальный канал", "channel", req.Name)
 	s.jsonResponse(w, http.StatusOK, map[string]string{"channel": req.Name}, "")
 }
 
-// handleChannelStatus вЂ” GET /api/channel/status вЂ” СЃС‚Р°С‚СѓСЃ РєР°РЅР°Р»РѕРІ
+// handleChannelStatus — GET /api/channel/status — статус каналов
 func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var statuses []signaling.ChannelStatus
@@ -464,7 +464,7 @@ func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, statuses, "")
 }
 
-// handleConfig вЂ” GET & POST /api/config вЂ” С‡С‚РµРЅРёРµ Рё СЃРѕС…СЂР°РЅРµРЅРёРµ РЅР°СЃС‚СЂРѕРµРє
+// handleConfig — GET & POST /api/config — чтение и сохранение настроек
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -489,13 +489,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var req config.Config
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			s.jsonResponse(w, http.StatusBadRequest, nil, "РѕС€РёР±РєР° СЂР°Р·Р±РѕСЂР° JSON: "+err.Error())
+			s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON: "+err.Error())
 			return
 		}
 
-		// РЎРѕС…СЂР°РЅСЏРµРј РІ YAML
+		// Сохраняем в YAML
 		yamlData := fmt.Sprintf(`# ============================================================
-# NatBypass вЂ” РљРѕРЅС„РёРіСѓСЂР°С†РёРѕРЅРЅС‹Р№ С„Р°Р№Р» (РЎРѕС…СЂР°РЅРµРЅРѕ С‡РµСЂРµР· Web UI)
+# NatBypass — Конфигурационный файл (Сохранено через Web UI)
 # ============================================================
 
 app:
@@ -544,26 +544,26 @@ network:
 		}
 		_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
 		if err := os.WriteFile(targetPath, []byte(yamlData), 0644); err != nil {
-			s.jsonResponse(w, http.StatusInternalServerError, nil, "РѕС€РёР±РєР° Р·Р°РїРёСЃРё С„Р°Р№Р»Р°: "+err.Error())
+			s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка записи файла: "+err.Error())
 			return
 		}
 
 		if s.registry != nil {
 			s.registry.ClearAll()
 		}
-		s.AddEvent("info", "РќР°СЃС‚СЂРѕР№РєРё РѕР±РЅРѕРІР»РµРЅС‹ вЂ” СЃРїРёСЃРѕРє РїРёСЂРѕРІ РѕС‡РёС‰РµРЅ РґР»СЏ РЅРѕРІРѕР№ РєРѕРЅС„РёРіСѓСЂР°С†РёРё", "")
-		slog.Info("РќР°СЃС‚СЂРѕР№РєРё СЃРѕС…СЂР°РЅРµРЅС‹ С‡РµСЂРµР· Web UI, СЂРµРµСЃС‚СЂ РїРёСЂРѕРІ РѕС‡РёС‰РµРЅ", "file", targetPath)
-		s.jsonResponse(w, http.StatusOK, map[string]string{"message": "РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ СѓСЃРїРµС€РЅРѕ СЃРѕС…СЂР°РЅРµРЅР°! РЎРїРёСЃРѕРє СѓСЃС‚СЂРѕР№СЃС‚РІ СЃР±СЂРѕС€РµРЅ."}, "")
+		s.AddEvent("info", "Настройки обновлены — список пиров очищен для новой конфигурации", "")
+		slog.Info("Настройки сохранены через Web UI, реестр пиров очищен", "file", targetPath)
+		s.jsonResponse(w, http.StatusOK, map[string]string{"message": "Конфигурация успешно сохранена! Список устройств сброшен."}, "")
 
 	default:
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 	}
 }
 
-// handleTestTelegram вЂ” POST /api/test/telegram вЂ” РїСЂРѕРІРµСЂРєР° Telegram С‚РѕРєРµРЅР° Рё С‡Р°С‚Р°
+// handleTestTelegram — POST /api/test/telegram — проверка Telegram токена и чата
 func (s *Server) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
@@ -573,11 +573,11 @@ func (s *Server) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 		Proxy  string `json:"proxy"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ JSON")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "некорректный JSON")
 		return
 	}
 	if req.Token == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "СѓРєР°Р¶РёС‚Рµ С‚РѕРєРµРЅ Р±РѕС‚Р°")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "укажите токен бота")
 		return
 	}
 
@@ -597,7 +597,7 @@ func (s *Server) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", req.Token)
 	resp, err := client.Get(apiURL)
 	if err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РѕС€РёР±РєР° РїРѕРґРєР»СЋС‡РµРЅРёСЏ Рє Telegram API: "+err.Error())
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка подключения к Telegram API: "+err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -614,22 +614,22 @@ func (s *Server) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(bodyBytes, &tgResp)
 
 	if !tgResp.Ok {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "Telegram API РѕС€РёР±РєР°: "+tgResp.Description)
+		s.jsonResponse(w, http.StatusBadRequest, nil, "Telegram API ошибка: "+tgResp.Description)
 		return
 	}
 
 	res := map[string]interface{}{
 		"bot_username": "@" + tgResp.Result.Username,
 		"bot_name":     tgResp.Result.FirstName,
-		"status":       "РџРѕРґРєР»СЋС‡РµРЅРёРµ СѓСЃРїРµС€РЅРѕ!",
+		"status":       "Подключение успешно!",
 	}
 	s.jsonResponse(w, http.StatusOK, res, "")
 }
 
-// handleTestMQTT вЂ” POST /api/test/mqtt вЂ” РїСЂРѕРІРµСЂРєР° РґРѕСЃС‚СѓРїРЅРѕСЃС‚Рё Р±СЂРѕРєРµСЂР°
+// handleTestMQTT — POST /api/test/mqtt — проверка доступности брокера
 func (s *Server) handleTestMQTT(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -648,24 +648,24 @@ func (s *Server) handleTestMQTT(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := net.DialTimeout("tcp", host, 5*time.Second)
 	if err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РЅРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє MQTT Р±СЂРѕРєРµСЂСѓ: "+err.Error())
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не удалось подключиться к MQTT брокеру: "+err.Error())
 		return
 	}
 	conn.Close()
 
-	s.jsonResponse(w, http.StatusOK, map[string]string{"status": "MQTT Р±СЂРѕРєРµСЂ РґРѕСЃС‚СѓРїРµРЅ!"}, "")
+	s.jsonResponse(w, http.StatusOK, map[string]string{"status": "MQTT брокер доступен!"}, "")
 }
 
-// handleWgConfig вЂ” GET /api/wg/config вЂ” РіРµРЅРµСЂР°С†РёСЏ WireGuard РєРѕРЅС„РёРіР°
+// handleWgConfig — GET /api/wg/config — генерация WireGuard конфига
 func (s *Server) handleWgConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
 	kp, err := wireguard.GenerateKeyPair()
 	if err != nil {
-		s.jsonResponse(w, http.StatusInternalServerError, nil, "РѕС€РёР±РєР° РіРµРЅРµСЂР°С†РёРё РєР»СЋС‡РµР№ WireGuard")
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка генерации ключей WireGuard")
 		return
 	}
 
@@ -701,14 +701,14 @@ func (s *Server) handleWgConfig(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(content))
 }
 
-// handleRestart вЂ” POST /api/restart вЂ” РїРµСЂРµР·Р°РїСѓСЃРє СЃРµСЂРІРёСЃР°
+// handleRestart — POST /api/restart — перезапуск сервиса
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
-	slog.Warn("РџРѕР»СѓС‡РµРЅ СЃРёРіРЅР°Р» РїРµСЂРµР·Р°РїСѓСЃРєР° С‡РµСЂРµР· Web UI")
-	s.jsonResponse(w, http.StatusOK, map[string]string{"message": "РЎРёРіРЅР°Р» РїРµСЂРµР·Р°РїСѓСЃРєР° РѕС‚РїСЂР°РІР»РµРЅ"}, "")
+	slog.Warn("Получен сигнал перезапуска через Web UI")
+	s.jsonResponse(w, http.StatusOK, map[string]string{"message": "Сигнал перезапуска отправлен"}, "")
 
 	go func() {
 		time.Sleep(100 * time.Millisecond)
@@ -718,26 +718,26 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-// handleAWGRandomParams вЂ” GET /api/awg/random-params вЂ” РіРµРЅРµСЂР°С†РёСЏ РєСЂРёРїС‚РѕСЃС‚РѕР№РєРёС… РїР°СЂР°РјРµС‚СЂРѕРІ AWG 2.0
+// handleAWGRandomParams — GET /api/awg/random-params — генерация криптостойких параметров AWG 2.0
 func (s *Server) handleAWGRandomParams(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	params := wireguard.GenerateRandomAWGParams()
 	s.jsonResponse(w, http.StatusOK, params, "")
 }
 
-// handleAWGConfig вЂ” GET /api/awg/config вЂ” РіРµРЅРµСЂР°С†РёСЏ AmneziaWG 2.0 РєРѕРЅС„РёРіР° СЃ РѕР±С„СѓСЃРєР°С†РёРµР№
+// handleAWGConfig — GET /api/awg/config — генерация AmneziaWG 2.0 конфига с обфускацией
 func (s *Server) handleAWGConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
 	kp, err := wireguard.GenerateKeyPair()
 	if err != nil {
-		s.jsonResponse(w, http.StatusInternalServerError, nil, "РѕС€РёР±РєР° РіРµРЅРµСЂР°С†РёРё РєР»СЋС‡РµР№: "+err.Error())
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка генерации ключей: "+err.Error())
 		return
 	}
 
@@ -793,10 +793,10 @@ func (s *Server) handleAWGConfig(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(content))
 }
 
-// handleDiagnose вЂ” GET /api/diagnose вЂ” РїРѕР»РЅР°СЏ РґРёР°РіРЅРѕСЃС‚РёРєР° РїРѕРґРєР»СЋС‡РµРЅРёСЏ
+// handleDiagnose — GET /api/diagnose — полная диагностика подключения
 func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
@@ -808,7 +808,7 @@ func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
 
 	result := map[string]interface{}{}
 
-	// РџСЂРѕРІРµСЂРєР° РґРѕСЃС‚СѓРїРЅРѕСЃС‚Рё РёРЅС‚РµСЂРЅРµС‚Р° С‡РµСЂРµР· РЅРµСЃРєРѕР»СЊРєРѕ РЅРµР·Р°РІРёСЃРёРјС‹С… С…РѕСЃС‚РѕРІ
+	// Проверка доступности интернета через несколько независимых хостов
 	testEndpoints := []string{
 		"77.88.8.8:53",      // Yandex DNS
 		"8.8.8.8:53",        // Google DNS
@@ -828,36 +828,36 @@ func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if internetOK {
-		result["internet"] = check{Ok: true, Detail: "РРЅС‚РµСЂРЅРµС‚ РґРѕСЃС‚СѓРїРµРЅ", Extra: connectedEndpoint}
+		result["internet"] = check{Ok: true, Detail: "нтернет доступен", Extra: connectedEndpoint}
 	} else {
-		result["internet"] = check{Ok: false, Detail: "РќРµС‚ РїСЂСЏРјРѕРіРѕ РґРѕСЃС‚СѓРїР° Рє РїСЂРѕРІРµСЂРѕС‡РЅС‹Рј DNS/HTTPS СЃРµСЂРІРµСЂР°Рј"}
+		result["internet"] = check{Ok: false, Detail: "Нет прямого доступа к проверочным DNS/HTTPS серверам"}
 	}
 
-	// РџСЂРѕРІРµСЂРєР° РїСѓР±Р»РёС‡РЅРѕРіРѕ IP
+	// Проверка публичного IP
 	pip := ""
 	if s.state != nil {
 		pip = s.state.PublicIP
 	}
-	if pip != "" && pip != "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ..." && pip != "<nil>" && pip != "0.0.0.0" {
-		result["public_ip"] = check{Ok: true, Detail: "Р’РЅРµС€РЅРёР№ IP РѕРїСЂРµРґРµР»С‘РЅ", Extra: pip}
+	if pip != "" && pip != "Определяется..." && pip != "<nil>" && pip != "0.0.0.0" {
+		result["public_ip"] = check{Ok: true, Detail: "Внешний IP определён", Extra: pip}
 	} else {
-		result["public_ip"] = check{Ok: false, Detail: "Р’РЅРµС€РЅРёР№ IP РµС‰С‘ РЅРµ РѕРїСЂРµРґРµР»С‘РЅ. РџРѕРґРѕР¶РґРёС‚Рµ РЅРµСЃРєРѕР»СЊРєРѕ СЃРµРєСѓРЅРґ."}
+		result["public_ip"] = check{Ok: false, Detail: "Внешний IP ещё не определён. Подождите несколько секунд."}
 	}
 
-	// РџСЂРѕРІРµСЂРєР° STUN
+	// Проверка STUN
 	stun := ""
 	if s.state != nil {
 		stun = s.state.STUNAddr
 	}
-	if stun != "" && stun != "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ..." {
-		result["stun"] = check{Ok: true, Detail: "STUN-Р°РґСЂРµСЃ РѕРїСЂРµРґРµР»С‘РЅ (РІРѕР·РјРѕР¶РµРЅ РїСЂСЏРјРѕР№ P2P)", Extra: stun}
-		result["nat_type"] = check{Ok: true, Detail: "Р’РѕР·РјРѕР¶РµРЅ Full Cone NAT вЂ” P2P СЃРѕРµРґРёРЅРµРЅРёРµ РґРѕСЃС‚СѓРїРЅРѕ"}
+	if stun != "" && stun != "Определяется..." {
+		result["stun"] = check{Ok: true, Detail: "STUN-адрес определён (возможен прямой P2P)", Extra: stun}
+		result["nat_type"] = check{Ok: true, Detail: "Возможен Full Cone NAT — P2P соединение доступно"}
 	} else {
-		result["stun"] = check{Ok: false, Detail: "STUN-Р°РґСЂРµСЃ РЅРµ РѕРїСЂРµРґРµР»С‘РЅ (СЃРёРјРјРµС‚СЂРёС‡РЅС‹Р№ NAT)."}
-		result["nat_type"] = check{Ok: false, Detail: "РЎРёРјРјРµС‚СЂРёС‡РЅС‹Р№ NAT РёР»Рё CGNAT вЂ” РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ MQTT relay-РєР°РЅР°Р»"}
+		result["stun"] = check{Ok: false, Detail: "STUN-адрес не определён (симметричный NAT)."}
+		result["nat_type"] = check{Ok: false, Detail: "Симметричный NAT или CGNAT — используется MQTT relay-канал"}
 	}
 
-	// РџСЂРѕРІРµСЂРєР° СЃРёРіРЅР°Р»СЊРЅРѕРіРѕ РєР°РЅР°Р»Р°
+	// Проверка сигнального канала
 	ch := ""
 	if s.sigMgr != nil {
 		ch = s.sigMgr.CurrentChannel()
@@ -873,30 +873,30 @@ func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if ch != "" {
-		result["channel"] = check{Ok: true, Detail: "РЎРёРіРЅР°Р»СЊРЅС‹Р№ РєР°РЅР°Р» Р°РєС‚РёРІРµРЅ", Extra: ch}
+		result["channel"] = check{Ok: true, Detail: "Сигнальный канал активен", Extra: ch}
 	} else {
-		result["channel"] = check{Ok: true, Detail: "РљР°РЅР°Р» Р°РєС‚РёРІРµРЅ (MQTT Parallel Mesh Relay)", Extra: "MQTT Parallel Mesh Relay"}
+		result["channel"] = check{Ok: true, Detail: "Канал активен (MQTT Parallel Mesh Relay)", Extra: "MQTT Parallel Mesh Relay"}
 	}
 
-	// РџСЂРѕРІРµСЂРєР° РїРёСЂРѕРІ
+	// Проверка пиров
 	peers := []*peer.Peer{}
 	if s.registry != nil {
 		peers = s.registry.List()
 	}
 	if len(peers) > 0 {
-		result["peers"] = check{Ok: true, Detail: fmt.Sprintf("РћР±РЅР°СЂСѓР¶РµРЅРѕ %d СѓСЃС‚СЂРѕР№СЃС‚РІ РІ СЃРµС‚Рё", len(peers)), Extra: fmt.Sprintf("%d", len(peers))}
+		result["peers"] = check{Ok: true, Detail: fmt.Sprintf("Обнаружено %d устройств в сети", len(peers)), Extra: fmt.Sprintf("%d", len(peers))}
 	} else {
-		result["peers"] = check{Ok: false, Detail: "РЈСЃС‚СЂРѕР№СЃС‚РІР° РІ СЃРµС‚Рё РїРѕРєР° РЅРµ РѕР±РЅР°СЂСѓР¶РµРЅС‹ (РѕР¶РёРґР°РЅРёРµ РјР°СЏРєРѕРІ)", Extra: "0"}
+		result["peers"] = check{Ok: false, Detail: "Устройства в сети пока не обнаружены (ожидание маяков)", Extra: "0"}
 	}
 
-	s.AddEvent("info", "Р—Р°РїСѓС‰РµРЅР° РґРёР°РіРЅРѕСЃС‚РёРєР° РїРѕРґРєР»СЋС‡РµРЅРёСЏ", fmt.Sprintf("channel=%s ip=%s", ch, pip))
+	s.AddEvent("info", "Запущена диагностика подключения", fmt.Sprintf("channel=%s ip=%s", ch, pip))
 	s.jsonResponse(w, http.StatusOK, result, "")
 }
 
-// handleSetupStatus вЂ” GET /api/setup/status вЂ” СЃС‚Р°С‚СѓСЃ РјР°СЃС‚РµСЂР° РїРµСЂРІРѕРЅР°С‡Р°Р»СЊРЅРѕР№ РЅР°СЃС‚СЂРѕР№РєРё
+// handleSetupStatus — GET /api/setup/status — статус мастера первоначальной настройки
 func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
@@ -906,7 +906,7 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 		hasChannels = len(statuses) > 0
 	}
 
-	// РЎС‡РёС‚Р°РµРј РЅР°СЃС‚СЂРѕРµРЅРЅС‹Рј, РµСЃР»Рё РІ config.yaml РµСЃС‚СЊ РЅРµ-РїСѓР±Р»РёС‡РЅС‹Р№ РєР°РЅР°Р»
+	// Считаем настроенным, если в config.yaml есть не-публичный канал
 	configuredProperly := false
 	if cfg, err := config.Load(s.configPath); err == nil {
 		for _, ch := range cfg.Signaling.Channels {
@@ -931,10 +931,10 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
-// handleSetupComplete вЂ” POST /api/setup/complete вЂ” Р·Р°РІРµСЂС€РµРЅРёРµ РјР°СЃС‚РµСЂР° РЅР°СЃС‚СЂРѕР№РєРё
+// handleSetupComplete — POST /api/setup/complete — завершение мастера настройки
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -948,14 +948,14 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 			s.state.DeviceID = req.DeviceName
 		}
 	}
-	s.AddEvent("info", "РњР°СЃС‚РµСЂ РЅР°СЃС‚СЂРѕР№РєРё Р·Р°РІРµСЂС€С‘РЅ", "device="+s.deviceName)
+	s.AddEvent("info", "Мастер настройки завершён", "device="+s.deviceName)
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "device_name": s.deviceName}, "")
 }
 
-// handleEvents вЂ” GET /api/events вЂ” Р¶СѓСЂРЅР°Р» СЃРѕР±С‹С‚РёР№
+// handleEvents — GET /api/events — журнал событий
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
@@ -972,11 +972,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	copy(evts, s.events)
 	s.eventsMu.Unlock()
 
-	// Р’РѕР·РІСЂР°С‰Р°РµРј РїРѕСЃР»РµРґРЅРёРµ N РІ РѕР±СЂР°С‚РЅРѕРј РїРѕСЂСЏРґРєРµ (РЅРѕРІС‹Рµ РїРµСЂРІС‹Рµ)
+	// Возвращаем последние N в обратном порядке (новые первые)
 	if len(evts) > limit {
 		evts = evts[len(evts)-limit:]
 	}
-	// Р РµРІРµСЂСЃ вЂ” РЅРѕРІС‹Рµ СЃРѕР±С‹С‚РёСЏ РїРµСЂРІС‹РјРё
+	// Реверс — новые события первыми
 	for i, j := 0, len(evts)-1; i < j; i, j = i+1, j-1 {
 		evts[i], evts[j] = evts[j], evts[i]
 	}
@@ -984,17 +984,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, evts, "")
 }
 
-// handleDeviceRename вЂ” POST /api/device/rename вЂ” РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёРµ СѓСЃС‚СЂРѕР№СЃС‚РІР°
+// handleDeviceRename — POST /api/device/rename — переименование устройства
 func (s *Server) handleDeviceRename(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "СѓРєР°Р¶РёС‚Рµ РЅРѕРІРѕРµ РёРјСЏ СѓСЃС‚СЂРѕР№СЃС‚РІР°")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "укажите новое имя устройства")
 		return
 	}
 	oldName := s.deviceName
@@ -1007,15 +1007,15 @@ func (s *Server) handleDeviceRename(w http.ResponseWriter, r *http.Request) {
 		cfg.App.DeviceName = req.Name
 		_ = config.Save(cfg, s.configPath, true)
 	}
-	s.AddEvent("info", fmt.Sprintf("РЈСЃС‚СЂРѕР№СЃС‚РІРѕ РїРµСЂРµРёРјРµРЅРѕРІР°РЅРѕ: %s в†’ %s", oldName, req.Name), "")
-	slog.Info("РЈСЃС‚СЂРѕР№СЃС‚РІРѕ РїРµСЂРµРёРјРµРЅРѕРІР°РЅРѕ С‡РµСЂРµР· Web UI", "old", oldName, "new", req.Name)
+	s.AddEvent("info", fmt.Sprintf("Устройство переименовано: %s → %s", oldName, req.Name), "")
+	slog.Info("Устройство переименовано через Web UI", "old", oldName, "new", req.Name)
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "name": req.Name}, "")
 }
 
-// handleQRInvite вЂ” GET /api/qr/invite вЂ” РґР°РЅРЅС‹Рµ РґР»СЏ QR-РєРѕРґР° РїСЂРёРіР»Р°С€РµРЅРёСЏ
+// handleQRInvite — GET /api/qr/invite — данные для QR-кода приглашения
 func (s *Server) handleQRInvite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
@@ -1029,7 +1029,7 @@ func (s *Server) handleQRInvite(w http.ResponseWriter, r *http.Request) {
 		devID = s.state.DeviceID
 	}
 
-	// Р”Р°РЅРЅС‹Рµ РґР»СЏ QR-РєРѕРґР°: СЃСЃС‹Р»РєР° РґР»СЏ СЃРєР°С‡РёРІР°РЅРёСЏ + РёРЅС„РѕСЂРјР°С†РёСЏ РѕР± СѓСЃС‚СЂРѕР№СЃС‚РІРµ
+	// Данные для QR-кода: ссылка для скачивания + информация об устройстве
 	inviteURL := "https://github.com/jamixm4-crypto/natbypass/releases/latest"
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
@@ -1042,7 +1042,7 @@ func (s *Server) handleQRInvite(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
-// handleQRImage вЂ” GET /api/qr/image?data=... вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ PNG QR-РєРѕРґ (100% РѕС„Р»Р°Р№РЅ РіРµРЅРµСЂР°С†РёСЏ)
+// handleQRImage — GET /api/qr/image?data=... — возвращает PNG QR-код (100% офлайн генерация)
 func (s *Server) handleQRImage(w http.ResponseWriter, r *http.Request) {
 	data := r.URL.Query().Get("data")
 	if data == "" {
@@ -1060,10 +1060,10 @@ func (s *Server) handleQRImage(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(png)
 }
 
-// handleDashboard вЂ” GET /api/dashboard вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ СЂРµР°Р»СЊРЅС‹Рµ Р°РіСЂРµРіРёСЂРѕРІР°РЅРЅС‹Рµ РјРµС‚СЂРёРєРё РґР»СЏ РґР°С€Р±РѕСЂРґР°
+// handleDashboard — GET /api/dashboard — возвращает реальные агрегированные метрики для дашборда
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
@@ -1126,7 +1126,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		awgActive = true
 	}
 
-	throughputStr := "вЂ”"
+	throughputStr := "—"
 	throughputKB := 0
 	if p2pActive > 0 {
 		throughputKB = p2pActive * 16
@@ -1161,10 +1161,10 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, data, "")
 }
 
-// handleAnalytics вЂ” GET /api/analytics вЂ” СЂРµР°Р»СЊРЅР°СЏ СЃРµС‚РµРІР°СЏ Р°РЅР°Р»РёС‚РёРєР°
+// handleAnalytics — GET /api/analytics — реальная сетевая аналитика
 func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 
@@ -1176,17 +1176,17 @@ func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"total_peers": len(peersList),
 		"encryption_ciphers": []map[string]string{
-			{"name": "ChaCha20-Poly1305", "type": "WireGuard / AWG 2.0", "status": "РђРєС‚РёРІРµРЅ"},
-			{"name": "Curve25519 / NaCl", "type": "Signaling Relay", "status": "РђРєС‚РёРІРµРЅ"},
+			{"name": "ChaCha20-Poly1305", "type": "WireGuard / AWG 2.0", "status": "Активен"},
+			{"name": "Curve25519 / NaCl", "type": "Signaling Relay", "status": "Активен"},
 		},
 	}
 	s.jsonResponse(w, http.StatusOK, data, "")
 }
 
-// handlePeerBookmark вЂ” POST /api/peer/bookmark вЂ” СЃРѕС…СЂР°РЅСЏРµС‚ РёРјСЏ (Р·Р°РєР»Р°РґРєСѓ) РґР»СЏ РїРёСЂР°
+// handlePeerBookmark — POST /api/peer/bookmark — сохраняет имя (закладку) для пира
 func (s *Server) handlePeerBookmark(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -1194,7 +1194,7 @@ func (s *Server) handlePeerBookmark(w http.ResponseWriter, r *http.Request) {
 		Nickname string `json:"nickname"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceID == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "СѓРєР°Р¶РёС‚Рµ device_id")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "укажите device_id")
 		return
 	}
 
@@ -1217,21 +1217,21 @@ func (s *Server) handlePeerBookmark(w http.ResponseWriter, r *http.Request) {
 			p.Nickname = req.Nickname
 		}
 	}
-	s.AddEvent("info", fmt.Sprintf("Р—Р°РєР»Р°РґРєР° РѕР±РЅРѕРІР»РµРЅР°: %s в†’ %s", req.DeviceID, req.Nickname), "")
+	s.AddEvent("info", fmt.Sprintf("Закладка обновлена: %s → %s", req.DeviceID, req.Nickname), "")
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "device_id": req.DeviceID, "nickname": req.Nickname}, "")
 }
 
-// handlePeerPing вЂ” POST /api/peer/ping вЂ” РёР·РјРµСЂРµРЅРёРµ СЂРµР°Р»СЊРЅРѕРіРѕ RTT РїРёРЅРіР° РґРѕ РїРёСЂР°
+// handlePeerPing — POST /api/peer/ping — измерение реального RTT пинга до пира
 func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
 		DeviceID string `json:"device_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceID == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "СѓРєР°Р¶РёС‚Рµ device_id")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "укажите device_id")
 		return
 	}
 
@@ -1278,7 +1278,7 @@ func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Р•СЃР»Рё РїРёСЂ РІ СЃРµС‚Рё РѕРЅР»Р°Р№РЅ
+			// Если пир в сети онлайн
 			latMs := int64(14)
 			if p.Latency > 0 {
 				latMs = p.Latency.Milliseconds()
@@ -1294,10 +1294,10 @@ func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"device_id": req.DeviceID, "latency_ms": 12, "direct_p2p": true}, "")
 }
 
-// handleAWGParams вЂ” POST /api/awg/params вЂ” РѕР±РЅРѕРІР»РµРЅРёРµ РїР°СЂР°РјРµС‚СЂРѕРІ РѕР±С„СѓСЃРєР°С†РёРё AWG 2.0
+// handleAWGParams — POST /api/awg/params — обновление параметров обфускации AWG 2.0
 func (s *Server) handleAWGParams(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -1313,7 +1313,7 @@ func (s *Server) handleAWGParams(w http.ResponseWriter, r *http.Request) {
 		H4      string `json:"h4"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РѕС€РёР±РєР° СЂР°Р·Р±РѕСЂР° JSON")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
 		return
 	}
 
@@ -1331,14 +1331,14 @@ func (s *Server) handleAWGParams(w http.ResponseWriter, r *http.Request) {
 		if h4, err := strconv.ParseUint(req.H4, 10, 32); err == nil { cfg.WireGuard.AWG.H4 = uint32(h4) }
 		_ = config.Save(cfg, s.configPath, true)
 	}
-	s.AddEvent("info", "РџР°СЂР°РјРµС‚СЂС‹ AmneziaWG 2.0 РѕР±РЅРѕРІР»РµРЅС‹", fmt.Sprintf("Jc=%d S1=%d S2=%d", req.Jc, req.S1, req.S2))
+	s.AddEvent("info", "Параметры AmneziaWG 2.0 обновлены", fmt.Sprintf("Jc=%d S1=%d S2=%d", req.Jc, req.S1, req.S2))
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true}, "")
 }
 
-// handleRoutingExitNode вЂ” POST /api/routing/exit-node вЂ” СѓРїСЂР°РІР»РµРЅРёРµ С€Р»СЋР·РѕРј РёРЅС‚РµСЂРЅРµС‚Р°
+// handleRoutingExitNode — POST /api/routing/exit-node — управление шлюзом интернета
 func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -1346,7 +1346,7 @@ func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 		DefaultGatewayPeer string `json:"default_gateway_peer"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РѕС€РёР±РєР° СЂР°Р·Р±РѕСЂР° JSON")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
 		return
 	}
 
@@ -1356,21 +1356,21 @@ func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 		cfg.Network.SelectedExitNode = req.DefaultGatewayPeer
 		_ = config.Save(cfg, s.configPath, true)
 	}
-	s.AddEvent("info", fmt.Sprintf("Exit Node РѕР±РЅРѕРІР»РµРЅ: allow=%v gateway=%s", req.AllowExitNode, req.DefaultGatewayPeer), "")
+	s.AddEvent("info", fmt.Sprintf("Exit Node обновлен: allow=%v gateway=%s", req.AllowExitNode, req.DefaultGatewayPeer), "")
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "selected_exit_node": req.DefaultGatewayPeer}, "")
 }
 
-// handleRoutingSubnets вЂ” POST /api/routing/subnets вЂ” СЃРѕС…СЂР°РЅРµРЅРёРµ Р°РЅРѕРЅСЃРёСЂСѓРµРјС‹С… РїРѕРґСЃРµС‚РµР№
+// handleRoutingSubnets — POST /api/routing/subnets — сохранение анонсируемых подсетей
 func (s *Server) handleRoutingSubnets(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
 		Subnets []string `json:"subnets"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РѕС€РёР±РєР° СЂР°Р·Р±РѕСЂР° JSON")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
 		return
 	}
 	cfg, _ := config.Load(s.configPath)
@@ -1378,11 +1378,11 @@ func (s *Server) handleRoutingSubnets(w http.ResponseWriter, r *http.Request) {
 		cfg.Network.AdvertisedSubnets = req.Subnets
 		_ = config.Save(cfg, s.configPath, true)
 	}
-	s.AddEvent("info", fmt.Sprintf("РђРЅРѕРЅСЃРёСЂСѓРµРјС‹Рµ РїРѕРґСЃРµС‚Рё РѕР±РЅРѕРІР»РµРЅС‹: %v", req.Subnets), "")
+	s.AddEvent("info", fmt.Sprintf("Анонсируемые подсети обновлены: %v", req.Subnets), "")
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true}, "")
 }
 
-// handleRoutingLocalSubnets вЂ” GET /api/routing/local-subnets вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ СЃРїРёСЃРѕРє РѕР±РЅР°СЂСѓР¶РµРЅРЅС‹С… Р»РѕРєР°Р»СЊРЅС‹С… РїРѕРґСЃРµС‚РµР№
+// handleRoutingLocalSubnets — GET /api/routing/local-subnets — возвращает список обнаруженных локальных подсетей
 func (s *Server) handleRoutingLocalSubnets(w http.ResponseWriter, r *http.Request) {
 	subnets := []string{}
 	ifaces, err := net.Interfaces()
@@ -1414,10 +1414,10 @@ func (s *Server) handleRoutingLocalSubnets(w http.ResponseWriter, r *http.Reques
 	s.jsonResponse(w, http.StatusOK, subnets, "")
 }
 
-// handleSettingsSave вЂ” POST /api/settings/save вЂ” РїРѕР»РЅРѕРµ СЃРѕС…СЂР°РЅРµРЅРёРµ РЅР°СЃС‚СЂРѕРµРє СЃ DPAPI
+// handleSettingsSave — POST /api/settings/save — полное сохранение настроек с DPAPI
 func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -1439,7 +1439,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		AutoStart       bool   `json:"autostart"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РѕС€РёР±РєР° СЂР°Р·Р±РѕСЂР° JSON")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
 		return
 	}
 
@@ -1464,7 +1464,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		cfg.WireGuard.MTU = req.MTU
 	}
 
-	// РћР±РЅРѕРІР»РµРЅРёРµ Telegram
+	// Обновление Telegram
 	hasTg := false
 	hasMqtt := false
 	for i, ch := range cfg.Signaling.Channels {
@@ -1530,12 +1530,12 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := config.Save(cfg, targetPath, isWindows); err != nil {
-		slog.Error("РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РєРѕРЅС„РёРіСѓСЂР°С†РёРё", "path", targetPath, "err", err)
-		s.jsonResponse(w, http.StatusInternalServerError, nil, "РѕС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РЅР°СЃС‚СЂРѕРµРє: "+err.Error())
+		slog.Error("Ошибка сохранения конфигурации", "path", targetPath, "err", err)
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения настроек: "+err.Error())
 		return
 	}
 
-	// Р”РёРЅР°РјРёС‡РµСЃРєРѕРµ РїСЂРёРјРµРЅРµРЅРёРµ РЅРѕРІРѕРіРѕ MQTT С‚РѕРїРёРєР° РІ СЂР°Р±РѕС‚Р°СЋС‰РµРј РґРµРјРѕРЅРµ
+	// Динамическое применение нового MQTT топика в работающем демоне
 	if req.MqttTopic != "" && s.sigMgr != nil {
 		s.sigMgr.UpdateMQTTTopic(req.MqttTopic)
 	}
@@ -1543,30 +1543,30 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	if s.registry != nil {
 		s.registry.ClearAll()
 	}
-	msg := "РќР°СЃС‚СЂРѕР№РєРё СѓСЃРїРµС€РЅРѕ СЃРѕС…СЂР°РЅРµРЅС‹! РљСЌС€ СѓСЃС‚СЂРѕР№СЃС‚РІ СЃР±СЂРѕС€РµРЅ."
+	msg := "Настройки успешно сохранены! Кэш устройств сброшен."
 	if isWindows {
-		s.AddEvent("info", "РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ Р·Р°С€РёС„СЂРѕРІР°РЅР° DPAPI Рё СЃРѕС…СЂР°РЅРµРЅР° вЂ” РєСЌС€ СѓСЃС‚СЂРѕР№СЃС‚РІ РѕС‡РёС‰РµРЅ", fmt.Sprintf("device=%s", req.DeviceName))
+		s.AddEvent("info", "Конфигурация зашифрована DPAPI и сохранена — кэш устройств очищен", fmt.Sprintf("device=%s", req.DeviceName))
 	} else {
-		s.AddEvent("info", "РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ СЃРѕС…СЂР°РЅРµРЅР° вЂ” РєСЌС€ СѓСЃС‚СЂРѕР№СЃС‚РІ РѕС‡РёС‰РµРЅ", fmt.Sprintf("device=%s file=%s", req.DeviceName, targetPath))
+		s.AddEvent("info", "Конфигурация сохранена — кэш устройств очищен", fmt.Sprintf("device=%s file=%s", req.DeviceName, targetPath))
 	}
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": msg}, "")
 }
 
-// handlePeersClear вЂ” POST /api/peers/clear вЂ” РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅС‹Р№ СЃР±СЂРѕСЃ РєСЌС€Р° СѓСЃС‚СЂРѕР№СЃС‚РІ
+// handlePeersClear — POST /api/peers/clear — принудительный сброс кэша устройств
 func (s *Server) handlePeersClear(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	if s.registry != nil {
 		s.registry.ClearAll()
 	}
-	s.AddEvent("info", "РљСЌС€ СѓСЃС‚СЂРѕР№СЃС‚РІ РѕС‡РёС‰РµРЅ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј РІСЂСѓС‡РЅСѓСЋ", "")
-	slog.Info("РљСЌС€ СѓСЃС‚СЂРѕР№СЃС‚РІ СЃР±СЂРѕС€РµРЅ С‡РµСЂРµР· Web UI")
-	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "РљСЌС€ СѓСЃС‚СЂРѕР№СЃС‚РІ РѕС‡РёС‰РµРЅ. РЎРµС‚СЊ РїРµСЂРµСЃРєР°РЅРёСЂСѓРµС‚СЃСЏ."}, "")
+	s.AddEvent("info", "Кэш устройств очищен пользователем вручную", "")
+	slog.Info("Кэш устройств сброшен через Web UI")
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "Кэш устройств очищен. Сеть пересканируется."}, "")
 }
 
-// handleFavicon вЂ” GET /favicon.ico вЂ” РѕС‚РґР°С‘С‚ РєР°СЃС‚РѕРјРЅС‹Р№ Р·РЅР°С‡РѕРє NatBypass РґР»СЏ Р±СЂР°СѓР·РµСЂР° Рё РѕРєРѕРЅРЅРѕРіРѕ С„СЂРµР№РјР°
+// handleFavicon — GET /favicon.ico — отдаёт кастомный значок NatBypass для браузера и оконного фрейма
 func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 	icoData, err := staticFS.ReadFile("static/app.ico")
 	if err == nil && len(icoData) > 0 {
@@ -1581,7 +1581,7 @@ func (s *Server) handleFavicon(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(svgIcon))
 }
 
-// handleIconPng вЂ” GET /icon.png вЂ” РѕС‚РґР°С‘С‚ 512x512 PNG Р·РЅР°С‡РѕРє РґР»СЏ Chromium / Edge PWA С„СЂРµР№РјР°
+// handleIconPng — GET /icon.png — отдаёт 512x512 PNG значок для Chromium / Edge PWA фрейма
 func (s *Server) handleIconPng(w http.ResponseWriter, r *http.Request) {
 	pngData, err := staticFS.ReadFile("static/icon.png")
 	if err == nil && len(pngData) > 0 {
@@ -1593,7 +1593,7 @@ func (s *Server) handleIconPng(w http.ResponseWriter, r *http.Request) {
 	s.handleFavicon(w, r)
 }
 
-// handleManifest вЂ” GET /manifest.json вЂ” РѕС‚РґР°С‘С‚ PWA-РјР°РЅРёС„РµСЃС‚ РґР»СЏ Edge/Chrome App window
+// handleManifest — GET /manifest.json — отдаёт PWA-манифест для Edge/Chrome App window
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	manifest := map[string]interface{}{
 		"name":             "NatBypass Mesh Network",
@@ -1624,10 +1624,10 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(manifest)
 }
 
-// handleUpdateCheck вЂ” GET /api/update/check вЂ” РїСЂРѕРІРµСЂСЏРµС‚ РЅР°Р»РёС‡РёРµ РЅРѕРІРѕР№ РІРµСЂСЃРёРё РЅР° GitHub
+// handleUpdateCheck — GET /api/update/check — проверяет наличие новой версии на GitHub
 func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	ver := s.version
@@ -1646,10 +1646,10 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, info, "")
 }
 
-// handleUpdateApply вЂ” POST /api/update/apply вЂ” СЃРєР°С‡РёРІР°РµС‚ Рё РїСЂРёРјРµРЅСЏРµС‚ РѕР±РЅРѕРІР»РµРЅРёРµ
+// handleUpdateApply — POST /api/update/apply — скачивает и применяет обновление
 func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -1663,7 +1663,7 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 		}
 		info, err := updater.CheckUpdate(r.Context(), ver)
 		if err != nil || info == nil || info.AssetURL == "" {
-			s.jsonResponse(w, http.StatusBadRequest, nil, "РЅРµ СѓРґР°Р»РѕСЃСЊ РЅР°Р№С‚Рё С„Р°Р№Р» РѕР±РЅРѕРІР»РµРЅРёСЏ РґР»СЏ РІР°С€РµР№ СЃРёСЃС‚РµРјС‹")
+			s.jsonResponse(w, http.StatusBadRequest, nil, "не удалось найти файл обновления для вашей системы")
 			return
 		}
 		req.AssetURL = info.AssetURL
@@ -1673,26 +1673,26 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 		_ = updater.ApplyUpdate(context.Background(), req.AssetURL)
 	}()
 
-	s.AddEvent("info", "Р—Р°РїСѓС‰РµРЅРѕ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРѕРµ РѕР±РЅРѕРІР»РµРЅРёРµ NatBypass", "")
+	s.AddEvent("info", "Запущено автоматическое обновление NatBypass", "")
 	s.jsonResponse(w, http.StatusOK, map[string]string{
-		"message": "РћР±РЅРѕРІР»РµРЅРёРµ Р·Р°РїСѓС‰РµРЅРѕ РІ С„РѕРЅРѕРІРѕРј СЂРµР¶РёРјРµ",
+		"message": "Обновление запущено в фоновом режиме",
 	}, "")
 }
 
-// handleUpdateStatus вЂ” GET /api/update/status вЂ” СЃС‚Р°С‚СѓСЃ РїСЂРѕС†РµСЃСЃР° РѕР±РЅРѕРІР»РµРЅРёСЏ
+// handleUpdateStatus — GET /api/update/status — статус процесса обновления
 func (s *Server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	st := updater.GetStatus()
 	s.jsonResponse(w, http.StatusOK, st, "")
 }
 
-// handleProfilesList вЂ” GET /api/profiles вЂ” СЃРїРёСЃРѕРє РІСЃРµС… РїСЂРѕС„РёР»РµР№ СЃРµС‚Рё Рё Р°РєС‚РёРІРЅС‹Р№ РїСЂРѕС„РёР»СЊ
+// handleProfilesList — GET /api/profiles — список всех профилей сети и активный профиль
 func (s *Server) handleProfilesList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	cfg, err := config.Load(s.configPath)
@@ -1702,8 +1702,8 @@ func (s *Server) handleProfilesList(w http.ResponseWriter, r *http.Request) {
 	}
 	active := cfg.EnsureActiveProfile()
 
-	// РџСЂРё РїРµСЂРІРѕРј Р·Р°РїСѓСЃРєРµ (РЅРµС‚ С„Р°Р№Р»Р° РєРѕРЅС„РёРіР°) вЂ” СЃСЂР°Р·Сѓ СЃРѕС…СЂР°РЅСЏРµРј РїСЂРѕС„РёР»СЊ РЅР° РґРёСЃРє,
-	// РёРЅР°С‡Рµ РїРѕРїС‹С‚РєР° СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ/СЃРѕС…СЂР°РЅРёС‚СЊ РµРіРѕ РІРµСЂРЅС‘С‚ В«РїСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅВ»
+	// При первом запуске (нет файла конфига) — сразу сохраняем профиль на диск,
+	// иначе попытка редактировать/сохранить его вернёт «профиль не найден»
 	if firstLaunch && active != nil {
 		_ = config.Save(cfg, s.configPath, false)
 	}
@@ -1715,10 +1715,10 @@ func (s *Server) handleProfilesList(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
-// handleProfileCreate вЂ” POST /api/profiles/create вЂ” СЃРѕР·РґР°РЅРёРµ РЅРѕРІРѕРіРѕ РїСЂРѕС„РёР»СЏ СЃРµС‚Рё
+// handleProfileCreate — POST /api/profiles/create — создание нового профиля сети
 func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -1734,7 +1734,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		AutoSwitch bool   `json:"auto_switch"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РѕС€РёР±РєР° СЂР°Р·Р±РѕСЂР° JSON")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
 		return
 	}
 
@@ -1744,7 +1744,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Name == "" {
-		req.Name = fmt.Sprintf("РЎРµС‚СЊ #%d", len(cfg.Profiles)+1)
+		req.Name = fmt.Sprintf("Сеть #%d", len(cfg.Profiles)+1)
 	}
 	if req.MQTTTopic == "" {
 		req.MQTTTopic = "natbypass/mesh/" + config.GenerateRandomHex(8)
@@ -1777,9 +1777,9 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 
 	if req.AutoSwitch && s.onProfileSwitch != nil {
 		_ = s.onProfileSwitch(saved)
-		s.AddEvent("channel_switch", "РЎРѕР·РґР°РЅ Рё Р°РєС‚РёРІРёСЂРѕРІР°РЅ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё: "+saved.Name, "РўРѕРїРёРє: "+saved.MQTTTopic)
+		s.AddEvent("channel_switch", "Создан и активирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
 	} else {
-		s.AddEvent("info", "РЎРѕР·РґР°РЅ РЅРѕРІС‹Р№ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё: "+newProf.Name, "РўРѕРїРёРє: "+newProf.MQTTTopic)
+		s.AddEvent("info", "Создан новый профиль сети: "+newProf.Name, "Топик: "+newProf.MQTTTopic)
 	}
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
@@ -1789,10 +1789,10 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
-// handleProfileUpdate вЂ” POST /api/profiles/update вЂ” СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРіРѕ РїСЂРѕС„РёР»СЏ
+// handleProfileUpdate — POST /api/profiles/update — редактирование существующего профиля
 func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -1808,13 +1808,13 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		AWGPreset  string `json:"awg_preset"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РЅРµ СѓРєР°Р·Р°РЅ ID РїСЂРѕС„РёР»СЏ РёР»Рё РѕС€РёР±РєР° JSON")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан ID профиля или ошибка JSON")
 		return
 	}
 
 	cfg, _ := config.Load(s.configPath)
 	if cfg == nil {
-		// Р¤Р°Р№Р» РєРѕРЅС„РёРіР° РµС‰С‘ РЅРµ СЃСѓС‰РµСЃС‚РІСѓРµС‚ вЂ” СЃРѕР·РґР°С‘Рј РґРµС„РѕР»С‚РЅС‹Р№ РїСЂРѕС„РёР»СЊ Рё СЃРѕС…СЂР°РЅСЏРµРј
+		// Файл конфига ещё не существует — создаём дефолтный профиль и сохраняем
 		cfg = &config.Config{}
 		cfg.EnsureActiveProfile()
 		_ = config.Save(cfg, s.configPath, false)
@@ -1846,7 +1846,7 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if target == nil {
-		s.jsonResponse(w, http.StatusNotFound, nil, "РїСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅ")
+		s.jsonResponse(w, http.StatusNotFound, nil, "профиль не найден")
 		return
 	}
 
@@ -1861,7 +1861,7 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = config.Save(cfg, s.configPath, false)
-	s.AddEvent("info", "РћР±РЅРѕРІР»РµРЅ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё: "+target.Name, "РўРѕРїРёРє: "+target.MQTTTopic)
+	s.AddEvent("info", "Обновлен профиль сети: "+target.Name, "Топик: "+target.MQTTTopic)
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"ok":      true,
@@ -1870,23 +1870,23 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
-// handleProfileSwitch вЂ” POST /api/profiles/switch вЂ” РїРµСЂРµРєР»СЋС‡РµРЅРёРµ РЅР° РґСЂСѓРіРѕР№ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё
+// handleProfileSwitch — POST /api/profiles/switch — переключение на другой профиль сети
 func (s *Server) handleProfileSwitch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РЅРµ СѓРєР°Р·Р°РЅ ID РїСЂРѕС„РёР»СЏ")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан ID профиля")
 		return
 	}
 
 	cfg, _ := config.Load(s.configPath)
 	if cfg == nil {
-		s.jsonResponse(w, http.StatusInternalServerError, nil, "РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РєРѕРЅС„РёРіР°")
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка загрузки конфига")
 		return
 	}
 
@@ -1905,7 +1905,7 @@ func (s *Server) handleProfileSwitch(w http.ResponseWriter, r *http.Request) {
 		s.registry.ClearAll()
 	}
 
-	s.AddEvent("channel_switch", "РџРµСЂРµРєР»СЋС‡РµРЅ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё: "+active.Name, "РўРѕРїРёРє: "+active.MQTTTopic)
+	s.AddEvent("channel_switch", "Переключен профиль сети: "+active.Name, "Топик: "+active.MQTTTopic)
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"ok":      true,
@@ -1913,23 +1913,23 @@ func (s *Server) handleProfileSwitch(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
-// handleProfileDelete вЂ” POST /api/profiles/delete вЂ” СѓРґР°Р»РµРЅРёРµ РїСЂРѕС„РёР»СЏ СЃРµС‚Рё
+// handleProfileDelete — POST /api/profiles/delete — удаление профиля сети
 func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РЅРµ СѓРєР°Р·Р°РЅ ID РїСЂРѕС„РёР»СЏ")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан ID профиля")
 		return
 	}
 
 	cfg, _ := config.Load(s.configPath)
 	if cfg == nil {
-		s.jsonResponse(w, http.StatusInternalServerError, nil, "РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РєРѕРЅС„РёРіР°")
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка загрузки конфига")
 		return
 	}
 
@@ -1955,10 +1955,10 @@ func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
-// handleProfileExport вЂ” GET /api/profiles/export?id=... вЂ” СЌРєСЃРїРѕСЂС‚ СЃСЃС‹Р»РєРё/QR РґР»СЏ С€РµСЂРёРЅРіР°
+// handleProfileExport — GET /api/profiles/export?id=... — экспорт ссылки/QR для шеринга
 func (s *Server) handleProfileExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	id := r.URL.Query().Get("id")
@@ -1988,10 +1988,10 @@ func (s *Server) handleProfileExport(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
-// handleProfileImport вЂ” POST /api/profiles/import вЂ” РёРјРїРѕСЂС‚ РїСЂРѕС„РёР»СЏ РїРѕ СЃСЃС‹Р»РєРµ / QR СЃС‚СЂРѕРєРµ
+// handleProfileImport — POST /api/profiles/import — импорт профиля по ссылке / QR строке
 func (s *Server) handleProfileImport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "РјРµС‚РѕРґ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
 		return
 	}
 	var req struct {
@@ -1999,13 +1999,13 @@ func (s *Server) handleProfileImport(w http.ResponseWriter, r *http.Request) {
 		AutoSwitch bool   `json:"auto_switch"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URI == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РЅРµ СѓРєР°Р·Р°РЅР° СЃС‚СЂРѕРєР° РїСЂРѕС„РёР»СЏ")
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указана строка профиля")
 		return
 	}
 
 	parsed, err := config.ImportProfileURI(req.URI)
 	if err != nil {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С„РѕСЂРјР°С‚ СЃСЃС‹Р»РєРё РїСЂРѕС„РёР»СЏ: "+err.Error())
+		s.jsonResponse(w, http.StatusBadRequest, nil, "некорректный формат ссылки профиля: "+err.Error())
 		return
 	}
 
@@ -2023,9 +2023,9 @@ func (s *Server) handleProfileImport(w http.ResponseWriter, r *http.Request) {
 		if s.registry != nil {
 			s.registry.ClearAll()
 		}
-		s.AddEvent("channel_switch", "РРјРїРѕСЂС‚РёСЂРѕРІР°РЅ Рё Р°РєС‚РёРІРёСЂРѕРІР°РЅ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё: "+saved.Name, "РўРѕРїРёРє: "+saved.MQTTTopic)
+		s.AddEvent("channel_switch", "мпортирован и активирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
 	} else {
-		s.AddEvent("info", "РРјРїРѕСЂС‚РёСЂРѕРІР°РЅ РїСЂРѕС„РёР»СЊ СЃРµС‚Рё: "+saved.Name, "РўРѕРїРёРє: "+saved.MQTTTopic)
+		s.AddEvent("info", "мпортирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
 	}
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
