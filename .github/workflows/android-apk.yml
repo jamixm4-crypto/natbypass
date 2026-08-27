@@ -30,7 +30,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.23.x'
           cache: true
 
       - name: Set up JDK 17
@@ -68,14 +68,21 @@ jobs:
       - name: Build Go Mobile Core (AAR)
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
-          go get golang.org/x/mobile@latest
+          export GOPROXY="https://proxy.golang.org,direct"
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
           export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$NDK_PATH}"
           export NDK_HOME="${ANDROID_NDK_HOME}"
           gomobile init
           mkdir -p android/app/libs
-          gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi=24 -o android/app/libs/mobile.aar ./mobile
+          for attempt in 1 2 3; do
+            echo "Building mobile.aar (attempt $attempt)..."
+            if gomobile bind -v -target=android/arm64,android/arm,android/amd64 -androidapi=24 -o android/app/libs/mobile.aar ./mobile; then
+              break
+            fi
+            echo "Attempt $attempt failed, retrying in 5 seconds..."
+            sleep 5
+          done
           ls -lh android/app/libs/
           test -f android/app/libs/mobile.aar || (echo "ERROR: mobile.aar was not created!" && exit 1)
 
