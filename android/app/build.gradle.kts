@@ -11,8 +11,11 @@ android {
         applicationId = "org.natbypass.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 130
-        versionName = "1.3.0"
+
+        val vName = (project.findProperty("versionName") as? String)?.trim() ?: "1.3.7"
+        val vCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 137
+        versionCode = vCode
+        versionName = vName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
