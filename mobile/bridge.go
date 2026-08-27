@@ -1,4 +1,4 @@
-﻿package mobile
+package mobile
 
 import (
 	"context"
@@ -1546,8 +1546,6 @@ func ImportProfileURI(rawURI string) string {
 	}
 
 	engineMu.Lock()
-	defer engineMu.Unlock()
-
 	if globalConfig == nil {
 		globalConfig = &config.Config{}
 	}
@@ -1555,6 +1553,10 @@ func ImportProfileURI(rawURI string) string {
 	parsed.IsActive = true
 	saved := globalConfig.AddOrUpdateProfile(*parsed)
 	rebuildSignalingInternal(saved)
+	engineMu.Unlock()
+
+	// Мгновенная синхронизация сети и отправка маяка в новый топик
+	go RefreshPublicIP()
 
 	data, _ := json.Marshal(saved)
 	return string(data)

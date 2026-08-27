@@ -1033,8 +1033,17 @@ func (s *Server) handleQRInvite(w http.ResponseWriter, r *http.Request) {
 		devID = s.state.DeviceID
 	}
 
-	// Данные для QR-кода: ссылка для скачивания + информация об устройстве
 	inviteURL := "https://github.com/jamixm4-crypto/natbypass/releases/latest"
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	activeProf := cfg.EnsureActiveProfile()
+	profileURI := ""
+	if activeProf != nil {
+		profileURI = config.ExportProfileURI(*activeProf)
+	}
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"invite_url":  inviteURL,
@@ -1042,7 +1051,8 @@ func (s *Server) handleQRInvite(w http.ResponseWriter, r *http.Request) {
 		"device_name": devName,
 		"public_ip":   ip,
 		"stun_addr":   stun,
-		"qr_text":     fmt.Sprintf("NatBypass|%s|%s|%s", devName, ip, inviteURL),
+		"profile_uri": profileURI,
+		"qr_text":     profileURI,
 	}, "")
 }
 
