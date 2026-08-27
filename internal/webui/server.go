@@ -352,6 +352,10 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 			if myID != "" && p.DeviceID == myID {
 				continue
 			}
+			// Пропускаем фантомные/неинициализированные узлы без ключей и адресов
+			if p.PublicKey == "" && p.VirtualIP == "" && p.STUNAddr == "" && p.PublicIP == "" {
+				continue
+			}
 			if p.Online && time.Since(p.LastSeen) < 90*time.Second {
 				if p.VirtualIP == "" {
 					p.VirtualIP = fmt.Sprintf("100.64.200.%d", peerIndex)

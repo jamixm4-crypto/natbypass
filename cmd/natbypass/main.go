@@ -789,20 +789,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					}
 
 					p, exists := registry.Get(peerID)
-					if !exists || !p.Online || !p.DirectP2P {
-						log.Info().Str("peer", peerID).Str("addr", targetAddr).Msg("🏠 [LAN Discovery] Обнаружен локальный пир в сети")
-						registry.Upsert(&peer.Peer{
-							DeviceID:       peerID,
-							LocalAddr:      targetAddr,
-							ActiveEndpoint: targetAddr,
-							Online:         true,
-							DirectP2P:      true,
-							LastSeen:       time.Now(),
-						})
-					} else {
-						// Пир уже зарегистрирован и на связи — обновляем время активности без спама в лог
+					if exists {
+						// Пир уже известен из сигнального канала — обновляем локальный адрес и статус
 						p.LastSeen = time.Now()
 						p.Online = true
+						p.LocalAddr = targetAddr
 						if p.ActiveEndpoint == "" {
 							p.ActiveEndpoint = targetAddr
 						}

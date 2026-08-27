@@ -2188,6 +2188,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           chanBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:2px 7px;" title="Доступен через Telegram">💬 Telegram</span>`;
         } else if (p.has_mqtt || p.channel === 'mqtt') {
           chanBadge = `<span class="badge badge-purple" style="font-size:0.72rem; padding:2px 7px;" title="Доступен через MQTT">⚡ MQTT</span>`;
+        } else if (p.channel === 'lan' || p.local_addr) {
+          chanBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:2px 7px;" title="Локальная сеть">🏠 LAN</span>`;
         } else {
           chanBadge = `<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-dim); font-size:0.72rem; padding:2px 7px;">📡 Сигнал</span>`;
         }
