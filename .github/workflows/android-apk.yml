@@ -89,17 +89,16 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.3.7"
+            [ -z "$TAG" ] && TAG="v1.3.9"
           fi
 
           VERSION_NAME="${TAG#v}"
-          # Compute integer version code e.g. 1.3.7 -> 10307
           V_MAJOR=$(echo "$VERSION_NAME" | cut -d. -f1)
           V_MINOR=$(echo "$VERSION_NAME" | cut -d. -f2)
           V_PATCH=$(echo "$VERSION_NAME" | cut -d. -f3)
           V_MAJOR=${V_MAJOR:-1}
           V_MINOR=${V_MINOR:-3}
-          V_PATCH=${V_PATCH:-7}
+          V_PATCH=${V_PATCH:-9}
           VERSION_CODE=$((V_MAJOR * 10000 + V_MINOR * 100 + V_PATCH))
 
           echo "Building Android APK for version $VERSION_NAME (versionCode: $VERSION_CODE)..."
@@ -123,14 +122,16 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then
             TAG=$(git tag -l "v*" | sort -V | tail -n 1)
-            [ -z "$TAG" ] && TAG="v1.3.2"
+            [ -z "$TAG" ] && TAG="v1.3.9"
           fi
           echo "Attaching Android APK to release $TAG..."
           gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --draft=false --latest || true
           
           for apk in release_apk/*.apk; do
             if [ -f "$apk" ]; then
-              echo "Uploading $apk..."
+              fname=$(basename "$apk")
+              echo "Uploading $fname..."
+              gh release delete-asset "${TAG}" "$fname" --yes 2>/dev/null || true
               gh release upload "${TAG}" "$apk" --clobber
             fi
           done

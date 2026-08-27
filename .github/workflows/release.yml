@@ -41,7 +41,7 @@ jobs:
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $allTags = git tag -l "v*"
               $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
-              if (!$latestTag) { $latestTag = "v1.3.3" }
+              if (!$latestTag) { $latestTag = "v1.3.9" }
               $tag = $latestTag
           }
           Write-Host "Building release for tag: $tag"
@@ -100,7 +100,7 @@ jobs:
           if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
               $allTags = git tag -l "v*"
               $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
-              if (!$latestTag) { $latestTag = "v1.3.3" }
+              if (!$latestTag) { $latestTag = "v1.3.9" }
               $tag = $latestTag
           }
           
@@ -114,6 +114,7 @@ jobs:
           $files = Get-ChildItem -Path release -File
           foreach ($f in $files) {
               Write-Host "==> Uploading $($f.Name) ($([math]::Round($f.Length / 1MB, 2)) MB)..."
+              $null = gh release delete-asset $tag $f.Name --yes 2>$null
               gh release upload $tag $f.FullName --clobber
           }
           
