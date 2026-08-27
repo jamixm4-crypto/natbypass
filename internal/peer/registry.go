@@ -188,8 +188,8 @@ func (r *Registry) MarkOffline(maxAge time.Duration) {
 
 // Cleanup removes stale peers not seen within maxAge (default: 24 hours).
 func (r *Registry) Cleanup(maxAge time.Duration) {
-	if maxAge < time.Hour {
-		maxAge = 24 * time.Hour
+	if maxAge <= 0 {
+		maxAge = 3 * time.Minute
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -217,7 +217,7 @@ func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
 				return
 			case <-ticker.C:
 				r.MarkOffline(120 * time.Second)
-				r.Cleanup(24 * time.Hour)
+				r.Cleanup(3 * time.Minute)
 			}
 		}
 	}()

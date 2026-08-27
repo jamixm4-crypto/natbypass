@@ -290,7 +290,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val intent = Intent(appContext, NatBypassVpnService::class.java).apply {
             action = NatBypassVpnService.ACTION_DISCONNECT
         }
-        appContext.startService(intent)
+        try {
+            appContext.startService(intent)
+        } catch (e: Exception) {
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    appContext.startForegroundService(intent)
+                }
+            } catch (_: Exception) {}
+        }
         prefs.edit().putBoolean("vpn_running", false).apply()
         _uiState.update { it.copy(connectionState = ConnectionState.DISCONNECTED) }
     }

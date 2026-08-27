@@ -267,15 +267,7 @@ func StartEngine(configYAML string, tunFd int) string {
 			globalRegistry.Upsert(p)
 			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("⚡ Android P2P сокет пробит!")
 
-			// Встречный зонд на обнаруженный сокет для гарантированного подтверждения со стороны ПК/роутера
-			if puncher != nil {
-				go func(targetAddr string) {
-					for i := 0; i < 3; i++ {
-						_ = puncher.SendHolePunchProbe(targetAddr)
-						time.Sleep(50 * time.Millisecond)
-					}
-				}(fromAddr)
-			}
+// periodic probeTicker maintains connection
 		}
 	})
 	globalPuncher = puncher

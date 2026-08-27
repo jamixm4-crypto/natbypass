@@ -78,22 +78,15 @@ func acquireSingleInstanceMutex(port int) bool {
 }
 
 func activateExistingWindow() {
-	procFindWindowW := moduser32Instance.NewProc("FindWindowW")
-	procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
-	procShowWindow := moduser32Instance.NewProc("ShowWindow")
-
-	titlePtr, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Network")
-	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
-	if hwnd != 0 {
-		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
-		procSetForegroundWindow.Call(hwnd)
-		return
-	}
-
-	// Поиск окна через EnumWindows если заголовок частично отличается
-	procEnumWindows := moduser32Instance.NewProc("EnumWindows")
+	procGetWindowRect := moduser32Instance.NewProc("GetWindowRect")
 	procGetWindowTextW := moduser32Instance.NewProc("GetWindowTextW")
 	procGetWindowTextLengthW := moduser32Instance.NewProc("GetWindowTextLengthW")
+	procEnumWindows := moduser32Instance.NewProc("EnumWindows")
+	procShowWindow := moduser32Instance.NewProc("ShowWindow")
+	procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
+
+	type RECT struct { Left, Top, Right, Bottom int32 }
+	var foundHWnd uintptr
 
 	cb := syscall.NewCallback(func(h uintptr, lparam uintptr) uintptr {
 		lenRet, _, _ := procGetWindowTextLengthW.Call(h)
@@ -101,15 +94,32 @@ func activateExistingWindow() {
 			buf := make([]uint16, lenRet+1)
 			procGetWindowTextW.Call(h, uintptr(unsafe.Pointer(&buf[0])), lenRet+1)
 			title := windows.UTF16ToString(buf)
-			if strings.Contains(title, "NatBypass") {
-				procShowWindow.Call(h, 9 /* SW_RESTORE */)
-				procSetForegroundWindow.Call(h)
-				return 0 // стоп перечисление
+			if strings.Contains(title, "NatBypass") && !strings.Contains(title, "Tray") {
+				var rc RECT
+				procGetWindowRect.Call(h, uintptr(unsafe.Pointer(&rc)))
+				w := rc.Right - rc.Left
+				hH := rc.Bottom - rc.Top
+				if w >= 400 && hH >= 300 {
+					foundHWnd = h
+					return 0 // Найдено настоящее главное окно программы
+				}
 			}
 		}
-		return 1 // продолжить
+		return 1
 	})
 	procEnumWindows.Call(cb, 0)
+
+	if foundHWnd != 0 {
+		procShowWindow.Call(foundHWnd, 9 /* SW_RESTORE */)
+		procSetForegroundWindow.Call(foundHWnd)
+		return
+	}
+
+	// Если главное окно было закрыто — открываем интерфейс в браузере или приложении
+	url := "http://127.0.0.1:8080/"
+	if !tryOpenAppMode(url, 1180, 750) {
+		openBrowserFallback(url)
+	}
 }
 
 // cleanupStaleBackups удаляет старые резервные копии .old.* после успешного обновления

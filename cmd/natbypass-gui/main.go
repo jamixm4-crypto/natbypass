@@ -4309,6 +4309,9 @@ func updateData() {
 				addListBoxItem(hListPeers, "  📡 Ожидание подключения других устройств... (0 пиров онлайн)")
 			} else {
 				for _, p := range peers {
+					if !p.Online && time.Since(p.LastSeen) > 90*time.Second {
+						continue // Скрываем фантомные отключенные узлы
+					}
 					addressBookMu.RLock()
 					bookmarkedName, isBookmarked := addressBook[p.DeviceID]
 					addressBookMu.RUnlock()

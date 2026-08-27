@@ -568,14 +568,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	// спользуем порт 47832 для пробивки NAT — отдельный от WireGuard (51820),
 	// чтобы избежать конфликта портов и сохранить правильный STUN-адрес в маяке.
 	puncher, err = network.NewUDPPuncher(47832, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
-		log.Info().Str("peer", remoteDevID).Dur("rtt", rtt).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг")
 		if p, ok := registry.Get(remoteDevID); ok {
+			wasDirect := p.DirectP2P
 			p.DirectP2P = true
-			// Обновляем ActiveEndpoint и STUNAddr реальным адресом источника UDP-пакета.
-			// fromAddr — это РЕАЛЬНЫЙ адрес пира за NAT, он точнее чем STUNAddr из маяка
-			// (особенно при symmetric NAT где mapped port разный для каждого destination).
 			p.ActiveEndpoint = fromAddr
-			p.STUNAddr = fromAddr // ← ключевое: теперь keepalive будет долбить правильный порт
+			p.STUNAddr = fromAddr
 			if rtt > 0 && rtt < 10*time.Second {
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
@@ -588,14 +585,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			p.LastSeen = time.Now()
 			registry.Upsert(p)
 
-			// Встречный зонд на обнаруженный сокет для гарантированного подтверждения со стороны смартфона/клиента
-			if puncher != nil {
-				go func(targetAddr string) {
-					for i := 0; i < 3; i++ {
-						_ = puncher.SendHolePunchProbe(targetAddr)
-						time.Sleep(50 * time.Millisecond)
-					}
-				}(fromAddr)
+			// Логируем только при первом успешном переходе в Direct P2P или раз в минуту
+			if !wasDirect {
+				log.Info().Str("peer", remoteDevID).Dur("rtt", p.Latency).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг установлен")
 			}
 		}
 	})

@@ -59,24 +59,8 @@ class NatBypassVpnService : VpnService() {
                 connect()
             }
             ACTION_DISCONNECT -> {
-                // БАГ #1: При нажатии "Отключить" НЕ вызываем stopSelf(), чтобы сервис оставался якорем процесса
                 disconnect()
-                val notif = buildNotification("Отключено. Нажмите для подключения.", showDisconnect = false)
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        startForeground(
-                            NOTIFICATION_ID, notif,
-                            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                        )
-                    } else {
-                        startForeground(NOTIFICATION_ID, notif)
-                    }
-                } catch (_: Exception) {
-                    try {
-                        val nm = getSystemService(NotificationManager::class.java)
-                        nm.notify(NOTIFICATION_ID, notif)
-                    } catch (_: Exception) {}
-                }
+                stopSelf()
             }
             else -> {
                 if (!isRunning) {
@@ -202,7 +186,6 @@ class NatBypassVpnService : VpnService() {
 
             isRunning = true
 
-            // БАГ #2: При подключении сразу инициируем опрос STUN и обновление IP
             scope.launch {
                 delay(500)
                 org.natbypass.app.util.MobileBridge.refreshPublicIP()
@@ -217,19 +200,19 @@ class NatBypassVpnService : VpnService() {
         } catch (e: Exception) {
             Log.e(TAG, "connect failed", e)
             disconnect()
+            stopSelf()
         }
     }
 
     private fun disconnect() {
-        if (!isRunning && vpnInterface == null) return
         isRunning = false
         serviceJob?.cancel()
         serviceJob = null
 
-        try { org.natbypass.app.util.MobileBridge.detachTUN() } catch (_: Exception) {}
+        try { org.natbypass.app.util.MobileBridge.detachTUN() } catch (_: Throwable) {}
 
-        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
-        try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Exception) {}
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Throwable) {}
+        try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Throwable) {}
         wakeLock = null
         wifiLock = null
 
@@ -237,26 +220,26 @@ class NatBypassVpnService : VpnService() {
             networkCallback?.let {
                 (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it)
             }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         networkCallback = null
 
-        try { vpnInterface?.close() } catch (_: Exception) {}
+        try { vpnInterface?.close() } catch (_: Throwable) {}
         vpnInterface = null
 
-        // БАГ #1: Используем DETACH, а не REMOVE, чтобы не убивать контекст процесса
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_DETACH)
+                stopForeground(STOP_FOREGROUND_REMOVE)
             } else {
                 @Suppress("DEPRECATION")
-                stopForeground(false)
+                stopForeground(true)
             }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
 
-        sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
-            putExtra("state", "disconnected")
-        })
-        // БЕЗ stopSelf()!
+        try {
+            sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
+                putExtra("state", "disconnected")
+            })
+        } catch (_: Throwable) {}
     }
 
     private fun registerNetworkCallback() {
@@ -284,41 +267,13 @@ class NatBypassVpnService : VpnService() {
 
     override fun onRevoke() {
         Log.w(TAG, "VPN отозван системой")
-        try { vpnInterface?.close() } catch (_: Exception) {}
-        vpnInterface = null
-        isRunning = false
-        serviceJob?.cancel()
-        serviceJob = null
-
-        try { org.natbypass.app.util.MobileBridge.detachTUN() } catch (_: Exception) {}
-
-        val notif = buildNotification("⚠️ VPN отключён. Нажмите для подключения.", showDisconnect = false)
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID, notif,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notif)
-            }
-        } catch (_: Exception) {
-            try {
-                val nm = getSystemService(NotificationManager::class.java)
-                nm.notify(NOTIFICATION_ID, notif)
-            } catch (_: Exception) {}
-        }
-
-        sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
-            putExtra("state", "revoked")
-        })
-        super.onRevoke() // БЕЗ stopSelf()!
+        disconnect()
+        stopSelf()
+        super.onRevoke()
     }
 
     override fun onDestroy() {
-        if (isRunning) {
-            disconnect()
-        }
+        disconnect()
         super.onDestroy()
     }
 

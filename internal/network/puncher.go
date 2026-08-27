@@ -287,7 +287,7 @@ func (p *UDPPuncher) readLoop() {
 			continue
 		}
 
-		// 2. Входящий PING от пира -> отвечаем одним PONG
+		// 2. Входящий PING от пира -> отвечаем одним PONG (НЕ триггерим onPingResult чтобы избежать бесконечной лавины)
 		if strings.HasPrefix(data, "NATBYPASS:PING:") {
 			parts := strings.Split(data, ":")
 			if len(parts) >= 4 {
@@ -297,13 +297,8 @@ func (p *UDPPuncher) readLoop() {
 				}
 				sentTs := parts[len(parts)-1]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
-				// Отправляем ровно 1 PONG
+				// Отправляем ровно 1 PONG в ответ на PING
 				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
-
-				// Обновляем активность пира (LastSeen)
-				if p.onPingResult != nil {
-					p.onPingResult(senderID, 0, remoteAddr.String())
-				}
 			}
 			continue
 		}
