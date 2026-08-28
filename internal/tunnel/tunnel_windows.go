@@ -297,7 +297,27 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	return cmd.Run()
 }
 
+// SetMTU динамически обновляет MTU на интерфейсе Windows
+func (d *Device) SetMTU(mtu int) error {
+	if mtu < 1280 || mtu > 1500 {
+		return fmt.Errorf("недопустимый MTU: %d (допустимо 1280..1500)", mtu)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "netsh", "interface", "ipv4", "set", "subinterface",
+		fmt.Sprintf("name=%s", d.AdapterName),
+		fmt.Sprintf("mtu=%d", mtu),
+		"store=persistent",
+	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000,
+	}
+	return cmd.Run()
+}
+
 // Close корректно завершает работу адаптера
+
 func (d *Device) Close() error {
 	if !atomic.CompareAndSwapInt32(&d.isClosed, 0, 1) {
 		return nil

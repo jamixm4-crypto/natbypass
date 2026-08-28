@@ -129,7 +129,15 @@ type Payload struct {
 	PingMs           int64      `json:"ping_ms,omitempty"`
 	NATType          string     `json:"nat_type,omitempty"` // "full_cone", "restricted", "symmetric", "unknown"
 	Candidates       []string   `json:"candidates,omitempty"`
+
+	// MDAR (Mesh Dynamic Adaptive Reconfiguration)
+	MTU             int    `json:"mtu,omitempty"`
+	PreferredPort   int    `json:"preferred_port,omitempty"`
+	DPIPreset       string `json:"dpi_preset,omitempty"`
+	AdaptationEpoch uint64 `json:"adaptation_epoch,omitempty"`
+	HealthScore     int    `json:"health_score,omitempty"`
 }
+
 
 
 func (p *Payload) UnmarshalJSON(data []byte) error {

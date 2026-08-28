@@ -10,8 +10,10 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+
 
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/constants"
@@ -192,9 +194,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	go initialDiscovery(engineCtx, puncher, ipDisc, uiServer, deviceID)
 
-	go publishLoop(engineCtx, cfg, deviceID, myVirtualIP, pubKey, privKey, uiServer, registry, puncher, ipDisc, wgPubKey, wgPort, sigMgr)
-	go receiveLoop(engineCtx, deviceID, pubKey, privKey, registry, puncher, sigMgr)
+	go publishLoop(engineCtx, cfg, deviceID, myVirtualIP, pubKey, privKey, uiServer, registry, puncher, ipDisc, wgPubKey, wgPort, sigMgr, tunDev)
+	go receiveLoop(engineCtx, deviceID, pubKey, privKey, registry, puncher, sigMgr, tunDev)
 	go handleSIGHUP(engineCtx, cfg)
+
 
 	return waitForTermination(engineCtx, enableTray, cancel, cfg, uiServer, sigMgr, ipDisc)
 }
@@ -360,6 +363,14 @@ func initialDiscovery(ctx context.Context, puncher *network.UDPPuncher, ipDisc *
 	}
 }
 
+var (
+	mdarMu            sync.Mutex
+	currentMTU        int    = 1420
+	currentAdaptEpoch uint64 = 1
+	currentDPIPreset  string = "dpi"
+	relayStreakCount  int    = 0
+)
+
 func publishLoop(
 	ctx context.Context,
 	cfg *config.Config,
@@ -372,6 +383,7 @@ func publishLoop(
 	wgPubKey string,
 	wgPort int,
 	sigMgr *signaling.FallbackManager,
+	tunDev *tunnel.Device,
 ) {
 	publishInterval := time.Duration(cfg.App.PublishInterval) * time.Second
 	if publishInterval <= 0 {
@@ -413,8 +425,14 @@ func publishLoop(
 			candidates = puncher.DiscoverCandidates(ctx, ip.String())
 
 			myNAT := puncher.GetNATType()
+			peers := registry.List()
+			hasDirect := false
 
-			for _, p := range registry.List() {
+			for _, p := range peers {
+				if p.DirectP2P {
+					hasDirect = true
+				}
+
 				// 1. Maintain NAT keep-alive to active direct endpoint or STUN address
 				targetKA := p.STUNAddr
 				if p.DirectP2P && p.ActiveEndpoint != "" {
@@ -450,6 +468,32 @@ func publishLoop(
 					}
 				}
 			}
+
+			// MDAR: Network Quality Monitoring and Adaptive MTU Scaling
+			if len(peers) > 0 && !hasDirect {
+				relayStreakCount++
+				if relayStreakCount >= 6 && currentMTU > 1360 { // after ~30s of relay
+					mdarMu.Lock()
+					currentMTU = 1360
+					currentAdaptEpoch++
+					mdarMu.Unlock()
+					if tunDev != nil {
+						_ = tunDev.SetMTU(currentMTU)
+					}
+					log.Info().Int("adapted_mtu", currentMTU).Uint64("epoch", currentAdaptEpoch).Msg("MDAR: Адаптивное согласование MTU=1360 для обхода фрагментации")
+				} else if relayStreakCount >= 12 && currentMTU > 1280 { // after ~60s of relay
+					mdarMu.Lock()
+					currentMTU = 1280
+					currentAdaptEpoch++
+					mdarMu.Unlock()
+					if tunDev != nil {
+						_ = tunDev.SetMTU(currentMTU)
+					}
+					log.Info().Int("adapted_mtu", currentMTU).Uint64("epoch", currentAdaptEpoch).Msg("MDAR: Адаптивное согласование MTU=1280 (максимальная проходимость)")
+				}
+			} else if hasDirect {
+				relayStreakCount = 0
+			}
 		}
 
 		if uiServer != nil {
@@ -462,18 +506,27 @@ func publishLoop(
 			natLabel = puncher.GetNATType().String()
 		}
 
+		mdarMu.Lock()
+		activeMTU := currentMTU
+		activeEpoch := currentAdaptEpoch
+		activeDPI := currentDPIPreset
+		mdarMu.Unlock()
+
 		payload := &signaling.Payload{
-			DeviceID:   deviceID,
-			PublicKey:  crypto.KeyToHex(pubKey),
-			PublicIP:   ip.String(),
-			STUNAddr:   stunAddr,
-			Candidates: candidates,
-			NATType:    natLabel,
-			WGPubKey:   wgPubKey,
-			WGPort:     wgPort,
-			Timestamp:  time.Now(),
-			VirtualIP:  virtualIP,
-			AWG:        awgParams,
+			DeviceID:        deviceID,
+			PublicKey:       crypto.KeyToHex(pubKey),
+			PublicIP:        ip.String(),
+			STUNAddr:        stunAddr,
+			Candidates:      candidates,
+			NATType:         natLabel,
+			WGPubKey:        wgPubKey,
+			WGPort:          wgPort,
+			Timestamp:       time.Now(),
+			VirtualIP:       virtualIP,
+			AWG:             awgParams,
+			MTU:             activeMTU,
+			AdaptationEpoch: activeEpoch,
+			DPIPreset:       activeDPI,
 		}
 
 		encrypted, encErr := signaling.EncryptPayload(payload, pubKey, privKey)
@@ -502,6 +555,7 @@ func receiveLoop(
 	registry *peer.Registry,
 	puncher *network.UDPPuncher,
 	sigMgr *signaling.FallbackManager,
+	tunDev *tunnel.Device,
 ) {
 	inCh, err := sigMgr.Receive(ctx)
 	if err != nil {
@@ -526,6 +580,21 @@ func receiveLoop(
 			if p.DeviceID == deviceID {
 				continue
 			}
+
+			// MDAR: Синхронизация эпохи адаптации сети от удаленного узла
+			if p.AdaptationEpoch > currentAdaptEpoch {
+				mdarMu.Lock()
+				currentAdaptEpoch = p.AdaptationEpoch
+				if p.MTU >= 1280 && p.MTU <= 1500 && p.MTU != currentMTU {
+					currentMTU = p.MTU
+					if tunDev != nil {
+						_ = tunDev.SetMTU(currentMTU)
+					}
+					log.Info().Int("peer_mtu", p.MTU).Str("from", p.DeviceID).Msg("MDAR: Синхронизирован адаптированный MTU от удаленного узла")
+				}
+				mdarMu.Unlock()
+			}
+
 			if puncher != nil {
 				go func(targetSTUN string, extraCandidates []string) {
 					for burst := 0; burst < 6; burst++ {
@@ -560,6 +629,7 @@ func receiveLoop(
 		}
 	}
 }
+
 
 func handleSIGHUP(ctx context.Context, cfg *config.Config) {
 	sighupCh := make(chan os.Signal, 1)

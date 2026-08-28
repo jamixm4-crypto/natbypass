@@ -138,8 +138,20 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	return nil
 }
 
+// SetMTU динамически обновляет MTU на интерфейсе Linux/Keenetic
+func (d *Device) SetMTU(mtu int) error {
+	if mtu < 1280 || mtu > 1500 {
+		return fmt.Errorf("недопустимый MTU: %d (допустимо 1280..1500)", mtu)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "ip", "link", "set", "dev", d.AdapterName, "mtu", fmt.Sprintf("%d", mtu)).Run()
+	_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, "mtu", fmt.Sprintf("%d", mtu)).Run()
+	return nil
+}
 
 func (d *Device) Close() error {
+
 	if atomic.CompareAndSwapInt32(&d.isClosed, 0, 1) {
 		if d.file != nil {
 			return d.file.Close()
