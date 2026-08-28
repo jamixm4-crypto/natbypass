@@ -129,10 +129,17 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	// 4. Маршрутизация 100.64.200.0/24 через адаптер
 	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName).Run()
 
-	// 5. Разрешение входящего и транзитного трафика в iptables (Keenetic / OpenWrt / Linux)
+	// 5. Отключение фильтрации обратного пути (rp_filter) и разрешение транзита в ядре Linux / Keenetic
+	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.conf.all.rp_filter=0").Run()
+	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.conf.default.rp_filter=0").Run()
+	_ = exec.CommandContext(ctx, "sysctl", "-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=0", d.AdapterName)).Run()
+	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.conf.all.accept_local=1").Run()
+
+	// 6. Разрешение входящего и транзитного трафика в iptables (Keenetic / OpenWrt / Linux)
 	_ = exec.CommandContext(ctx, "iptables", "-I", "INPUT", "-i", d.AdapterName, "-j", "ACCEPT").Run()
 	_ = exec.CommandContext(ctx, "iptables", "-I", "FORWARD", "-i", d.AdapterName, "-j", "ACCEPT").Run()
 	_ = exec.CommandContext(ctx, "iptables", "-I", "FORWARD", "-o", d.AdapterName, "-j", "ACCEPT").Run()
+
 
 
 	return nil

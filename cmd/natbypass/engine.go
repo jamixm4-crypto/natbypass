@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
 
 
 	"github.com/natbypass/natbypass/internal/config"
@@ -100,23 +102,59 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 		}()
 
-		// L3 Data-plane: Inbound packets from UDP Puncher -> Write to TUN
+		// L3 Data-plane: Inbound packets from UDP Puncher & MQTT Relay -> Write to TUN and handle ICMP
+		onInboundPacket := func(payload []byte) {
+			if len(payload) < 20 {
+				return
+			}
+			_ = tunDev.WritePacket(payload)
+
+			// Userspace Guaranteed ICMP Echo Responder fallback
+			if len(payload) >= 28 && payload[9] == 1 && payload[20] == 8 {
+				srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
+				dstIP := net.IPv4(payload[16], payload[17], payload[18], payload[19]).String()
+				cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+				if dstIP == cleanVIP || dstIP == myVirtualIP {
+					if reply := createICMPEchoReply(payload); reply != nil {
+						p, found := registry.GetByVirtualIP(srcIP)
+						if !found || p == nil {
+							peers := registry.List()
+							if len(peers) == 1 {
+								p = peers[0]
+								found = true
+							}
+						}
+						if found && p != nil {
+							sentUDP := false
+							if p.DirectP2P && p.ActiveEndpoint != "" && puncher != nil {
+								if err := puncher.SendDataPacket(p.ActiveEndpoint, reply); err == nil {
+									sentUDP = true
+								}
+								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+									_ = puncher.SendDataPacket(p.STUNAddr, reply)
+								}
+							}
+							if (!sentUDP || !p.DirectP2P) && sigMgr != nil {
+								_ = sigMgr.PublishTunnelData(p.DeviceID, reply)
+							}
+						}
+					}
+				}
+			}
+		}
+
 		if puncher != nil {
 			puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
-				if len(payload) >= 20 {
-					_ = tunDev.WritePacket(payload)
-				}
+				onInboundPacket(payload)
 			})
 		}
 
-		// L3 Data-plane: Inbound packets from MQTT Relay -> Write to TUN
 		if sigMgr != nil {
 			sigMgr.SubscribeTunnelData(deviceID, func(pkt []byte) {
-				if len(pkt) >= 20 {
-					_ = tunDev.WritePacket(pkt)
-				}
+				onInboundPacket(pkt)
 			})
 		}
+
 
 		// L3 Data-plane: Outbound packets from TUN -> Dispatch to peer over UDP Direct or MQTT Relay
 		go func() {
@@ -700,4 +738,54 @@ func waitForTermination(
 
 	time.Sleep(300 * time.Millisecond)
 	return nil
+}
+
+func createICMPEchoReply(pkt []byte) []byte {
+	if len(pkt) < 28 {
+		return nil
+	}
+	// Protocol must be ICMP (1) and Type must be Echo Request (8)
+	if pkt[9] != 1 || pkt[20] != 8 {
+		return nil
+	}
+	reply := make([]byte, len(pkt))
+	copy(reply, pkt)
+
+	// Swap Source IP (bytes 12..15) and Destination IP (bytes 16..19)
+	copy(reply[12:16], pkt[16:20])
+	copy(reply[16:20], pkt[12:16])
+
+	// Set TTL = 64
+	reply[8] = 64
+
+	// Reset and recalculate IPv4 header checksum (bytes 10..11)
+	reply[10] = 0
+	reply[11] = 0
+	ipChecksum := calculateChecksum(reply[:20])
+	binary.BigEndian.PutUint16(reply[10:12], ipChecksum)
+
+	// Change ICMP Type to 0 (Echo Reply)
+	reply[20] = 0
+
+	// Reset and recalculate ICMP checksum (bytes 22..23)
+	reply[22] = 0
+	reply[23] = 0
+	icmpChecksum := calculateChecksum(reply[20:])
+	binary.BigEndian.PutUint16(reply[22:24], icmpChecksum)
+
+	return reply
+}
+
+func calculateChecksum(data []byte) uint16 {
+	var sum uint32
+	for i := 0; i < len(data)-1; i += 2 {
+		sum += uint32(binary.BigEndian.Uint16(data[i : i+2]))
+	}
+	if len(data)%2 == 1 {
+		sum += uint32(data[len(data)-1]) << 8
+	}
+	for sum > 0xffff {
+		sum = (sum >> 16) + (sum & 0xffff)
+	}
+	return ^uint16(sum)
 }
