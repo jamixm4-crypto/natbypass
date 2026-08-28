@@ -1894,13 +1894,17 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const progPct = document.getElementById('updateProgressPct');
       const progStatus = document.getElementById('updateProgressStatus');
 
+      let fetchFailures = 0;
+      let lastPct = 0;
       updatePollTimer = setInterval(async () => {
         try {
-          const res = await fetch('/api/update/status');
+          const res = await fetch('/api/update/status?_t=' + Date.now(), { cache: 'no-store' });
           const json = await res.json();
+          fetchFailures = 0;
           if (json.ok && json.data) {
             const d = json.data;
             if (d.percent > 0) {
+              lastPct = d.percent;
               progBar.style.width = d.percent + '%';
               progPct.innerText = d.percent + '%';
             }
@@ -1920,10 +1924,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             }
           }
         } catch (e) {
-          // Сервер временно выключился для применения бинарника
+          fetchFailures++;
+          // Если скачивание завершилось (>70%) и сервер ушел в перезапуск — сразу переходим в режим ожидания старта
+          if (lastPct >= 70 && fetchFailures >= 2) {
+            clearInterval(updatePollTimer);
+            waitForServiceRestart();
+          }
         }
       }, 800);
     }
+
 
     function waitForServiceRestart() {
       const progStatus = document.getElementById('updateProgressStatus');

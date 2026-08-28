@@ -382,6 +382,10 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 			return err
 		}
 	} else {
+		// Linux / MIPS / OpenWrt / Keenetic
+		oldPath := execPath + ".old"
+		_ = os.Remove(oldPath)
+		_ = os.Rename(execPath, oldPath)
 		if err := os.Rename(tmpPath, execPath); err != nil {
 			// Fallback copy
 			input, errRead := os.ReadFile(tmpPath)
@@ -390,7 +394,10 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 			}
 			_ = os.Remove(tmpPath)
 		}
+		_ = os.Chmod(execPath, 0755)
+		_ = os.Remove(oldPath)
 	}
+
 
 	setStatus(true, 95, "Перезапуск службы NatBypass...", "", false)
 
