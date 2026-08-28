@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -60,8 +62,33 @@ func init() {
 	}
 }
 
-// acquireSingleInstanceMutex ensures only one primary NatBypass instance runs.
-func acquireSingleInstanceMutex(port int) bool {
+var (
+	trayHWnd uintptr
+	trayMu   sync.Mutex
+)
+
+func cleanupTrayIcon() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	trayMu.Lock()
+	defer trayMu.Unlock()
+	if trayHWnd != 0 {
+		procShellNotifyIconW := modshell32Instance.NewProc("Shell_NotifyIconW")
+		if procShellNotifyIconW.Find() == nil {
+			var nid notifyIconDataW
+			nid.cbSize = uint32(unsafe.Sizeof(nid))
+			nid.hWnd = trayHWnd
+			nid.uID = trayIconID
+			_, _, _ = procShellNotifyIconW.Call(2 /* NIM_DELETE */, uintptr(unsafe.Pointer(&nid)))
+		}
+		trayHWnd = 0
+		atomic.StoreInt32(&trayRunning, 0)
+	}
+}
+
+// acquireSingleInstanceMutex ensures only one primary NatBypass instance runs per configuration.
+func acquireSingleInstanceMutex(cfgPath string, port int) bool {
 	if runtime.GOOS != "windows" {
 		return true
 	}
@@ -76,7 +103,13 @@ func acquireSingleInstanceMutex(port int) bool {
 		_, _, _ = procSetLastError.Call(0)
 	}
 
-	mutexName, _ := windows.UTF16PtrFromString("Local\\NatBypass_SingleInstance_App_Mutex")
+	absPath, err := filepath.Abs(cfgPath)
+	if err != nil {
+		absPath = cfgPath
+	}
+	hash := sha256.Sum256([]byte(strings.ToLower(absPath)))
+	mutexNameStr := fmt.Sprintf("Local\\NatBypass_Instance_%x", hash[:8])
+	mutexName, _ := windows.UTF16PtrFromString(mutexNameStr)
 	hMutex, err := windows.CreateMutex(nil, false, mutexName)
 	if hMutex == 0 {
 		return true
@@ -89,7 +122,7 @@ func acquireSingleInstanceMutex(port int) bool {
 		if httpErr == nil && resp != nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == 200 {
-				fmt.Printf("NatBypass is already running on port %d. Activating window...\n", port)
+				fmt.Printf("NatBypass is already running for config '%s' on port %d. Activating window...\n", cfgPath, port)
 				_ = windows.CloseHandle(hMutex)
 				activateExistingWindow()
 				return false
@@ -490,6 +523,10 @@ func startTrayIcon(port int) {
 	if hwnd == 0 {
 		return
 	}
+
+	trayMu.Lock()
+	trayHWnd = hwnd
+	trayMu.Unlock()
 
 	var nid notifyIconDataW
 	nid.cbSize = uint32(unsafe.Sizeof(nid))

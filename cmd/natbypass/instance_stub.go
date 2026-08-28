@@ -1,11 +1,14 @@
-﻿//go:build !windows
+//go:build !windows
 
 package main
 
-func acquireSingleInstanceMutex(port int) bool {
+func acquireSingleInstanceMutex(cfgPath string, port int) bool {
 	return true
 }
 
 func releaseSingleInstanceMutex() {}
 
+func cleanupTrayIcon() {}
+
 func openAppWindow(port int) {}
+

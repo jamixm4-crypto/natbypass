@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"runtime/debug"
+	"time"
 
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/daemon"
 	"github.com/spf13/cobra"
 )
+
 
 var (
 	Version   = "1.9.11"
@@ -28,6 +31,29 @@ var (
 
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			stack := debug.Stack()
+			timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+			crashMsg := fmt.Sprintf("[%s] FATAL PANIC: %v\nStack Trace:\n%s\n", timestamp, r, string(stack))
+			fmt.Fprintln(os.Stderr, crashMsg)
+
+			_ = os.MkdirAll("dist", 0755)
+			if f, err := os.OpenFile("dist/crash.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				_, _ = f.WriteString(crashMsg)
+				_ = f.Close()
+			}
+			if f2, err2 := os.OpenFile("crash.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err2 == nil {
+				_, _ = f2.WriteString(crashMsg)
+				_ = f2.Close()
+			}
+
+			cleanupTrayIcon()
+			os.Exit(2)
+		}
+		cleanupTrayIcon()
+	}()
+
 	// If running as a Windows background service, dispatch directly to service handler
 	if daemon.IsWindowsService() {
 		err := daemon.RunService(func(ctx context.Context) error {
@@ -67,7 +93,7 @@ Supported platforms: Windows, Linux (amd64/arm64/mips/mipsle), Android, iOS.`, V
 				if p <= 0 {
 					p = constants.DefaultWebUIPort
 				}
-				if !acquireSingleInstanceMutex(p) {
+				if !acquireSingleInstanceMutex(configFile, p) {
 					return nil
 				}
 			}
