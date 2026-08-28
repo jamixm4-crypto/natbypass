@@ -432,6 +432,19 @@ func StartEngine(configYAML string, tunFd int) string {
 							continue
 						}
 					}
+					existingPeer, hasExisting := globalRegistry.Get(p.DeviceID)
+					directP2P := false
+					activeEP := ""
+					latency := time.Duration(0)
+					pingMs := p.PingMs
+					if hasExisting && existingPeer != nil {
+						directP2P = existingPeer.DirectP2P
+						activeEP = existingPeer.ActiveEndpoint
+						latency = existingPeer.Latency
+						if existingPeer.PingMs > 0 {
+							pingMs = existingPeer.PingMs
+						}
+					}
 					globalRegistry.Upsert(&peer.Peer{
 						DeviceID:         p.DeviceID,
 						Nickname:         p.Nickname,
@@ -443,9 +456,10 @@ func StartEngine(configYAML string, tunFd int) string {
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
 						VirtualIP:        p.VirtualIP,
-						DirectP2P:        p.DirectP2P,
-						ActiveEndpoint:   p.ActiveEndpoint,
-						PingMs:           p.PingMs,
+						DirectP2P:        directP2P,
+						ActiveEndpoint:   activeEP,
+						PingMs:           pingMs,
+						Latency:          latency,
 						IsExitNode:       p.IsExitNode,
 						AdvertisedRoutes: p.AdvertisedRoutes,
 						LastSeen:         time.Now(),
@@ -485,11 +499,9 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
-	// Фоновый цикл постоянного пробития NAT и поддержания сокетов живыми (каждые 3 секунды)
-	// Отправляет NATBYPASS:PING на все известные адреса пира для удержания NAT-сессии
-	// и непрерывного измерения RTT / подтверждения Direct P2P.
+	// Фоновый цикл постоянного пробития NAT и удержания мобильного CGNAT (каждые 3 секунды)
 	go func() {
-		probeTicker := time.NewTicker(30 * time.Second)
+		probeTicker := time.NewTicker(3 * time.Second)
 		defer probeTicker.Stop()
 
 		// Логируем NAT тип через 6 секунд после старта
@@ -515,16 +527,20 @@ func StartEngine(configYAML string, tunFd int) string {
 				if puncher != nil && globalRegistry != nil {
 					for _, p := range globalRegistry.List() {
 						go func(peer *peer.Peer) {
-							// Приоритет: ActiveEndpoint > STUNAddr > LocalAddr (ровно 1 целевой адрес)
-							target := peer.ActiveEndpoint
-							if target == "" {
-								target = peer.STUNAddr
-							}
-							if target == "" {
-								target = peer.LocalAddr
-							}
-							if target != "" {
-								_ = puncher.SendHolePunchProbe(target)
+							if peer.DirectP2P && peer.ActiveEndpoint != "" {
+								_ = puncher.SendKeepAlive(peer.ActiveEndpoint)
+							} else {
+								if peer.STUNAddr != "" {
+									_ = puncher.SendHolePunchProbe(peer.STUNAddr)
+								}
+								if peer.LocalAddr != "" {
+									_ = puncher.SendHolePunchProbe(peer.LocalAddr)
+								}
+								for _, cand := range peer.Candidates {
+									if cand != "" && cand != peer.STUNAddr {
+										_ = puncher.SendHolePunchProbe(cand)
+									}
+								}
 							}
 						}(p)
 					}
@@ -532,6 +548,7 @@ func StartEngine(configYAML string, tunFd int) string {
 			}
 		}
 	}()
+
 
 
 	if tunFd > 0 {
