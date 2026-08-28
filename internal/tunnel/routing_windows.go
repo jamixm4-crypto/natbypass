@@ -35,6 +35,8 @@ func EnableHostIPForwarding() error {
 	// 2. Enable IP routing in Windows Registry & NetNat & enable forwarding on all active network adapters
 	psScript := `
 		Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'IPEnableRouter' -Value 1 -ErrorAction SilentlyContinue
+		Set-Service -Name RemoteAccess -StartupType Automatic -ErrorAction SilentlyContinue
+		Start-Service -Name RemoteAccess -ErrorAction SilentlyContinue
 		netsh interface ipv4 set interface "NatBypass" forwarding=enabled
 		Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
 			netsh interface ipv4 set interface $_.InterfaceAlias forwarding=enabled

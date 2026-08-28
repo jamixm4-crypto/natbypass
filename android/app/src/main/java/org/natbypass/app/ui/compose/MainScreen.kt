@@ -55,22 +55,28 @@ fun MainScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
+            var menuExpanded by remember { mutableStateOf(false) }
             TopAppBar(
                 title = {
                     val context = LocalContext.current
                     val vName = remember {
                         try {
                             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-                            "v" + (pInfo.versionName ?: "1.6.5")
+                            "v" + (pInfo.versionName ?: "1.6.9")
                         } catch (e: Exception) {
-                            "v1.6.5"
+                            "v1.6.9"
                         }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
                         Text(
                             text = "NatBypass",
                             fontWeight = FontWeight.Bold,
+                            fontSize = 19.sp,
                             letterSpacing = (-0.5).sp,
+                            maxLines = 1,
                         )
                         Spacer(Modifier.width(8.dp))
                         Surface(
@@ -82,26 +88,44 @@ fun MainScreen(
                                 color = MaterialTheme.colorScheme.primary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                maxLines = 1,
                             )
                         }
                     }
                 },
                 actions = {
-                    IconButton(onClick = onCheckUpdate) {
-                        Icon(Icons.Outlined.CloudDownload, contentDescription = "Обновления")
-                    }
                     IconButton(onClick = onOpenDiagnostics) {
                         Icon(Icons.Outlined.Analytics, contentDescription = "Диагностика")
                     }
-                    IconButton(onClick = onSync) {
-                        Icon(Icons.Outlined.Sync, contentDescription = "Синхронизация")
-                    }
-                    IconButton(onClick = onClearCache) {
-                        Icon(Icons.Outlined.CleaningServices, contentDescription = "Очистить кэш")
-                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Outlined.Settings, contentDescription = "Настройки")
+                    }
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Меню")
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Проверить обновления") },
+                                leadingIcon = { Icon(Icons.Outlined.CloudDownload, contentDescription = null) },
+                                onClick = { menuExpanded = false; onCheckUpdate() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Синхронизировать сеть") },
+                                leadingIcon = { Icon(Icons.Outlined.Sync, contentDescription = null) },
+                                onClick = { menuExpanded = false; onSync() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Очистить кэш узлов") },
+                                leadingIcon = { Icon(Icons.Outlined.CleaningServices, contentDescription = null) },
+                                onClick = { menuExpanded = false; onClearCache() }
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

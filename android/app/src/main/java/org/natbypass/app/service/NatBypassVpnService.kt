@@ -132,6 +132,15 @@ class NatBypassVpnService : VpnService() {
                 .setBlocking(false)
                 .allowBypass()
 
+            try {
+                // Исключаем само приложение NatBypass из VPN-туннеля.
+                // Это критически важно: сокеты Go (MQTT брокер, STUN, UDP Puncher) должны идти напрямую через Wi-Fi/LTE,
+                // иначе при маршруте 0.0.0.0/0 возникает зацикливание трафика (петля маршрутизации)!
+                builder.addDisallowedApplication(packageName)
+            } catch (e: Exception) {
+                Log.w(TAG, "addDisallowedApplication error: ${e.message}")
+            }
+
             try { builder.allowFamily(android.system.OsConstants.AF_INET) } catch (_: Throwable) {}
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
