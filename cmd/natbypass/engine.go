@@ -141,13 +141,20 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 		}
 	}()
 
-	// Windows: open native WebView2 window after readiness gate confirms listening
+	// Windows: open native WebView2 window after readiness gate confirms listening (TCP + HTTP healthz)
 	if runtime.GOOS == "windows" {
 		go func() {
+			actualPort := uiServer.GetPort()
+			if err := tray.EnsureFirewallRule(actualPort); err != nil {
+				log.Debug().Err(err).Msg("Windows Firewall rule notice")
+			}
 			if uiServer.WaitForReady(10 * time.Second) {
-				openAppWindow(uiServer.GetPort())
+				actualPort = uiServer.GetPort()
+				url := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
+				log.Info().Int("port", actualPort).Str("url", url).Msg("WebUI readiness confirmed (TCP + HTTP healthz OK), opening window")
+				openAppWindow(actualPort)
 			} else {
-				log.Warn().Msg("WebUI readiness gate timed out; window launch skipped")
+				log.Warn().Int("port", actualPort).Msg("WebUI readiness gate timed out; window launch skipped")
 			}
 		}()
 	}

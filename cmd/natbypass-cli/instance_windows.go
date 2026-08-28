@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -317,8 +318,10 @@ const (
 	wmUserTray   = 0x0400 + 1
 	trayIconID   = 1
 	menuItemOpen = 2001
-	menuItemExit = 2002
+	menuItemDiag = 2002
+	menuItemExit = 2003
 )
+
 
 type notifyIconDataW struct {
 	cbSize           uint32
@@ -400,9 +403,11 @@ func startTrayIcon(port int) {
 				hMenu, _, _ := procCreatePopupMenu.Call()
 				if hMenu != 0 {
 					openText, _ := windows.UTF16PtrFromString("Открыть NatBypass")
+					diagText, _ := windows.UTF16PtrFromString("🩺 Диагностика WebUI")
 					exitText, _ := windows.UTF16PtrFromString("Выход")
 
 					procAppendMenuW.Call(hMenu, 0, uintptr(menuItemOpen), uintptr(unsafe.Pointer(openText)))
+					procAppendMenuW.Call(hMenu, 0, uintptr(menuItemDiag), uintptr(unsafe.Pointer(diagText)))
 					procAppendMenuW.Call(hMenu, 0x0800 /* MF_SEPARATOR */, 0, 0)
 					procAppendMenuW.Call(hMenu, 0, uintptr(menuItemExit), uintptr(unsafe.Pointer(exitText)))
 
@@ -416,6 +421,8 @@ func startTrayIcon(port int) {
 					switch cmd {
 					case uintptr(menuItemOpen):
 						activateExistingWindow()
+					case uintptr(menuItemDiag):
+						go diagnoseWebUI(port)
 					case uintptr(menuItemExit):
 						var nid notifyIconDataW
 						nid.cbSize = uint32(unsafe.Sizeof(nid))
@@ -480,4 +487,38 @@ func startTrayIcon(port int) {
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
+}
+func diagnoseWebUI(port int) {
+	fmt.Printf("\n=== WebUI Diagnostics (Port %d) ===\n", port)
+
+	// 1. Check if listening
+	cmdNetstat := exec.Command("netstat", "-an")
+	cmdNetstat.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	out, err := cmdNetstat.CombinedOutput()
+	if err == nil && strings.Contains(string(out), fmt.Sprintf(":%d", port)) {
+		fmt.Printf("✓ Port %d is actively listening\n", port)
+	} else {
+		fmt.Printf("✗ Port %d is NOT listening!\n", port)
+	}
+
+	// 2. Check Firewall
+	cmdFw := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name=NatBypass WebUI")
+	cmdFw.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	outFw, errFw := cmdFw.CombinedOutput()
+	if errFw == nil && strings.Contains(string(outFw), "NatBypass WebUI") {
+		fmt.Println("✓ Windows Firewall rule: ENABLED")
+	} else {
+		fmt.Println("! Windows Firewall rule: not found or disabled")
+	}
+
+	// 3. Test HTTP GET to /healthz
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, httpErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
+	if httpErr == nil && resp != nil {
+		fmt.Printf("✓ HTTP GET /healthz responded with status %d\n", resp.StatusCode)
+		_ = resp.Body.Close()
+	} else {
+		fmt.Printf("✗ HTTP GET failed: %v\n", httpErr)
+	}
+	fmt.Println("===================================")
 }

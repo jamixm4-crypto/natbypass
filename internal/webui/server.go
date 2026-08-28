@@ -151,7 +151,7 @@ func (s *Server) GetPort() int {
 	return s.port
 }
 
-// WaitForReady blocks until the WebUI HTTP listener is actively accepting TCP connections.
+// WaitForReady blocks until the WebUI HTTP listener is actively accepting TCP connections and answering HTTP /healthz.
 func (s *Server) WaitForReady(timeout time.Duration) bool {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -160,15 +160,30 @@ func (s *Server) WaitForReady(timeout time.Duration) bool {
 	for time.Now().Before(deadline) {
 		p := s.GetPort()
 		if p > 0 {
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", p), 200*time.Millisecond)
+			addr := fmt.Sprintf("127.0.0.1:%d", p)
+			// 1. TCP probe
+			conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 			if err == nil {
 				_ = conn.Close()
-				return true
+				// 2. HTTP probe to /healthz
+				client := &http.Client{Timeout: 1 * time.Second}
+				resp, httpErr := client.Get(fmt.Sprintf("http://%s/healthz", addr))
+				if httpErr == nil && resp != nil {
+					_ = resp.Body.Close()
+					if resp.StatusCode == 200 {
+						return true
+					}
+				}
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
 	return false
+}
+
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("OK"))
 }
 
 // AddEvent добавляет событие в кольцевой буфер (до 200 записей)
@@ -197,6 +212,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/api/peers", s.handlePeers)
 	mux.HandleFunc("/api/peers/clear", s.handlePeersClear)
 	mux.HandleFunc("/api/status", s.handleStatus)
@@ -292,7 +308,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
-	slog.Info("Web UI запущен", "url", fmt.Sprintf("http://localhost:%d", s.port))
+	slog.Info("WebUI server listening", "address", listener.Addr().String(), "port", s.port, "url", fmt.Sprintf("http://127.0.0.1:%d", s.port))
 	if err := s.srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("ошибка Web UI сервера: %w", err)
 	}
