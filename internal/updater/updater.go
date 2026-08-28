@@ -222,10 +222,9 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	var candidates []string
 	if osName == "windows" {
 		candidates = []string{
-			"natbypass-v",
-			"natbypass-",
-			"windows-amd64.exe",
 			"natbypass.exe",
+			"natbypass-windows-amd64.exe",
+			"natbypass-v",
 		}
 	} else if osName == "linux" {
 		if arch == "arm64" {
@@ -244,15 +243,19 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	for _, cand := range candidates {
 		for _, a := range filtered {
 			nameLower := strings.ToLower(a.Name)
-			// Избегаем cli версии при подборе для GUI
+			// Исключаем версии gui и cli при подборе основного бинарника
+			if strings.Contains(nameLower, "-gui") && !strings.Contains(cand, "-gui") {
+				continue
+			}
 			if strings.Contains(nameLower, "-cli") && !strings.Contains(cand, "-cli") {
 				continue
 			}
-			if strings.Contains(nameLower, cand) {
+			if nameLower == cand || strings.Contains(nameLower, cand) {
 				return a.BrowserDownloadURL, a.Name, a.Size
 			}
 		}
 	}
+
 
 	// Fallback на первый подходящий отфильтрованный ассет
 	if len(filtered) > 0 {
