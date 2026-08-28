@@ -313,7 +313,14 @@ wireguard:
 [System.IO.File]::WriteAllText($configOut, $cfgYaml, [System.Text.UTF8Encoding]::new($false))
 Write-Info "Generated config saved to $configOut"
 
+if (Test-Path "$ProjectRoot\wintun.dll") {
+    Copy-Item "$ProjectRoot\wintun.dll" "$DistDir\wintun.dll" -Force
+} elseif (Test-Path "$ProjectRoot\internal\tunnel\wintun.dll") {
+    Copy-Item "$ProjectRoot\internal\tunnel\wintun.dll" "$DistDir\wintun.dll" -Force
+}
+
 Write-Host ""
+
 if ($buildSuccess) {
     Write-Header "======================================================"
     Write-Header "  BUILD COMPLETED SUCCESSFULLY!                       "
