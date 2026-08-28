@@ -1561,10 +1561,19 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       modal.classList.add('active');
       modal.style.display = 'flex';
 
-      // Immediate payload so it's NEVER blank
+      // Determine target profile for QR
+      let targetProf = currentActiveProfile;
+      if (selectedQRProfileId && currentProfiles && currentProfiles.length > 0) {
+        const found = currentProfiles.find(p => p.id === selectedQRProfileId);
+        if (found) targetProf = found;
+      }
+      if (!targetProf && currentProfiles && currentProfiles.length > 0) {
+        targetProf = currentProfiles[0];
+      }
+
       let immediatePayload = '';
-      if (currentActiveProfile) {
-        immediatePayload = `natbypass://profile?id=${encodeURIComponent(currentActiveProfile.id)}&name=${encodeURIComponent(currentActiveProfile.name)}&topic=${encodeURIComponent(currentActiveProfile.mqtt_topic || 'natbypass/mesh/default')}&broker=${encodeURIComponent(currentActiveProfile.mqtt_broker || 'tcp://broker.emqx.io:1883')}${currentActiveProfile.network_key ? '&key=' + encodeURIComponent(currentActiveProfile.network_key) : ''}&awg=${encodeURIComponent(currentActiveProfile.awg_preset || 'dpi')}`;
+      if (targetProf) {
+        immediatePayload = `natbypass://profile?id=${encodeURIComponent(targetProf.id)}&name=${encodeURIComponent(targetProf.name)}&topic=${encodeURIComponent(targetProf.mqtt_topic || 'natbypass/mesh/default')}&broker=${encodeURIComponent(targetProf.mqtt_broker || 'tcp://broker.emqx.io:1883')}${targetProf.network_key ? '&key=' + encodeURIComponent(targetProf.network_key) : ''}&awg=${encodeURIComponent(targetProf.awg_preset || 'dpi')}`;
       } else {
         const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'natbypass/mesh/default';
         const cfgBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim() || 'tcp://broker.emqx.io:1883';

@@ -2011,7 +2011,7 @@ func (s *Server) handleProfileExport(w http.ResponseWriter, r *http.Request) {
 	var target *config.Profile
 	if id != "" {
 		for i := range cfg.Profiles {
-			if cfg.Profiles[i].ID == id {
+			if cfg.Profiles[i].ID == id || (id == "default" && i == 0) {
 				target = &cfg.Profiles[i]
 				break
 			}

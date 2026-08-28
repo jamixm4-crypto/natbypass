@@ -220,20 +220,21 @@ func (c *Config) AddOrUpdateProfile(p Profile) *Profile {
 
 	found := false
 	for i := range c.Profiles {
-		// Если обновляем существующий ID, либо импортируем первый профиль при наличии дефолтного
-		if c.Profiles[i].ID == p.ID || (len(c.Profiles) == 1 && (c.Profiles[i].Name == "Основная сеть" || c.Profiles[i].Name == p.Name)) {
+		// Обновляем существующий профиль ТОЛЬКО при точном совпадении ID
+		if c.Profiles[i].ID == p.ID {
 			c.Profiles[i] = p
-			c.ActiveProfileID = p.ID
+			if p.IsActive {
+				c.ActiveProfileID = p.ID
+			}
 			found = true
 			break
 		}
 	}
 	if !found {
 		c.Profiles = append(c.Profiles, p)
-	}
-
-	if p.IsActive || len(c.Profiles) == 1 {
-		c.ActiveProfileID = p.ID
+		if p.IsActive || len(c.Profiles) == 1 {
+			c.ActiveProfileID = p.ID
+		}
 	}
 
 	return c.EnsureActiveProfile()
