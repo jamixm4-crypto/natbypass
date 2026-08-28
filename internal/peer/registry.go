@@ -75,9 +75,13 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.Latency = existing.Latency
 		newer.PingMs = existing.PingMs
 	}
+	if newer.Nickname == "" && existing.Nickname != "" {
+		newer.Nickname = existing.Nickname
+	}
 	if newer.VirtualIP == "" && existing.VirtualIP != "" {
 		newer.VirtualIP = existing.VirtualIP
 	}
+
 	if newer.STUNAddr == "" && existing.STUNAddr != "" {
 		newer.STUNAddr = existing.STUNAddr
 	}
