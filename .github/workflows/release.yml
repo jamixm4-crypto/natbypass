@@ -81,8 +81,12 @@ jobs:
           $go122Bin = (Resolve-Path "go122\go\bin\go.exe").Path
           $env:GOTOOLCHAIN = "local"
 
-          Write-Host "==> 6. Building Router MIPS (Go 1.22 softfloat)..."
+          # Временно меняем строку версии go на 1.22.0 для компилятора Go 1.22
+          $origMod = [System.IO.File]::ReadAllText("go.mod")
+          $routerMod = $origMod -replace '(?m)^go\s+[0-9.]+', 'go 1.22.0'
+          [System.IO.File]::WriteAllText("go.mod", $routerMod, [System.Text.UTF8Encoding]::new($false))
 
+          Write-Host "==> 6. Building Router MIPS (Go 1.22 softfloat)..."
           $env:GOOS = "linux"
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"
@@ -100,8 +104,12 @@ jobs:
           $env:GOARM = "7"
           & $go122Bin build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-armv7" ./cmd/natbypass-cli
 
+          # Восстанавливаем оригинальный go.mod
+          [System.IO.File]::WriteAllText("go.mod", $origMod, [System.Text.UTF8Encoding]::new($false))
+
           Write-Host "==> 9. Copying config..."
           Copy-Item config.yaml.example release\config.yaml.example -Force
+
 
 
           Write-Host "==> All Files in release/:"
