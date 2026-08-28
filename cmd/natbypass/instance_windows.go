@@ -170,8 +170,100 @@ func isHeadlessOrServerCore() bool {
 	return hDesktop == 0
 }
 
-// openAppWindow launches the WebUI window using the native in-process WebView2
-// with readiness gate, automated WebView2 installation on Windows Server, and fallback to default browser.
+// launchNativeWebView attempts to create and run an in-process native WebView2 window.
+// Returns true on success, false if WebView2 runtime is missing or fails to initialize.
+func launchNativeWebView(url string, port int) bool {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0)
+	screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1)
+
+	winWidth := 1220
+	winHeight := 780
+	if screenWidth > 0 && int(screenWidth) < winWidth+40 {
+		winWidth = int(screenWidth) - 40
+	}
+	if screenHeight > 0 && int(screenHeight) < winHeight+40 {
+		winHeight = int(screenHeight) - 40
+	}
+
+	// Set DPI awareness
+	procSetProcessDpiAwarenessContext := moduser32Instance.NewProc("SetProcessDpiAwarenessContext")
+	if procSetProcessDpiAwarenessContext.Find() == nil {
+		_, _, _ = procSetProcessDpiAwarenessContext.Call(^uintptr(3))
+	}
+
+	var w webview2.WebView
+	var initErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				initErr = fmt.Errorf("panic in webview2 init: %v", r)
+			}
+		}()
+		w = webview2.NewWithOptions(webview2.WebViewOptions{
+			Debug:     false,
+			AutoFocus: true,
+			WindowOptions: webview2.WindowOptions{
+				Title:  "NatBypass — P2P Mesh Network",
+				Width:  uint(winWidth),
+				Height: uint(winHeight),
+				Center: true,
+			},
+		})
+	}()
+
+	if w == nil || initErr != nil {
+		return false
+	}
+
+	defer func() {
+		defer func() { recover() }()
+		w.Destroy()
+		mainAppHWnd = 0
+	}()
+
+	hwnd := uintptr(w.Window())
+	subclassWebViewWindow(hwnd)
+
+	// Enable Dark Mode on titlebar
+	procDwmSetWindowAttribute := moddwmapiInstance.NewProc("DwmSetWindowAttribute")
+	if procDwmSetWindowAttribute.Find() == nil {
+		darkMode := int32(1)
+		_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
+		_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 19, uintptr(unsafe.Pointer(&darkMode)), 4)
+	}
+
+	// Apply application icon to the window
+	if appHIcon != 0 {
+		procSendMessageW := moduser32Instance.NewProc("SendMessageW")
+		_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, appHIcon)
+		_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, appHIcon)
+	}
+
+	w.Init(`
+		window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+		window.addEventListener('keydown', function(e) {
+			if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R' || e.key === 'f' || e.key === 'F' || e.key === 'u' || e.key === 'U' || e.key === 'p' || e.key === 'P'))) {
+				e.preventDefault();
+			}
+		});
+		window.open = function(url) { return null; };
+	`)
+
+	w.SetSize(880, 560, webview2.HintMin)
+	w.SetSize(winWidth, winHeight, webview2.HintNone)
+
+	w.Navigate(url)
+	w.Run()
+	return true
+}
+
+// openAppWindow launches the WebUI window using Native-First strategy:
+// 1. If uiMode == "browser" -> opens default browser immediately.
+// 2. Otherwise (auto / native) -> ALWAYS tries native WebView2 first.
+// 3. If native fails (e.g. Server without runtime) -> checks auto-install or falls back to default browser.
 func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
@@ -206,120 +298,46 @@ func openAppWindow(port int) {
 		go startTrayIcon(port)
 	}
 
-	// 4. Check if WebView2 runtime is installed. If missing, trigger silent auto-installation with UAC elevation.
-	if !tray.IsWebView2RuntimeAvailable() {
-		fmt.Println("WebView2 runtime not found. Starting automatic installation...")
-		installed, err := tray.InstallWebView2RuntimeIfNeeded()
-		if err == nil && installed {
-			fmt.Println("WebView2 runtime successfully installed. Restarting NatBypass...")
-			_ = tray.RestartSelf()
-			return
-		}
-		fmt.Printf("WebView2 installation skipped/failed (%v). Opening in default browser...\n", err)
+	// 4. If explicit browser mode requested via CLI flag:
+	if strings.EqualFold(uiMode, "browser") {
 		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
 		return
 	}
 
-	// 5. Launch in-process native WebView2 window
+	// 5. NATIVE-FIRST: Always try opening the native in-process WebView2 window first!
 	go func() {
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-
-		screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0)
-		screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1)
-
-		winWidth := 1220
-		winHeight := 780
-		if screenWidth > 0 && int(screenWidth) < winWidth+40 {
-			winWidth = int(screenWidth) - 40
-		}
-		if screenHeight > 0 && int(screenHeight) < winHeight+40 {
-			winHeight = int(screenHeight) - 40
-		}
-
-		var fallbackTriggered bool
-		fallbackOpen := func() {
-			if fallbackTriggered {
-				return
-			}
-			fallbackTriggered = true
-			_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
-		}
-
-		defer func() {
-			if r := recover(); r != nil {
-				fallbackOpen()
-			}
-		}()
-
-		// Set DPI awareness
-		procSetProcessDpiAwarenessContext := moduser32Instance.NewProc("SetProcessDpiAwarenessContext")
-		if procSetProcessDpiAwarenessContext.Find() == nil {
-			_, _, _ = procSetProcessDpiAwarenessContext.Call(^uintptr(3))
-		}
-
-		w := webview2.NewWithOptions(webview2.WebViewOptions{
-			Debug:     false,
-			AutoFocus: true,
-			WindowOptions: webview2.WindowOptions{
-				Title:  "NatBypass — P2P Mesh Network",
-				Width:  uint(winWidth),
-				Height: uint(winHeight),
-				Center: true,
-			},
-		})
-		if w == nil {
-			fallbackOpen()
+		success := launchNativeWebView(url, port)
+		if success {
 			return
 		}
 
-		defer func() {
-			defer func() { recover() }()
-			w.Destroy()
-		}()
+		// Native window failed (e.g. WebView2 runtime missing on Windows Server)
+		fmt.Printf("Native WebView2 window could not be initialized. Checking fallback...\n")
 
-		hwnd := uintptr(w.Window())
-		subclassWebViewWindow(hwnd)
-
-		// Enable Dark Mode on titlebar
-		procDwmSetWindowAttribute := moddwmapiInstance.NewProc("DwmSetWindowAttribute")
-		if procDwmSetWindowAttribute.Find() == nil {
-			darkMode := int32(1)
-			_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
-			_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 19, uintptr(unsafe.Pointer(&darkMode)), 4)
-		}
-
-		// Apply application icon to the window
-		if appHIcon != 0 {
-			procSendMessageW := moduser32Instance.NewProc("SendMessageW")
-			_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, appHIcon)
-			_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, appHIcon)
-		}
-
-		w.Init(`
-			window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
-			window.addEventListener('keydown', function(e) {
-				if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R' || e.key === 'f' || e.key === 'F' || e.key === 'u' || e.key === 'U' || e.key === 'p' || e.key === 'P'))) {
-					e.preventDefault();
+		// If on Windows Server with GUI, attempt on-demand installation:
+		if tray.IsDesktopExperienceAvailable() && !tray.IsWebView2RuntimeAvailable() {
+			fmt.Println("Attempting on-demand WebView2 runtime setup...")
+			installed, err := tray.InstallWebView2RuntimeIfNeeded()
+			if err == nil && installed {
+				if launchNativeWebView(url, port) {
+					return
 				}
-			});
-			window.open = function(url) { return null; };
-		`)
+			}
+		}
 
-		w.SetSize(880, 560, webview2.HintMin)
-		w.SetSize(winWidth, winHeight, webview2.HintNone)
-
-		w.Navigate(url)
-		w.Run()
+		// Fallback to default browser
+		fmt.Printf("Opening WebUI in default browser at %s\n", url)
+		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
 	}()
 }
 
 const (
-	wmUserTray   = 0x0400 + 1
-	trayIconID   = 1
-	menuItemOpen = 2001
-	menuItemDiag = 2002
-	menuItemExit = 2003
+	wmUserTray     = 0x0400 + 1
+	trayIconID     = 1
+	menuItemOpen   = 2001
+	menuItemBrowse = 2002
+	menuItemDiag   = 2003
+	menuItemExit   = 2004
 )
 
 
@@ -402,11 +420,13 @@ func startTrayIcon(port int) {
 			case 0x0205: // WM_RBUTTONUP
 				hMenu, _, _ := procCreatePopupMenu.Call()
 				if hMenu != 0 {
-					openText, _ := windows.UTF16PtrFromString("Открыть NatBypass")
+					openText, _ := windows.UTF16PtrFromString("Открыть окно NatBypass")
+					browseText, _ := windows.UTF16PtrFromString("Открыть в браузере")
 					diagText, _ := windows.UTF16PtrFromString("🩺 Диагностика WebUI")
 					exitText, _ := windows.UTF16PtrFromString("Выход")
 
 					procAppendMenuW.Call(hMenu, 0, uintptr(menuItemOpen), uintptr(unsafe.Pointer(openText)))
+					procAppendMenuW.Call(hMenu, 0, uintptr(menuItemBrowse), uintptr(unsafe.Pointer(browseText)))
 					procAppendMenuW.Call(hMenu, 0, uintptr(menuItemDiag), uintptr(unsafe.Pointer(diagText)))
 					procAppendMenuW.Call(hMenu, 0x0800 /* MF_SEPARATOR */, 0, 0)
 					procAppendMenuW.Call(hMenu, 0, uintptr(menuItemExit), uintptr(unsafe.Pointer(exitText)))
@@ -420,7 +440,13 @@ func startTrayIcon(port int) {
 
 					switch cmd {
 					case uintptr(menuItemOpen):
-						activateExistingWindow()
+						if mainAppHWnd != 0 {
+							activateExistingWindow()
+						} else {
+							go launchNativeWebView(fmt.Sprintf("http://127.0.0.1:%d/", port), port)
+						}
+					case uintptr(menuItemBrowse):
+						_ = exec.Command("cmd.exe", "/c", "start", "", fmt.Sprintf("http://127.0.0.1:%d/", port)).Start()
 					case uintptr(menuItemDiag):
 						go diagnoseWebUI(port)
 					case uintptr(menuItemExit):

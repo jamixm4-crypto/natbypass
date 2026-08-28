@@ -23,7 +23,9 @@ var (
 	noWebUI    bool
 	webUIPort  int
 	useTray    bool
+	uiMode     string
 )
+
 
 func main() {
 	// If running as a Windows background service, dispatch directly to service handler
@@ -77,6 +79,7 @@ Supported platforms: Windows, Linux (amd64/arm64/mips/mipsle), Android, iOS.`, V
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level: debug/info/warn/error")
 	rootCmd.PersistentFlags().BoolVar(&noWebUI, "no-webui", false, "Disable embedded Web UI")
 	rootCmd.PersistentFlags().IntVar(&webUIPort, "port", 0, "Override Web UI HTTP port")
+	rootCmd.PersistentFlags().StringVar(&uiMode, "ui", "auto", "UI launch mode: auto | native | browser")
 
 	rootCmd.AddCommand(
 		newStartCmd(),
