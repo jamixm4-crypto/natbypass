@@ -60,10 +60,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	// Unconditional Wintun / TUN adapter creation with VirtualIP
 	adapterName := "NatBypass"
-	if cfg.App.DeviceID != "" {
-		adapterName = "NatBypass-" + cfg.App.DeviceID
-	}
 	tunDev, tunErr := tunnel.CreateAdapter(adapterName, myVirtualIP)
+
 	if tunErr != nil {
 		log.Warn().Err(tunErr).Msg("Could not create TUN adapter (ensure running with Administrator rights)")
 	} else {

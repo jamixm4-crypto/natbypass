@@ -149,9 +149,9 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 			return c.Run()
 		}
 
-		// Ожидаем готовности интерфейса в NDIS и устанавливаем статический IP
-		for i := 0; i < 6; i++ {
-			time.Sleep(200 * time.Millisecond)
+		// 1. Ожидаем готовности интерфейса в NDIS и устанавливаем статический IP через netsh
+		ipAssigned := false
+		for i := 0; i < 10; i++ {
 			err := runNetsh("interface", "ipv4", "set", "address",
 				fmt.Sprintf("name=%s", adapterName),
 				"source=static",
@@ -159,58 +159,51 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 				"mask=255.255.255.0",
 			)
 			if err == nil {
+				ipAssigned = true
 				break
 			}
+			time.Sleep(250 * time.Millisecond)
 		}
 
-		// КРИТИЧНО: выставляем очень высокий metric чтобы Wintun НИКОГДА не перебивал маршруты
-		// физических адаптеров (Wi-Fi, Ethernet, LAN 192.168.x.x, 10.x.x.x)
-		// Metric 9000 = самый низкий приоритет, физические адаптеры обычно metric 25-50
+		// PowerShell fallback if netsh was blocked
+		if !ipAssigned {
+			psCmd := fmt.Sprintf(`New-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -ErrorAction SilentlyContinue`, adapterName, virtualIP, adapterName, virtualIP)
+			_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psCmd).Run()
+		}
+
+		// 2. Переводим профиль сети адаптера в Private (критично для разрешения ICMP Ping на Windows 10/11 и Windows Server)
+		psProfile := fmt.Sprintf(`Set-NetConnectionProfile -InterfaceAlias "%s" -NetworkCategory Private -ErrorAction SilentlyContinue`, adapterName)
+		_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psProfile).Run()
+
+		// 3. Выставляем метрику
 		_ = runNetsh("interface", "ipv4", "set", "interface",
 			fmt.Sprintf("name=%s", adapterName),
 			"metric=100",
 		)
 
-		// Full Firewall rules for TCP, UDP, ICMP and 100.64.200.0/24 mesh subnet
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP Allow")
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP Reply Allow")
+		// 4. Правила брандмауэра Windows для интерфейса NatBypass (ICMP, TCP, UDP)
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP In")
+		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass All In")
 		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass Mesh Inbound")
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass Mesh Outbound")
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass TCP Mesh")
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass UDP Mesh")
 
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass ICMP Allow",
+			"name=NatBypass ICMP In",
 			"dir=in", "action=allow",
-			"protocol=icmpv4:8,any",
+			"protocol=icmpv4:any,any",
+			fmt.Sprintf("interface=%s", adapterName),
 		)
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass ICMP Reply Allow",
+			"name=NatBypass All In",
 			"dir=in", "action=allow",
-			"protocol=icmpv4:0,any",
+			fmt.Sprintf("interface=%s", adapterName),
 		)
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
 			"name=NatBypass Mesh Inbound",
 			"dir=in", "action=allow",
 			"remoteip=100.64.200.0/24",
 		)
-		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass Mesh Outbound",
-			"dir=out", "action=allow",
-			"remoteip=100.64.200.0/24",
-		)
-		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass TCP Mesh",
-			"dir=in", "action=allow", "protocol=tcp",
-			"remoteip=100.64.200.0/24",
-		)
-		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass UDP Mesh",
-			"dir=in", "action=allow", "protocol=udp",
-			"remoteip=100.64.200.0/24",
-		)
 
-		// Explicit metric=1 route for 100.64.200.0/24 via Wintun adapter
+		// 5. Явный маршрут 100.64.200.0/24 через адаптер
 		for i := 0; i < 3; i++ {
 			err := runNetsh("interface", "ipv4", "add", "route",
 				"100.64.200.0/24",
@@ -227,6 +220,7 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 
 	return dev, nil
 }
+
 
 // ReadPacket считывает один IPv4 пакет из сетевого стека Windows
 func (d *Device) ReadPacket() ([]byte, error) {
