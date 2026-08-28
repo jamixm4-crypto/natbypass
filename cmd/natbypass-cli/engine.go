@@ -60,10 +60,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	// Unconditional Wintun / TUN adapter creation with VirtualIP
 	adapterName := "NatBypass"
-	if cfg.App.DeviceID != "" {
-		adapterName = "NatBypass-" + cfg.App.DeviceID
-	}
 	tunDev, tunErr := tunnel.CreateAdapter(adapterName, myVirtualIP)
+
 	if tunErr != nil {
 		log.Warn().Err(tunErr).Msg("Could not create TUN adapter (ensure running with Administrator rights)")
 	} else {
@@ -145,12 +143,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 
 				if found && p != nil {
+					sentUDP := false
 					if p.DirectP2P && p.ActiveEndpoint != "" && puncher != nil {
-						_ = puncher.SendDataPacket(p.ActiveEndpoint, pkt)
-					} else if sigMgr != nil {
+						if err := puncher.SendDataPacket(p.ActiveEndpoint, pkt); err == nil {
+							sentUDP = true
+						}
+						if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+							_ = puncher.SendDataPacket(p.STUNAddr, pkt)
+						}
+					}
+					if (!sentUDP || !p.DirectP2P) && sigMgr != nil {
 						_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 					}
 				}
+
 			}
 		}()
 	}

@@ -143,12 +143,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 
 				if found && p != nil {
+					sentUDP := false
 					if p.DirectP2P && p.ActiveEndpoint != "" && puncher != nil {
-						_ = puncher.SendDataPacket(p.ActiveEndpoint, pkt)
-					} else if sigMgr != nil {
+						if err := puncher.SendDataPacket(p.ActiveEndpoint, pkt); err == nil {
+							sentUDP = true
+						}
+						if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+							_ = puncher.SendDataPacket(p.STUNAddr, pkt)
+						}
+					}
+					if (!sentUDP || !p.DirectP2P) && sigMgr != nil {
 						_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 					}
 				}
+
 			}
 		}()
 	}

@@ -3,8 +3,10 @@ package peer
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+
 
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/signaling"
@@ -73,12 +75,25 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.Latency = existing.Latency
 		newer.PingMs = existing.PingMs
 	}
-	if newer.Nickname == "" && existing.Nickname != "" {
-		newer.Nickname = existing.Nickname
+	if newer.VirtualIP == "" && existing.VirtualIP != "" {
+		newer.VirtualIP = existing.VirtualIP
+	}
+	if newer.STUNAddr == "" && existing.STUNAddr != "" {
+		newer.STUNAddr = existing.STUNAddr
+	}
+	if newer.PublicIP == "" && existing.PublicIP != "" {
+		newer.PublicIP = existing.PublicIP
+	}
+	if newer.WGPubKey == "" && existing.WGPubKey != "" {
+		newer.WGPubKey = existing.WGPubKey
+	}
+	if newer.ActiveEndpoint == "" && existing.ActiveEndpoint != "" {
+		newer.ActiveEndpoint = existing.ActiveEndpoint
 	}
 	if newer.AWG == nil && existing.AWG != nil {
 		newer.AWG = existing.AWG
 	}
+
 
 	if existing.HasMQTT && now.Sub(existing.LastMQTTSeen) < constants.PeerOfflineThreshold {
 		newer.HasMQTT = true
@@ -216,7 +231,7 @@ func (r *Registry) Get(deviceID string) (*Peer, bool) {
 	return p, ok
 }
 
-// GetByVirtualIP retrieves a peer by its VirtualIP.
+// GetByVirtualIP retrieves a peer by its VirtualIP (ignoring /CIDR mask).
 func (r *Registry) GetByVirtualIP(vip string) (*Peer, bool) {
 	if vip == "" {
 		return nil, false
@@ -224,13 +239,16 @@ func (r *Registry) GetByVirtualIP(vip string) (*Peer, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	targetIP := strings.TrimSpace(strings.Split(vip, "/")[0])
 	for _, p := range r.peers {
-		if p.VirtualIP == vip {
+		pIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		if pIP == targetIP && pIP != "" {
 			return p, true
 		}
 	}
 	return nil, false
 }
+
 
 
 // MarkOffline sets the Online flag to false for peers not seen within maxAge.

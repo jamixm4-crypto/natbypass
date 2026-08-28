@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
 )
+
 
 const (
 	IFF_TUN   = 0x0001
@@ -108,18 +110,29 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
+
 	// 1. Попытка через утилиту ip
 	_ = exec.CommandContext(ctx, "ip", "addr", "flush", "dev", d.AdapterName).Run()
-	cmd := exec.CommandContext(ctx, "ip", "addr", "add", virtualIP+"/24", "dev", d.AdapterName)
+	cmd := exec.CommandContext(ctx, "ip", "addr", "add", cleanVIP+"/24", "dev", d.AdapterName)
 	if err := cmd.Run(); err != nil {
 		// 2. Fallback через ifconfig
-		_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, virtualIP, "netmask", "255.255.255.0", "up").Run()
+		_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, cleanVIP, "netmask", "255.255.255.0", "up").Run()
 	} else {
 		_ = exec.CommandContext(ctx, "ip", "link", "set", d.AdapterName, "up").Run()
 	}
 
+	// 3. Маршрутизация 100.64.200.0/24 через адаптер
+	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName).Run()
+
+	// 4. Разрешение входящего и транзитного трафика в iptables (Keenetic / OpenWrt / Linux)
+	_ = exec.CommandContext(ctx, "iptables", "-I", "INPUT", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+	_ = exec.CommandContext(ctx, "iptables", "-I", "FORWARD", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+	_ = exec.CommandContext(ctx, "iptables", "-I", "FORWARD", "-o", d.AdapterName, "-j", "ACCEPT").Run()
+
 	return nil
 }
+
 
 func (d *Device) Close() error {
 	if atomic.CompareAndSwapInt32(&d.isClosed, 0, 1) {
