@@ -4,65 +4,65 @@ package tray
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"os/exec"
+	"syscall"
 	"time"
-	"unsafe"
-
-	"golang.org/x/sys/windows"
 )
 
-var (
-	modShell32Install    = windows.NewLazySystemDLL("shell32.dll")
-	procShellExecuteWRun = modShell32Install.NewProc("ShellExecuteW")
-)
+const webview2BootstrapperURL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 
-// InstallWebView2RuntimeIfNeeded extracts the embedded Evergreen bootstrapper and
-// executes silent installation with UAC elevation if WebView2 is missing.
+func downloadWebView2Bootstrapper() (string, error) {
+	tmpFile, err := os.CreateTemp("", "webview2-setup-*.exe")
+	if err != nil {
+		return "", err
+	}
+	defer tmpFile.Close()
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Get(webview2BootstrapperURL)
+	if err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to download WebView2 setup from Microsoft CDN: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		_ = os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("Microsoft CDN returned status %d", resp.StatusCode)
+	}
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to save WebView2 setup: %w", err)
+	}
+
+	return tmpFile.Name(), nil
+}
+
+// InstallWebView2RuntimeIfNeeded downloads and installs the official Microsoft WebView2 runtime if missing.
 func InstallWebView2RuntimeIfNeeded() (bool, error) {
 	if IsWebView2RuntimeAvailable() {
 		return true, nil
 	}
 
-	if len(webview2Bootstrapper) == 0 {
-		return false, fmt.Errorf("embedded webview2 bootstrapper payload is empty")
-	}
-
-	// 1. Write embedded bootstrapper to temp file
-	tmpFile, err := os.CreateTemp("", "webview2-setup-*.exe")
-	if err != nil {
-		return false, fmt.Errorf("failed to create temp installer file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := tmpFile.Write(webview2Bootstrapper); err != nil {
-		_ = tmpFile.Close()
-		return false, fmt.Errorf("failed to write installer payload: %w", err)
-	}
-	_ = tmpFile.Close()
-
-	// 2. Launch installer with UAC elevation ("runas") and silent flags ("/silent /install")
-	procPtr, err := windows.UTF16PtrFromString(tmpPath)
+	// 1. Download official bootstrapper on-demand from Microsoft CDN
+	installerPath, err := downloadWebView2Bootstrapper()
 	if err != nil {
 		return false, err
 	}
-	verbPtr, _ := windows.UTF16PtrFromString("runas")
-	argsPtr, _ := windows.UTF16PtrFromString("/silent /install")
+	defer os.Remove(installerPath)
 
-	ret, _, _ := procShellExecuteWRun.Call(
-		0,
-		uintptr(unsafe.Pointer(verbPtr)),
-		uintptr(unsafe.Pointer(procPtr)),
-		uintptr(unsafe.Pointer(argsPtr)),
-		0,
-		windows.SW_HIDE,
-	)
-
-	if ret <= 32 {
-		return false, fmt.Errorf("ShellExecuteW failed to launch installer with elevation (code %d)", ret)
+	// 2. Launch silent installation
+	cmd := exec.Command(installerPath, "/silent", "/install")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmd.Start(); err != nil {
+		return false, fmt.Errorf("failed to start WebView2 installer: %w", err)
 	}
 
-	// 3. Poll registry for installation completion (every 2 seconds up to 5 minutes)
+	// 3. Poll registry for installation completion (every 2s up to 5 minutes)
 	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
 		if IsWebView2RuntimeAvailable() {
@@ -71,5 +71,5 @@ func InstallWebView2RuntimeIfNeeded() (bool, error) {
 		time.Sleep(2 * time.Second)
 	}
 
-	return false, fmt.Errorf("WebView2 runtime installation timed out")
+	return false, fmt.Errorf("WebView2 installation timed out")
 }

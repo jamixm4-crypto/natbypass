@@ -1,168 +1,85 @@
-name: Release / Publish Binaries
+name: Build, Sign and Release
 
 on:
   push:
     tags:
       - 'v*'
-    branches:
-      - main
-  workflow_dispatch:
 
 permissions:
   contents: write
-
-concurrency:
-  group: release-pipeline-${{ github.ref }}
-  cancel-in-progress: true
+  id-token: write
 
 jobs:
-  build-and-release:
-    name: Build & Upload All Platform Binaries
+  build-and-sign:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout Code
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up Go
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
+          go-version: '1.22'
           cache: true
 
-      - name: Build All Release Binaries
-        shell: pwsh
+      - name: Install go-winres
+        run: go install github.com/tc-hib/go-winres@latest
+
+      - name: Compile Windows PE resources
+        run: |
+          go-winres make --in winres/winres.json --out cmd/natbypass/rsrc
+          go-winres make --in winres/winres.json --out cmd/natbypass-cli/rsrc
+
+      - name: Build Windows Binaries (without UPX)
         env:
           CGO_ENABLED: '0'
+          GOOS: windows
+          GOARCH: amd64
         run: |
-          $tag = "${{ github.ref_name }}"
-          if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
-              $allTags = git tag -l "v*"
-              $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
-              if (!$latestTag) { $latestTag = "v1.3.9" }
-              $tag = $latestTag
-          }
-          Write-Host "Building release for tag: $tag"
-          Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path release | Out-Null
+          mkdir -p build
+          $VERSION = "${{ github.ref_name }}"
+          go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$VERSION" -o build/NatBypass.exe ./cmd/natbypass
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-cli.exe ./cmd/natbypass-cli
 
-          Write-Host "==> 1. Generating Windows Resources (Manifest + Icon)..."
-          & go install github.com/akavel/rsrc@latest
-          $rsrcPath = Join-Path (go env GOPATH) "bin\rsrc.exe"
-          if (Test-Path $rsrcPath) {
-              & $rsrcPath -manifest "cmd\natbypass\natbypass.manifest" -ico "app.ico" -o "cmd\natbypass\rsrc_windows_amd64.syso"
-              & $rsrcPath -manifest "cmd\natbypass\natbypass.manifest" -ico "app.ico" -o "cmd\natbypass-gui\rsrc_windows_amd64.syso"
-          }
+      - name: Install Cosign (Sigstore)
+        uses: sigstore/cosign-installer@v3
 
-          Write-Host "==> 2. Building Windows Desktop App with WebUI (NatBypass.exe)..."
-          $env:GOOS = "windows"
+      - name: Sign Windows Binary with Sigstore
+        run: |
+          cosign sign-blob --yes `
+            --output-signature build/NatBypass.exe.sig `
+            --output-certificate build/NatBypass.exe.pem `
+            build/NatBypass.exe
+
+      - name: Build Linux Cross-Platform Binaries
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+        run: |
+          $VERSION = "${{ github.ref_name }}"
           $env:GOARCH = "amd64"
-          & go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$tag" -o "release\NatBypass-$tag-windows-amd64.exe" ./cmd/natbypass
-          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-cli-$tag-windows-amd64.exe" ./cmd/natbypass-cli
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-linux-amd64 ./cmd/natbypass-cli
 
-
-          Write-Host "==> 3. Building Windows Router Builder GUI..."
-          & go build -trimpath -ldflags="-w -H=windowsgui" -o "release\NatBypass-Builder-$tag.exe" ./cmd/builder
-
-          Write-Host "==> 4. Building Linux x64..."
-          $env:GOOS = "linux"
-          $env:GOARCH = "amd64"
-          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-linux-amd64" ./cmd/natbypass-cli
-
-          Write-Host "==> 5. Building Linux ARM64..."
           $env:GOARCH = "arm64"
-          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-linux-arm64" ./cmd/natbypass-cli
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-linux-arm64 ./cmd/natbypass-cli
 
-          Write-Host "==> Downloading Go 1.22.12 for Router MIPS/ARM Linux Kernel Compatibility..."
-          Invoke-WebRequest -Uri "https://go.dev/dl/go1.22.12.windows-amd64.zip" -OutFile "go122.zip"
-          Expand-Archive -Path "go122.zip" -DestinationPath "go122" -Force
-          $go122Bin = (Resolve-Path "go122\go\bin\go.exe").Path
-          $env:GOTOOLCHAIN = "local"
-
-          # Подменяем go.mod и go.sum на готовые совместимые с Go 1.22 для роутеров
-          Copy-Item "go.mod" "go.mod.backup" -Force
-          Copy-Item "go.sum" "go.sum.backup" -Force
-          Copy-Item "go.mod.router" "go.mod" -Force
-          Copy-Item "go.sum.router" "go.sum" -Force
-
-
-          Write-Host "==> 6. Building Router MIPS (Go 1.22 softfloat)..."
-          $env:GOOS = "linux"
-          $env:GOARCH = "mips"
-          $env:GOMIPS = "softfloat"
-          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-router-mips" ./cmd/natbypass-cli
-
-          Write-Host "==> 7. Building Router MIPSLE (Go 1.22 softfloat)..."
-          $env:GOOS = "linux"
           $env:GOARCH = "mipsle"
           $env:GOMIPS = "softfloat"
-          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-router-mipsle" ./cmd/natbypass-cli
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-router-mipsle ./cmd/natbypass-cli
 
-          Write-Host "==> 8. Building Router ARMv7 (Go 1.22 32-bit)..."
-          $env:GOOS = "linux"
-          $env:GOARCH = "arm"
-          $env:GOARM = "7"
-          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-router-armv7" ./cmd/natbypass-cli
+          $env:GOARCH = "mips"
+          $env:GOMIPS = "softfloat"
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-router-mips ./cmd/natbypass-cli
 
-
-          # Восстанавливаем оригинальные go.mod и go.sum
-          Move-Item "go.mod.backup" "go.mod" -Force
-          Move-Item "go.sum.backup" "go.sum" -Force
-
-
-
-
-          Write-Host "==> 9. Copying config..."
-          Copy-Item config.yaml.example release\config.yaml.example -Force
-
-
-
-          Write-Host "==> All Files in release/:"
-          Get-ChildItem -Path release -File | Select-Object Name, Length | Format-Table -AutoSize
-
-      - name: Publish Release via GitHub CLI
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ github.ref_name }}"
-          if ($tag -eq "main" -or $tag -eq "master" -or [string]::IsNullOrWhiteSpace($tag)) {
-              $allTags = git tag -l "v*"
-              $latestTag = $allTags | Sort-Object { [version]($_ -replace '^v','') } -Descending | Select-Object -First 1
-              if (!$latestTag) { $latestTag = "v1.3.9" }
-              $tag = $latestTag
-          }
-          
-          # Создаем релиз если еще не существует
-          $null = gh release view $tag 2>$null
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "==> Creating clean release $tag..."
-              gh release create $tag --title "NatBypass $tag" --notes "NatBypass $tag — P2P Mesh & AmneziaWG 2.0 Client." --draft=false --latest
-          }
-
-          $files = Get-ChildItem -Path release -File
-          foreach ($f in $files) {
-              Write-Host "==> Uploading $($f.Name) ($([math]::Round($f.Length / 1MB, 2)) MB)..."
-              $null = gh release delete-asset $tag $f.Name --yes 2>$null
-              gh release upload $tag $f.FullName --clobber
-          }
-          
-          # Публикуем релиз из draft и устанавливаем статус Latest
-          $null = gh release edit $tag --draft=false --latest --title "NatBypass $tag" 2>$null
-          Write-Host "==> All fresh release files successfully uploaded for $tag!"
-
-          # Удаление предыдущих устаревших релизов (оставляем только самый актуальный)
-          Write-Host "==> Cleaning up previous releases, keeping ONLY $tag..."
-          $allReleases = gh release list --limit 100 | ForEach-Object { ($_ -split "`t")[2] }
-          foreach ($rel in $allReleases) {
-              if ($rel -and $rel -ne $tag) {
-                  Write-Host "Deleting old release: $rel"
-                  gh release delete $rel --yes 2>$null
-              }
-          }
-
-          $global:LASTEXITCODE = 0
-          exit 0
-
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/NatBypass.exe
+            build/NatBypass.exe.sig
+            build/NatBypass.exe.pem
+            build/natbypass-cli.exe
+            build/natbypass-linux-amd64
+            build/natbypass-linux-arm64
+            build/natbypass-router-mipsle
+            build/natbypass-router-mips

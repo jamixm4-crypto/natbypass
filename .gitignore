@@ -4,7 +4,6 @@ release/
 bin/
 *.exe
 *.exe~
-!internal/tray/assets/MicrosoftEdgeWebview2Setup.exe
 *.dll
 !internal/tunnel/wintun.dll
 !wintun.dll
