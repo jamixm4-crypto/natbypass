@@ -74,10 +74,15 @@
 
 ## 🚀 Быстрая установка
 
-### Windows
-1. Скачайте [**`NatBypass-v1.5.2-windows-amd64.exe`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+### Windows (10/11 & Windows Server)
+1. Скачайте [**`NatBypass.exe`**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
 2. Запустите файл (для поднятия виртуального адаптера `NatBypass` рекомендуются права администратора).
-3. Приложение откроется в нативном графическом окне.
+3. Приложение откроется в нативном графическом окне с фирменной иконкой.
+
+#### 🪟 Windows Server (Desktop Experience, RDSH & Server Core)
+* **Windows Server с Desktop Experience (GUI / RDSH):** Если рантайм WebView2 отсутствует, NatBypass автоматически запустит встроенный тихий установщик Microsoft Evergreen Bootstrapper с UAC-элевацией и после завершения перезапустит приложение в полноценном нативном окне.
+* **Windows Server Core (Headless):** Автоматически определяется отсутствие графического интерфейса — приложение запускается как фоновая служба (WebUI доступен по адресу `http://127.0.0.1:8080` без вызова диалогов UAC).
+
 
 ### Linux / Keenetic / OpenWrt (Установка в 1 команду)
 ```bash

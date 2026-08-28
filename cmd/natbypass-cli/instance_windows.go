@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/jchv/go-webview2"
+	"github.com/natbypass/natbypass/internal/tray"
 	"golang.org/x/sys/windows"
 )
 
@@ -169,7 +170,7 @@ func isHeadlessOrServerCore() bool {
 }
 
 // openAppWindow launches the WebUI window using the native in-process WebView2
-// with readiness gate and automatic fallback to default browser.
+// with readiness gate, automated WebView2 installation on Windows Server, and fallback to default browser.
 func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
@@ -193,9 +194,9 @@ func openAppWindow(port int) {
 		return
 	}
 
-	// 2. If headless Server Core (no desktop UI), keep running as background daemon
-	if isHeadlessOrServerCore() {
-		fmt.Printf("Headless environment detected. WebUI accessible at %s\n", url)
+	// 2. Detect Desktop Experience vs Server Core
+	if !tray.IsDesktopExperienceAvailable() || isHeadlessOrServerCore() {
+		fmt.Printf("Windows Server Core / headless environment detected. WebUI running in background at %s\n", url)
 		return
 	}
 
@@ -204,7 +205,21 @@ func openAppWindow(port int) {
 		go startTrayIcon(port)
 	}
 
-	// 4. Launch in-process native WebView2 window
+	// 4. Check if WebView2 runtime is installed. If missing, trigger silent auto-installation with UAC elevation.
+	if !tray.IsWebView2RuntimeAvailable() {
+		fmt.Println("WebView2 runtime not found. Starting automatic installation...")
+		installed, err := tray.InstallWebView2RuntimeIfNeeded()
+		if err == nil && installed {
+			fmt.Println("WebView2 runtime successfully installed. Restarting NatBypass...")
+			_ = tray.RestartSelf()
+			return
+		}
+		fmt.Printf("WebView2 installation skipped/failed (%v). Opening in default browser...\n", err)
+		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
+		return
+	}
+
+	// 5. Launch in-process native WebView2 window
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
