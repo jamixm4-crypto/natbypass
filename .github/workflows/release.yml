@@ -92,19 +92,20 @@ jobs:
           $env:GOOS = "linux"
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"
-          & $go122Bin build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mips" ./cmd/natbypass-cli
+          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mips" ./cmd/natbypass-cli
 
           Write-Host "==> 7. Building Router MIPSLE (Go 1.22 softfloat)..."
           $env:GOOS = "linux"
           $env:GOARCH = "mipsle"
           $env:GOMIPS = "softfloat"
-          & $go122Bin build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mipsle" ./cmd/natbypass-cli
+          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mipsle" ./cmd/natbypass-cli
 
           Write-Host "==> 8. Building Router ARMv7 (Go 1.22 32-bit)..."
           $env:GOOS = "linux"
           $env:GOARCH = "arm"
           $env:GOARM = "7"
-          & $go122Bin build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-armv7" ./cmd/natbypass-cli
+          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-armv7" ./cmd/natbypass-cli
+
 
           # Восстанавливаем оригинальные go.mod и go.sum
           Move-Item "go.mod.backup" "go.mod" -Force
