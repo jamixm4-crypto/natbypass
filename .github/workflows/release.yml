@@ -79,8 +79,10 @@ jobs:
           Invoke-WebRequest -Uri "https://go.dev/dl/go1.22.12.windows-amd64.zip" -OutFile "go122.zip"
           Expand-Archive -Path "go122.zip" -DestinationPath "go122" -Force
           $go122Bin = (Resolve-Path "go122\go\bin\go.exe").Path
+          $env:GOTOOLCHAIN = "local"
 
           Write-Host "==> 6. Building Router MIPS (Go 1.22 softfloat)..."
+
           $env:GOOS = "linux"
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"
