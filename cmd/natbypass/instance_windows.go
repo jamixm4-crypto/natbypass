@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -29,7 +30,14 @@ var (
 	lastWebUIPort       = 8080
 	mainAppHWnd         uintptr
 	origWndProc         uintptr
+
+	// trayRunning = 1 если трей уже запущен через trayApp.Run() — не создавать второй
+	trayRunning int32
 )
+
+func isTrayRunning() bool    { return atomic.LoadInt32(&trayRunning) == 1 }
+func setTrayRunning()        { atomic.StoreInt32(&trayRunning, 1) }
+
 
 func init() {
 	if runtime.GOOS == "windows" {
@@ -334,7 +342,11 @@ func openAppWindow(port int) {
 	}
 
 	// Запускаем System Tray иконку в фоновом потоке
-	go startTrayIcon(port)
+	// ПРИМЕЧАНИЕ: если вызывается из runEngine с enableTray=true, трей уже запущен через trayApp.Run()
+	// Вызываем startTrayIcon только если трей ещё не был запущен (standalone режим)
+	if !isTrayRunning() {
+		go startTrayIcon(port)
+	}
 
 	// На Windows Server — сразу используем стабильный режим standalone окна Edge/Chrome,
 	// так как рантайм WebView2 на Server 2016/2019 без рабочего стола Desktop Experience создаёт зависшее пустое окно.

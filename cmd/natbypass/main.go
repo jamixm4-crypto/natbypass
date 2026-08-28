@@ -551,6 +551,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 			openAppWindow(port)
 		}()
+		setTrayRunning() // пометить что трей запущен — не создавать дубль из openAppWindow
 		return trayApp.Run(engineCtx)
 	}
 
