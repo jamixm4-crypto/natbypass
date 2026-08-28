@@ -74,7 +74,7 @@ jobs:
 
           Write-Host "==> 5. Building Linux ARM64..."
           $env:GOARCH = "arm64"
-          & go build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-linux-arm64" ./cmd/natbypass-cli
+          & go build -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-linux-arm64" ./cmd/natbypass-cli
 
           Write-Host "==> Downloading Go 1.22.12 for Router MIPS/ARM Linux Kernel Compatibility..."
           Invoke-WebRequest -Uri "https://go.dev/dl/go1.22.12.windows-amd64.zip" -OutFile "go122.zip"
@@ -93,19 +93,19 @@ jobs:
           $env:GOOS = "linux"
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"
-          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mips" ./cmd/natbypass-cli
+          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-router-mips" ./cmd/natbypass-cli
 
           Write-Host "==> 7. Building Router MIPSLE (Go 1.22 softfloat)..."
           $env:GOOS = "linux"
           $env:GOARCH = "mipsle"
           $env:GOMIPS = "softfloat"
-          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-mipsle" ./cmd/natbypass-cli
+          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-router-mipsle" ./cmd/natbypass-cli
 
           Write-Host "==> 8. Building Router ARMv7 (Go 1.22 32-bit)..."
           $env:GOOS = "linux"
           $env:GOARCH = "arm"
           $env:GOARM = "7"
-          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-armv7" ./cmd/natbypass-cli
+          & $go122Bin build -mod=mod -trimpath -ldflags="-s -w -X main.Version=$tag" -o "release\natbypass-$tag-router-armv7" ./cmd/natbypass-cli
 
 
           # Восстанавливаем оригинальные go.mod и go.sum

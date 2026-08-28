@@ -30,7 +30,7 @@ import (
 	"github.com/natbypass/natbypass/internal/wireguard"
 )
 var (
-	Version   = "1.8.0"
+	Version   = "1.8.6"
 	Commit    = "release"
 	BuildDate = "unknown"
 
@@ -390,7 +390,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	publishInterval := time.Duration(cfg.App.PublishInterval) * time.Second
 	if publishInterval == 0 {
-		publishInterval = 60 * time.Second
+		publishInterval = 8 * time.Second
 	}
 
 	// Р¦РёРєР» РїСѓР±Р»РёРєР°С†РёРё
@@ -426,6 +426,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							_ = udpPuncher.SendKeepAlive(peerObj.STUNAddr)
 						}
 					}
+				}
+				if uiServer != nil {
+					uiServer.SetAppState(deviceID, ip.String(), stunAddr)
+					uiServer.SetVirtualIP(myVirtualIP)
 				}
 				payload := &signaling.Payload{
 					DeviceID:  deviceID,
@@ -933,7 +937,7 @@ func buildDefaultConfig() *config.Config {
 
 	cfg.App.LogLevel        = ifEmpty(DefaultLogLevel, "info")
 	cfg.App.DeviceID        = DefaultDeviceID
-	cfg.App.PublishInterval = 60
+	cfg.App.PublishInterval = 8
 
 	// Автогенерация уникального профиля сети со случайным топиком
 	p := config.GenerateDefaultProfile("Основная сеть")
