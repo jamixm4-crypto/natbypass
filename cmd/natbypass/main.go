@@ -539,26 +539,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			GetStatusText: func() string {
 				ch := sigMgr.CurrentChannel()
 				if ch == "" {
-					ch = "РЅРµС‚"
+					ch = "нет"
 				}
-				return fmt.Sprintf("рџ’Ў РЎС‚Р°С‚СѓСЃ: РћРЅР»Р°Р№РЅ (РљР°РЅР°Р»: %s)", ch)
+				return fmt.Sprintf("💡 Статус: Онлайн (Канал: %s)", ch)
 			},
 		})
-		log.Info().Msg("Запущен системный трей Windows")
-		// Ждём готовности Web UI (макс 9 сек), затем открываем красивое standalone окно
-		go func() {
-			addr := fmt.Sprintf("127.0.0.1:%d", port)
-			for i := 0; i < 60; i++ {
-				conn, dialErr := net.DialTimeout("tcp", addr, 200*time.Millisecond)
-				if dialErr == nil {
-					conn.Close()
-					break
-				}
-				time.Sleep(150 * time.Millisecond)
-			}
-			openAppWindow(port)
-		}()
-		setTrayRunning() // пометить что трей запущен — не создавать дубль из openAppWindow
+
 		return trayApp.Run(engineCtx)
 	}
 

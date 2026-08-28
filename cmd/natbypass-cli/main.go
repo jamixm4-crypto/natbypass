@@ -533,12 +533,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			GetStatusText: func() string {
 				ch := sigMgr.CurrentChannel()
 				if ch == "" {
-					ch = "РЅРµС‚"
+					ch = "нет"
 				}
-				return fmt.Sprintf("рџ’Ў РЎС‚Р°С‚СѓСЃ: РћРЅР»Р°Р№РЅ (РљР°РЅР°Р»: %s)", ch)
+				return fmt.Sprintf("💡 Статус: Онлайн (Канал: %s)", ch)
 			},
 		})
-		log.Info().Msg("Запущен системный трей Windows")
+
 		return trayApp.Run(engineCtx)
 	}
 

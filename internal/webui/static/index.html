@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -761,7 +761,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.2.7</span>
+          <span id="topUpdateLabel">v1.9.11</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1754,16 +1754,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       document.body.removeChild(textArea);
     }
 
-    function copyQRText() {
+        function copyQRText() {
       const text = document.getElementById('qrRawText').value;
-      if (!text) return;
-      copyToClipboard(text, "✓ Скопировано"); return; if (false) {
-        showToast('✓ Данные QR-кода скопированы в буфер обмена');
-      }).catch(() => {
-        document.getElementById('qrRawText').select();
-        document.execCommand('copy');
-        showToast('✓ Скопировано');
-      });
+      copyToClipboard(text, '✓ Данные QR-кода скопированы в буфер обмена');
     }
 
     function switchTab(tabName) {
@@ -2500,6 +2493,19 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     function closeRenameModal() {
       document.getElementById('renameModal').classList.remove('active');
+    }
+
+    function copyDiagReport() {
+      if (!lastDiagReport) {
+        const b = document.getElementById('diagBox');
+        lastDiagReport = b.innerText;
+      }
+      copyToClipboard(lastDiagReport, '✓ Отчет диагностики скопирован в буфер обмена!');
+    }
+
+    function copyLogs() {
+      const ls = document.getElementById('logStream');
+      copyToClipboard(ls.innerText, '✓ Журнал событий скопирован в буфер обмена!');
     }
 
     function openNodeInfoModal() {
