@@ -96,10 +96,11 @@ main() {
             BIN_SUFFIX="router-mipsle"
             ARCH_DESC="MIPS Little-Endian (Keenetic / MT7621 / KN-1010 / Viva / Extra)"
             ;;
-        armv7l|armv6l)
-            BIN_SUFFIX="linux-arm64"
-            ARCH_DESC="ARM 32/64"
+        armv7l|armv6l|armv7|armhf|arm)
+            BIN_SUFFIX="router-armv7"
+            ARCH_DESC="ARMv7 32-bit (Keenetic Hopper/Voyager, Cortex-A7)"
             ;;
+
         *)
             print_yellow "[!] Нестандартная архитектура: ${RAW_ARCH}"
             BIN_SUFFIX="linux-amd64"
