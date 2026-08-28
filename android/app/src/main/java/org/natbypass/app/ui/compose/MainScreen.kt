@@ -57,11 +57,35 @@ fun MainScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "NatBypass",
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.5).sp,
-                    )
+                    val context = LocalContext.current
+                    val vName = remember {
+                        try {
+                            val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                            "v" + (pInfo.versionName ?: "1.6.5")
+                        } catch (e: Exception) {
+                            "v1.6.5"
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "NatBypass",
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        ) {
+                            Text(
+                                text = vName,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 },
                 actions = {
                     IconButton(onClick = onCheckUpdate) {
@@ -402,7 +426,7 @@ private fun MyDeviceInfoCard(
             ) {
                 Column {
                     Text(
-                        text = "Виртуальный IP (Mesh)",
+                        text = "Статический IP сети (Mesh)",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
