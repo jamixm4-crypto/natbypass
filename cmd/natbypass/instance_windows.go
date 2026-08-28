@@ -577,8 +577,8 @@ func startTrayIcon(port int) {
 						procShellNotifyIconW.Call(2 /* NIM_DELETE */, uintptr(unsafe.Pointer(&nid)))
 						procDestroyWindow.Call(hwnd)
 						cleanupSingleInstanceMutex()
-						closeLogging()
 						os.Exit(0)
+
 					}
 				}
 			}

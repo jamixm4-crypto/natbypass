@@ -38,7 +38,9 @@ type WebUIConfig struct {
 
 // NetworkConfig — сетевые настройки
 type NetworkConfig struct {
+	Address            string   `mapstructure:"address" yaml:"address,omitempty"`
 	StunServers        []string `mapstructure:"stun_servers" yaml:"stun_servers,omitempty"`
+
 	UpnpEnabled        bool     `mapstructure:"upnp_enabled" yaml:"upnp_enabled"`
 	IPApis             []string `mapstructure:"ip_apis" yaml:"ip_apis,omitempty"`
 	IPTimeout          int      `mapstructure:"ip_timeout" yaml:"ip_timeout,omitempty"`

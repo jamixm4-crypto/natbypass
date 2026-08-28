@@ -2666,6 +2666,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             toggleDiagVisibility(showDiag);
           }
           if (c.network) {
+            document.getElementById('cfgVirtualIP').value = c.network.address || '';
             document.getElementById('chkUpnp').checked = c.network.upnp_enabled || false;
             document.getElementById('chkDoH').checked = c.network.doh_enabled || false;
             document.getElementById('chkAllowExitNode').checked = c.network.allow_exit_node || false;
@@ -2720,6 +2721,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     async function saveAllSettings() {
       const device_name = document.getElementById('cfgNick').value.trim();
+      const virtual_ip = document.getElementById('cfgVirtualIP').value.trim();
       const publish_interval = parseInt(document.getElementById('cfgInterval').value) || 8;
       const tg_token = document.getElementById('cfgTgToken').value.trim();
       const tg_chat = document.getElementById('cfgTgChat').value.trim();
@@ -2981,6 +2983,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const name = document.getElementById('editProfName').value.trim();
       const mqtt_topic = document.getElementById('editProfTopic').value.trim();
       const mqtt_broker = document.getElementById('editProfBroker').value.trim();
+      const virtual_ip = document.getElementById('editProfVirtualIP').value.trim();
 
       if (!id) return;
       try {
