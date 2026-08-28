@@ -81,11 +81,12 @@ jobs:
           $go122Bin = (Resolve-Path "go122\go\bin\go.exe").Path
           $env:GOTOOLCHAIN = "local"
 
-          # Подменяем go.mod на совместимый с Go 1.22 для роутеров
+          # Подменяем go.mod и go.sum на готовые совместимые с Go 1.22 для роутеров
           Copy-Item "go.mod" "go.mod.backup" -Force
           Copy-Item "go.sum" "go.sum.backup" -Force
           Copy-Item "go.mod.router" "go.mod" -Force
-          & $go122Bin mod tidy
+          Copy-Item "go.sum.router" "go.sum" -Force
+
 
           Write-Host "==> 6. Building Router MIPS (Go 1.22 softfloat)..."
           $env:GOOS = "linux"
