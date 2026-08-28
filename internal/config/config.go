@@ -68,8 +68,12 @@ type ChannelConfig struct {
 
 // SignalingConfig — конфигурация всех сигнальных каналов
 type SignalingConfig struct {
-	Channels []ChannelConfig `mapstructure:"channels" yaml:"channels,omitempty"`
+	DefaultChannel string          `mapstructure:"default_channel" yaml:"default_channel,omitempty"`
+	MQTTBroker     string          `mapstructure:"mqtt_broker" yaml:"mqtt_broker,omitempty"`
+	MQTTTopic      string          `mapstructure:"mqtt_topic" yaml:"mqtt_topic,omitempty"`
+	Channels       []ChannelConfig `mapstructure:"channels" yaml:"channels,omitempty"`
 }
+
 
 // WGPeerConfig — настройки одного WG пира
 type WGPeerConfig struct {

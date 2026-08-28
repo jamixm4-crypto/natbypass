@@ -86,9 +86,16 @@ func (c *Config) EnsureActiveProfile() *Profile {
 				}
 			}
 		}
+		if defaultProf.MQTTTopic == "" && c.Signaling.MQTTTopic != "" {
+			defaultProf.MQTTTopic = c.Signaling.MQTTTopic
+		}
+		if defaultProf.MQTTBroker == "" && c.Signaling.MQTTBroker != "" {
+			defaultProf.MQTTBroker = c.Signaling.MQTTBroker
+		}
 		c.Profiles = append(c.Profiles, defaultProf)
 		c.ActiveProfileID = defaultProf.ID
 	}
+
 
 	var active *Profile
 	for i := range c.Profiles {
@@ -130,13 +137,24 @@ func (c *Config) SyncSignalingWithProfile(p *Profile) {
 	// 1. MQTT Канал
 	mqttBroker := p.MQTTBroker
 	if mqttBroker == "" {
-		mqttBroker = "tcp://broker.emqx.io:1883"
+		if c.Signaling.MQTTBroker != "" {
+			mqttBroker = c.Signaling.MQTTBroker
+			p.MQTTBroker = mqttBroker
+		} else {
+			mqttBroker = "tcp://broker.emqx.io:1883"
+		}
 	}
 	mqttTopic := p.MQTTTopic
 	if mqttTopic == "" {
-		mqttTopic = "natbypass/mesh/" + GenerateRandomHex(8)
-		p.MQTTTopic = mqttTopic
+		if c.Signaling.MQTTTopic != "" {
+			mqttTopic = c.Signaling.MQTTTopic
+			p.MQTTTopic = mqttTopic
+		} else {
+			mqttTopic = "natbypass/mesh/" + GenerateRandomHex(8)
+			p.MQTTTopic = mqttTopic
+		}
 	}
+
 
 	mqttParams := map[string]string{
 		"broker":     mqttBroker,

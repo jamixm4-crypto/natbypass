@@ -216,6 +216,23 @@ func (r *Registry) Get(deviceID string) (*Peer, bool) {
 	return p, ok
 }
 
+// GetByVirtualIP retrieves a peer by its VirtualIP.
+func (r *Registry) GetByVirtualIP(vip string) (*Peer, bool) {
+	if vip == "" {
+		return nil, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, p := range r.peers {
+		if p.VirtualIP == vip {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+
 // MarkOffline sets the Online flag to false for peers not seen within maxAge.
 func (r *Registry) MarkOffline(maxAge time.Duration) {
 	if maxAge < 60*time.Second {

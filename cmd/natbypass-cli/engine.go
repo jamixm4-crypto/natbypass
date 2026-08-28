@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"runtime"
 	"strings"
@@ -19,10 +20,12 @@ import (
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/tray"
+	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/webui"
 	"github.com/natbypass/natbypass/internal/wireguard"
 	"github.com/rs/zerolog/log"
 )
+
 
 // runEngine initializes and runs the core NatBypass networking pipeline.
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
@@ -54,6 +57,103 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		defer puncher.Close()
 	}
 	wgPubKey, wgPort := initWireGuard(cfg)
+
+	// Unconditional Wintun / TUN adapter creation with VirtualIP
+	adapterName := "NatBypass"
+	if cfg.App.DeviceID != "" {
+		adapterName = "NatBypass-" + cfg.App.DeviceID
+	}
+	tunDev, tunErr := tunnel.CreateAdapter(adapterName, myVirtualIP)
+	if tunErr != nil {
+		log.Warn().Err(tunErr).Msg("Could not create TUN adapter (ensure running with Administrator rights)")
+	} else {
+		log.Info().Str("adapter", adapterName).Str("vip", myVirtualIP).Msg("TUN interface created and configured")
+		defer tunDev.Close()
+
+		// Self-check and self-ping of Virtual IP
+		go func() {
+			time.Sleep(2 * time.Second)
+			foundVIP := false
+			ifaces, _ := net.Interfaces()
+			for _, iface := range ifaces {
+				addrs, _ := iface.Addrs()
+				for _, addr := range addrs {
+					if strings.Contains(addr.String(), myVirtualIP) {
+						foundVIP = true
+						break
+					}
+				}
+			}
+
+			var pingCmd *exec.Cmd
+			if runtime.GOOS == "windows" {
+				pingCmd = exec.Command("ping", "-n", "1", "-w", "1000", myVirtualIP)
+				pingCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+			} else {
+				pingCmd = exec.Command("ping", "-c", "1", "-W", "1", myVirtualIP)
+			}
+			pingErr := pingCmd.Run()
+			if pingErr == nil {
+				log.Info().Str("vip", myVirtualIP).Bool("interface_bound", foundVIP).Msg("Self-check Virtual IP OK (ping responded)")
+			} else {
+				log.Warn().Str("vip", myVirtualIP).Bool("interface_bound", foundVIP).Err(pingErr).Msg("Self-check Virtual IP ping returned non-zero (interface still settling)")
+			}
+		}()
+
+		// L3 Data-plane: Inbound packets from UDP Puncher -> Write to TUN
+		if puncher != nil {
+			puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+				if len(payload) >= 20 {
+					_ = tunDev.WritePacket(payload)
+				}
+			})
+		}
+
+		// L3 Data-plane: Inbound packets from MQTT Relay -> Write to TUN
+		if sigMgr != nil {
+			sigMgr.SubscribeTunnelData(deviceID, func(pkt []byte) {
+				if len(pkt) >= 20 {
+					_ = tunDev.WritePacket(pkt)
+				}
+			})
+		}
+
+		// L3 Data-plane: Outbound packets from TUN -> Dispatch to peer over UDP Direct or MQTT Relay
+		go func() {
+			for {
+				select {
+				case <-engineCtx.Done():
+					return
+				default:
+				}
+
+				pkt, err := tunDev.ReadPacket()
+				if err != nil || len(pkt) < 20 {
+					time.Sleep(20 * time.Millisecond)
+					continue
+				}
+
+				dstIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19]).String()
+
+				p, found := registry.GetByVirtualIP(dstIP)
+				if !found || p == nil {
+					peers := registry.List()
+					if len(peers) == 1 {
+						p = peers[0]
+						found = true
+					}
+				}
+
+				if found && p != nil {
+					if p.DirectP2P && p.ActiveEndpoint != "" && puncher != nil {
+						_ = puncher.SendDataPacket(p.ActiveEndpoint, pkt)
+					} else if sigMgr != nil {
+						_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
+					}
+				}
+			}
+		}()
+	}
 
 	go initialDiscovery(engineCtx, puncher, ipDisc, uiServer, deviceID)
 	go publishLoop(engineCtx, cfg, deviceID, myVirtualIP, pubKey, privKey, uiServer, registry, puncher, ipDisc, wgPubKey, wgPort, sigMgr)
@@ -247,108 +347,114 @@ func publishLoop(
 
 	var stunAddr string
 
+	publishOnce := func() {
+		ip, _ := ipDisc.GetPublicIPCached(ctx, publishInterval/2)
+
+		var awgParams *signaling.AWGParams
+		if cfg.WireGuard.AWG.Enabled {
+			awgParams = &signaling.AWGParams{
+				Jc:   cfg.WireGuard.AWG.Jc,
+				Jmin: cfg.WireGuard.AWG.Jmin,
+				Jmax: cfg.WireGuard.AWG.Jmax,
+				S1:   cfg.WireGuard.AWG.S1,
+				S2:   cfg.WireGuard.AWG.S2,
+				H1:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H1),
+				H2:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H2),
+				H3:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H3),
+				H4:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H4),
+			}
+		}
+
+		var candidates []string
+		if puncher != nil {
+			if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
+				stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
+			} else {
+				log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
+			}
+
+			// Harvest full list of ICE-like candidate endpoints
+			candidates = puncher.DiscoverCandidates(ctx, ip.String())
+
+			myNAT := puncher.GetNATType()
+
+			for _, p := range registry.List() {
+				// 1. Maintain NAT keep-alive to active direct endpoint or STUN address
+				targetKA := p.STUNAddr
+				if p.DirectP2P && p.ActiveEndpoint != "" {
+					targetKA = p.ActiveEndpoint
+				}
+				if targetKA != "" {
+					_ = puncher.SendKeepAlive(targetKA)
+				}
+
+				// 2. Periodic hole punch probe burst for non-direct peers
+				if !p.DirectP2P {
+					if p.STUNAddr != "" {
+						_ = puncher.SendHolePunchProbe(p.STUNAddr)
+						p.ProbeCount++
+					}
+					// Probe all extra candidates
+					for _, cand := range p.Candidates {
+						if cand != p.STUNAddr && cand != "" {
+							_ = puncher.SendHolePunchProbe(cand)
+							p.ProbeCount++
+						}
+					}
+
+					// Honest Double Symmetric NAT diagnostics
+					if !p.FirstSeen.IsZero() && time.Since(p.FirstSeen) > 60*time.Second {
+						if p.NATType == "symmetric" && myNAT == network.NATTypeSymmetric {
+							p.NATBlocked = true
+							log.Debug().
+								Str("peer", p.DeviceID).
+								Int("probes", p.ProbeCount).
+								Msg("Double Symmetric NAT detected — direct P2P unavailable, running in Relay mode")
+						}
+					}
+				}
+			}
+		}
+
+		if uiServer != nil {
+			uiServer.SetAppState(deviceID, ip.String(), stunAddr)
+			uiServer.SetVirtualIP(virtualIP)
+		}
+
+		natLabel := "unknown"
+		if puncher != nil {
+			natLabel = puncher.GetNATType().String()
+		}
+
+		payload := &signaling.Payload{
+			DeviceID:   deviceID,
+			PublicKey:  crypto.KeyToHex(pubKey),
+			PublicIP:   ip.String(),
+			STUNAddr:   stunAddr,
+			Candidates: candidates,
+			NATType:    natLabel,
+			WGPubKey:   wgPubKey,
+			WGPort:     wgPort,
+			Timestamp:  time.Now(),
+			VirtualIP:  virtualIP,
+			AWG:        awgParams,
+		}
+
+		encrypted, encErr := signaling.EncryptPayload(payload, pubKey, privKey)
+		if encErr == nil {
+			sigMgr.Send(ctx, encrypted)
+		}
+	}
+
+	// Immediate initial beacon
+	publishOnce()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ip, _ := ipDisc.GetPublicIPCached(ctx, publishInterval/2)
-
-			var awgParams *signaling.AWGParams
-			if cfg.WireGuard.AWG.Enabled {
-				awgParams = &signaling.AWGParams{
-					Jc:   cfg.WireGuard.AWG.Jc,
-					Jmin: cfg.WireGuard.AWG.Jmin,
-					Jmax: cfg.WireGuard.AWG.Jmax,
-					S1:   cfg.WireGuard.AWG.S1,
-					S2:   cfg.WireGuard.AWG.S2,
-					H1:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H1),
-					H2:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H2),
-					H3:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H3),
-					H4:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H4),
-				}
-			}
-
-			var candidates []string
-			if puncher != nil {
-				if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
-					stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
-				} else {
-					log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
-				}
-
-				// Harvest full list of ICE-like candidate endpoints
-				candidates = puncher.DiscoverCandidates(ctx, ip.String())
-
-				myNAT := puncher.GetNATType()
-
-				for _, p := range registry.List() {
-					// 1. Maintain NAT keep-alive to active direct endpoint or STUN address
-					targetKA := p.STUNAddr
-					if p.DirectP2P && p.ActiveEndpoint != "" {
-						targetKA = p.ActiveEndpoint
-					}
-					if targetKA != "" {
-						_ = puncher.SendKeepAlive(targetKA)
-					}
-
-					// 2. Periodic hole punch probe burst for non-direct peers
-					if !p.DirectP2P {
-						if p.STUNAddr != "" {
-							_ = puncher.SendHolePunchProbe(p.STUNAddr)
-							p.ProbeCount++
-						}
-						// Probe all extra candidates
-						for _, cand := range p.Candidates {
-							if cand != p.STUNAddr && cand != "" {
-								_ = puncher.SendHolePunchProbe(cand)
-								p.ProbeCount++
-							}
-						}
-
-						// Honest Double Symmetric NAT diagnostics
-						if !p.FirstSeen.IsZero() && time.Since(p.FirstSeen) > 60*time.Second {
-							if p.NATType == "symmetric" && myNAT == network.NATTypeSymmetric {
-								p.NATBlocked = true
-								log.Debug().
-									Str("peer", p.DeviceID).
-									Int("probes", p.ProbeCount).
-									Msg("Double Symmetric NAT detected — direct P2P unavailable, running in Relay mode")
-							}
-						}
-					}
-				}
-			}
-
-			if uiServer != nil {
-				uiServer.SetAppState(deviceID, ip.String(), stunAddr)
-				uiServer.SetVirtualIP(virtualIP)
-			}
-
-			natLabel := "unknown"
-			if puncher != nil {
-				natLabel = puncher.GetNATType().String()
-			}
-
-			payload := &signaling.Payload{
-				DeviceID:   deviceID,
-				PublicKey:  crypto.KeyToHex(pubKey),
-				PublicIP:   ip.String(),
-				STUNAddr:   stunAddr,
-				Candidates: candidates,
-				NATType:    natLabel,
-				WGPubKey:   wgPubKey,
-				WGPort:     wgPort,
-				Timestamp:  time.Now(),
-				VirtualIP:  virtualIP,
-				AWG:        awgParams,
-			}
-
-			encrypted, encErr := signaling.EncryptPayload(payload, pubKey, privKey)
-			if encErr != nil {
-				continue
-			}
-			sigMgr.Send(ctx, encrypted)
+			publishOnce()
 		}
 	}
 }
@@ -385,14 +491,19 @@ func receiveLoop(
 				continue
 			}
 			if puncher != nil {
-				if p.STUNAddr != "" {
-					_ = puncher.SendHolePunchProbe(p.STUNAddr)
-				}
-				for _, cand := range p.Candidates {
-					if cand != "" && cand != p.STUNAddr {
-						_ = puncher.SendHolePunchProbe(cand)
+				go func(targetSTUN string, extraCandidates []string) {
+					for burst := 0; burst < 6; burst++ {
+						if targetSTUN != "" {
+							_ = puncher.SendHolePunchProbe(targetSTUN)
+						}
+						for _, cand := range extraCandidates {
+							if cand != "" && cand != targetSTUN {
+								_ = puncher.SendHolePunchProbe(cand)
+							}
+						}
+						time.Sleep(2 * time.Second)
 					}
-				}
+				}(p.STUNAddr, p.Candidates)
 			}
 			registry.Upsert(&peer.Peer{
 				DeviceID:         p.DeviceID,
