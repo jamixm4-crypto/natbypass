@@ -626,7 +626,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if srcIP.String() == myVirtualIP {
 					return
 				}
-				if destIP.String() != myVirtualIP && destIP.String() != "100.64.200.1" {
+				if !cfg.Network.AllowExitNode && destIP.String() != myVirtualIP && destIP.String() != "100.64.200.1" {
 					return
 				}
 				if tunDev != nil {

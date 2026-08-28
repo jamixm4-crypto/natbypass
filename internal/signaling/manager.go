@@ -182,3 +182,16 @@ func (m *FallbackManager) UpdateMQTTTopic(newTopic string) {
 		}
 	}
 }
+
+// PublishTunnelData пересылает сырой IP пакет через активный MQTT канал
+func (m *FallbackManager) PublishTunnelData(targetDevID string, pkt []byte) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, ch := range m.channels {
+		if mqttCh, ok := ch.(*MQTTChannel); ok {
+			return mqttCh.PublishTunnelData(targetDevID, pkt)
+		}
+	}
+	return nil
+}
+

@@ -29,25 +29,26 @@ func runRouteCmd(name string, args ...string) error {
 // EnableHostIPForwarding sets IP forwarding on interface "NatBypass", enables IP routing in Windows registry,
 // and activates Windows NetNat (kernel NAT masquerading) for the mesh subnet.
 func EnableHostIPForwarding() error {
-	var errs []string
-
 	// 1. Enable forwarding on NatBypass adapter
-	if err := runRouteCmd("netsh", "interface", "ipv4", "set", "interface", "NatBypass", "forwarding=enabled"); err != nil {
-		errs = append(errs, err.Error())
-	}
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "interface", "NatBypass", "forwarding=enabled")
 
-	// 2. Enable IPEnableRouter in Windows Registry & Configure NetNat for 100.64.200.0/24
+	// 2. Enable IP routing in Windows Registry & NetNat & enable forwarding on all active network adapters
 	psScript := `
 		Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'IPEnableRouter' -Value 1 -ErrorAction SilentlyContinue
+		netsh interface ipv4 set interface "NatBypass" forwarding=enabled
+		Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
+			netsh interface ipv4 set interface $_.InterfaceAlias forwarding=enabled
+		}
 		if (-not (Get-NetNat -Name 'NatBypassNAT' -ErrorAction SilentlyContinue)) {
 			New-NetNat -Name 'NatBypassNAT' -InternalIPInterfaceAddressPrefix '100.64.200.0/24' -ErrorAction SilentlyContinue
 		}
 	`
 	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 
-	if len(errs) > 0 {
-		return fmt.Errorf("enable host forwarding: %s", strings.Join(errs, "; "))
-	}
+	// 3. Add Windows firewall rules for interface forwarding
+	_ = runRouteCmd("netsh", "advfirewall", "firewall", "add", "rule", "name=NatBypass Forward In", "dir=in", "action=allow", "interface=NatBypass")
+	_ = runRouteCmd("netsh", "advfirewall", "firewall", "add", "rule", "name=NatBypass Forward Out", "dir=out", "action=allow", "interface=NatBypass")
+
 	return nil
 }
 

@@ -56,7 +56,10 @@ class NatBypassVpnService : VpnService() {
         val action = intent?.action
         when (action) {
             ACTION_CONNECT -> {
-                connect()
+                connect(forceReconfigure = false)
+            }
+            ACTION_RECONNECT -> {
+                connect(forceReconfigure = true)
             }
             ACTION_DISCONNECT -> {
                 disconnect()
@@ -71,8 +74,8 @@ class NatBypassVpnService : VpnService() {
         return START_NOT_STICKY
     }
 
-    private fun connect() {
-        if (isRunning) return
+    private fun connect(forceReconfigure: Boolean = false) {
+        if (isRunning && !forceReconfigure) return
 
         try {
             var rawVip = org.natbypass.app.util.MobileBridge.getVirtualIP().trim()

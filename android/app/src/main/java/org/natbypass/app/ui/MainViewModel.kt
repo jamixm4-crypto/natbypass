@@ -346,7 +346,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         
         if (NatBypassVpnService.isRunning) {
             val intent = Intent(context, NatBypassVpnService::class.java).apply {
-                action = NatBypassVpnService.ACTION_CONNECT
+                action = NatBypassVpnService.ACTION_RECONNECT
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }

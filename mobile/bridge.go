@@ -615,21 +615,26 @@ func attachTUN(tunFd int) {
 							}
 						}
 
-						if targetPeer != nil && globalPuncher != nil {
-							if targetPeer.ActiveEndpoint != "" {
-								_ = globalPuncher.SendDataPacket(targetPeer.ActiveEndpoint, pkt)
+						if targetPeer != nil {
+							if globalPuncher != nil {
+								if targetPeer.ActiveEndpoint != "" {
+									_ = globalPuncher.SendDataPacket(targetPeer.ActiveEndpoint, pkt)
+								}
+								if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetPeer.ActiveEndpoint {
+									_ = globalPuncher.SendDataPacket(targetPeer.LocalAddr, pkt)
+								}
+								if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint && targetPeer.STUNAddr != targetPeer.LocalAddr {
+									_ = globalPuncher.SendDataPacket(targetPeer.STUNAddr, pkt)
+								}
 							}
-							if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetPeer.ActiveEndpoint {
-								_ = globalPuncher.SendDataPacket(targetPeer.LocalAddr, pkt)
-							}
-							if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint && targetPeer.STUNAddr != targetPeer.LocalAddr {
-								_ = globalPuncher.SendDataPacket(targetPeer.STUNAddr, pkt)
+							if globalSigMgr != nil {
+								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, pkt)
 							}
 							logger.Debug().
 								Str("dst", destIP.String()).
 								Str("peer", targetPeer.DeviceID).
 								Int("size", len(pkt)).
-								Msg("📤 TUN TX: пакет отправлен пиру")
+								Msg("📤 TUN TX: пакет отправлен узлу")
 						} else {
 							logger.Debug().
 								Str("dst", destIP.String()).
