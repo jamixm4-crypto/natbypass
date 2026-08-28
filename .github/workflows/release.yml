@@ -81,30 +81,10 @@ jobs:
           $go122Bin = (Resolve-Path "go122\go\bin\go.exe").Path
           $env:GOTOOLCHAIN = "local"
 
-          # Создаем резервную копию go.mod и go.sum
+          # Подменяем go.mod на совместимый с Go 1.22 для роутеров
           Copy-Item "go.mod" "go.mod.backup" -Force
           Copy-Item "go.sum" "go.sum.backup" -Force
-
-          $routerGoMod = @"
-module github.com/natbypass/natbypass
-
-go 1.22
-
-require (
-	github.com/eclipse/paho.mqtt.golang v1.4.3
-	github.com/huin/goupnp v1.3.0
-	github.com/pion/stun/v2 v2.0.0
-	github.com/rs/zerolog v1.33.0
-	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
-	github.com/spf13/cobra v1.8.1
-	github.com/spf13/viper v1.19.0
-	golang.org/x/crypto v0.26.0
-	golang.org/x/net v0.28.0
-	golang.org/x/sys v0.24.0
-	gopkg.in/yaml.v3 v3.0.1
-)
-"@
-          [System.IO.File]::WriteAllText("go.mod", $routerGoMod, [System.Text.UTF8Encoding]::new($false))
+          Copy-Item "go.mod.router" "go.mod" -Force
           & $go122Bin mod tidy
 
           Write-Host "==> 6. Building Router MIPS (Go 1.22 softfloat)..."
@@ -128,6 +108,7 @@ require (
           # Восстанавливаем оригинальные go.mod и go.sum
           Move-Item "go.mod.backup" "go.mod" -Force
           Move-Item "go.sum.backup" "go.sum" -Force
+
 
 
 
