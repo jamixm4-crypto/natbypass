@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -1757,7 +1757,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     function copyQRText() {
       const text = document.getElementById('qrRawText').value;
       if (!text) return;
-      navigator.clipboard.writeText(text).then(() => {
+      copyToClipboard(text, "✓ Скопировано"); return; if (false) {
         showToast('✓ Данные QR-кода скопированы в буфер обмена');
       }).catch(() => {
         document.getElementById('qrRawText').select();
@@ -2475,12 +2475,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     function copyAwgConf() {
       const t = document.getElementById('awgConfText');
-      navigator.clipboard.writeText(t.value);
+      copyToClipboard(t.value, "✓ Конфигурация скопирована в буфер обмена!"); return;
       showToast('✓ Конфигурация скопирована в буфер обмена!');
     }
 
     function copyText(txt) {
-      navigator.clipboard.writeText(txt);
+      copyToClipboard(txt, "✓ Скопировано: " + txt); return;
       showToast('✓ Скопировано: ' + txt);
     }
 
@@ -2642,13 +2642,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         const b = document.getElementById('diagBox');
         lastDiagReport = b.innerText;
       }
-      navigator.clipboard.writeText(lastDiagReport);
+      copyToClipboard(lastDiagReport, "✓ Отчет диагностики скопирован в буфер обмена!"); return;
       showToast('✓ Отчет диагностики скопирован в буфер обмена!');
     }
 
     function copyLogs() {
       const ls = document.getElementById('logStream');
-      navigator.clipboard.writeText(ls.innerText);
+      copyToClipboard(ls.innerText, "✓ Журнал событий скопирован в буфер обмена!"); return;
       showToast('✓ Журнал событий скопирован в буфер обмена!');
     }
 

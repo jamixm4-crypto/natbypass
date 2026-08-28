@@ -181,15 +181,12 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("NATBYPASS:PING:%s:%d", p.myDevID, nowNano))
 
-	// 3 пакета пробития с паузой 15ms — обходит потери на CGNAT/Symmetric NAT
-	for i := 0; i < 3; i++ {
-		_, err = p.conn.WriteToUDP(probeData, rAddr)
-		if i < 2 {
-			time.Sleep(15 * time.Millisecond)
-		}
-	}
+	// 2 быстрых пакета пробития
+	_, err = p.conn.WriteToUDP(probeData, rAddr)
+	_, _ = p.conn.WriteToUDP(probeData, rAddr)
 	return err
 }
+
 
 
 // SendKeepAlive отправляет минимальный 4-байтный пакет для поддержания CGNAT маппинга.
@@ -292,7 +289,7 @@ func (p *UDPPuncher) readLoop() {
 			continue
 		}
 
-		// 2. Входящий PING от пира -> отвечаем одним PONG (НЕ триггерим onPingResult чтобы избежать бесконечной лавины)
+		// 2. Входящий PING от пира -> отвечаем PONG и подтверждаем прямую видимость (двунаправленный P2P)
 		if strings.HasPrefix(data, "NATBYPASS:PING:") {
 			parts := strings.Split(data, ":")
 			if len(parts) >= 4 {
@@ -302,16 +299,17 @@ func (p *UDPPuncher) readLoop() {
 				}
 				sentTs := parts[len(parts)-1]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
-				// Отправляем 3 PONG в ответ на PING (компенсация потерь на MIPS/CGNAT)
-				for i := 0; i < 3; i++ {
-					_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
-					if i < 2 {
-						time.Sleep(10 * time.Millisecond)
-					}
+				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
+
+				// Если пришёл прямой UDP пакет PING — удаленный пир УЖЕ достучался до нас напрямую!
+				// Сразу фиксируем прямое P2P соединение на этой стороне
+				if p.onPingResult != nil && remoteAddr != nil {
+					p.onPingResult(senderID, 35*time.Millisecond, remoteAddr.String())
 				}
 			}
 			continue
 		}
+
 
 		// 3. Ответ PONG от пира
 		if strings.HasPrefix(data, "NATBYPASS:PONG:") {

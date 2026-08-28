@@ -200,11 +200,26 @@ func (t *TrayApp) Run(ctx context.Context) error {
 
 	className, _ := windows.UTF16PtrFromString("NatBypassTrayClass")
 	windowName, _ := windows.UTF16PtrFromString("NatBypassTrayWindow")
-	hIconRaw, _, _ := procLoadIconW.Call(uintptr(t.hInst), 1)
+	var hIconRaw uintptr
+	execPath, _ := os.Executable()
+	if execPath != "" {
+		execPathPtr, _ := windows.UTF16PtrFromString(execPath)
+		hExtIcon, _, _ := modshell32.NewProc("ExtractIconW").Call(0, uintptr(unsafe.Pointer(execPathPtr)), 0)
+		if hExtIcon != 0 && hExtIcon != 1 {
+			hIconRaw = hExtIcon
+		}
+	}
+	if hIconRaw == 0 {
+		hIconRaw, _, _ = procLoadIconW.Call(uintptr(t.hInst), 1)
+	}
+	if hIconRaw == 0 {
+		hIconRaw, _, _ = procLoadIconW.Call(0, uintptr(IDI_SHIELD))
+	}
 	if hIconRaw == 0 {
 		hIconRaw, _, _ = procLoadIconW.Call(0, uintptr(IDI_APPLICATION))
 	}
 	hIcon := windows.Handle(hIconRaw)
+
 
 	wndClass := WNDCLASSEXW{
 		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),

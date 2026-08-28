@@ -299,13 +299,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	registry := peer.NewRegistry()
 	registry.StartMonitor(engineCtx, 2*time.Minute)
 
+	activeProf := cfg.EnsureActiveProfile()
+	if activeProf != nil {
+		cfg.SyncSignalingWithProfile(activeProf)
+	}
 	channels, err := buildSignalingChannels(cfg)
 	if err != nil {
-		log.Warn().Err(err).Msg("Ошибка парсинга каналов, используется публичный резервный канал")
+		log.Warn().Err(err).Msg("Ошибка парсинга сигнальных каналов")
 	}
 	if len(channels) == 0 {
-		log.Warn().Msg("вљ пёЏ РЎРёРіРЅР°Р»СЊРЅС‹Рµ РєР°РЅР°Р»С‹ РЅРµ РЅР°СЃС‚СЂРѕРµРЅС‹ РІ РєРѕРЅС„РёРіРµ. Р’РєР»СЋС‡РµРЅ СЂРµР·РµСЂРІРЅС‹Р№ РїСѓР±Р»РёС‡РЅС‹Р№ MQTT Р±СЂРѕРєРµСЂ (topic: natbypass/public/peers). Р’С‹ РјРѕР¶РµС‚Рµ РЅР°СЃС‚СЂРѕРёС‚СЊ Р»РёС‡РЅС‹Р№ Telegram-Р±РѕС‚ РІ Web UI (http://localhost:8080) РёР»Рё С„Р°Р№Р»Рµ config.yaml")
-		channels = append(channels, signaling.NewMQTTChannel("tcp://mqtt.eclipseprojects.io:1883", "natbypass/public/peers", deviceID, "", ""))
+		topic := "natbypass/mesh/default"
+		if activeProf != nil && activeProf.MQTTTopic != "" {
+			topic = activeProf.MQTTTopic
+		}
+		channels = append(channels, signaling.NewMQTTChannel("tcp://broker.emqx.io:1883", topic, deviceID, "", ""))
 	}
 	sigMgr := signaling.NewFallbackManager(channels)
 	log.Info().Int("channels", len(channels)).Str("current", sigMgr.CurrentChannel()).Msg("Сигнальные каналы инициализированы")
