@@ -115,8 +115,15 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		}
 	}()
 
+	// Try UPnP automatic port mapping on gateway router in background
+	go func() {
+		upnpClient := NewUPnPClient()
+		_ = upnpClient.AddPortMapping(ctx, localPort, localPort, "UDP", "NatBypass P2P", 3600)
+	}()
+
 	return p, nil
 }
+
 
 // LocalPort returns the local bound UDP port.
 func (p *UDPPuncher) LocalPort() int {
@@ -251,38 +258,40 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 // candidatePorts calculates predicted port numbers for Symmetric NAT traversal.
 func (p *UDPPuncher) candidatePorts(base int) []int {
 	ports := []int{base}
-	switch p.GetNATType() {
-	case NATTypeSymmetric:
-		p.natTypeMu.RLock()
-		d := p.portDelta
-		p.natTypeMu.RUnlock()
-		if d <= 0 {
-			d = 1
+	p.natTypeMu.RLock()
+	d := p.portDelta
+	p.natTypeMu.RUnlock()
+	if d <= 0 {
+		d = 1
+	}
+
+	// 1. Delta series prediction (+/- 1*d .. 16*d)
+	for i := 1; i <= 16; i++ {
+		p1 := base + i*d
+		p2 := base - i*d
+		if p1 > 1024 && p1 < 65535 {
+			ports = append(ports, p1)
 		}
-		for i := 1; i <= 8; i++ {
-			p1 := base + i*d
-			p2 := base - i*d
-			if p1 > 1024 && p1 < 65535 {
-				ports = append(ports, p1)
-			}
-			if p2 > 1024 && p2 < 65535 {
-				ports = append(ports, p2)
-			}
-		}
-	case NATTypeUnknown:
-		for i := 1; i <= 4; i++ {
-			p1 := base + i
-			p2 := base - i
-			if p1 > 1024 && p1 < 65535 {
-				ports = append(ports, p1)
-			}
-			if p2 > 1024 && p2 < 65535 {
-				ports = append(ports, p2)
-			}
+		if p2 > 1024 && p2 < 65535 {
+			ports = append(ports, p2)
 		}
 	}
+
+	// 2. Sequential neighbor spray (+/- 1 .. 8)
+	for i := 1; i <= 8; i++ {
+		p1 := base + i
+		p2 := base - i
+		if p1 > 1024 && p1 < 65535 {
+			ports = append(ports, p1)
+		}
+		if p2 > 1024 && p2 < 65535 {
+			ports = append(ports, p2)
+		}
+	}
+
 	return ports
 }
+
 
 // SendHolePunchProbe sends direct UDP probe packets to the target peer endpoint and candidate ports.
 func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {

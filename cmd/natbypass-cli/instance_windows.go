@@ -454,8 +454,14 @@ type pointW struct {
 }
 
 func startTrayIcon(port int) {
+	if !atomic.CompareAndSwapInt32(&trayRunning, 0, 1) {
+		return
+	}
+	defer atomic.StoreInt32(&trayRunning, 0)
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+
 
 	procRegisterClassExW := moduser32Instance.NewProc("RegisterClassExW")
 	procCreateWindowExW := moduser32Instance.NewProc("CreateWindowExW")

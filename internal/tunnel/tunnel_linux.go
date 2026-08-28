@@ -122,13 +122,18 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		_ = exec.CommandContext(ctx, "ip", "link", "set", d.AdapterName, "up").Run()
 	}
 
-	// 3. Маршрутизация 100.64.200.0/24 через адаптер
+	// 3. Установка MTU 1420
+	_ = exec.CommandContext(ctx, "ip", "link", "set", "dev", d.AdapterName, "mtu", "1420").Run()
+	_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, "mtu", "1420").Run()
+
+	// 4. Маршрутизация 100.64.200.0/24 через адаптер
 	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName).Run()
 
-	// 4. Разрешение входящего и транзитного трафика в iptables (Keenetic / OpenWrt / Linux)
+	// 5. Разрешение входящего и транзитного трафика в iptables (Keenetic / OpenWrt / Linux)
 	_ = exec.CommandContext(ctx, "iptables", "-I", "INPUT", "-i", d.AdapterName, "-j", "ACCEPT").Run()
 	_ = exec.CommandContext(ctx, "iptables", "-I", "FORWARD", "-i", d.AdapterName, "-j", "ACCEPT").Run()
 	_ = exec.CommandContext(ctx, "iptables", "-I", "FORWARD", "-o", d.AdapterName, "-j", "ACCEPT").Run()
+
 
 	return nil
 }

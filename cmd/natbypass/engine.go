@@ -161,7 +161,37 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}()
 	}
 
+	// Dedicated rapid 2.5s keepalive & probe loop for maintaining carrier CGNAT mappings
+	if puncher != nil {
+		go func() {
+			kaTicker := time.NewTicker(2500 * time.Millisecond)
+			defer kaTicker.Stop()
+			for {
+				select {
+				case <-engineCtx.Done():
+					return
+				case <-kaTicker.C:
+					for _, p := range registry.List() {
+						if p.DirectP2P && p.ActiveEndpoint != "" {
+							_ = puncher.SendKeepAlive(p.ActiveEndpoint)
+						} else {
+							if p.STUNAddr != "" {
+								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							}
+							for _, cand := range p.Candidates {
+								if cand != "" && cand != p.STUNAddr {
+									_ = puncher.SendHolePunchProbe(cand)
+								}
+							}
+						}
+					}
+				}
+			}
+		}()
+	}
+
 	go initialDiscovery(engineCtx, puncher, ipDisc, uiServer, deviceID)
+
 	go publishLoop(engineCtx, cfg, deviceID, myVirtualIP, pubKey, privKey, uiServer, registry, puncher, ipDisc, wgPubKey, wgPort, sigMgr)
 	go receiveLoop(engineCtx, deviceID, pubKey, privKey, registry, puncher, sigMgr)
 	go handleSIGHUP(engineCtx, cfg)

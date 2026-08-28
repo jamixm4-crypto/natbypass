@@ -175,11 +175,17 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		psProfile := fmt.Sprintf(`Set-NetConnectionProfile -InterfaceAlias "%s" -NetworkCategory Private -ErrorAction SilentlyContinue`, adapterName)
 		_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psProfile).Run()
 
-		// 3. Выставляем метрику
+		// 3. Выставляем метрику и MTU 1420 для защиты от фрагментации пакетов
 		_ = runNetsh("interface", "ipv4", "set", "interface",
 			fmt.Sprintf("name=%s", adapterName),
 			"metric=100",
 		)
+		_ = runNetsh("interface", "ipv4", "set", "subinterface",
+			fmt.Sprintf("name=%s", adapterName),
+			"mtu=1420",
+			"store=persistent",
+		)
+
 
 		// 4. Правила брандмауэра Windows для интерфейса NatBypass (ICMP, TCP, UDP)
 		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP In")
