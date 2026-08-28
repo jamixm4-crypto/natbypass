@@ -40,12 +40,14 @@ class NatBypassVpnService : VpnService() {
     companion object {
         const val TAG = "NatBypassVpn"
         const val ACTION_CONNECT = "org.natbypass.app.CONNECT"
+        const val ACTION_RECONNECT = "org.natbypass.app.RECONNECT"
         const val ACTION_DISCONNECT = "org.natbypass.app.DISCONNECT"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "natbypass_vpn_channel"
         var isRunning = false
             private set
     }
+
 
     override fun onCreate() {
         super.onCreate()

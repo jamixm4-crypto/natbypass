@@ -363,10 +363,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Р•СЃР»Рё VPN Р°РєС‚РёРІРµРЅ вЂ” РїРµСЂРµР·Р°РїСѓСЃРєР°РµРј РµРіРѕ РґР»СЏ РїРµСЂРµСЃС‚СЂРѕР№РєРё С‚Р°Р±Р»РёС†С‹ РјР°СЂС€СЂСѓС‚РѕРІ (0.0.0.0/0 vs 10.200.0.0/24)
         if (NatBypassVpnService.isRunning) {
             val intent = Intent(context, NatBypassVpnService::class.java).apply {
-                action = NatBypassVpnService.ACTION_CONNECT
+                action = NatBypassVpnService.ACTION_RECONNECT
             }
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
+
         viewModelScope.launch { refreshStatus() }
         return newTarget.isNotEmpty()
     }
