@@ -219,12 +219,24 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 		filtered = append(filtered, a)
 	}
 
+	currentExe := ""
+	if ep, err := os.Executable(); err == nil {
+		currentExe = strings.ToLower(filepath.Base(ep))
+	}
+
 	var candidates []string
 	if osName == "windows" {
-		candidates = []string{
-			"natbypass.exe",
-			"natbypass-windows-amd64.exe",
-			"natbypass-v",
+		if strings.Contains(currentExe, "gui") {
+			candidates = []string{"natbypass-gui.exe", "natbypass-gui"}
+		} else if strings.Contains(currentExe, "cli") {
+			candidates = []string{"natbypass-cli.exe", "natbypass-cli"}
+		} else if strings.Contains(currentExe, "diag") {
+			candidates = []string{"natbypass-diag.exe", "natbypass-diag"}
+		} else {
+			candidates = []string{
+				"natbypass.exe",
+				"natbypass-windows-amd64.exe",
+			}
 		}
 	} else if osName == "linux" {
 		if arch == "arm64" {
@@ -244,10 +256,13 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 		for _, a := range filtered {
 			nameLower := strings.ToLower(a.Name)
 			// Исключаем версии gui и cli при подборе основного бинарника
-			if strings.Contains(nameLower, "-gui") && !strings.Contains(cand, "-gui") {
+			if !strings.Contains(cand, "gui") && strings.Contains(nameLower, "-gui") {
 				continue
 			}
-			if strings.Contains(nameLower, "-cli") && !strings.Contains(cand, "-cli") {
+			if !strings.Contains(cand, "cli") && strings.Contains(nameLower, "-cli") {
+				continue
+			}
+			if !strings.Contains(cand, "diag") && strings.Contains(nameLower, "-diag") {
 				continue
 			}
 			if nameLower == cand || strings.Contains(nameLower, cand) {
@@ -255,6 +270,7 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 			}
 		}
 	}
+
 
 
 	// Fallback на первый подходящий отфильтрованный ассет
