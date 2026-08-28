@@ -36,7 +36,7 @@ jobs:
           GOOS: windows
           GOARCH: amd64
         run: |
-          mkdir -p build
+          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" -Force | Out-Null }
           $VERSION = "${{ github.ref_name }}"
           go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$VERSION" -o build/NatBypass.exe ./cmd/natbypass
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-cli.exe ./cmd/natbypass-cli
