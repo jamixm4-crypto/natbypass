@@ -227,8 +227,22 @@ switch -Wildcard ($Target) {
         $buildSuccess = $buildSuccess -and (Build-Arch "linux" "mipsle" "" @{GOMIPS="softfloat"})
     }
     "windows*" {
-        $buildSuccess = $buildSuccess -and (Build-Arch "windows" "amd64" ".exe")
+        $env:GOOS = "windows"
+        $env:GOARCH = "amd64"
+        $env:CGO_ENABLED = "0"
+        Write-Host "   Compiling NatBypass.exe (WebUI + Tray)..." -NoNewline
+        & $GoExe build -trimpath -ldflags "$LDFlags -H=windowsgui" -o (Join-Path $DistDir "NatBypass.exe") ./cmd/natbypass
+        Write-Host " OK" -ForegroundColor Green
+
+        Write-Host "   Compiling NatBypass-GUI.exe (Pure Win32 GDI)..." -NoNewline
+        & $GoExe build -trimpath -ldflags "$LDFlags -H=windowsgui" -o (Join-Path $DistDir "NatBypass-GUI.exe") ./cmd/natbypass-gui
+        Write-Host " OK" -ForegroundColor Green
+
+        Write-Host "   Compiling natbypass-cli.exe (Console Daemon)..." -NoNewline
+        & $GoExe build -trimpath -ldflags "$LDFlags" -o (Join-Path $DistDir "natbypass-cli.exe") ./cmd/natbypass-cli
+        Write-Host " OK" -ForegroundColor Green
     }
+
     "linux*" {
         $buildSuccess = $buildSuccess -and (Build-Arch "linux" "amd64")
         $buildSuccess = $buildSuccess -and (Build-Arch "linux" "arm64")

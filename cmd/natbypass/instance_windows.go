@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,7 +23,9 @@ import (
 	"github.com/jchv/go-webview2"
 	"github.com/natbypass/natbypass/internal/tray"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
+
 
 var (
 	singleInstanceMutex windows.Handle
@@ -337,28 +340,56 @@ func openAppWindow(port int) {
 		return
 	}
 
-	// 5. NATIVE-FIRST: Always try opening the native in-process WebView2 window first!
+	// 5. MULTI-TIER WINDOW LAUNCHER (Windows 7/10/11 & Windows Server 2012-2025):
 	go func() {
-		success := launchNativeWebView(url, port)
-		if success {
+		// Tier 1: In-process WebView2 Native Window (Windows 10/11 & Servers with WebView2 runtime)
+		if launchNativeWebView(url, port) {
 			return
 		}
 
-		// Native window failed (e.g. WebView2 runtime missing on Windows Server)
-		fmt.Printf("Native WebView2 window could not be initialized. Checking fallback...\n")
+		// Tier 2: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
+		// This runs on Windows Server 2012-2025 where Edge, Chrome or Brave is present,
+		// opening a dedicated frameless app window without IE ESC security warnings.
+		if browserPath := findChromiumAppBrowser(); browserPath != "" {
+			fmt.Printf("Launching NatBypass in dedicated app window (%s)...\n", filepath.Base(browserPath))
+			appArgs := []string{
+				fmt.Sprintf("--app=%s", url),
+				"--new-window",
+				"--disable-features=Translate",
+				"--app-id=NatBypass.MeshNetwork",
+			}
+			cmd := exec.Command(browserPath, appArgs...)
+			if err := cmd.Start(); err == nil {
+				return
+			}
+		}
 
-		// If on Windows Server with GUI, attempt on-demand installation:
-		if tray.IsDesktopExperienceAvailable() && !tray.IsWebView2RuntimeAvailable() {
-			fmt.Println("Attempting on-demand WebView2 runtime setup...")
-			installed, err := tray.InstallWebView2RuntimeIfNeeded()
-			if err == nil && installed {
-				if launchNativeWebView(url, port) {
+		// Tier 3: Pure Win32 Native Dark Mode GDI GUI (Zero dependencies - works on Windows Server 2012-2025 out of the box)
+		exeDir, err := os.Executable()
+		if err == nil {
+			guiPath := filepath.Join(filepath.Dir(exeDir), "NatBypass-GUI.exe")
+			if _, statErr := os.Stat(guiPath); statErr == nil {
+				fmt.Println("Launching Pure Win32 Native GUI window (NatBypass-GUI)...")
+				cmd := exec.Command(guiPath, "-port", strconv.Itoa(port))
+				if startErr := cmd.Start(); startErr == nil {
 					return
 				}
 			}
 		}
 
-		// Fallback to default browser
+		// Tier 4: If on Windows Server with Desktop Experience, trigger on-demand WebView2 auto-install
+		if tray.IsDesktopExperienceAvailable() && !tray.IsWebView2RuntimeAvailable() {
+			fmt.Println("Attempting on-demand WebView2 runtime setup...")
+			go func() {
+				installed, instErr := tray.InstallWebView2RuntimeIfNeeded()
+				if instErr == nil && installed {
+					_ = launchNativeWebView(url, port)
+				}
+			}()
+		}
+
+		// Tier 5: Fallback to default browser with IE ESC Intranet Zone preconfigured
+		configureLocalIntranetZone()
 		fmt.Printf("Opening WebUI in default browser at %s\n", url)
 		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
 	}()
@@ -584,4 +615,44 @@ func diagnoseWebUI(port int) {
 		fmt.Printf("✗ HTTP GET failed: %v\n", httpErr)
 	}
 	fmt.Println("===================================")
+}
+// findChromiumAppBrowser returns the path to an installed Chromium browser
+// (Edge, Chrome, Brave) suitable for launching dedicated standalone App windows.
+func findChromiumAppBrowser() string {
+	candidates := []string{
+		// Microsoft Edge
+		os.Getenv("ProgramFiles(x86)") + `\Microsoft\Edge\Application\msedge.exe`,
+		os.Getenv("ProgramFiles") + `\Microsoft\Edge\Application\msedge.exe`,
+		os.Getenv("LOCALAPPDATA") + `\Microsoft\Edge\Application\msedge.exe`,
+		// Google Chrome
+		os.Getenv("ProgramFiles") + `\Google\Chrome\Application\chrome.exe`,
+		os.Getenv("ProgramFiles(x86)") + `\Google\Chrome\Application\chrome.exe`,
+		os.Getenv("LOCALAPPDATA") + `\Google\Chrome\Application\chrome.exe`,
+		// Brave
+		os.Getenv("ProgramFiles") + `\BraveSoftware\Brave-Browser\Application\brave.exe`,
+		os.Getenv("LOCALAPPDATA") + `\BraveSoftware\Brave-Browser\Application\brave.exe`,
+	}
+	for _, p := range candidates {
+		if p != "" {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
+// configureLocalIntranetZone adds 127.0.0.1 and localhost to the Trusted/Intranet zone in Registry
+// to prevent IE Enhanced Security Configuration (IE ESC) on Windows Server from blocking WebUI.
+func configureLocalIntranetZone() {
+	if k, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\Domains\localhost`, registry.SET_VALUE); err == nil {
+		_ = k.SetDWordValue("*", 1) // Zone 1 = Local Intranet
+		k.Close()
+	}
+	if k2, _, err2 := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Internet Settings\ZoneMap\Ranges\Range99`, registry.SET_VALUE); err2 == nil {
+		_ = k2.SetStringValue(":Range", "127.0.0.1")
+		_ = k2.SetDWordValue("http", 1)
+		_ = k2.SetDWordValue("https", 1)
+		k2.Close()
+	}
 }
