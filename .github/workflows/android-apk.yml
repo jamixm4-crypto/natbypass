@@ -69,11 +69,13 @@ jobs:
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           export GOPROXY="https://proxy.golang.org,direct"
+          go get golang.org/x/mobile/bind@latest
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
           export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$NDK_PATH}"
           export NDK_HOME="${ANDROID_NDK_HOME}"
           gomobile init
+
           mkdir -p android/app/libs
           for attempt in 1 2 3; do
             echo "Building mobile.aar (attempt $attempt)..."
