@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"syscall"
 
@@ -380,38 +379,7 @@ func (t *TrayApp) activateExistingWindow() {
 		port = 8080
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
-	if !tryOpenAppMode(url, 1220, 780) {
-		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	}
-}
-
-func tryOpenAppMode(url string, winWidth, winHeight int) bool {
-	userDataDir := filepath.Join(os.TempDir(), "NatBypass_Edge_UI_Profile")
-	dataDirArg := fmt.Sprintf("--user-data-dir=%s", userDataDir)
-
-	candidates := []string{
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Microsoft", "Edge", "Application", "msedge.exe"),
-		filepath.Join(os.Getenv("ProgramFiles"), "Microsoft", "Edge", "Application", "msedge.exe"),
-		filepath.Join(os.Getenv("LocalAppData"), "Microsoft", "Edge", "Application", "msedge.exe"),
-		filepath.Join(os.Getenv("ProgramFiles"), "Google", "Chrome", "Application", "chrome.exe"),
-		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Google", "Chrome", "Application", "chrome.exe"),
-		filepath.Join(os.Getenv("LocalAppData"), "Google", "Chrome", "Application", "chrome.exe"),
-	}
-
-	for _, exe := range candidates {
-		if exe == "" {
-			continue
-		}
-		if _, err := os.Stat(exe); err == nil {
-			appArg := fmt.Sprintf("--app=%s", url)
-			sizeArg := fmt.Sprintf("--window-size=%d,%d", winWidth, winHeight)
-			cmd := exec.Command(exe, appArg, sizeArg, dataDirArg, "--disable-plugins", "--disable-extensions", "--no-first-run", "--no-default-browser-check")
-			if err := cmd.Start(); err == nil {
-				return true
-			}
-		}
-	}
-	return false
+	_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
 }
 
 

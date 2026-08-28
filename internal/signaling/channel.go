@@ -128,7 +128,9 @@ type Payload struct {
 	ActiveEndpoint   string     `json:"active_endpoint,omitempty"`
 	PingMs           int64      `json:"ping_ms,omitempty"`
 	NATType          string     `json:"nat_type,omitempty"` // "full_cone", "restricted", "symmetric", "unknown"
+	Candidates       []string   `json:"candidates,omitempty"`
 }
+
 
 func (p *Payload) UnmarshalJSON(data []byte) error {
 	type Alias Payload

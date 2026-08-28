@@ -40,7 +40,12 @@ type Peer struct {
 	OS               string               `json:"os,omitempty"`
 	Platform         string               `json:"platform,omitempty"`
 	CountryFlag      string               `json:"country_flag,omitempty"`
+	Candidates       []string             `json:"candidates,omitempty"`
+	NATBlocked       bool                 `json:"nat_blocked,omitempty"`
+	FirstSeen        time.Time            `json:"first_seen,omitempty"`
+	ProbeCount       int                  `json:"probe_count,omitempty"`
 }
+
 
 // MergeFrom merges discovery details into an existing peer while preserving established connections.
 func (existing *Peer) MergeFrom(newer *Peer) {
@@ -100,9 +105,25 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.PingMs = newer.Latency.Milliseconds()
 	}
 
+	if !existing.FirstSeen.IsZero() {
+		newer.FirstSeen = existing.FirstSeen
+	} else {
+		newer.FirstSeen = now
+	}
+	if len(newer.Candidates) == 0 && len(existing.Candidates) > 0 {
+		newer.Candidates = existing.Candidates
+	}
+	if existing.NATBlocked && !newer.DirectP2P {
+		newer.NATBlocked = true
+	}
+	if existing.ProbeCount > 0 && newer.ProbeCount == 0 {
+		newer.ProbeCount = existing.ProbeCount
+	}
+
 	newer.Online = true
 	newer.LastSeen = now
 }
+
 
 // Registry manages thread-safe tracking of discovered mesh peers.
 type Registry struct {

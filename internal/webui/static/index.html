@@ -2246,9 +2246,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       peers.forEach((p, idx) => {
         const name = p.nickname ? `⭐ ${p.nickname}` : p.device_id;
-        const p2pBadge = p.direct_p2p 
-          ? `<span class="badge badge-success" style="font-size:0.72rem;">⚡ Direct P2P</span>` 
-          : `<span class="badge badge-cyan" style="font-size:0.72rem;">🌐 Relay</span>`;
+        const p2pBadge = p.direct_p2p ? '<span class="badge badge-success" style="font-size:0.72rem;">⚡ Direct P2P</span>' : (p.nat_blocked ? '<span class="badge" style="background:rgba(239,68,68,0.18); border:1px solid rgba(239,68,68,0.4); color:#fca5a5; font-size:0.72rem;" title="Оба узла за Symmetric NAT — прямой P2P заблокирован, работает Relay">🔒 Relay (Symmetric NAT)</span>' : '<span class="badge badge-cyan" style="font-size:0.72rem;">🌐 Relay</span>');
+
+
         
         // Реальный пинг
         const latMs = p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0);

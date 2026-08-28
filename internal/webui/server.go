@@ -77,6 +77,8 @@ type Server struct {
 	deviceName      string
 	onProfileSwitch func(p *config.Profile) error
 	onConfigChange  func()
+	readyCh         chan struct{}
+	readyOnce       sync.Once
 }
 
 // SetOnProfileSwitch устанавливает колбэк для переключения профиля
@@ -99,6 +101,7 @@ func NewServer(port int, user, password string, registry *peer.Registry, sigMgr 
 		state: &AppState{
 			StartedAt: time.Now(),
 		},
+		readyCh: make(chan struct{}),
 	}
 }
 
@@ -146,6 +149,26 @@ func (s *Server) GetDeviceName() string {
 // GetPort возвращает актуальный порт, на котором работает сервер
 func (s *Server) GetPort() int {
 	return s.port
+}
+
+// WaitForReady blocks until the WebUI HTTP listener is actively accepting TCP connections.
+func (s *Server) WaitForReady(timeout time.Duration) bool {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		p := s.GetPort()
+		if p > 0 {
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", p), 200*time.Millisecond)
+			if err == nil {
+				_ = conn.Close()
+				return true
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
 }
 
 // AddEvent добавляет событие в кольцевой буфер (до 200 записей)

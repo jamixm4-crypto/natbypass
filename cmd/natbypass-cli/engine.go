@@ -140,6 +140,18 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 			log.Error().Err(err).Msg("Web UI stopped")
 		}
 	}()
+
+	// Windows: open native WebView2 window after readiness gate confirms listening
+	if runtime.GOOS == "windows" {
+		go func() {
+			if uiServer.WaitForReady(10 * time.Second) {
+				openAppWindow(uiServer.GetPort())
+			} else {
+				log.Warn().Msg("WebUI readiness gate timed out; window launch skipped")
+			}
+		}()
+	}
+
 	return uiServer
 }
 
@@ -158,6 +170,7 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			p.Latency = rtt
 			p.PingMs = rtt.Milliseconds()
 			p.ActiveEndpoint = fromAddr
+			p.NATBlocked = false
 			registry.Upsert(p)
 		}
 	})
@@ -249,12 +262,18 @@ func publishLoop(
 				}
 			}
 
+			var candidates []string
 			if puncher != nil {
 				if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
 					stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
 				} else {
 					log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
 				}
+
+				// Harvest full list of ICE-like candidate endpoints
+				candidates = puncher.DiscoverCandidates(ctx, ip.String())
+
+				myNAT := puncher.GetNATType()
 
 				for _, p := range registry.List() {
 					// 1. Maintain NAT keep-alive to active direct endpoint or STUN address
@@ -267,8 +286,29 @@ func publishLoop(
 					}
 
 					// 2. Periodic hole punch probe burst for non-direct peers
-					if !p.DirectP2P && p.STUNAddr != "" {
-						_ = puncher.SendHolePunchProbe(p.STUNAddr)
+					if !p.DirectP2P {
+						if p.STUNAddr != "" {
+							_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							p.ProbeCount++
+						}
+						// Probe all extra candidates
+						for _, cand := range p.Candidates {
+							if cand != p.STUNAddr && cand != "" {
+								_ = puncher.SendHolePunchProbe(cand)
+								p.ProbeCount++
+							}
+						}
+
+						// Honest Double Symmetric NAT diagnostics
+						if !p.FirstSeen.IsZero() && time.Since(p.FirstSeen) > 60*time.Second {
+							if p.NATType == "symmetric" && myNAT == network.NATTypeSymmetric {
+								p.NATBlocked = true
+								log.Debug().
+									Str("peer", p.DeviceID).
+									Int("probes", p.ProbeCount).
+									Msg("Double Symmetric NAT detected — direct P2P unavailable, running in Relay mode")
+							}
+						}
 					}
 				}
 			}
@@ -278,16 +318,23 @@ func publishLoop(
 				uiServer.SetVirtualIP(virtualIP)
 			}
 
+			natLabel := "unknown"
+			if puncher != nil {
+				natLabel = puncher.GetNATType().String()
+			}
+
 			payload := &signaling.Payload{
-				DeviceID:  deviceID,
-				PublicKey: crypto.KeyToHex(pubKey),
-				PublicIP:  ip.String(),
-				STUNAddr:  stunAddr,
-				WGPubKey:  wgPubKey,
-				WGPort:    wgPort,
-				Timestamp: time.Now(),
-				VirtualIP: virtualIP,
-				AWG:       awgParams,
+				DeviceID:   deviceID,
+				PublicKey:  crypto.KeyToHex(pubKey),
+				PublicIP:   ip.String(),
+				STUNAddr:   stunAddr,
+				Candidates: candidates,
+				NATType:    natLabel,
+				WGPubKey:   wgPubKey,
+				WGPort:     wgPort,
+				Timestamp:  time.Now(),
+				VirtualIP:  virtualIP,
+				AWG:        awgParams,
 			}
 
 			encrypted, encErr := signaling.EncryptPayload(payload, pubKey, privKey)
@@ -330,14 +377,23 @@ func receiveLoop(
 			if p.DeviceID == deviceID {
 				continue
 			}
-			if p.STUNAddr != "" && puncher != nil {
-				_ = puncher.SendHolePunchProbe(p.STUNAddr)
+			if puncher != nil {
+				if p.STUNAddr != "" {
+					_ = puncher.SendHolePunchProbe(p.STUNAddr)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" && cand != p.STUNAddr {
+						_ = puncher.SendHolePunchProbe(cand)
+					}
+				}
 			}
 			registry.Upsert(&peer.Peer{
 				DeviceID:         p.DeviceID,
 				PublicKey:        p.PublicKey,
 				PublicIP:         p.PublicIP,
 				STUNAddr:         p.STUNAddr,
+				Candidates:       p.Candidates,
+				NATType:          p.NATType,
 				WGPubKey:         p.WGPubKey,
 				WGPort:           p.WGPort,
 				VirtualIP:        p.VirtualIP,

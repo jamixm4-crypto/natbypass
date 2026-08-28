@@ -92,18 +92,27 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	// Start packet processing loop
 	go p.readLoop()
 
-	// Detect NAT type in background — non-blocking
+	// Detect NAT type in background with retry up to 3 times
 	go func() {
-		dCtx, dCancel := context.WithTimeout(ctx, 6*time.Second)
-		defer dCancel()
-		natType, err := DetectNATType(dCtx, conn, stunServers)
-		p.natTypeMu.Lock()
-		if err == nil {
-			p.NATType = natType
-		} else {
-			p.NATType = NATTypeUnknown
+		for attempt := 1; attempt <= 3; attempt++ {
+			dCtx, dCancel := context.WithTimeout(ctx, 6*time.Second)
+			natType, err := DetectNATType(dCtx, conn, stunServers)
+			dCancel()
+
+			p.natTypeMu.Lock()
+			if err == nil && natType != NATTypeUnknown {
+				p.NATType = natType
+				p.natTypeMu.Unlock()
+				return
+			}
+			p.natTypeMu.Unlock()
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 		}
-		p.natTypeMu.Unlock()
 	}()
 
 	return p, nil
@@ -120,6 +129,88 @@ func (p *UDPPuncher) GetNATType() NATType {
 	defer p.natTypeMu.RUnlock()
 	return p.NATType
 }
+
+// DiscoverCandidates harvests all possible ICE-like candidate endpoints for direct connectivity.
+func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []string {
+	candidateSet := make(map[string]struct{})
+	localPort := p.LocalPort()
+
+	// 1. Mapped STUN endpoints
+	p.mu.Lock()
+	if p.mappedIP != nil && p.mappedPort > 0 {
+		candidateSet[fmt.Sprintf("%s:%d", p.mappedIP.String(), p.mappedPort)] = struct{}{}
+	}
+	p.mu.Unlock()
+
+	// Query first 3 STUN servers to harvest possible multi-NAT mapped endpoints
+	serversToQuery := p.stunServers
+	if len(serversToQuery) > 3 {
+		serversToQuery = serversToQuery[:3]
+	}
+	for _, srv := range serversToQuery {
+		srvAddr, err := net.ResolveUDPAddr("udp", srv)
+		if err != nil {
+			srvAddr, err = net.ResolveUDPAddr("udp4", srv)
+			if err != nil {
+				continue
+			}
+		}
+		msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
+		if _, err := p.conn.WriteToUDP(msg.Raw, srvAddr); err == nil {
+			select {
+			case <-p.stunRespCh:
+				p.mu.Lock()
+				if p.mappedIP != nil && p.mappedPort > 0 {
+					candidateSet[fmt.Sprintf("%s:%d", p.mappedIP.String(), p.mappedPort)] = struct{}{}
+				}
+				p.mu.Unlock()
+			case <-time.After(250 * time.Millisecond):
+			case <-ctx.Done():
+				break
+			}
+		}
+	}
+
+	// 2. Public IP + localPort
+	if publicIP != "" && publicIP != "0.0.0.0" && publicIP != "<nil>" {
+		candidateSet[fmt.Sprintf("%s:%d", publicIP, localPort)] = struct{}{}
+	}
+
+	// 3. Local LAN addresses
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+					continue
+				}
+				if ip4 := ip.To4(); ip4 != nil {
+					candidateSet[fmt.Sprintf("%s:%d", ip4.String(), localPort)] = struct{}{}
+				}
+			}
+		}
+	}
+
+	var res []string
+	for c := range candidateSet {
+		res = append(res, c)
+	}
+	return res
+}
+
 
 // DiscoverMappedAddress sends a STUN Binding Request from the persistent socket.
 func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, error) {
