@@ -88,10 +88,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			var pingCmd *exec.Cmd
 			if runtime.GOOS == "windows" {
 				pingCmd = exec.Command("ping", "-n", "1", "-w", "1000", myVirtualIP)
-				pingCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 			} else {
 				pingCmd = exec.Command("ping", "-c", "1", "-W", "1", myVirtualIP)
 			}
+
 			pingErr := pingCmd.Run()
 			if pingErr == nil {
 				log.Info().Str("vip", myVirtualIP).Bool("interface_bound", foundVIP).Msg("Self-check Virtual IP OK (ping responded)")
