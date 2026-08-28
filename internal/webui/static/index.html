@@ -1203,6 +1203,37 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         </div>
       </div>
 
+      <!-- Exit Node & Subnet Routing Card -->
+      <div class="glass-card" style="margin-bottom: 16px; border-color: rgba(168,85,247,0.3);">
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px; display:flex; align-items:center; gap:8px;">
+          <span>🌐</span> Роль шлюза и маршрутизация подсетей (Exit Node & LAN Subnets)
+        </h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px;">
+          Разрешите другим устройствам в сети выходить в интернет через этот узел или открывать доступ к локальным устройствам (принтеры, роутеры, NAS) с автоматическим NAT (SNAT).
+        </p>
+
+        <div style="display:flex; flex-direction:column; gap: 14px; margin-bottom: 16px;">
+          <label style="display:flex; align-items:center; gap: 8px; font-size:0.88rem; cursor:pointer; font-weight:600;">
+            <input type="checkbox" id="cfgAllowExitNode" style="accent-color:#a855f7; width:18px; height:18px;">
+            <span>🌐 Разрешить другим устройствам выходить в интернет через этот узел (Exit Node Gateway)</span>
+          </label>
+
+          <div class="form-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <label class="form-label" style="margin:0;">🏠 Анонсировать локальные подсети (например, 192.168.1.0/24):</label>
+              <button type="button" onclick="autoDetectLocalSubnets()" class="btn btn-glass" style="padding:3px 8px; font-size:0.72rem; color:#4ade80; border-color:rgba(74,222,128,0.4);">
+                🔍 Автоопределить подсети
+              </button>
+            </div>
+            <input type="text" id="cfgAdvertisedSubnets" class="form-input mono" placeholder="192.168.1.0/24, 192.168.0.0/24">
+          </div>
+        </div>
+
+        <button type="button" onclick="saveHostRoutingSettings()" class="btn btn-neon" style="width:100%; justify-content:center; padding: 10px; font-size:0.88rem;">
+          💾 Применить настройки маршрутизации и шлюза
+        </button>
+      </div>
+
       <div class="glass-card">
         <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">🔒 Сетевые параметры WireGuard & DNS</h2>
 
@@ -3100,30 +3131,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
     }
 
-    setInterval(refreshData, 2000);
-    window.addEventListener('DOMContentLoaded', () => {
-      // Ensure all sidebar nav items have direct click bindings
-      document.querySelectorAll('.nav-item').forEach(item => {
-        const id = item.id;
-        if (id && id.startsWith('nav-')) {
-          const tabName = id.replace('nav-', '');
-          item.addEventListener('click', (e) => {
-            e.preventDefault();
-            switchTab(tabName);
-          });
-        }
-      });
-
-      refreshData();
-      loadConfig();
-      loadProfiles();
-      // Background update check after 3s
-      setTimeout(checkUpdateManual, 3000);
-    });
-  </script>
-</body>
-</html>
-
 
     async function loadRoutingStatus() {
       try {
@@ -3152,7 +3159,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (!banner) return;
       if (data && data.selected_exit_node && data.active_exit_vip) {
         banner.style.display = 'flex';
-        document.getElementById('gatewayBannerName').innerText = (data.active_exit_name || data.selected_exit_node) + ' (' + data.active_exit_vip + ')';
+        const nameEl = document.getElementById('gatewayBannerName');
+        if (nameEl) nameEl.innerText = (data.active_exit_name || data.selected_exit_node) + ' (' + data.active_exit_vip + ')';
       } else {
         banner.style.display = 'none';
       }
@@ -3168,7 +3176,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         });
         const json = await res.json();
         if (json.ok) {
-          showToast(enable ? '✅ Весь интернет направлен через шлюз ' + gatewayVIP : '✅ Восстановлен прямой интернет');
+          showToast(enable ? ('✅ Весь интернет направлен через шлюз ' + gatewayVIP) : '✅ Восстановлен прямой интернет');
           loadRoutingStatus();
           refreshData();
         } else {
@@ -3243,3 +3251,27 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         showToast('❌ Ошибка автоопределения');
       }
     }
+
+        setInterval(refreshData, 2000);
+    window.addEventListener('DOMContentLoaded', () => {
+      // Ensure all sidebar nav items have direct click bindings
+      document.querySelectorAll('.nav-item').forEach(item => {
+        const id = item.id;
+        if (id && id.startsWith('nav-')) {
+          const tabName = id.replace('nav-', '');
+          item.addEventListener('click', (e) => {
+            e.preventDefault();
+            switchTab(tabName);
+          });
+        }
+      });
+
+      refreshData();
+      loadConfig();
+      loadProfiles();
+      // Background update check after 3s
+      setTimeout(checkUpdateManual, 3000);
+    });
+  </script>
+</body>
+</html>
