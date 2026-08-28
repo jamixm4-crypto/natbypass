@@ -81,10 +81,14 @@ jobs:
           $go122Bin = (Resolve-Path "go122\go\bin\go.exe").Path
           $env:GOTOOLCHAIN = "local"
 
-          # Временно меняем строку версии go на 1.22.0 для компилятора Go 1.22
-          $origMod = [System.IO.File]::ReadAllText("go.mod")
-          $routerMod = $origMod -replace '(?m)^go\s+[0-9.]+', 'go 1.22.0'
-          [System.IO.File]::WriteAllText("go.mod", $routerMod, [System.Text.UTF8Encoding]::new($false))
+          # Создаем резервную копию go.mod и go.sum
+          Copy-Item "go.mod" "go.mod.backup" -Force
+          Copy-Item "go.sum" "go.sum.backup" -Force
+
+          # Адаптируем зависимости под Go 1.22
+          & $go122Bin mod edit -go=1.22.0
+          & $go122Bin get -d golang.org/x/crypto@v0.26.0 golang.org/x/net@v0.28.0 golang.org/x/sys@v0.24.0
+          & $go122Bin mod tidy
 
           Write-Host "==> 6. Building Router MIPS (Go 1.22 softfloat)..."
           $env:GOOS = "linux"
@@ -104,8 +108,10 @@ jobs:
           $env:GOARM = "7"
           & $go122Bin build -trimpath -ldflags="-s -w" -o "release\natbypass-$tag-router-armv7" ./cmd/natbypass-cli
 
-          # Восстанавливаем оригинальный go.mod
-          [System.IO.File]::WriteAllText("go.mod", $origMod, [System.Text.UTF8Encoding]::new($false))
+          # Восстанавливаем оригинальные go.mod и go.sum
+          Move-Item "go.mod.backup" "go.mod" -Force
+          Move-Item "go.sum.backup" "go.sum" -Force
+
 
           Write-Host "==> 9. Copying config..."
           Copy-Item config.yaml.example release\config.yaml.example -Force
