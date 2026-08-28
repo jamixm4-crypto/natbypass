@@ -183,7 +183,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/wg/config", s.handleWgConfig)
 	mux.HandleFunc("/api/awg/config", s.handleAWGConfig)
+	mux.HandleFunc("/api/awg/params", s.handleAWGParams)
 	mux.HandleFunc("/api/awg/random-params", s.handleAWGRandomParams)
+
 	mux.HandleFunc("/api/restart", s.handleRestart)
 	// Тест подключений
 	mux.HandleFunc("/api/test/telegram", s.handleTestTelegram)

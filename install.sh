@@ -188,21 +188,14 @@ https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
     # 6. Generate Clean config.yaml if not exists
     CONFIG_FILE="${CONFIG_DIR}/config.yaml"
     if [ ! -f "${CONFIG_FILE}" ]; then
-        echo ">> Создание конфигурации ${CONFIG_FILE}..."
-        HOST_NAME="${ROUTER_NAME}"
-        if [ -z "$HOST_NAME" ]; then
-            HOST_NAME=$(uname -n 2>/dev/null || echo "Router")
-        fi
-        
-        cat > "${CONFIG_FILE}" << EOF
+        echo ">> Создание конфигурации ${CONFIG_FILE} с уникальной сетью (${RAND_TOPIC})..."
+        cat <<EOF > "${CONFIG_FILE}"
 app:
-  name: "${HOST_NAME}"
-  device_name: "${HOST_NAME}"
-  version: "${DEFAULT_TAG}"
   log_level: "info"
-  publish_interval: 10
+  device_id: "${HOST_NAME}"
+  publish_interval: 8
 
-web_ui:
+webui:
   enabled: true
   port: 8080
   username: "admin"
@@ -210,14 +203,22 @@ web_ui:
 
 network:
   upnp_enabled: true
-  doh_enabled: true
-  allow_exit_node: true
-  advertised_subnets:
-    - "192.168.1.0/24"
+  ip_timeout: 10
+  udp_port: 47832
   stun_servers:
     - "stun.l.google.com:19302"
     - "stun1.l.google.com:19302"
     - "stun.cloudflare.com:3478"
+
+profiles:
+  - id: "default-mesh"
+    name: "Основная сеть"
+    mqtt_broker: "tcp://broker.emqx.io:1883"
+    mqtt_topic: "${RAND_TOPIC}"
+    virtual_ip: "100.64.200.1/24"
+    is_active: true
+
+active_profile_id: "default-mesh"
 
 signaling:
   channels:
@@ -226,7 +227,7 @@ signaling:
       enabled: true
       params:
         broker_url: "tcp://broker.emqx.io:1883"
-        topic: "natbypass/mynet/peers"
+        topic: "${RAND_TOPIC}"
     - type: "telegram"
       priority: 2
       enabled: false
@@ -239,8 +240,9 @@ wireguard:
   listen_port: 51820
   mtu: 1420
 EOF
-        print_green "✓ Конфигурация сохранена."
+        print_green "✓ Конфигурация сохранена с уникальным топиком: ${RAND_TOPIC}"
     fi
+
 
     # 7. Setup System Service and Autostart
     echo ">> Запуск службы NatBypass..."

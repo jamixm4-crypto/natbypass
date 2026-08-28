@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -1720,6 +1720,38 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         container.innerHTML = '<div style="color:#000; font-size:0.75rem; word-break:break-all; padding:6px; line-height:1.3;"><b>Данные:</b><br>' + escapeHtml(text.substring(0, 100)) + '...</div>';
       };
       container.appendChild(img);
+    }
+
+        function copyToClipboard(text, successMsg) {
+      if (!text) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+          showToast(successMsg || '✓ Скопировано в буфер обмена');
+        }).catch(function() {
+          fallbackCopyText(text, successMsg);
+        });
+      } else {
+        fallbackCopyText(text, successMsg);
+      }
+    }
+
+    function fallbackCopyText(text, successMsg) {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.top = '0';
+      textArea.style.left = '0';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        showToast(successMsg || '✓ Скопировано в буфер обмена');
+      } catch (err) {
+        showToast('⚠️ Не удалось скопировать', 'error');
+      }
+      document.body.removeChild(textArea);
     }
 
     function copyQRText() {
