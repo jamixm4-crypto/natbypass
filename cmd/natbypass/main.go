@@ -95,6 +95,14 @@ func main() {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
+			if runtime.GOOS == "windows" {
+				p := cfg.WebUI.Port
+				if webUIPort > 0 { p = webUIPort }
+				if p == 0 { p = 8080 }
+				if !acquireSingleInstanceMutex(p) {
+					return nil
+				}
+			}
 			return runEngine(ctx, cfg, runtime.GOOS == "windows")
 		},
 	}
