@@ -330,6 +330,23 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	var publicIP net.IP = net.IPv4(0, 0, 0, 0)
 	ipDisc := network.NewDiscoverer(cfg.Network.IPApis, time.Duration(cfg.Network.IPTimeout)*time.Second)
 
+	udpListenPort := cfg.Network.UDPPort
+	if udpListenPort <= 0 {
+		udpListenPort = 47832
+	}
+	udpPuncher, punchErr := network.NewUDPPuncher(udpListenPort, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+		log.Info().Str("peer", remoteDevID).Float64("rtt_ms", float64(rtt.Microseconds())/1000.0).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг установлен")
+		if p, ok := registry.Get(remoteDevID); ok && p != nil {
+			p.Latency = rtt
+			p.ActiveEndpoint = fromAddr
+			registry.Upsert(p)
+		}
+	})
+	if punchErr == nil && udpPuncher != nil {
+		log.Info().Int("port", udpPuncher.LocalPort()).Msg("UDPPuncher активен (постоянный сокет)")
+		defer udpPuncher.Close()
+	}
+
 	// Р¤РѕРЅРѕРІРѕРµ РїРµСЂРІРѕРЅР°С‡Р°Р»СЊРЅРѕРµ РѕРїСЂРµРґРµР»РµРЅРёРµ IP Рё STUN
 	go func() {
 		if ip, err := ipDisc.GetPublicIPCached(engineCtx, 5*time.Minute); err == nil {
@@ -337,6 +354,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			log.Info().Str("ip", publicIP.String()).Msg("РџСѓР±Р»РёС‡РЅС‹Р№ IP РѕРїСЂРµРґРµР»С‘РЅ")
 		}
 
+		if udpPuncher != nil {
+			if extIP, port, err := udpPuncher.DiscoverMappedAddress(engineCtx); err == nil && extIP != nil {
+				stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
+				log.Info().Str("stun_addr", stunAddr).Msg("STUN сокет определён через UDPPuncher")
+			}
+		}
 		stunClient := network.NewSTUNClient(cfg.Network.StunServers)
 		if stunIP, stunPort, stunErr := stunClient.GetMappedAddress(engineCtx); stunErr == nil {
 			stunAddr = fmt.Sprintf("%s:%d", stunIP.String(), stunPort)
@@ -394,6 +417,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						H4:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H4),
 					}
 				}
+				if udpPuncher != nil {
+					if extIP, port, err := udpPuncher.DiscoverMappedAddress(engineCtx); err == nil && extIP != nil {
+						stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
+					}
+					for _, peerObj := range registry.List() {
+						if peerObj.STUNAddr != "" {
+							_ = udpPuncher.SendKeepAlive(peerObj.STUNAddr)
+						}
+					}
+				}
 				payload := &signaling.Payload{
 					DeviceID:  deviceID,
 					PublicKey: crypto.KeyToHex(pubKey),
@@ -434,6 +467,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					}
 					if p.DeviceID == deviceID {
 						continue
+					}
+					if p.STUNAddr != "" && udpPuncher != nil {
+						_ = udpPuncher.SendHolePunchProbe(p.STUNAddr)
 					}
 					registry.Upsert(&peer.Peer{
 						DeviceID:  p.DeviceID,
@@ -898,6 +934,12 @@ func buildDefaultConfig() *config.Config {
 	cfg.App.LogLevel        = ifEmpty(DefaultLogLevel, "info")
 	cfg.App.DeviceID        = DefaultDeviceID
 	cfg.App.PublishInterval = 60
+
+	// Автогенерация уникального профиля сети со случайным топиком
+	p := config.GenerateDefaultProfile("Основная сеть")
+	cfg.Profiles = []config.Profile{p}
+	cfg.ActiveProfileID = p.ID
+	cfg.SyncSignalingWithProfile(&p)
 
 	cfg.WebUI.Enabled  = true
 	cfg.WebUI.Username = ifEmpty(DefaultWebUIUser, "admin")
