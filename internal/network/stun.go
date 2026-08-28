@@ -70,8 +70,10 @@ func (s *STUNClient) GetMappedAddress(ctx context.Context) (net.IP, int, error) 
 	var lastErr error
 
 	for _, server := range s.servers {
-		ip, port, err := s.getMappedAddressFromServer(ctx, server)
-		if err == nil {
+		reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		ip, port, err := s.getMappedAddressFromServer(reqCtx, server)
+		cancel()
+		if err == nil && ip != nil {
 			return ip, port, nil
 		}
 		lastErr = err

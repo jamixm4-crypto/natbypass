@@ -30,7 +30,7 @@ import (
 	"github.com/natbypass/natbypass/internal/wireguard"
 )
 var (
-	Version   = "1.2.7"
+	Version   = "1.8.0"
 	Commit    = "release"
 	BuildDate = "unknown"
 
@@ -316,6 +316,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		uiServer.SetConfigPath(configFile)
 		uiServer.SetAppState(deviceID, "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ...", "РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ...")
 		uiServer.SetDeviceName(deviceID)
+		uiServer.SetVersion(Version)
 		uiServer.SetVirtualIP(myVirtualIP)
 		uiServer.AddEvent("info", "NatBypass Р·Р°РїСѓС‰РµРЅ", "version="+Version)
 		go func() {

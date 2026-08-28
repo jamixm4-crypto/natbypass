@@ -93,7 +93,7 @@ func NewServer(port int, user, password string, registry *peer.Registry, sigMgr 
 		user:       user,
 		password:   password,
 		configPath: "config.yaml",
-		version:    "1.1.6",
+		version:    "1.8.0",
 		registry:   registry,
 		sigMgr:     sigMgr,
 		state: &AppState{
@@ -394,7 +394,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.2.7"
+		ver = "1.8.0"
 	}
 
 	status := map[string]interface{}{
@@ -1161,7 +1161,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.1.6"
+		ver = "1.8.0"
 	}
 
 	data := map[string]interface{}{
