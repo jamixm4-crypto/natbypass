@@ -153,11 +153,12 @@ func wndProc(hwnd windows.HWND, msg uint32, wparam, lparam uintptr) uintptr {
 			if globalTray != nil {
 				globalTray.showMenu()
 			}
-		case WM_LBUTTONDBLCLK:
+		case WM_LBUTTONDBLCLK, 0x0202 /* WM_LBUTTONUP */:
 			if globalTray != nil {
 				globalTray.activateExistingWindow()
 			}
 		}
+
 		return 0
 
 	case WM_COMMAND:
@@ -348,8 +349,22 @@ func (t *TrayApp) activateExistingWindow() {
 	if hwnd != 0 {
 		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
 		procSetForegroundWindow.Call(hwnd)
+		return
 	}
+
+	port := t.opts.WebUIPort
+	if t.opts.GetWebUIPort != nil {
+		if p := t.opts.GetWebUIPort(); p > 0 {
+			port = p
+		}
+	}
+	if port <= 0 {
+		port = 8080
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 }
+
 
 func (t *TrayApp) ShowNotification(titleStr, msgStr string) {
 	title, _ := windows.UTF16FromString(titleStr)
