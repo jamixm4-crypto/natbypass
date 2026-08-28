@@ -195,3 +195,15 @@ func (m *FallbackManager) PublishTunnelData(targetDevID string, pkt []byte) erro
 	return nil
 }
 
+// SubscribeTunnelData подписывается на входящие пакеты туннеля для текущего узла
+func (m *FallbackManager) SubscribeTunnelData(myDevID string, onPkt func(pkt []byte)) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, ch := range m.channels {
+		if mqttCh, ok := ch.(*MQTTChannel); ok {
+			mqttCh.SubscribeTunnelData(myDevID, onPkt)
+		}
+	}
+}
+
+
