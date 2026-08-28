@@ -943,6 +943,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					}
 					localAddr = fmt.Sprintf("%s:%d", lanIP, puncherPort)
 				}
+				// Всегда перечитываем актуальный конфиг (для мгновенного применения Exit Node и подсетей)
+				if latestCfg, err := config.Load(configFile); err == nil && latestCfg != nil {
+					cfg = latestCfg
+				}
 				activeProf := cfg.EnsureActiveProfile()
 				activeKey := ""
 				activeTopic := ""

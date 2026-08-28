@@ -76,9 +76,12 @@ type Server struct {
 	setupDone       bool
 	deviceName      string
 	onProfileSwitch func(p *config.Profile) error
+	onConfigChange  func()
 }
 
 // SetOnProfileSwitch устанавливает колбэк для переключения профиля
+func (s *Server) SetOnConfigChange(cb func()) { s.onConfigChange = cb }
+
 func (s *Server) SetOnProfileSwitch(cb func(p *config.Profile) error) {
 	s.onProfileSwitch = cb
 }
@@ -2292,6 +2295,9 @@ func (s *Server) handleRoutingHostSettings(w http.ResponseWriter, r *http.Reques
 	} else {
 		_ = tunnel.DisableHostIPForwarding()
 		s.AddEvent("info", "Роль маршрутизатора/шлюза отключена", "NAT Masquerade деактивирован")
+	}
+	if s.onConfigChange != nil {
+		s.onConfigChange()
 	}
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{

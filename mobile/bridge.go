@@ -398,6 +398,21 @@ func StartEngine(configYAML string, tunFd int) string {
 				if !ok {
 					return
 				}
+				if p != nil {
+					// Расшифровка сквозного шифрования (E2E) сетевым ключом профиля
+					if len(p.Encrypted) > 0 {
+						activeProf := cfg.EnsureActiveProfile()
+						if activeProf != nil {
+							kBytes := activeProf.GetNetworkKeyBytes()
+							if decBytes, err := crypto.DecryptSelf(p.Encrypted, kBytes); err == nil {
+								var inner signaling.Payload
+								if err := json.Unmarshal(decBytes, &inner); err == nil {
+									p = &inner
+								}
+							}
+						}
+					}
+				}
 				if p != nil && p.DeviceID != devID {
 					activeProf := cfg.EnsureActiveProfile()
 					if activeProf != nil {
