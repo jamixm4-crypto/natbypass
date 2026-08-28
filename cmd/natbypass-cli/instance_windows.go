@@ -329,16 +329,13 @@ func openAppWindow(port int) {
 		return
 	}
 
-	// 3. Start System Tray icon in background if not yet active
-	if !isTrayRunning() {
-		go startTrayIcon(port)
-	}
-
-	// 4. If explicit browser mode requested via CLI flag:
+	// 3. If explicit browser mode requested via CLI flag:
 	if strings.EqualFold(uiMode, "browser") {
 		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
 		return
 	}
+
+
 
 	// 5. MULTI-TIER WINDOW LAUNCHER (Windows 7/10/11 & Windows Server 2012-2025):
 	go func() {
