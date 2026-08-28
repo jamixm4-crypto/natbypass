@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -1957,13 +1957,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           }
         } catch (e) {
           fetchFailures++;
-          // Если скачивание завершилось (>70%) и сервер ушел в перезапуск — сразу переходим в режим ожидания старта
-          if (lastPct >= 70 && fetchFailures >= 2) {
+          // Если скачивание началось (>30%) и соединение разорвалось (роутер перезапускает службу) — переходим в режим ожидания перезапуска
+          if (lastPct >= 30 || fetchFailures >= 2) {
             clearInterval(updatePollTimer);
             waitForServiceRestart();
           }
         }
-      }, 800);
+      }, 600);
     }
 
 
@@ -1974,56 +1974,49 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       if (progBar) progBar.style.width = '100%';
       if (progPct) progPct.innerText = '100%';
+      if (progStatus) {
+        progStatus.innerText = '🔄 Роутер перезапускает службу NatBypass с новой версией...';
+        progStatus.style.color = '#38bdf8';
+      }
 
       let attempts = 0;
-      let consecutiveSuccess = 0;
-      const maxAttempts = 40; // до 40 секунд ожидания
+      const maxAttempts = 60; // до 30 секунд (по 500мс)
       
       const checkInterval = setInterval(async () => {
         attempts++;
-        if (progStatus) {
-          if (consecutiveSuccess > 0) {
-            progStatus.innerText = `🛡️ Сетевой адаптер инициализирован. Стабилизация подключения (${consecutiveSuccess}/3)...`;
-            progStatus.style.color = '#a855f7';
-          } else {
-            progStatus.innerText = `🔄 Перезапуск NatBypass... Ожидание готовности службы (${attempts}с)...`;
-            progStatus.style.color = '#38bdf8';
-          }
+        if (progStatus && attempts > 3) {
+          progStatus.innerText = `🔄 Ожидание готовности службы NatBypass (${Math.round(attempts/2)}с)...`;
+          progStatus.style.color = '#38bdf8';
         }
 
         try {
           const res = await fetch('/api/status?_t=' + Date.now(), { cache: 'no-store' });
           if (res.ok) {
-            consecutiveSuccess++;
-            // Ждем 3 успешных ответа подряд, чтобы Wintun адаптер и маршруты
-            // полностью стабилизировались в Windows NLA и не вызвали ошибку ERR_NETWORK_CHANGED
-            if (consecutiveSuccess >= 3) {
-              clearInterval(checkInterval);
-              if (progStatus) {
-                progStatus.innerText = '✓ Сеть и служба готовы! Переход...';
-                progStatus.style.color = '#10b981';
-              }
-              showToast('🎉 NatBypass успешно обновлен и запущен!');
-              setTimeout(() => {
-                window.location.replace(window.location.pathname + '?v=' + Date.now());
-              }, 1000);
+            clearInterval(checkInterval);
+            if (progStatus) {
+              progStatus.innerText = '✓ Новая версия успешно запущена! Обновление страницы...';
+              progStatus.style.color = '#10b981';
             }
-          } else {
-            consecutiveSuccess = 0;
+            showToast('🎉 NatBypass успешно обновлен до новой версии!');
+            setTimeout(() => {
+              window.location.replace(window.location.pathname + '?v=' + Date.now());
+            }, 500);
           }
         } catch (e) {
-          consecutiveSuccess = 0;
+          // Ждём старта службы
         }
 
         if (attempts >= maxAttempts) {
           clearInterval(checkInterval);
           if (progStatus) {
-            progStatus.innerHTML = `⚠️ Сервер перезапускается дольше обычного. <button onclick="window.location.replace(window.location.pathname + '?v=' + Date.now())" class="btn btn-glass" style="margin-left:8px; padding:3px 8px;">🔄 Обновить сейчас</button>`;
+            progStatus.innerHTML = `⚠️ Служба перезапускается. <button onclick="window.location.replace(window.location.pathname + '?v=' + Date.now())" class="btn btn-glass" style="margin-left:8px; padding:3px 8px;">🔄 Обновить сейчас</button>`;
             progStatus.style.color = '#fbbf24';
           }
+          document.getElementById('btnCheckUpdate').style.display = 'inline-flex';
         }
-      }, 1000);
+      }, 500);
     }
+
 
     function updateChannelUI(mode) {
       currentChannelMode = mode;

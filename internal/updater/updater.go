@@ -323,9 +323,10 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 			downloaded += int64(n)
 			pct := 10
 			if totalSize > 0 {
-				pct = 10 + int((float64(downloaded)/float64(totalSize))*70)
+				pct = 10 + int((float64(downloaded)/float64(totalSize))*80)
 			}
 			setStatus(true, pct, fmt.Sprintf("Скачивание обновления... %d%% (%d / %d KB)", pct, downloaded/1024, totalSize/1024), "", false)
+
 		}
 		if rErr != nil {
 			if rErr == io.EOF {
