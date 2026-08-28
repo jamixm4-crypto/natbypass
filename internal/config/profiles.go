@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +18,7 @@ type Profile struct {
 	ID          string    `json:"id" mapstructure:"id" yaml:"id"`
 	Name        string    `json:"name" mapstructure:"name" yaml:"name"`
 	NetworkKey  string    `json:"network_key,omitempty" mapstructure:"network_key" yaml:"network_key,omitempty"`
+	VirtualIP   string    `json:"virtual_ip,omitempty" mapstructure:"virtual_ip" yaml:"virtual_ip,omitempty"`
 	MQTTBroker  string    `json:"mqtt_broker" mapstructure:"mqtt_broker" yaml:"mqtt_broker"`
 	MQTTTopic   string    `json:"mqtt_topic" mapstructure:"mqtt_topic" yaml:"mqtt_topic"`
 	MQTTUser    string    `json:"mqtt_user,omitempty" mapstructure:"mqtt_user" yaml:"mqtt_user,omitempty"`
@@ -375,4 +377,27 @@ func ImportProfileURI(raw string) (*Profile, error) {
 	}
 
 	return nil, fmt.Errorf("unsupported profile format")
+}
+
+
+// GetNetworkKeyBytes возвращает 32-байтный ключ шифрования для сети
+func (p *Profile) GetNetworkKeyBytes() [32]byte {
+	seed := p.NetworkKey
+	if seed == "" {
+		seed = p.MQTTTopic + ":" + p.ID
+	}
+	h := sha256.Sum256([]byte(seed))
+	return h
+}
+
+// GetDeterministicVIP возвращает постоянный фиксированный IP-адрес узла в данной сети
+func (p *Profile) GetDeterministicVIP(deviceID string) string {
+	if p.VirtualIP != "" && strings.HasPrefix(p.VirtualIP, "100.64.200.") {
+		return p.VirtualIP
+	}
+	h := sha256.Sum256([]byte(deviceID + ":" + p.ID + ":" + p.MQTTTopic))
+	octet := int(h[0])%240 + 10 // Диапазон 100.64.200.10 - 100.64.200.249
+	vip := fmt.Sprintf("100.64.200.%d", octet)
+	p.VirtualIP = vip
+	return vip
 }

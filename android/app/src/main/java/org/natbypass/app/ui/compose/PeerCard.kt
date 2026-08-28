@@ -249,17 +249,34 @@ private fun PeerActionsContent(
         }
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-        PeerActionItem(icon = Icons.Outlined.Speed,   label = "Ping",            onClick = onPing)
-        PeerActionItem(icon = Icons.Outlined.ContentCopy, label = "Скопировать IP (${peer.virtualIp})", onClick = onCopyIp)
-        PeerActionItem(
-            icon = Icons.Outlined.Public,
-            label = if (peer.isExitNode) "🌐 Маршрутизировать весь интернет через этот узел" else "Использовать как Exit Node",
-            onClick = onSetExitNode,
-            tint = if (peer.isExitNode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-        )
+        PeerActionItem(icon = Icons.Outlined.Speed,   label = "⚡ Проверить пинг (Ping)", onClick = onPing)
+        PeerActionItem(icon = Icons.Outlined.ContentCopy, label = "📋 Скопировать IP (${peer.virtualIp})", onClick = onCopyIp)
+        
+        // Показываем пункт выхода в интернет ТОЛЬКО если узел действительно является Exit Node
+        if (peer.isExitNode) {
+            PeerActionItem(
+                icon = Icons.Outlined.Public,
+                label = if (peer.isSelectedExitNode) "🟢 Отключить интернет-шлюз" else "🌐 Маршрутизировать весь интернет через этот узел",
+                onClick = onSetExitNode,
+                tint = if (peer.isSelectedExitNode) Color(0xFF22C55E) else MaterialTheme.colorScheme.primary
+            )
+        }
+
+        // Показываем подсети ТОЛЬКО если узел анонсировал их
+        if (peer.advertisedRoutes.isNotEmpty()) {
+            peer.advertisedRoutes.forEach { subnet ->
+                PeerActionItem(
+                    icon = Icons.Outlined.Home,
+                    label = "🏠 Доступ к локальной сети ($subnet)",
+                    onClick = onSetExitNode,
+                    tint = Color(0xFF38BDF8)
+                )
+            }
+        }
+
         PeerActionItem(
             icon    = Icons.Outlined.DeleteOutline,
-            label   = "Удалить из списка",
+            label   = "🗑️ Удалить из списка",
             onClick = onDelete,
             tint    = MaterialTheme.colorScheme.error
         )

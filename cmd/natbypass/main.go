@@ -972,6 +972,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					NetworkKey:       activeKey,
 					Topic:            activeTopic,
 				}
+
+				// Сквозное шифрование (E2E) сетевым ключом профиля
+				if activeProf != nil && activeKey != "" {
+					kBytes := activeProf.GetNetworkKeyBytes()
+					rawJson, _ := json.Marshal(payload)
+					if encBlob, encErr := crypto.EncryptSelf(rawJson, kBytes); encErr == nil {
+						payload.Encrypted = encBlob
+					}
+				}
+
 				_ = sigMgr.Send(engineCtx, payload)
 
 				// LAN Broadcast Ping выполняется в отдельном фоновом цикле раз в 60 секунд
@@ -992,9 +1002,53 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						return
 					}
 					if len(p.Encrypted) > 0 {
-						decrypted, decErr := signaling.DecryptPayload(p, pubKey, privKey)
-						if decErr == nil {
-							p = decrypted
+						// 1. Попытка расшифровать сетевым ключом профиля (E2E)
+						activeProf := cfg.EnsureActiveProfile()
+						if activeProf != nil {
+							kBytes := activeProf.GetNetworkKeyBytes()
+							if decBytes, err := crypto.DecryptSelf(p.Encrypted, kBytes); err == nil {
+								var inner signaling.Payload
+								if err := json.Unmarshal(decBytes, &inner); err == nil {
+									p = &inner
+								}
+							}
+						}
+						// 2. Fallback на асимметричную NaCl коробку
+						if len(p.Encrypted) > 0 {
+							decrypted, decErr := signaling.DecryptPayload(p, pubKey, privKey)
+							if decErr == nil {
+								p = decrypted
+							}
+						}
+					}
+
+					// Проверка коллизий IP-адресов в mesh-сети
+					if p.VirtualIP != "" && p.VirtualIP == myVirtualIP && p.DeviceID != deviceID {
+						// Если коллизия обнаружена, узел с большим ID переназначает свой IP на свободный
+						if deviceID > p.DeviceID {
+							taken := make(map[string]bool)
+							if registry != nil {
+								for _, regPeer := range registry.List() {
+									taken[regPeer.VirtualIP] = true
+								}
+							}
+							for oct := 10; oct < 250; oct++ {
+								candidate := fmt.Sprintf("100.64.200.%d", oct)
+								if !taken[candidate] && candidate != p.VirtualIP {
+									myVirtualIP = candidate
+									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+										activeProf.VirtualIP = myVirtualIP
+										_ = config.Save(cfg, configFile, false)
+									}
+									if uiServer != nil {
+										uiServer.SetVirtualIP(myVirtualIP)
+									}
+									if tunDev != nil {
+										_ = tunDev.SetVirtualIP(myVirtualIP)
+									}
+									break
+								}
+							}
 						}
 					}
 					if p.DeviceID == "" || p.DeviceID == deviceID {
