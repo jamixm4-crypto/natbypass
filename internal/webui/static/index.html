@@ -1214,7 +1214,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
         <div style="display:flex; flex-direction:column; gap: 14px; margin-bottom: 16px;">
           <label style="display:flex; align-items:center; gap: 8px; font-size:0.88rem; cursor:pointer; font-weight:600;">
-            <input type="checkbox" id="cfgAllowExitNode" style="accent-color:#a855f7; width:18px; height:18px;">
+            <input type="checkbox" id="cfgAllowExitNode" onchange="saveHostRoutingSettings()" style="accent-color:#a855f7; width:18px; height:18px;">
             <span>🌐 Разрешить другим устройствам выходить в интернет через этот узел (Exit Node Gateway)</span>
           </label>
 
@@ -2745,7 +2745,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           doh_enabled,
           save_logs_to_disk,
           show_diagnostics,
-          autostart
+          autostart,
+          allow_exit_node: document.getElementById('cfgAllowExitNode') ? document.getElementById('cfgAllowExitNode').checked : false,
+          advertised_subnets: (document.getElementById('cfgAdvertisedSubnets') ? document.getElementById('cfgAdvertisedSubnets').value : '').split(',').map(s => s.trim()).filter(s => s.length > 0)
         })
       });
       const json = await res.json();

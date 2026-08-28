@@ -197,6 +197,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/qr/image", s.handleQRImage)
 	mux.HandleFunc("/api/peer/bookmark", s.handlePeerBookmark)
 	mux.HandleFunc("/api/peer/ping", s.handlePeerPing)
+	mux.HandleFunc("/api/routing/status", s.handleRoutingStatus)
+	mux.HandleFunc("/api/routing/exit-node/toggle", s.handleRoutingExitNodeToggle)
+	mux.HandleFunc("/api/routing/subnet/toggle", s.handleRoutingSubnetToggle)
+	mux.HandleFunc("/api/routing/host/settings", s.handleRoutingHostSettings)
 	mux.HandleFunc("/api/routing/exit-node", s.handleRoutingExitNode)
 	mux.HandleFunc("/api/routing/subnets", s.handleRoutingSubnets)
 	mux.HandleFunc("/api/routing/local-subnets", s.handleRoutingLocalSubnets)
@@ -1453,9 +1457,11 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		MTU             int    `json:"mtu"`
 		UpnpEnabled     bool   `json:"upnp_enabled"`
 		DoHEnabled      bool   `json:"doh_enabled"`
-		SaveLogsToDisk  bool   `json:"save_logs_to_disk"`
-		ShowDiagnostics bool   `json:"show_diagnostics"`
-		AutoStart       bool   `json:"autostart"`
+		SaveLogsToDisk    bool     `json:"save_logs_to_disk"`
+		ShowDiagnostics   bool     `json:"show_diagnostics"`
+		AutoStart         bool     `json:"autostart"`
+		AllowExitNode     bool     `json:"allow_exit_node"`
+		AdvertisedSubnets []string `json:"advertised_subnets"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
@@ -1476,6 +1482,15 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	cfg.Network.UpnpEnabled = req.UpnpEnabled
 	cfg.Network.DoHEnabled = req.DoHEnabled
+	cfg.Network.AllowExitNode = req.AllowExitNode
+	if len(req.AdvertisedSubnets) > 0 {
+		cfg.Network.AdvertisedSubnets = req.AdvertisedSubnets
+	}
+	if req.AllowExitNode || len(req.AdvertisedSubnets) > 0 {
+		_ = tunnel.EnableHostIPForwarding()
+	} else {
+		_ = tunnel.DisableHostIPForwarding()
+	}
 	if req.WGPort > 0 {
 		cfg.WireGuard.ListenPort = req.WGPort
 	}
