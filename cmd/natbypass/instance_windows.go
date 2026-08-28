@@ -27,6 +27,8 @@ var (
 	moddwmapiInstance   = windows.NewLazySystemDLL("dwmapi.dll")
 	appHIcon            uintptr
 	lastWebUIPort       = 8080
+	mainAppHWnd         uintptr
+	origWndProc         uintptr
 )
 
 func init() {
@@ -93,16 +95,62 @@ func acquireSingleInstanceMutex(port int) bool {
 	return true
 }
 
+
+// subclassWebViewWindow перехватывает WM_CLOSE (нажатие на крестик) и сворачивает окно в трей вместо закрытия
+func subclassWebViewWindow(hwnd uintptr) {
+	if hwnd == 0 {
+		return
+	}
+	mainAppHWnd = hwnd
+
+	procSetWindowLongPtrW := moduser32Instance.NewProc("SetWindowLongPtrW")
+	if procSetWindowLongPtrW.Find() != nil {
+		procSetWindowLongPtrW = moduser32Instance.NewProc("SetWindowLongW")
+	}
+	procCallWindowProcW := moduser32Instance.NewProc("CallWindowProcW")
+
+	customProc := syscall.NewCallback(func(h uintptr, msg uint32, wparam uintptr, lparam uintptr) uintptr {
+		if msg == 0x0010 /* WM_CLOSE */ {
+			// Скрываем окно при нажатии на крестик — оно остаётся живым в трее
+			procShowWindow := moduser32Instance.NewProc("ShowWindow")
+			procShowWindow.Call(h, 0 /* SW_HIDE */)
+			return 0
+		}
+		if msg == 0x0002 /* WM_DESTROY */ {
+			if mainAppHWnd == h {
+				mainAppHWnd = 0
+			}
+		}
+		ret, _, _ := procCallWindowProcW.Call(origWndProc, h, uintptr(msg), wparam, lparam)
+		return ret
+	})
+
+	// GWLP_WNDPROC = -4
+	res, _, _ := procSetWindowLongPtrW.Call(hwnd, ^uintptr(3), customProc)
+	if res != 0 {
+		origWndProc = res
+	}
+}
+
 func activateExistingWindow() {
+	procShowWindow := moduser32Instance.NewProc("ShowWindow")
+	procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
+
+	// 1. Быстрое мгновенное восстановление сохраненного HWND
+	if mainAppHWnd != 0 {
+		procShowWindow.Call(mainAppHWnd, 5 /* SW_SHOW */)
+		procShowWindow.Call(mainAppHWnd, 9 /* SW_RESTORE */)
+		procSetForegroundWindow.Call(mainAppHWnd)
+		return
+	}
+
+	// 2. Поиск окна через EnumWindows если mainAppHWnd был утерян
+	type RECT struct { Left, Top, Right, Bottom int32 }
+	var foundHWnd uintptr
 	procGetWindowRect := moduser32Instance.NewProc("GetWindowRect")
 	procGetWindowTextW := moduser32Instance.NewProc("GetWindowTextW")
 	procGetWindowTextLengthW := moduser32Instance.NewProc("GetWindowTextLengthW")
 	procEnumWindows := moduser32Instance.NewProc("EnumWindows")
-	procShowWindow := moduser32Instance.NewProc("ShowWindow")
-	procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
-
-	type RECT struct { Left, Top, Right, Bottom int32 }
-	var foundHWnd uintptr
 
 	cb := syscall.NewCallback(func(h uintptr, lparam uintptr) uintptr {
 		lenRet, _, _ := procGetWindowTextLengthW.Call(h)
@@ -117,7 +165,7 @@ func activateExistingWindow() {
 				hH := rc.Bottom - rc.Top
 				if w >= 400 && hH >= 300 {
 					foundHWnd = h
-					return 0 // Найдено настоящее главное окно программы
+					return 0 // Найдено главное окно
 				}
 			}
 		}
@@ -126,14 +174,20 @@ func activateExistingWindow() {
 	procEnumWindows.Call(cb, 0)
 
 	if foundHWnd != 0 {
+		mainAppHWnd = foundHWnd
+		procShowWindow.Call(foundHWnd, 5 /* SW_SHOW */)
 		procShowWindow.Call(foundHWnd, 9 /* SW_RESTORE */)
 		procSetForegroundWindow.Call(foundHWnd)
 		return
 	}
 
-	// Если главное окно было закрыто — открываем интерфейс в браузере или приложении
-	url := "http://127.0.0.1:8080/"
-	if !tryOpenAppMode(url, 1180, 750) {
+	// 3. Если окно не существует — открываем новое окно на актуальном порту
+	port := lastWebUIPort
+	if port <= 0 {
+		port = 8080
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	if !tryOpenAppMode(url, 1220, 780) {
 		openBrowserFallback(url)
 	}
 }
@@ -345,6 +399,7 @@ func openAppWindow(port int) {
 		}()
 
 		hwnd := uintptr(w.Window())
+		subclassWebViewWindow(hwnd)
 
 		// Dark Mode для рамки и заголовка
 		procDwmSetWindowAttribute := moddwmapiInstance.NewProc("DwmSetWindowAttribute")
