@@ -6,39 +6,102 @@ import (
 	"sync"
 	"time"
 
+	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/signaling"
 )
 
 // Peer represents a discovered mesh network device.
 type Peer struct {
-	DeviceID         string                `json:"device_id"`
-	Nickname         string                `json:"nickname,omitempty"`
-	PublicKey        string                `json:"public_key"`
-	PublicIP         string                `json:"public_ip"`
-	LocalAddr        string                `json:"local_addr,omitempty"`
-	STUNAddr         string                `json:"stun_addr,omitempty"`
-	IPv6Addr         string                `json:"ipv6_addr,omitempty"`
-	WGPubKey         string                `json:"wg_pubkey,omitempty"`
-	WGPort           int                   `json:"wg_port,omitempty"`
-	VirtualIP        string                `json:"virtual_ip,omitempty"`
-	DirectP2P        bool                  `json:"direct_p2p"`
-	ActiveEndpoint   string                `json:"active_endpoint,omitempty"`
-	PingMs           int64                 `json:"ping_ms"`
-	NATType          string                `json:"nat_type,omitempty"`
-	IsExitNode       bool                  `json:"is_exit_node,omitempty"`
-	AdvertisedRoutes []string              `json:"advertised_routes,omitempty"`
-	LastSeen         time.Time             `json:"last_seen"`
-	Online           bool                  `json:"online"`
-	Latency          time.Duration         `json:"latency"`
-	Channel          string                `json:"channel,omitempty"`
-	HasMQTT          bool                  `json:"has_mqtt,omitempty"`
-	HasTelegram      bool                  `json:"has_telegram,omitempty"`
-	LastMQTTSeen     time.Time             `json:"last_mqtt_seen,omitempty"`
-	LastTelegramSeen time.Time             `json:"last_telegram_seen,omitempty"`
-	AWG              *signaling.AWGParams  `json:"awg,omitempty"`
-	OS               string                `json:"os,omitempty"`
-	Platform         string                `json:"platform,omitempty"`
-	CountryFlag      string                `json:"country_flag,omitempty"`
+	DeviceID         string               `json:"device_id"`
+	Nickname         string               `json:"nickname,omitempty"`
+	PublicKey        string               `json:"public_key"`
+	PublicIP         string               `json:"public_ip"`
+	LocalAddr        string               `json:"local_addr,omitempty"`
+	STUNAddr         string               `json:"stun_addr,omitempty"`
+	IPv6Addr         string               `json:"ipv6_addr,omitempty"`
+	WGPubKey         string               `json:"wg_pubkey,omitempty"`
+	WGPort           int                  `json:"wg_port,omitempty"`
+	VirtualIP        string               `json:"virtual_ip,omitempty"`
+	DirectP2P        bool                 `json:"direct_p2p"`
+	ActiveEndpoint   string               `json:"active_endpoint,omitempty"`
+	PingMs           int64                `json:"ping_ms"`
+	NATType          string               `json:"nat_type,omitempty"`
+	IsExitNode       bool                 `json:"is_exit_node,omitempty"`
+	AdvertisedRoutes []string             `json:"advertised_routes,omitempty"`
+	LastSeen         time.Time            `json:"last_seen"`
+	Online           bool                 `json:"online"`
+	Latency          time.Duration        `json:"latency"`
+	Channel          string               `json:"channel,omitempty"`
+	HasMQTT          bool                 `json:"has_mqtt,omitempty"`
+	HasTelegram      bool                 `json:"has_telegram,omitempty"`
+	LastMQTTSeen     time.Time            `json:"last_mqtt_seen,omitempty"`
+	LastTelegramSeen time.Time            `json:"last_telegram_seen,omitempty"`
+	AWG              *signaling.AWGParams `json:"awg,omitempty"`
+	OS               string               `json:"os,omitempty"`
+	Platform         string               `json:"platform,omitempty"`
+	CountryFlag      string               `json:"country_flag,omitempty"`
+}
+
+// MergeFrom merges discovery details into an existing peer while preserving established connections.
+func (existing *Peer) MergeFrom(newer *Peer) {
+	now := time.Now()
+
+	if newer.Channel == "mqtt" {
+		newer.HasMQTT = true
+		if newer.LastMQTTSeen.IsZero() {
+			newer.LastMQTTSeen = now
+		}
+	} else if newer.Channel == "telegram" {
+		newer.HasTelegram = true
+		if newer.LastTelegramSeen.IsZero() {
+			newer.LastTelegramSeen = now
+		}
+	}
+
+	if existing.DirectP2P {
+		newer.DirectP2P = true
+	}
+	if existing.ActiveEndpoint != "" && newer.ActiveEndpoint == "" {
+		newer.ActiveEndpoint = existing.ActiveEndpoint
+	}
+	if existing.Latency > 0 && newer.Latency == 0 {
+		newer.Latency = existing.Latency
+		newer.PingMs = existing.PingMs
+	}
+	if newer.Nickname == "" && existing.Nickname != "" {
+		newer.Nickname = existing.Nickname
+	}
+	if newer.AWG == nil && existing.AWG != nil {
+		newer.AWG = existing.AWG
+	}
+
+	if existing.HasMQTT && now.Sub(existing.LastMQTTSeen) < constants.PeerOfflineThreshold {
+		newer.HasMQTT = true
+		if newer.LastMQTTSeen.IsZero() {
+			newer.LastMQTTSeen = existing.LastMQTTSeen
+		}
+	}
+	if existing.HasTelegram && now.Sub(existing.LastTelegramSeen) < constants.PeerOfflineThreshold {
+		newer.HasTelegram = true
+		if newer.LastTelegramSeen.IsZero() {
+			newer.LastTelegramSeen = existing.LastTelegramSeen
+		}
+	}
+
+	if newer.HasMQTT && newer.HasTelegram {
+		newer.Channel = "parallel"
+	} else if newer.HasTelegram && !newer.HasMQTT {
+		newer.Channel = "telegram"
+	} else if newer.HasMQTT && !newer.HasTelegram {
+		newer.Channel = "mqtt"
+	}
+
+	if newer.Latency > 0 {
+		newer.PingMs = newer.Latency.Milliseconds()
+	}
+
+	newer.Online = true
+	newer.LastSeen = now
 }
 
 // Registry manages thread-safe tracking of discovered mesh peers.
@@ -94,51 +157,14 @@ func (r *Registry) Upsert(p *Peer) {
 	}
 
 	if existing, ok := r.peers[p.DeviceID]; ok {
-		if existing.DirectP2P {
-			p.DirectP2P = true
+		existing.MergeFrom(p)
+	} else {
+		if p.Latency > 0 {
+			p.PingMs = p.Latency.Milliseconds()
 		}
-		if existing.ActiveEndpoint != "" && p.ActiveEndpoint == "" {
-			p.ActiveEndpoint = existing.ActiveEndpoint
-		}
-		if existing.Latency > 0 && p.Latency == 0 {
-			p.Latency = existing.Latency
-			p.PingMs = existing.PingMs
-		}
-		if p.Nickname == "" && existing.Nickname != "" {
-			p.Nickname = existing.Nickname
-		}
-		if p.AWG == nil && existing.AWG != nil {
-			p.AWG = existing.AWG
-		}
-
-		if existing.HasMQTT && now.Sub(existing.LastMQTTSeen) < 120*time.Second {
-			p.HasMQTT = true
-			if p.LastMQTTSeen.IsZero() {
-				p.LastMQTTSeen = existing.LastMQTTSeen
-			}
-		}
-		if existing.HasTelegram && now.Sub(existing.LastTelegramSeen) < 120*time.Second {
-			p.HasTelegram = true
-			if p.LastTelegramSeen.IsZero() {
-				p.LastTelegramSeen = existing.LastTelegramSeen
-			}
-		}
-
-		if p.HasMQTT && p.HasTelegram {
-			p.Channel = "parallel"
-		} else if p.HasTelegram && !p.HasMQTT {
-			p.Channel = "telegram"
-		} else if p.HasMQTT && !p.HasTelegram {
-			p.Channel = "mqtt"
-		}
+		p.Online = true
+		p.LastSeen = now
 	}
-
-	if p.Latency > 0 {
-		p.PingMs = p.Latency.Milliseconds()
-	}
-
-	p.Online = true
-	p.LastSeen = now
 
 	r.peers[p.DeviceID] = p
 }
@@ -172,7 +198,7 @@ func (r *Registry) Get(deviceID string) (*Peer, bool) {
 // MarkOffline sets the Online flag to false for peers not seen within maxAge.
 func (r *Registry) MarkOffline(maxAge time.Duration) {
 	if maxAge < 60*time.Second {
-		maxAge = 120 * time.Second
+		maxAge = constants.PeerOfflineThreshold
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -186,10 +212,10 @@ func (r *Registry) MarkOffline(maxAge time.Duration) {
 	}
 }
 
-// Cleanup removes stale peers not seen within maxAge (default: 24 hours).
+// Cleanup removes stale peers not seen within maxAge.
 func (r *Registry) Cleanup(maxAge time.Duration) {
 	if maxAge <= 0 {
-		maxAge = 3 * time.Minute
+		maxAge = constants.PeerCleanupInterval
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -205,7 +231,7 @@ func (r *Registry) Cleanup(maxAge time.Duration) {
 // StartMonitor runs a background goroutine to periodically mark stale peers offline.
 func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
-		interval = 10 * time.Second
+		interval = constants.PeerMonitorInterval
 	}
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -216,8 +242,8 @@ func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				r.MarkOffline(120 * time.Second)
-				r.Cleanup(3 * time.Minute)
+				r.MarkOffline(constants.PeerOfflineThreshold)
+				r.Cleanup(constants.PeerCleanupInterval)
 			}
 		}
 	}()

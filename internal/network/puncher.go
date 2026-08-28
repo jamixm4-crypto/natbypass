@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/pion/stun/v2"
 )
 
@@ -30,8 +31,8 @@ type UDPPuncher struct {
 	mu           sync.Mutex
 
 	// NATType is detected asynchronously after construction.
-	NATType    NATType
-	natTypeMu  sync.RWMutex
+	NATType   NATType
+	natTypeMu sync.RWMutex
 
 	// portDelta tracks the observed consecutive port increment for Symmetric NAT prediction.
 	lastMappedPort int
@@ -41,6 +42,7 @@ type UDPPuncher struct {
 	lastProbeMap map[string]time.Time
 }
 
+// NewUDPPuncher creates a new persistent UDP socket for STUN, hole punching, and data transfer.
 func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPing DirectPingCallback) (*UDPPuncher, error) {
 	if len(stunServers) == 0 {
 		stunServers = defaultSTUNServers
@@ -50,7 +52,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	var err error
 	var lAddr *net.UDPAddr
 
-	// Используем сеть "udp" (dual-stack: IPv4 + IPv6) для полноценной работы на мобильных сетях
+	// Use "udp" (dual-stack: IPv4 + IPv6) for full mobile and desktop support
 	if preferredPort > 0 {
 		lAddr, _ = net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", preferredPort))
 		conn, err = net.ListenUDP("udp", lAddr)
@@ -60,7 +62,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		lAddr, _ = net.ResolveUDPAddr("udp", ":0")
 		conn, err = net.ListenUDP("udp", lAddr)
 		if err != nil {
-			// Fallback на udp4 если dual-stack сокет не поддерживается ядром
+			// Fallback to udp4 if dual-stack is not supported by kernel
 			lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
 			conn, err = net.ListenUDP("udp4", lAddr4)
 			if err != nil {
@@ -84,10 +86,10 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		NATType:      NATTypeUnknown,
 	}
 
-	// Единый цикл чтения пакетов (STUN + PING/PONG)
+	// Start packet processing loop
 	go p.readLoop()
 
-	// Detect NAT type in background — doesn't block startup
+	// Detect NAT type in background — non-blocking
 	go func() {
 		dCtx, dCancel := context.WithTimeout(ctx, 6*time.Second)
 		defer dCancel()
@@ -104,6 +106,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	return p, nil
 }
 
+// LocalPort returns the local bound UDP port.
 func (p *UDPPuncher) LocalPort() int {
 	return p.localPort
 }
@@ -115,8 +118,7 @@ func (p *UDPPuncher) GetNATType() NATType {
 	return p.NATType
 }
 
-
-// DiscoverMappedAddress отправляет STUN Binding Request с постоянного сокета
+// DiscoverMappedAddress sends a STUN Binding Request from the persistent socket.
 func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -152,9 +154,7 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 	return nil, 0, fmt.Errorf("STUN discovery timeout")
 }
 
-// SendHolePunchProbe отправляет прямой UDP пакет второму устройству.
-// Точное попадание отправляется всегда (3 пакета).
-// Для неизвестных / CGNAT сокетов также выполняется умеренный sweep соседних портов.
+// SendHolePunchProbe sends direct UDP probe packets to the target peer endpoint.
 func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
@@ -171,26 +171,23 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if p.lastProbeMap == nil {
 		p.lastProbeMap = make(map[string]time.Time)
 	}
-	if time.Since(p.lastProbeMap[targetAddr]) < 500*time.Millisecond {
+	if time.Since(p.lastProbeMap[targetAddr]) < constants.MinProbeInterval {
 		p.probeMu.Unlock()
-		return nil // Rate limit: не более 2 зондов в секунду на адрес
+		return nil // Rate limit: maximum 2 probes/second per address
 	}
 	p.lastProbeMap[targetAddr] = time.Now()
 	p.probeMu.Unlock()
 
 	nowNano := time.Now().UnixNano()
-	probeData := []byte(fmt.Sprintf("NATBYPASS:PING:%s:%d", p.myDevID, nowNano))
+	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
 
-	// 2 быстрых пакета пробития
+	// Send fast probe burst
 	_, err = p.conn.WriteToUDP(probeData, rAddr)
 	_, _ = p.conn.WriteToUDP(probeData, rAddr)
 	return err
 }
 
-
-
-// SendKeepAlive отправляет минимальный 4-байтный пакет для поддержания CGNAT маппинга.
-// Использует отдельный tiny payload вместо полноценного PING/PONG, чтобы не триггерить лишние callback-и.
+// SendKeepAlive sends a tiny keep-alive packet to maintain CGNAT port mappings.
 func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
@@ -202,18 +199,18 @@ func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 			return err
 		}
 	}
-	_, err = p.conn.WriteToUDP([]byte("KAEP"), rAddr)
+	_, err = p.conn.WriteToUDP([]byte(constants.KeepAlivePayload), rAddr)
 	return err
 }
 
+// SetDataCallback registers the callback handler for incoming tunnel data packets.
 func (p *UDPPuncher) SetDataCallback(cb DirectDataCallback) {
 	p.mu.Lock()
 	p.onDataPacket = cb
 	p.mu.Unlock()
 }
 
-
-// SendDataPacket отправляет сырой IP пакет туннеля пиру
+// SendDataPacket sends a raw tunnel IP packet directly to the peer.
 func (p *UDPPuncher) SendDataPacket(targetAddr string, payload []byte) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
@@ -223,7 +220,7 @@ func (p *UDPPuncher) SendDataPacket(targetAddr string, payload []byte) error {
 		return err
 	}
 
-	header := []byte("NATBYPASS:TUN:")
+	header := []byte(constants.TunHeader)
 	fullPkt := make([]byte, len(header)+len(payload))
 	copy(fullPkt, header)
 	copy(fullPkt[len(header):], payload)
@@ -232,8 +229,108 @@ func (p *UDPPuncher) SendDataPacket(targetAddr string, payload []byte) error {
 	return err
 }
 
+// handleSTUNMessage decodes incoming STUN responses and extracts mapped public IP/port.
+func (p *UDPPuncher) handleSTUNMessage(data []byte) {
+	var stunResp stun.Message
+	stunResp.Raw = make([]byte, len(data))
+	copy(stunResp.Raw, data)
+	if err := stunResp.Decode(); err != nil {
+		return
+	}
+
+	var xorAddr stun.XORMappedAddress
+	if err := xorAddr.GetFrom(&stunResp); err == nil {
+		p.mappedIP = xorAddr.IP
+		p.mappedPort = xorAddr.Port
+		select {
+		case p.stunRespCh <- struct{}{}:
+		default:
+		}
+		return
+	}
+
+	var mappedAddr stun.MappedAddress
+	if err := mappedAddr.GetFrom(&stunResp); err == nil {
+		p.mappedIP = mappedAddr.IP
+		p.mappedPort = mappedAddr.Port
+		select {
+		case p.stunRespCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// handlePing processes incoming NAT hole punch PING probes.
+func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
+	parts := strings.Split(data, ":")
+	if len(parts) < 4 {
+		return
+	}
+	senderID := strings.Join(parts[2:len(parts)-1], ":")
+	if senderID == p.myDevID {
+		return
+	}
+	sentTs := parts[len(parts)-1]
+	pongMsg := fmt.Sprintf("%s%s:%s", constants.PongPrefix, p.myDevID, sentTs)
+	_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
+
+	// Inbound PING confirms that the remote peer reached us directly over UDP
+	if p.onPingResult != nil && remoteAddr != nil {
+		p.onPingResult(senderID, 35*time.Millisecond, remoteAddr.String())
+	}
+}
+
+// handlePong processes incoming PONG responses and measures latency.
+func (p *UDPPuncher) handlePong(data string, remoteAddr *net.UDPAddr) {
+	parts := strings.Split(data, ":")
+	if len(parts) < 4 {
+		return
+	}
+	senderID := strings.Join(parts[2:len(parts)-1], ":")
+	if senderID == p.myDevID {
+		return
+	}
+	sentNano, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
+	if err != nil {
+		return
+	}
+	rtt := time.Since(time.Unix(0, sentNano))
+	if rtt <= 0 {
+		rtt = 1 * time.Millisecond
+	}
+
+	// Track port delta for Symmetric NAT port prediction
+	if remoteAddr != nil && rtt > 0 {
+		p.natTypeMu.Lock()
+		if p.lastMappedPort > 0 && remoteAddr.Port > 0 {
+			observed := remoteAddr.Port - p.lastMappedPort
+			if observed > 0 && observed < 512 {
+				p.portDelta = observed
+			}
+		}
+		p.lastMappedPort = remoteAddr.Port
+		p.natTypeMu.Unlock()
+	}
+
+	if p.onPingResult != nil && remoteAddr != nil {
+		p.onPingResult(senderID, rtt, remoteAddr.String())
+	}
+}
+
+// handleTunnelPacket dispatches incoming tunnel data packets to the data callback.
+func (p *UDPPuncher) handleTunnelPacket(payload []byte, remoteAddr *net.UDPAddr) {
+	p.mu.Lock()
+	cb := p.onDataPacket
+	p.mu.Unlock()
+	if cb != nil {
+		pktCopy := make([]byte, len(payload))
+		copy(pktCopy, payload)
+		cb(remoteAddr, pktCopy)
+	}
+}
+
 func (p *UDPPuncher) readLoop() {
-	buf := make([]byte, 65535) // MTU-safe буфер для IP-пакетов до 65535 байт
+	buf := make([]byte, 65535) // MTU-safe buffer for IP packets up to 65535 bytes
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -253,109 +350,17 @@ func (p *UDPPuncher) readLoop() {
 			continue
 		}
 
-		// 1. STUN Ответ (поддерживаем как XOR-MAPPED-ADDRESS так и MAPPED-ADDRESS)
-		if stun.IsMessage(buf[:n]) {
-			var stunResp stun.Message
-			stunResp.Raw = make([]byte, n)
-			copy(stunResp.Raw, buf[:n])
-			if err := stunResp.Decode(); err == nil {
-				var xorAddr stun.XORMappedAddress
-				if err := xorAddr.GetFrom(&stunResp); err == nil {
-					p.mappedIP = xorAddr.IP
-					p.mappedPort = xorAddr.Port
-					select {
-					case p.stunRespCh <- struct{}{}:
-					default:
-					}
-				} else {
-					var mappedAddr stun.MappedAddress
-					if err := mappedAddr.GetFrom(&stunResp); err == nil {
-						p.mappedIP = mappedAddr.IP
-						p.mappedPort = mappedAddr.Port
-						select {
-						case p.stunRespCh <- struct{}{}:
-						default:
-						}
-					}
-				}
-			}
-			continue
-		}
-
-		data := string(buf[:n])
-
-		// Тихий keep-alive пакет — просто игнорируем без callback
-		if data == "KAEP" {
-			continue
-		}
-
-		// 2. Входящий PING от пира -> отвечаем PONG и подтверждаем прямую видимость (двунаправленный P2P)
-		if strings.HasPrefix(data, "NATBYPASS:PING:") {
-			parts := strings.Split(data, ":")
-			if len(parts) >= 4 {
-				senderID := strings.Join(parts[2:len(parts)-1], ":")
-				if senderID == p.myDevID {
-					continue
-				}
-				sentTs := parts[len(parts)-1]
-				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
-				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
-
-				// Если пришёл прямой UDP пакет PING — удаленный пир УЖЕ достучался до нас напрямую!
-				// Сразу фиксируем прямое P2P соединение на этой стороне
-				if p.onPingResult != nil && remoteAddr != nil {
-					p.onPingResult(senderID, 35*time.Millisecond, remoteAddr.String())
-				}
-			}
-			continue
-		}
-
-
-		// 3. Ответ PONG от пира
-		if strings.HasPrefix(data, "NATBYPASS:PONG:") {
-			parts := strings.Split(data, ":")
-			if len(parts) >= 4 {
-				senderID := strings.Join(parts[2:len(parts)-1], ":")
-				if senderID == p.myDevID {
-					continue
-				}
-				sentNano, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
-				if err == nil {
-					rtt := time.Since(time.Unix(0, sentNano))
-					if rtt <= 0 {
-						rtt = 1 * time.Millisecond
-					}
-					// Обновляем portDelta для Symmetric NAT предсказания (разница между mapped портами)
-					if remoteAddr != nil && rtt > 0 {
-						p.natTypeMu.Lock()
-						if p.lastMappedPort > 0 && remoteAddr.Port > 0 {
-							observed := remoteAddr.Port - p.lastMappedPort
-							if observed > 0 && observed < 512 {
-								p.portDelta = observed
-							}
-						}
-						p.lastMappedPort = remoteAddr.Port
-						p.natTypeMu.Unlock()
-					}
-					if p.onPingResult != nil {
-						p.onPingResult(senderID, rtt, remoteAddr.String())
-					}
-				}
-			}
-			continue
-		}
-
-		// 4. Входящий пакет данных виртуального сетевого интерфейса (TUN)
-		if n > 14 && string(buf[:14]) == "NATBYPASS:TUN:" {
-			p.mu.Lock()
-			cb := p.onDataPacket
-			p.mu.Unlock()
-			if cb != nil {
-				pktCopy := make([]byte, n-14)
-				copy(pktCopy, buf[14:n])
-				cb(remoteAddr, pktCopy)
-			}
-			continue
+		switch {
+		case stun.IsMessage(buf[:n]):
+			p.handleSTUNMessage(buf[:n])
+		case n >= 4 && string(buf[:4]) == constants.KeepAlivePayload:
+			// Silent keep-alive, no-op
+		case strings.HasPrefix(string(buf[:n]), constants.PingPrefix):
+			p.handlePing(string(buf[:n]), remoteAddr)
+		case strings.HasPrefix(string(buf[:n]), constants.PongPrefix):
+			p.handlePong(string(buf[:n]), remoteAddr)
+		case n > constants.TunHeaderSize && string(buf[:constants.TunHeaderSize]) == constants.TunHeader:
+			p.handleTunnelPacket(buf[constants.TunHeaderSize:n], remoteAddr)
 		}
 	}
 }
