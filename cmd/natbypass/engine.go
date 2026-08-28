@@ -154,7 +154,9 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 	puncher, punchErr := network.NewUDPPuncher(udpListenPort, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		log.Info().Str("peer", remoteDevID).Float64("rtt_ms", float64(rtt.Microseconds())/1000.0).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] Connection confirmed via UDP ping")
 		if p, ok := registry.Get(remoteDevID); ok && p != nil {
+			p.DirectP2P = true
 			p.Latency = rtt
+			p.PingMs = rtt.Milliseconds()
 			p.ActiveEndpoint = fromAddr
 			registry.Upsert(p)
 		}
@@ -250,10 +252,23 @@ func publishLoop(
 			if puncher != nil {
 				if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
 					stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
+				} else {
+					log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
 				}
+
 				for _, p := range registry.List() {
-					if p.STUNAddr != "" {
-						_ = puncher.SendKeepAlive(p.STUNAddr)
+					// 1. Maintain NAT keep-alive to active direct endpoint or STUN address
+					targetKA := p.STUNAddr
+					if p.DirectP2P && p.ActiveEndpoint != "" {
+						targetKA = p.ActiveEndpoint
+					}
+					if targetKA != "" {
+						_ = puncher.SendKeepAlive(targetKA)
+					}
+
+					// 2. Periodic hole punch probe burst for non-direct peers
+					if !p.DirectP2P && p.STUNAddr != "" {
+						_ = puncher.SendHolePunchProbe(p.STUNAddr)
 					}
 				}
 			}

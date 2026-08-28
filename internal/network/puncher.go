@@ -38,8 +38,9 @@ type UDPPuncher struct {
 	lastMappedPort int
 	portDelta      int
 
-	probeMu      sync.Mutex
-	lastProbeMap map[string]time.Time
+	probeMu          sync.Mutex
+	lastProbeMap     map[string]time.Time
+	lastCleanupTime  time.Time
 }
 
 // NewUDPPuncher creates a new persistent UDP socket for STUN, hole punching, and data transfer.
@@ -75,15 +76,17 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &UDPPuncher{
-		conn:         conn,
-		localPort:    localPort,
-		myDevID:      myDevID,
-		stunServers:  stunServers,
-		onPingResult: onPing,
-		stunRespCh:   make(chan struct{}, 8),
-		ctx:          ctx,
-		cancel:       cancel,
-		NATType:      NATTypeUnknown,
+		conn:            conn,
+		localPort:       localPort,
+		myDevID:         myDevID,
+		stunServers:     stunServers,
+		onPingResult:    onPing,
+		stunRespCh:      make(chan struct{}, 8),
+		ctx:             ctx,
+		cancel:          cancel,
+		NATType:         NATTypeUnknown,
+		lastProbeMap:    make(map[string]time.Time),
+		lastCleanupTime: time.Now(),
 	}
 
 	// Start packet processing loop
@@ -154,7 +157,43 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 	return nil, 0, fmt.Errorf("STUN discovery timeout")
 }
 
-// SendHolePunchProbe sends direct UDP probe packets to the target peer endpoint.
+// candidatePorts calculates predicted port numbers for Symmetric NAT traversal.
+func (p *UDPPuncher) candidatePorts(base int) []int {
+	ports := []int{base}
+	switch p.GetNATType() {
+	case NATTypeSymmetric:
+		p.natTypeMu.RLock()
+		d := p.portDelta
+		p.natTypeMu.RUnlock()
+		if d <= 0 {
+			d = 1
+		}
+		for i := 1; i <= 8; i++ {
+			p1 := base + i*d
+			p2 := base - i*d
+			if p1 > 1024 && p1 < 65535 {
+				ports = append(ports, p1)
+			}
+			if p2 > 1024 && p2 < 65535 {
+				ports = append(ports, p2)
+			}
+		}
+	case NATTypeUnknown:
+		for i := 1; i <= 4; i++ {
+			p1 := base + i
+			p2 := base - i
+			if p1 > 1024 && p1 < 65535 {
+				ports = append(ports, p1)
+			}
+			if p2 > 1024 && p2 < 65535 {
+				ports = append(ports, p2)
+			}
+		}
+	}
+	return ports
+}
+
+// SendHolePunchProbe sends direct UDP probe packets to the target peer endpoint and candidate ports.
 func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
@@ -168,22 +207,43 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	}
 
 	p.probeMu.Lock()
-	if p.lastProbeMap == nil {
-		p.lastProbeMap = make(map[string]time.Time)
+	now := time.Now()
+
+	// Periodic cleanup of lastProbeMap entries older than 60s
+	if now.Sub(p.lastCleanupTime) > 60*time.Second {
+		for k, t := range p.lastProbeMap {
+			if now.Sub(t) > 60*time.Second {
+				delete(p.lastProbeMap, k)
+			}
+		}
+		p.lastCleanupTime = now
 	}
-	if time.Since(p.lastProbeMap[targetAddr]) < constants.MinProbeInterval {
+
+	if now.Sub(p.lastProbeMap[targetAddr]) < constants.MinProbeInterval {
 		p.probeMu.Unlock()
 		return nil // Rate limit: maximum 2 probes/second per address
 	}
-	p.lastProbeMap[targetAddr] = time.Now()
+	p.lastProbeMap[targetAddr] = now
 	p.probeMu.Unlock()
 
-	nowNano := time.Now().UnixNano()
+	nowNano := now.UnixNano()
 	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
 
-	// Send fast probe burst
+	// 1. Send 2 fast probe packets directly to target address
 	_, err = p.conn.WriteToUDP(probeData, rAddr)
 	_, _ = p.conn.WriteToUDP(probeData, rAddr)
+
+	// 2. Adaptive sweep across candidate ports for Symmetric NAT / CGNAT
+	targetIP := rAddr.IP
+	candidates := p.candidatePorts(rAddr.Port)
+	for _, port := range candidates {
+		if port == rAddr.Port {
+			continue
+		}
+		cAddr := &net.UDPAddr{IP: targetIP, Port: port}
+		_, _ = p.conn.WriteToUDP(probeData, cAddr)
+	}
+
 	return err
 }
 
@@ -274,9 +334,18 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 	pongMsg := fmt.Sprintf("%s%s:%s", constants.PongPrefix, p.myDevID, sentTs)
 	_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
+	// Calculate real RTT from embedded sender timestamp
+	rtt := 35 * time.Millisecond
+	if sentNano, err := strconv.ParseInt(sentTs, 10, 64); err == nil && sentNano > 0 {
+		measured := time.Since(time.Unix(0, sentNano))
+		if measured > 0 && measured < 10*time.Second {
+			rtt = measured
+		}
+	}
+
 	// Inbound PING confirms that the remote peer reached us directly over UDP
 	if p.onPingResult != nil && remoteAddr != nil {
-		p.onPingResult(senderID, 35*time.Millisecond, remoteAddr.String())
+		p.onPingResult(senderID, rtt, remoteAddr.String())
 	}
 }
 
