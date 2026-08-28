@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -825,18 +827,30 @@ func setupLogging(level, logFile string) {
 		}
 	}
 
+	// На MIPS/ARM роутерах busybox-shell не рендерит ANSI-коды ConsoleWriter
+	// → чистый JSON-вывод без кракозябр
+	isRouter := runtime.GOOS == "linux" &&
+		(runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "arm")
+
+	newLogger := func(w io.Writer) zerolog.Logger {
+		if isRouter {
+			return zerolog.New(w).With().Timestamp().Logger()
+		}
+		return zerolog.New(zerolog.ConsoleWriter{Out: w, TimeFormat: "15:04:05"}).
+			With().Timestamp().Logger()
+	}
+
 	if logFile != "" {
 		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err == nil {
-			console := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05"}
-			multi := zerolog.MultiLevelWriter(console, f)
-			log.Logger = zerolog.New(multi).With().Timestamp().Logger()
+			multi := io.MultiWriter(os.Stderr, f)
+			log.Logger = newLogger(multi)
 			return
 		}
 	}
-	log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05"}).
-		With().Timestamp().Logger()
+	log.Logger = newLogger(os.Stderr)
 }
+
 
 func loadOrGenerateKeys(cfg *config.Config) ([32]byte, [32]byte, error) {
 	if cfg.Crypto.PublicKey != "" && cfg.Crypto.PrivateKey != "" {

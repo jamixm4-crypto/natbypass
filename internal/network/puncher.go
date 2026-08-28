@@ -171,9 +171,9 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if p.lastProbeMap == nil {
 		p.lastProbeMap = make(map[string]time.Time)
 	}
-	if time.Since(p.lastProbeMap[targetAddr]) < 2*time.Second {
+	if time.Since(p.lastProbeMap[targetAddr]) < 500*time.Millisecond {
 		p.probeMu.Unlock()
-		return nil // Rate limit: не более 1 зонда в 2 секунды на адрес
+		return nil // Rate limit: не более 2 зондов в секунду на адрес
 	}
 	p.lastProbeMap[targetAddr] = time.Now()
 	p.probeMu.Unlock()
@@ -181,8 +181,13 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("NATBYPASS:PING:%s:%d", p.myDevID, nowNano))
 
-	// 1 точный пакет — без флуда и sweep-шторма
-	_, err = p.conn.WriteToUDP(probeData, rAddr)
+	// 3 пакета пробития с паузой 15ms — обходит потери на CGNAT/Symmetric NAT
+	for i := 0; i < 3; i++ {
+		_, err = p.conn.WriteToUDP(probeData, rAddr)
+		if i < 2 {
+			time.Sleep(15 * time.Millisecond)
+		}
+	}
 	return err
 }
 
@@ -297,8 +302,13 @@ func (p *UDPPuncher) readLoop() {
 				}
 				sentTs := parts[len(parts)-1]
 				pongMsg := fmt.Sprintf("NATBYPASS:PONG:%s:%s", p.myDevID, sentTs)
-				// Отправляем ровно 1 PONG в ответ на PING
-				_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
+				// Отправляем 3 PONG в ответ на PING (компенсация потерь на MIPS/CGNAT)
+				for i := 0; i < 3; i++ {
+					_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
+					if i < 2 {
+						time.Sleep(10 * time.Millisecond)
+					}
+				}
 			}
 			continue
 		}
