@@ -862,7 +862,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.072</span>
+          <span id="topUpdateLabel">v1.9.073</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -873,7 +873,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.072</span>
+          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.073</span>
           <div class="online-dot"></div>
         </div>
 
@@ -2610,26 +2610,34 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
         const vIP = p.virtual_ip || ('10.200.0.' + (idx + 2));
 
+        let pOS = (p.os || '').toLowerCase();
+        let pPlat = (p.platform || '').toLowerCase();
+        let pDev = (p.device_id || '').toLowerCase();
+
+        let isKeen = p.is_keenetic || pPlat.includes('keenetic') || pOS.includes('keenetic') || pDev.includes('keenetic') || pDev.includes('router') || pDev.includes('jcloud');
+        let isWin = (!isKeen) && (pPlat.includes('win') || pOS.includes('win') || pDev.includes('desktop') || pDev.includes('pc') || pDev.includes('laptop') || pDev.includes('windows'));
+        let isAndroid = (!isKeen) && (pPlat.includes('android') || pOS.includes('android') || pDev.includes('android') || pDev.includes('phone') || pDev.includes('samsung') || pDev.includes('xiaomi'));
+        let isMac = (!isKeen) && (pPlat.includes('darwin') || pPlat.includes('mac') || pOS.includes('darwin') || pOS.includes('mac') || pDev.includes('macbook'));
+
         let platName = 'Linux';
         let platCls = 'badge-purple';
-
-        let isKeen = p.is_keenetic || (p.platform && p.platform.toLowerCase().includes('keenetic')) || (p.os && p.os.toLowerCase().includes('keenetic')) || ((p.device_id || '').toLowerCase().includes('keenetic')) || ((p.device_id || '').toLowerCase().includes('router'));
-        let isWin = (!isKeen) && ((p.platform && p.platform.toLowerCase().includes('win')) || (p.os && p.os.toLowerCase().includes('win')));
-        let isAndroid = (p.platform && p.platform.toLowerCase().includes('android')) || (p.os && p.os.toLowerCase().includes('android')) || ((p.device_id || '').toLowerCase().includes('android'));
-        let isMac = (p.platform && (p.platform.toLowerCase().includes('darwin') || p.platform.toLowerCase().includes('mac'))) || (p.os && (p.os.toLowerCase().includes('darwin') || p.os.toLowerCase().includes('mac')));
 
         if (isKeen) {
           platName = 'KeeneticOS';
           platCls = 'badge-blue';
-        } else if (isAndroid) {
-          platName = 'Android';
-          platCls = 'badge-green';
         } else if (isWin) {
           platName = 'Windows';
           platCls = 'badge-purple';
+        } else if (isAndroid) {
+          platName = 'Android';
+          platCls = 'badge-green';
         } else if (isMac) {
           platName = 'macOS';
           platCls = 'badge-cyan';
+        } else if (p.platform) {
+          platName = p.platform;
+        } else if (p.os) {
+          platName = p.os;
         }
 
         let archStr = p.arch ? ' (' + p.arch + ')' : '';

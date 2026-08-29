@@ -39,7 +39,7 @@ import (
 )
 
 var (
-	Version = "1.9.072"
+	Version = "1.9.073"
 	Commit  = "release"
 )
 
@@ -3491,6 +3491,11 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						IsExitNode:       p.IsExitNode,
 						AdvertisedRoutes: p.AdvertisedRoutes,
 						AWG:              p.AWG,
+						OS:               p.OS,
+						Platform:         p.Platform,
+						Arch:             p.Arch,
+						Version:          p.Version,
+						IsKeenetic:       p.IsKeenetic,
 					})
 
 					nameInfo := p.DeviceID
@@ -3617,6 +3622,11 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					IsExitNode:       allowExitNode,
 					AdvertisedRoutes: advSubnets,
 					AWG:              awgParams,
+					OS:               "windows",
+					Platform:         "Windows",
+					Arch:             runtime.GOARCH,
+					Version:          Version,
+					IsKeenetic:       false,
 					NetworkKey:       activeKey,
 					Topic:            activeTopic,
 				}
@@ -3890,6 +3900,9 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					OS:               osName,
 					Platform:         plat,
 					CountryFlag:      pFlag,
+					Arch:             p.Arch,
+					Version:          p.Version,
+					IsKeenetic:       p.IsKeenetic,
 				})
 
 				nameInfo := p.DeviceID
@@ -4170,6 +4183,9 @@ func publishCurrentState(ctx context.Context) {
 		AWG:              awgParams,
 		OS:               "windows",
 		Platform:         "Windows",
+		Arch:             runtime.GOARCH,
+		Version:          Version,
+		IsKeenetic:       false,
 		CountryFlag:      network.LookupCountryFlag(ctx, ipStr),
 		NetworkKey:       activeKey,
 		Topic:            activeTopic,

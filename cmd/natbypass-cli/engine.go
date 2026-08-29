@@ -833,6 +833,11 @@ func receiveLoop(
 				LastSeen:         p.Timestamp,
 				Online:           true,
 				AWG:              p.AWG,
+				OS:               p.OS,
+				Platform:         p.Platform,
+				Arch:             p.Arch,
+				Version:          p.Version,
+				IsKeenetic:       p.IsKeenetic,
 			})
 			if isNewPeer {
 				// Реактивный ответ маяком новому узлу с джиттером для мгновенного обнаружения mesh-сети
