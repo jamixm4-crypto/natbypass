@@ -22,10 +22,10 @@
       --bg-workspace: #0b0f19;
       --bg-sidebar: #0e121d;
       --border-grid: rgba(255, 255, 255, 0.04);
-      --glass-bg: rgba(18, 24, 38, 0.70);
-      --glass-hover: rgba(25, 34, 54, 0.90);
-      --glass-border: rgba(168, 85, 247, 0.28);
-      --glass-glow: 0 0 30px rgba(168, 85, 247, 0.18), inset 0 0 20px rgba(56, 189, 248, 0.08);
+      --glass-bg: rgba(18, 24, 38, 0.65);
+      --glass-hover: rgba(25, 34, 54, 0.85);
+      --glass-border: rgba(168, 85, 247, 0.25);
+      --glass-glow: 0 0 30px rgba(168, 85, 247, 0.15), inset 0 0 20px rgba(56, 189, 248, 0.08);
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
       --text-dim: #64748b;
@@ -60,10 +60,7 @@
     html, body {
       background: var(--bg-space);
       color: var(--text-main);
-      font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      text-rendering: optimizeLegibility;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       width: 100vw;
       height: 100vh;
       min-width: 760px;
@@ -72,11 +69,6 @@
       overflow: hidden;
       user-select: none;
       -webkit-user-select: none;
-    }
-
-    .mono, code, pre {
-      font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace !important;
-      letter-spacing: -0.01em;
     }
 
     .grid-bg {
@@ -785,24 +777,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
     </div>
 
-    <!-- Persistent Update Notification Banner (Shown when new version is available) -->
-    <div id="updateAvailableBanner" style="display:none; background:linear-gradient(90deg, rgba(16, 185, 129, 0.16), rgba(6, 182, 212, 0.16)); border:1px solid rgba(16, 185, 129, 0.45); border-radius:14px; padding:10px 16px; margin-bottom:14px; align-items:center; justify-content:space-between; box-shadow:0 0 25px rgba(16, 185, 129, 0.15); flex-shrink:0;">
-      <div style="display:flex; align-items:center; gap:10px;">
-        <span style="font-size:1.3rem;">🚀</span>
-        <div>
-          <span style="font-weight:800; color:#ffffff; font-size:0.86rem;">Доступно обновление NatBypass <span id="bannerNewVer" class="mono" style="color:#34d399;">v1.9.36</span>!</span>
-          <span style="font-size:0.78rem; color:var(--text-muted); margin-left:8px;" id="bannerReleaseDate"></span>
-        </div>
-      </div>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <button onclick="openUpdateModal()" class="btn btn-neon" style="background:linear-gradient(135deg, #10b981, #06b6d4); padding:6px 14px; font-size:0.78rem; border-radius:10px; box-shadow:0 0 15px rgba(16,185,129,0.4);">⚡ Обновить в 1 клик</button>
-        <button onclick="dismissUpdateBanner()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.1rem; padding:4px 8px;" title="Скрыть">✕</button>
-      </div>
-    </div>
-
     <!-- TAB 1: DASHBOARD (EXACT SCREENSHOT LAYOUT) -->
     <div id="tab-dashboard" class="tab-pane active">
-
       <!-- Active Gateway Banner -->
       <div id="activeGatewayBanner" style="display:none; background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.4); border-radius:12px; padding:8px 14px; margin-bottom:12px; justify-content:space-between; align-items:center;">
         <div style="display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:700;">
@@ -1832,14 +1808,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
     }
 
-    function dismissUpdateBanner() {
-      const banner = document.getElementById('updateAvailableBanner');
-      if (banner) {
-        banner.style.display = 'none';
-      }
-    }
-
-
     async function checkUpdateManual() {
       const lblLatest = document.getElementById('lblLatestVer');
       const lblCur = document.getElementById('lblCurrentVer');
@@ -1879,31 +1847,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             lblLatest.innerText = (d.latest_version || '—') + ' (Новая версия!)' + pubStr;
             btnApply.innerText = '⚡ Скачать и обновить (' + (d.latest_version || '') + ')';
             btnApply.style.background = 'linear-gradient(135deg, #a855f7, #6366f1)';
-            if (topLabel) {
-              topLabel.innerText = '🚀 ' + d.latest_version;
-              const btnTop = document.getElementById('btnTopUpdate');
-              if (btnTop) {
-                btnTop.style.borderColor = '#10b981';
-                btnTop.style.boxShadow = '0 0 15px rgba(16, 185, 129, 0.4)';
-              }
-            }
+            if (topLabel) topLabel.innerText = 'Доступно ' + d.latest_version;
             if (d.release_notes) {
               notesBox.style.display = 'block';
               txtNotes.innerText = d.release_notes;
-            }
-
-            // Show persistent top banner
-            const updateBanner = document.getElementById('updateAvailableBanner');
-            const bannerVer = document.getElementById('bannerNewVer');
-            const bannerDate = document.getElementById('bannerReleaseDate');
-            if (updateBanner && bannerVer) {
-              bannerVer.innerText = d.latest_version || '';
-              if (bannerDate && d.published_at) {
-                try {
-                  bannerDate.innerText = 'от ' + new Date(d.published_at).toLocaleDateString();
-                } catch(e) {}
-              }
-              updateBanner.style.display = 'flex';
             }
           } else {
             lblLatest.className = 'badge badge-purple mono';
@@ -1918,7 +1865,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               notesBox.style.display = 'none';
             }
           }
-
         } else {
           lblLatest.innerText = 'Ошибка проверки';
         }

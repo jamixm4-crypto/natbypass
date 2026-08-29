@@ -274,8 +274,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	handler := s.corsMiddleware(s.authMiddleware(mux))
 
-	// щем свободный порт, начиная с s.port (до +20 портов)
+	// Ищем свободный порт, начиная с s.port (до +20 портов)
 	var listener net.Listener
+
 	var err error
 	initialPort := s.port
 	if initialPort <= 0 {
@@ -907,7 +908,7 @@ func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if internetOK {
-		result["internet"] = check{Ok: true, Detail: "нтернет доступен", Extra: connectedEndpoint}
+		result["internet"] = check{Ok: true, Detail: "Интернет доступен", Extra: connectedEndpoint}
 	} else {
 		result["internet"] = check{Ok: false, Detail: "Нет прямого доступа к проверочным DNS/HTTPS серверам"}
 	}
