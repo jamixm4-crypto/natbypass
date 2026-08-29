@@ -8,7 +8,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -43,7 +46,12 @@ func IsKeeneticOS() bool {
 		"/bin/ndmq",
 		"/usr/bin/ndmq",
 		"/opt/bin/ndmq",
+		"/bin/ndmc",
+		"/usr/bin/ndmc",
+		"/opt/bin/ndmc",
 		"/etc/ndm",
+		"/storage/startup-config",
+		"/var/ndm/startup-config",
 	}
 	for _, path := range indicators {
 		if _, err := os.Stat(path); err == nil {
@@ -51,15 +59,131 @@ func IsKeeneticOS() bool {
 		}
 	}
 	// Check /proc/version or os-release for Keenetic / NDMS
-	if data, err := os.ReadFile("/etc/os-release"); err == nil {
-		if strings.Contains(strings.ToLower(string(data)), "keenetic") || strings.Contains(strings.ToLower(string(data)), "ndms") {
-			return true
+	for _, f := range []string{"/etc/os-release", "/proc/version"} {
+		if data, err := os.ReadFile(f); err == nil {
+			lower := strings.ToLower(string(data))
+			if strings.Contains(lower, "keenetic") || strings.Contains(lower, "ndms") || strings.Contains(lower, "ndm") {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// GetKeeneticUsers parses KeeneticOS configuration and returns discovered users.
+// VerifyKeeneticAuth checks username and password against KeeneticOS credentials.
+func VerifyKeeneticAuth(username, password string) bool {
+	if username == "" || password == "" {
+		return false
+	}
+
+	// 1. Method 1: Local Keenetic Web/RCI API probe (most accurate & real-time)
+	if verifyViaLocalKeeneticHTTP(username, password) {
+		return true
+	}
+
+	// 2. Method 2: ndmc CLI authentication check
+	if verifyViaNDMC(username, password) {
+		return true
+	}
+
+	// 3. Method 3: Direct config and shadow files hash matching
+	users := GetKeeneticUsers()
+	for _, u := range users {
+		if subtle.ConstantTimeCompare([]byte(u.Username), []byte(username)) != 1 {
+			continue
+		}
+
+		// Plaintext match
+		if u.Password != "" {
+			if subtle.ConstantTimeCompare([]byte(u.Password), []byte(password)) == 1 {
+				return true
+			}
+		}
+
+		// Hash match
+		if u.PasswordHash != "" {
+			if verifyKeeneticHash(username, password, u.PasswordHash, u.HashType) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API (127.0.0.1:80 / 127.0.0.1:443 / 192.168.1.1:80)
+func verifyViaLocalKeeneticHTTP(username, password string) bool {
+	client := &http.Client{
+		Timeout: 1200 * time.Millisecond,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 800 * time.Millisecond,
+			}).DialContext,
+		},
+	}
+
+	// Check endpoints where Keenetic web services respond
+	targets := []string{
+		"http://127.0.0.1:80",
+		"http://127.0.0.1:81",
+		"http://127.0.0.1:8080",
+		"http://192.168.1.1:80",
+	}
+
+	for _, target := range targets {
+		// A. Try POST /auth with JSON payload
+		authPayload, _ := json.Marshal(map[string]string{
+			"login":    username,
+			"password": password,
+		})
+		req, err := http.NewRequest("POST", target+"/auth", bytes.NewReader(authPayload))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			if resp, err := client.Do(req); err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return true
+				}
+			}
+		}
+
+		// B. Try GET /rci/show/version with Basic Auth
+		reqB, errB := http.NewRequest("GET", target+"/rci/show/version", nil)
+		if errB == nil {
+			reqB.SetBasicAuth(username, password)
+			if respB, err := client.Do(reqB); err == nil {
+				_ = respB.Body.Close()
+				if respB.StatusCode == http.StatusOK {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// verifyViaNDMC checks credentials via ndmc CLI
+func verifyViaNDMC(username, password string) bool {
+	ndmcPaths := []string{"ndmc", "/bin/ndmc", "/usr/bin/ndmc", "/opt/bin/ndmc"}
+	for _, ndmc := range ndmcPaths {
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		cmd := exec.CommandContext(ctx, ndmc, "-u", username, "-p", password, "-c", "show version")
+		out, err := cmd.Output()
+		cancel()
+		if err == nil && len(out) > 0 {
+			outStr := string(out)
+			if !strings.Contains(outStr, "Authentication failed") &&
+				!strings.Contains(outStr, "Access denied") &&
+				!strings.Contains(outStr, "error") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// GetKeeneticUsers parses KeeneticOS configuration files and returns discovered users.
 func GetKeeneticUsers() []KeeneticUser {
 	keeneticCacheMu.RLock()
 	if len(keeneticUsersCache) > 0 && time.Since(keeneticCacheTime) < 30*time.Second {
@@ -75,13 +199,15 @@ func GetKeeneticUsers() []KeeneticUser {
 	var users []KeeneticUser
 	seen := make(map[string]bool)
 
-	// 1. Try reading Keenetic config files
+	// 1. Config files in KeeneticOS & Entware
 	configFiles := []string{
+		"/storage/startup-config",
 		"/var/ndm/startup-config",
 		"/var/ndm/running-config",
 		"/opt/etc/ndm/startup-config",
 		"/etc/ndm/startup-config",
 		"/opt/etc/ndm/running-config",
+		"/tmp/startup-config",
 	}
 
 	for _, cfgFile := range configFiles {
@@ -101,7 +227,7 @@ func GetKeeneticUsers() []KeeneticUser {
 		}
 	}
 
-	// 2. Try ndmq CLI query if config files were unreadable
+	// 2. ndmq CLI query
 	if len(users) == 0 {
 		ndmqPaths := []string{"ndmq", "/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq"}
 		for _, ndmq := range ndmqPaths {
@@ -155,11 +281,7 @@ func GetKeeneticUsers() []KeeneticUser {
 	return users
 }
 
-// parseKeeneticUserLine parses lines like:
-// "user admin password MyPass123"
-// "user admin password hash MD5:c4ca4238a0b923820dcc509a6f75849b"
-// "user admin password hash sha256:8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
-// "user admin password hash $1$..."
+// parseKeeneticUserLine parses user lines in Keenetic startup-config
 func parseKeeneticUserLine(line string) *KeeneticUser {
 	if !strings.HasPrefix(line, "user ") {
 		return nil
@@ -201,58 +323,34 @@ func parseKeeneticUserLine(line string) *KeeneticUser {
 	}
 }
 
-// VerifyKeeneticAuth checks username and password against KeeneticOS credentials.
-func VerifyKeeneticAuth(username, password string) bool {
-	users := GetKeeneticUsers()
-	if len(users) == 0 {
-		// Default fallback if no Keenetic users discovered
-		return (username == "admin" && password == "admin")
-	}
-
-	for _, u := range users {
-		if subtle.ConstantTimeCompare([]byte(u.Username), []byte(username)) != 1 {
-			continue
-		}
-
-		// 1. Plaintext match
-		if u.Password != "" {
-			if subtle.ConstantTimeCompare([]byte(u.Password), []byte(password)) == 1 {
-				return true
-			}
-		}
-
-		// 2. Hash match
-		if u.PasswordHash != "" {
-			if verifyHash(password, u.PasswordHash, u.HashType) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func verifyHash(password, storedHash, hashType string) bool {
+func verifyKeeneticHash(username, password, storedHash, hashType string) bool {
 	storedLower := strings.ToLower(storedHash)
 
-	// MD5 check
+	// 1. Plain MD5 of password
 	md5Sum := md5.Sum([]byte(password))
-	md5Hex := hex.EncodeToString(md5Sum[:])
-	if subtle.ConstantTimeCompare([]byte(md5Hex), []byte(storedLower)) == 1 {
+	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(md5Sum[:])), []byte(storedLower)) == 1 {
 		return true
 	}
 
-	// SHA256 check
+	// 2. Plain SHA256 of password
 	shaSum := sha256.Sum256([]byte(password))
-	shaHex := hex.EncodeToString(shaSum[:])
-	if subtle.ConstantTimeCompare([]byte(shaHex), []byte(storedLower)) == 1 {
+	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(shaSum[:])), []byte(storedLower)) == 1 {
 		return true
 	}
 
-	// MD5 Keenetic format: md5(username:realm:password) or md5(password)
-	adminRealmMD5 := md5.Sum([]byte(fmt.Sprintf("admin:Keenetic:%s", password)))
-	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(adminRealmMD5[:])), []byte(storedLower)) == 1 {
-		return true
+	// 3. Keenetic Digest formats: md5(username:realm:password)
+	realms := []string{"Keenetic", "KeeneticOS", "NDMS", "Keenetic Router", "Router", "admin", ""}
+	for _, realm := range realms {
+		dStr := fmt.Sprintf("%s:%s:%s", username, realm, password)
+		h := md5.Sum([]byte(dStr))
+		if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(h[:])), []byte(storedLower)) == 1 {
+			return true
+		}
+
+		sH := sha256.Sum256([]byte(dStr))
+		if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sH[:])), []byte(storedLower)) == 1 {
+			return true
+		}
 	}
 
 	return false
