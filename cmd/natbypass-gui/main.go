@@ -26,6 +26,7 @@ import (
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/network"
+	"github.com/natbypass/natbypass/internal/relay"
 
 
 	"github.com/natbypass/natbypass/internal/peer"
@@ -38,7 +39,7 @@ import (
 )
 
 var (
-	Version = "1.9.070"
+	Version = "1.9.071"
 	Commit  = "release"
 )
 
@@ -276,6 +277,7 @@ type MSG struct {
 // Глобальные постоянные GDI ресурсы (создаются 1 раз при старте, 0 утечек)
 var (
 	guiMagicSock *network.MagicSock
+	guiWSSClient *relay.WSSRelayClient
 	hMainWnd     uintptr
 	hAppIcon     uintptr
 	hCursor      uintptr
@@ -3070,6 +3072,16 @@ func startEngineFromConfig(c *config.Config) {
 			writeDebug("Web UI сервер: " + err.Error())
 		}
 	}()
+
+	if c.Relay.Server != "" {
+		guiWSSClient = relay.NewWSSRelayClient(c.Relay.Server, myDevID, func(srcID string, payload []byte) {
+			if len(payload) > 0 && tunDev != nil {
+				_ = tunDev.WritePacket(payload)
+			}
+		})
+		guiWSSClient.Start()
+		writeDebug("🔒 GUI: WSS/HTTPS Fallback Relay (порт 443) запущен: " + c.Relay.Server)
+	}
 
 	// Создание реального UDP Hole Punching сокета
 	// Порт берётся из конфига (Network.UDPPort). По умолчанию 0 = OS назначает случайный порт.

@@ -118,6 +118,12 @@ type CryptoConfig struct {
 }
 
 // DaemonConfig — настройки демона
+// RelayConfig — настройки резервного WSS / HTTPS релея (порт 443)
+type RelayConfig struct {
+	Enabled bool   `mapstructure:"enabled" yaml:"enabled"`
+	Server  string `mapstructure:"server" yaml:"server,omitempty"`
+}
+
 type DaemonConfig struct {
 	PidFile       string `mapstructure:"pid_file" yaml:"pid_file,omitempty"`
 	SyslogEnabled bool   `mapstructure:"syslog_enabled" yaml:"syslog_enabled,omitempty"`
@@ -132,6 +138,7 @@ type Config struct {
 	Signaling       SignalingConfig `mapstructure:"signaling" yaml:"signaling"`
 	WireGuard       WireGuardConfig `mapstructure:"wireguard" yaml:"wireguard"`
 	Crypto          CryptoConfig    `mapstructure:"crypto" yaml:"crypto"`
+	Relay           RelayConfig     `mapstructure:"relay" yaml:"relay,omitempty"`
 	Daemon          DaemonConfig    `mapstructure:"daemon" yaml:"daemon"`
 	Profiles        []Profile       `mapstructure:"profiles" yaml:"profiles,omitempty"`
 	ActiveProfileID string          `mapstructure:"active_profile_id" yaml:"active_profile_id,omitempty"`

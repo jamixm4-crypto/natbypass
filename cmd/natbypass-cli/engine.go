@@ -23,6 +23,7 @@ import (
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/daemon"
 	"github.com/natbypass/natbypass/internal/network"
+	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/tray"
@@ -37,6 +38,7 @@ import (
 
 var (
 	magicSock        *network.MagicSock
+	wssClient        *relay.WSSRelayClient
 	triggerPublishCh = make(chan struct{}, 10)
 )
 
@@ -282,7 +284,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							sentDirect = true
 						}
 					}
-					// Релей через сигнальный канал только если прямой UDP-сокет недоступен
+					// Релей через WSS (порт 443) или сигнальный канал только если прямой UDP-сокет недоступен
+					if !sentDirect && wssClient != nil && wssClient.IsConnected() {
+						if err := wssClient.SendPacket(p.DeviceID, pkt); err == nil {
+							sentDirect = true
+						}
+					}
 					if !sentDirect && sigMgr != nil {
 						_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 					}
@@ -320,6 +327,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 		}()
+	}
+
+	if cfg.Relay.Server != "" {
+		wssClient = relay.NewWSSRelayClient(cfg.Relay.Server, deviceID, func(srcID string, payload []byte) {
+			if len(payload) > 0 && tunDev != nil {
+				_ = tunDev.WritePacket(payload)
+			}
+		})
+		wssClient.Start()
+		log.Info().Str("server", cfg.Relay.Server).Msg("🔒 WSS/HTTPS Fallback Relay (порт 443) подключен")
 	}
 
 	go initialDiscovery(engineCtx, puncher, ipDisc, uiServer, deviceID)
