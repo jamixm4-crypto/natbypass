@@ -607,6 +607,16 @@ func keyListener(ctx context.Context, triggerDump chan<- struct{}, cancel contex
 
 func main() {
 	enableVirtualTerminal()
+
+	// Single Instance Protection (Windows)
+	mutName, _ := windows.UTF16PtrFromString("Global\\NatBypass_Monitor_SingleInstance")
+	hMut, err := windows.CreateMutex(nil, false, mutName)
+	if hMut != 0 && err == windows.ERROR_ALREADY_EXISTS {
+		fmt.Println("⚠️ NatBypass Monitor уже запущен. Второй экземпляр не допускается.")
+		os.Exit(0)
+	}
+	_ = hMut
+
 	fmt.Print("\033[2J\033[H")
 	fmt.Println("═════════════════════════════════════════════════════════════════════════")
 	fmt.Println("             🛸 NATBYPASS РЕАЛЬНО-ВРЕМЕННОЙ МОНИТОР И ДЕБАГГЕР           ")

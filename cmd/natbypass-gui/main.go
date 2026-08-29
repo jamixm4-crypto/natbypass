@@ -698,7 +698,7 @@ func main() {
 	mutName, _ := windows.UTF16PtrFromString("Global\\NatBypass_SingleInstance_Mutex_App")
 	hMut, _, _ := procCreateMutexW.Call(0, 1, uintptr(unsafe.Pointer(mutName)))
 	if windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
-		clsName, _ := windows.UTF16PtrFromString("NatBypassWindowClass")
+		clsName, _ := windows.UTF16PtrFromString("NatBypassModernAppClass")
 		hExisting, _, _ := procFindWindowW.Call(uintptr(unsafe.Pointer(clsName)), 0)
 		if hExisting != 0 {
 			procShowWindow.Call(hExisting, 9 /* SW_RESTORE */)
