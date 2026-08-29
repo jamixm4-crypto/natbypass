@@ -132,12 +132,8 @@ func getKeeneticProbeTargets() []string {
 		}
 	}
 
-	// Localhost is always active on router
-	add("http", "127.0.0.1", "80")
-	add("https", "127.0.0.1", "443")
-	add("http", "192.168.1.1", "80")
+	hosts := []string{"127.0.0.1", "192.168.1.1", "192.168.0.1", "192.168.91.1", "192.168.11.1"}
 
-	// Dynamically check interface IPs
 	ifaces, err := net.Interfaces()
 	if err == nil {
 		for _, iface := range ifaces {
@@ -145,12 +141,17 @@ func getKeeneticProbeTargets() []string {
 			if err == nil {
 				for _, addr := range addrs {
 					if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
-						ip := ipnet.IP.String()
-						add("http", ip, "80")
+						hosts = append(hosts, ipnet.IP.String())
 					}
 				}
 			}
 		}
+	}
+
+	for _, host := range hosts {
+		add("http", host, "80")
+		add("https", host, "443")
+		add("http", host, "81")
 	}
 
 	return targets
@@ -176,11 +177,11 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 			jar, _ := cookiejar.New(nil)
 			client := &http.Client{
 				Jar:     jar,
-				Timeout: 200 * time.Millisecond,
+				Timeout: 2500 * time.Millisecond,
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 					DialContext: (&net.Dialer{
-						Timeout: 200 * time.Millisecond,
+						Timeout: 2500 * time.Millisecond,
 					}).DialContext,
 				},
 			}
@@ -288,11 +289,11 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 // verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
 func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	client := &http.Client{
-		Timeout: 200 * time.Millisecond,
+		Timeout: 2500 * time.Millisecond,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			DialContext: (&net.Dialer{
-				Timeout: 150 * time.Millisecond,
+				Timeout: 1200 * time.Millisecond,
 			}).DialContext,
 		},
 	}
