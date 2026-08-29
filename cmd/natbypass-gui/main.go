@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	Version = "1.9.068"
+	Version = "1.9.069"
 	Commit  = "release"
 )
 
@@ -3078,9 +3078,9 @@ func startEngineFromConfig(c *config.Config) {
 		atomic.AddUint64(&packetsRecvCount, 1)
 		if p, ok := registry.Get(remoteDevID); ok {
 			p.DirectP2P = true
-			if rtt > 0 && rtt < 10*time.Second {
+			if rtt > 0 && rtt <= 1500*time.Millisecond {
 				if p.Latency > 0 {
-					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
+					p.Latency = time.Duration(float64(p.Latency)*0.70 + float64(rtt)*0.30)
 				} else {
 					p.Latency = rtt
 				}

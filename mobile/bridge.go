@@ -381,6 +381,9 @@ func StartEngine(configYAML string, tunFd int) string {
 					NetworkKey:       activeKey,
 					OS:               "android",
 					Platform:         "Android",
+					Arch:             "arm64",
+					Version:          "1.9.069",
+					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
 				_ = globalSigMgr.Send(ctx, payload)
@@ -467,6 +470,11 @@ func StartEngine(configYAML string, tunFd int) string {
 						LastSeen:         time.Now(),
 						Online:           true,
 						AWG:              p.AWG,
+						OS:               p.OS,
+						Platform:         p.Platform,
+						Arch:             p.Arch,
+						Version:          p.Version,
+						IsKeenetic:       p.IsKeenetic,
 					})
 					negotiateVirtualIP()
 

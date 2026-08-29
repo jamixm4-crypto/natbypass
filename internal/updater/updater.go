@@ -419,14 +419,12 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	}
 
 
-	setStatus(true, 95, "Перезапуск службы NatBypass...", "", false)
+	setStatus(true, 100, "Обновление успешно скачано! Перезапуск службы NatBypass...", "", true)
 
-	// Перезапуск службы или процесса в фоновом режиме
+	// Даем браузеру 2.5 секунды получить статус 100%, затем перезапускаем службу
 	go func() {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2500 * time.Millisecond)
 		restartService(execPath)
 	}()
-
-	setStatus(true, 100, "Обновление завершено! Страница обновится автоматически.", "", true)
 	return nil
 }

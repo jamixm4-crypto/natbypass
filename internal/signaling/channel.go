@@ -119,6 +119,9 @@ type Payload struct {
 	AWG              *AWGParams `json:"awg,omitempty"`
 	OS               string     `json:"os,omitempty"`
 	Platform         string     `json:"platform,omitempty"`
+	Arch             string     `json:"arch,omitempty"`
+	Version          string     `json:"version,omitempty"`
+	IsKeenetic       bool       `json:"is_keenetic,omitempty"`
 	CountryFlag      string     `json:"country_flag,omitempty"`
 	Channel          string     `json:"channel,omitempty"`
 	NetworkKey       string     `json:"network_key,omitempty"`
@@ -162,6 +165,9 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		CamelAWG              *AWGParams `json:"awg"`
 		UpperOS               string     `json:"OS"`
 		UpperPlatform         string     `json:"Platform"`
+		UpperArch             string     `json:"Arch"`
+		UpperVersion          string     `json:"Version"`
+		UpperIsKeenetic       bool       `json:"IsKeenetic"`
 		UpperCountryFlag      string     `json:"CountryFlag"`
 		UpperNetworkKey       string     `json:"NetworkKey"`
 		UpperNetworkID        string     `json:"NetworkID"`
@@ -256,6 +262,15 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 	}
 	if p.Platform == "" && aux.UpperPlatform != "" {
 		p.Platform = aux.UpperPlatform
+	}
+	if p.Arch == "" && aux.UpperArch != "" {
+		p.Arch = aux.UpperArch
+	}
+	if p.Version == "" && aux.UpperVersion != "" {
+		p.Version = aux.UpperVersion
+	}
+	if !p.IsKeenetic && aux.UpperIsKeenetic {
+		p.IsKeenetic = aux.UpperIsKeenetic
 	}
 	if p.CountryFlag == "" && aux.UpperCountryFlag != "" {
 		p.CountryFlag = aux.UpperCountryFlag

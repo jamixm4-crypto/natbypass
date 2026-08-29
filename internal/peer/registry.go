@@ -29,6 +29,11 @@ type Peer struct {
 	ActiveEndpoint   string               `json:"active_endpoint,omitempty"`
 	PingMs           int64                `json:"ping_ms"`
 	NATType          string               `json:"nat_type,omitempty"`
+	OS               string               `json:"os,omitempty"`
+	Platform         string               `json:"platform,omitempty"`
+	Arch             string               `json:"arch,omitempty"`
+	Version          string               `json:"version,omitempty"`
+	IsKeenetic       bool                 `json:"is_keenetic,omitempty"`
 	IsExitNode       bool                 `json:"is_exit_node,omitempty"`
 	AdvertisedRoutes []string             `json:"advertised_routes,omitempty"`
 	LastSeen         time.Time            `json:"last_seen"`
@@ -40,8 +45,6 @@ type Peer struct {
 	LastMQTTSeen     time.Time            `json:"last_mqtt_seen,omitempty"`
 	LastTelegramSeen time.Time            `json:"last_telegram_seen,omitempty"`
 	AWG              *signaling.AWGParams `json:"awg,omitempty"`
-	OS               string               `json:"os,omitempty"`
-	Platform         string               `json:"platform,omitempty"`
 	CountryFlag      string               `json:"country_flag,omitempty"`
 	Candidates       []string             `json:"candidates,omitempty"`
 	NATBlocked       bool                 `json:"nat_blocked,omitempty"`
@@ -66,15 +69,32 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
-	if existing.DirectP2P {
+	// Preserve direct P2P connection and latency if active in the last 30s
+	if existing.DirectP2P && (existing.LastSeen.IsZero() || time.Since(existing.LastSeen) < 30*time.Second || newer.DirectP2P) {
 		newer.DirectP2P = true
+		if newer.ActiveEndpoint == "" && existing.ActiveEndpoint != "" {
+			newer.ActiveEndpoint = existing.ActiveEndpoint
+		}
+		if newer.Latency == 0 && existing.Latency > 0 {
+			newer.Latency = existing.Latency
+			newer.PingMs = existing.PingMs
+		}
 	}
-	if existing.ActiveEndpoint != "" && newer.ActiveEndpoint == "" {
-		newer.ActiveEndpoint = existing.ActiveEndpoint
+
+	if newer.Arch == "" && existing.Arch != "" {
+		newer.Arch = existing.Arch
 	}
-	if existing.Latency > 0 && newer.Latency == 0 {
-		newer.Latency = existing.Latency
-		newer.PingMs = existing.PingMs
+	if newer.Version == "" && existing.Version != "" {
+		newer.Version = existing.Version
+	}
+	if !newer.IsKeenetic && existing.IsKeenetic {
+		newer.IsKeenetic = existing.IsKeenetic
+	}
+	if newer.OS == "" && existing.OS != "" {
+		newer.OS = existing.OS
+	}
+	if newer.Platform == "" && existing.Platform != "" {
+		newer.Platform = existing.Platform
 	}
 	if newer.Nickname == "" && existing.Nickname != "" {
 		newer.Nickname = existing.Nickname
