@@ -31,7 +31,7 @@ var (
 	procGetParent                = user32.NewProc("GetParent")
 	procGetWindowRect            = user32.NewProc("GetWindowRect")
 	procGetClassNameW            = user32.NewProc("GetClassNameW")
-	procGetAsyncKeyState          = user32.NewProc("GetAsyncKeyState")
+
 
 	procGetProcessTimes       = kernel32.NewProc("GetProcessTimes")
 	procGetProcessIoCounters  = kernel32.NewProc("GetProcessIoCounters")
@@ -578,17 +578,16 @@ func targetProbeWorker(ctx context.Context, targetPID uint32, hProc windows.Hand
 	}
 }
 
-// keyListener listens for keyboard shortcuts ('S', Space, 'Q', Esc) without blocking.
+// keyListener listens for standard console keyboard shortcuts ('S', Space, 'Q', Esc) without blocking.
 func keyListener(ctx context.Context, triggerDump chan<- struct{}, cancel context.CancelFunc) {
-	var lastSpaceState, lastSState, lastQState int16
-
-	ticker := time.NewTicker(35 * time.Millisecond)
-	defer ticker.Stop()
-
-	// Also support line input fallback
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			text := strings.TrimSpace(strings.ToUpper(scanner.Text()))
 			if text == "S" || text == "DUMP" || text == "" {
 				select {
@@ -602,43 +601,9 @@ func keyListener(ctx context.Context, triggerDump chan<- struct{}, cancel contex
 		}
 	}()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
-		// Space key (VK_SPACE = 0x20)
-		spaceState, _, _ := procGetAsyncKeyState.Call(0x20)
-		if (uint32(spaceState)&0x8000 != 0) && (uint32(lastSpaceState)&0x8000 == 0) {
-			select {
-			case triggerDump <- struct{}{}:
-			default:
-			}
-		}
-		lastSpaceState = int16(spaceState)
-
-		// 'S' key (0x53)
-		sState, _, _ := procGetAsyncKeyState.Call(0x53)
-		if (uint32(sState)&0x8000 != 0) && (uint32(lastSState)&0x8000 == 0) {
-			select {
-			case triggerDump <- struct{}{}:
-			default:
-			}
-		}
-		lastSState = int16(sState)
-
-		// 'Q' key (0x51) or ESC (0x1B)
-		qState, _, _ := procGetAsyncKeyState.Call(0x51)
-		escState, _, _ := procGetAsyncKeyState.Call(0x1B)
-		if (uint32(qState)&0x8000 != 0 && uint32(lastQState)&0x8000 == 0) || (uint32(escState)&0x8000 != 0) {
-			cancel()
-			return
-		}
-		lastQState = int16(qState)
-	}
+	<-ctx.Done()
 }
+
 
 func main() {
 	enableVirtualTerminal()
