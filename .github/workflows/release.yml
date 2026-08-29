@@ -31,6 +31,7 @@ jobs:
         run: |
           go-winres make --in winres/winres.json --out cmd/natbypass/rsrc
           go-winres make --in winres/winres.json --out cmd/natbypass-cli/rsrc
+          go-winres make --in winres/winres.json --out cmd/natbypass-gui/rsrc
 
       - name: Build Windows Binaries (without UPX)
         env:

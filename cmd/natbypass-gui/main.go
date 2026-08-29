@@ -950,8 +950,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		return 0
 
 	case WM_DRAWITEM:
-		var dis DRAWITEMSTRUCT
-		procRtlMoveMemory.Call(uintptr(unsafe.Pointer(&dis)), lParam, unsafe.Sizeof(dis))
+		dis := *(*DRAWITEMSTRUCT)(unsafe.Pointer(lParam))
 		drawCustomButton(&dis)
 		return 1
 
@@ -1955,8 +1954,7 @@ func bookmarkDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
 		return 0
 	case WM_DRAWITEM:
-		var dis DRAWITEMSTRUCT
-		procRtlMoveMemory.Call(uintptr(unsafe.Pointer(&dis)), lParam, unsafe.Sizeof(dis))
+		dis := *(*DRAWITEMSTRUCT)(unsafe.Pointer(lParam))
 		drawCustomButton(&dis)
 		return 1
 	case WM_CTLCOLORSTATIC:
@@ -2513,8 +2511,7 @@ func qrDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		return 0
 
 	case WM_DRAWITEM:
-		var dis DRAWITEMSTRUCT
-		procRtlMoveMemory.Call(uintptr(unsafe.Pointer(&dis)), lParam, unsafe.Sizeof(dis))
+		dis := *(*DRAWITEMSTRUCT)(unsafe.Pointer(lParam))
 		drawCustomButton(&dis)
 		return 1
 
@@ -3143,35 +3140,30 @@ func startEngineFromConfig(c *config.Config) {
 							}
 						}
 
-						// 4. Fallback для mesh-сети из 1 удаленного узла (только для 100.64.200.x)
-						if targetPeer == nil && len(peers) == 1 && strings.HasPrefix(destStr, "100.64.200.") {
-							if peers[0].DeviceID != myDevID {
-								targetPeer = peers[0]
-							}
-						}
+
 
 						if targetPeer != nil {
-							if targetPeer.ActiveEndpoint != "" && udpPuncher != nil {
-								_ = udpPuncher.SendDataPacket(targetPeer.ActiveEndpoint, packet)
-								atomic.AddUint64(&packetsSentCount, 1)
+							sentDirect := false
+							if udpPuncher != nil {
+								if targetPeer.ActiveEndpoint != "" {
+									if err := udpPuncher.SendDataPacket(targetPeer.ActiveEndpoint, packet); err == nil {
+										sentDirect = true
+									}
+								} else if targetPeer.LocalAddr != "" {
+									if err := udpPuncher.SendDataPacket(targetPeer.LocalAddr, packet); err == nil {
+										sentDirect = true
+									}
+								} else if targetPeer.STUNAddr != "" {
+									if err := udpPuncher.SendDataPacket(targetPeer.STUNAddr, packet); err == nil {
+										sentDirect = true
+									}
+								}
 							}
-							if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetPeer.ActiveEndpoint && udpPuncher != nil {
-								_ = udpPuncher.SendDataPacket(targetPeer.LocalAddr, packet)
-								atomic.AddUint64(&packetsSentCount, 1)
+							// Релей через MQTT используется ИСКЛЮЧИТЕЛЬНО если прямой UDP-сокет недоступен
+							if !sentDirect && activeMQTT != nil {
+								_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, packet)
 							}
-							if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint && targetPeer.STUNAddr != targetPeer.LocalAddr && udpPuncher != nil {
-								_ = udpPuncher.SendDataPacket(targetPeer.STUNAddr, packet)
-								atomic.AddUint64(&packetsSentCount, 1)
-							}
-							// Асинхронный неблокирующий релей через MQTT
-							if activeMQTT != nil {
-								pktCopy := make([]byte, len(packet))
-								copy(pktCopy, packet)
-								go func(tID string, d []byte) {
-									_ = activeMQTT.PublishTunnelData(tID, d)
-								}(targetPeer.DeviceID, pktCopy)
-								atomic.AddUint64(&packetsSentCount, 1)
-							}
+							atomic.AddUint64(&packetsSentCount, 1)
 						}
 					}
 				}

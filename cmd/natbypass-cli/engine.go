@@ -238,16 +238,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 
 				if found && p != nil {
-					sentUDP := false
+					sentDirect := false
 					if p.DirectP2P && p.ActiveEndpoint != "" && puncher != nil {
 						if err := puncher.SendDataPacket(p.ActiveEndpoint, pkt); err == nil {
-							sentUDP = true
+							sentDirect = true
 						}
-						if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-							_ = puncher.SendDataPacket(p.STUNAddr, pkt)
+					} else if puncher != nil && p.STUNAddr != "" {
+						if err := puncher.SendDataPacket(p.STUNAddr, pkt); err == nil {
+							sentDirect = true
 						}
 					}
-					if (!sentUDP || !p.DirectP2P) && sigMgr != nil {
+					// Релей через сигнальный канал только если прямой UDP-сокет недоступен
+					if !sentDirect && sigMgr != nil {
 						_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 					}
 				}
