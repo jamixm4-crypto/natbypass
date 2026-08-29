@@ -286,6 +286,15 @@ object MobileBridge {
         }
     }
 
+    fun setProfileVirtualIP(profileId: String, vip: String): Boolean {
+        val method = getMethod("setProfileVirtualIP") ?: return false
+        return try {
+            method.invoke(null, profileId, vip) as? Boolean ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun getLocalSubnetsJSON(): String {
         val method = getMethod("getLocalSubnetsJSON") ?: return "[]"
         return try {

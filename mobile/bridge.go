@@ -1729,3 +1729,25 @@ func PingPeer(deviceID string) int64 {
 	return -1
 }
 
+
+
+// SetProfileVirtualIP устанавливает кастомный Virtual IP для профиля
+func SetProfileVirtualIP(profileID, vip string) bool {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if globalConfig == nil {
+		return false
+	}
+	for i := range globalConfig.Profiles {
+		if globalConfig.Profiles[i].ID == profileID {
+			globalConfig.Profiles[i].VirtualIP = vip
+			if globalConfig.Profiles[i].IsActive || globalConfig.ActiveProfileID == profileID {
+				globalConfig.Network.Address = vip
+				myVirtualIP = vip
+			}
+			return true
+		}
+	}
+	return false
+}

@@ -47,6 +47,7 @@ data class ProfileUiModel(
     val name: String,
     val mqttTopic: String,
     val mqttBroker: String,
+    val virtualIp: String = "",
     val tgToken: String,
     val tgChat: Long,
     val tgProxy: String,
@@ -223,6 +224,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     mqttBroker = activeProf.optString("mqtt_broker", "tcp://broker.emqx.io:1883"),
                     tgToken    = activeProf.optString("tg_token", ""),
                     tgChat     = activeProf.optLong("tg_chat_id", 0L),
+                    virtualIp  = activeProf.optString("virtual_ip", ""),
                     tgProxy    = activeProf.optString("tg_proxy", ""),
                     isActive   = true,
                 ))
@@ -239,6 +241,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         mqttBroker = p.optString("mqtt_broker", "tcp://broker.emqx.io:1883"),
                         tgToken    = p.optString("tg_token", ""),
                         tgChat     = p.optLong("tg_chat_id", 0L),
+                        virtualIp  = p.optString("virtual_ip", ""),
                         tgProxy    = p.optString("tg_proxy", ""),
                         isActive   = false,
                     ))
@@ -392,19 +395,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun createProfile(
-        context: Context, name: String, broker: String, topic: String,
+        context: Context, name: String, broker: String, topic: String, virtualIp: String,
         tgToken: String, tgChat: Long, tgProxy: String
     ) {
-        MobileBridge.createProfile(name, broker, topic, "", "", tgToken, tgChat, tgProxy, "dpi", true)
+        val res = MobileBridge.createProfile(name, broker, topic, "", "", tgToken, tgChat, tgProxy, "dpi", true)
+        if (virtualIp.isNotBlank()) {
+            try {
+                val json = JSONObject(res)
+                val newId = json.optString("id", "")
+                if (newId.isNotEmpty()) {
+                    MobileBridge.setProfileVirtualIP(newId, virtualIp.trim())
+                }
+            } catch (_: Exception) {}
+            MobileBridge.setVirtualIP(virtualIp.trim())
+        }
         saveConfigToDisk(context)
         viewModelScope.launch { refreshStatus() }
     }
 
     fun updateProfile(
-        context: Context, id: String, name: String, broker: String, topic: String,
+        context: Context, id: String, name: String, broker: String, topic: String, virtualIp: String,
         tgToken: String, tgChat: Long, tgProxy: String
     ) {
         MobileBridge.updateProfile(id, name, broker, topic, "", "", tgToken, tgChat, tgProxy, "dpi")
+        if (virtualIp.isNotBlank()) {
+            MobileBridge.setProfileVirtualIP(id, virtualIp.trim())
+        }
         saveConfigToDisk(context)
         viewModelScope.launch { refreshStatus() }
     }

@@ -314,13 +314,13 @@ private fun NatBypassApp(
         ProfileEditDialog(
             mode = mode,
             onDismiss = { showProfileEdit = null },
-            onSave = { name, broker, topic, tgToken, tgChat, tgProxy ->
+            onSave = { name, broker, topic, virtualIp, tgToken, tgChat, tgProxy ->
                 when (mode) {
                     is ProfileEditMode.Create -> viewModel.createProfile(
-                        context, name, broker, topic, tgToken, tgChat, tgProxy
+                        context, name, broker, topic, virtualIp, tgToken, tgChat, tgProxy
                     )
                     is ProfileEditMode.Edit -> viewModel.updateProfile(
-                        context, mode.profile.id, name, broker, topic, tgToken, tgChat, tgProxy
+                        context, mode.profile.id, name, broker, topic, virtualIp, tgToken, tgChat, tgProxy
                     )
                 }
                 showProfileEdit = null
@@ -367,15 +367,16 @@ sealed class ProfileEditMode {
 private fun ProfileEditDialog(
     mode: ProfileEditMode,
     onDismiss: () -> Unit,
-    onSave: (String, String, String, String, Long, String) -> Unit,
+    onSave: (String, String, String, String, String, Long, String) -> Unit,
 ) {
     val initial = (mode as? ProfileEditMode.Edit)?.profile
-    var name    by remember { mutableStateOf(initial?.name ?: "") }
-    var broker  by remember { mutableStateOf(initial?.mqttBroker ?: "tcp://broker.emqx.io:1883") }
-    var topic   by remember { mutableStateOf(initial?.mqttTopic ?: "") }
-    var tgToken by remember { mutableStateOf(initial?.tgToken ?: "") }
-    var tgChat  by remember { mutableStateOf(initial?.tgChat?.takeIf { it > 0 }?.toString() ?: "") }
-    var tgProxy by remember { mutableStateOf(initial?.tgProxy ?: "") }
+    var name      by remember { mutableStateOf(initial?.name ?: "") }
+    var virtualIp by remember { mutableStateOf(initial?.virtualIp ?: "") }
+    var broker    by remember { mutableStateOf(initial?.mqttBroker ?: "tcp://broker.emqx.io:1883") }
+    var topic     by remember { mutableStateOf(initial?.mqttTopic ?: "") }
+    var tgToken   by remember { mutableStateOf(initial?.tgToken ?: "") }
+    var tgChat    by remember { mutableStateOf(initial?.tgChat?.takeIf { it > 0 }?.toString() ?: "") }
+    var tgProxy   by remember { mutableStateOf(initial?.tgProxy ?: "") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -385,6 +386,7 @@ private fun ProfileEditDialog(
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Название") }, singleLine = true)
+                OutlinedTextField(value = virtualIp, onValueChange = { virtualIp = it }, label = { Text("Виртуальный IP (Virtual IP)") }, placeholder = { Text("100.64.200.5/24") }, singleLine = true)
                 OutlinedTextField(value = topic, onValueChange = { topic = it }, label = { Text("MQTT Топик") }, singleLine = true)
                 OutlinedTextField(value = broker, onValueChange = { broker = it }, label = { Text("MQTT Брокер") }, singleLine = true)
                 OutlinedTextField(value = tgToken, onValueChange = { tgToken = it }, label = { Text("TG Bot Token") }, singleLine = true)
@@ -394,7 +396,7 @@ private fun ProfileEditDialog(
         },
         confirmButton = {
             Button(onClick = {
-                onSave(name.trim(), broker.trim(), topic.trim(), tgToken.trim(), tgChat.toLongOrNull() ?: 0L, tgProxy.trim())
+                onSave(name.trim(), broker.trim(), topic.trim(), virtualIp.trim(), tgToken.trim(), tgChat.toLongOrNull() ?: 0L, tgProxy.trim())
             }) { Text("Сохранить") }
         },
         dismissButton = {
