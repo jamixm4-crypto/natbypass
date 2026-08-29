@@ -38,9 +38,10 @@ import (
 )
 
 var (
-	Version = "1.2.7"
+	Version = "1.9.37"
 	Commit  = "release"
 )
+
 
 // Win32 API
 var (
@@ -1171,9 +1172,11 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 			(id == ID_NAV_AWG && currentTab == 2) ||
 			(id == ID_NAV_SETTINGS && currentTab == 3) ||
 			(id == ID_NAV_DIAG && currentTab == 4) ||
-			(id == ID_NAV_LOGS && currentTab == 5) {
+			(id == ID_NAV_LOGS && currentTab == 5) ||
+			(id == ID_NAV_LICENSE && currentTab == 6) {
 			isActiveNav = true
 		}
+
 	}
 
 	if isPressed {
@@ -1453,17 +1456,34 @@ func handleCommand(id uint16) {
 			info, err := updater.CheckUpdate(context.Background(), Version)
 			if err != nil {
 				addLog("❌ Ошибка проверки обновлений: " + err.Error())
+				msg, _ := windows.UTF16PtrFromString("Не удалось проверить обновления:\n" + err.Error())
+				title, _ := windows.UTF16PtrFromString("Обновление NatBypass")
+				procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x10 /* MB_ICONERROR */)
 				return
 			}
 			if !info.HasUpdate {
 				addLog(fmt.Sprintf("✅ У вас установлена самая свежая версия (%s)", Version))
+				msg, _ := windows.UTF16PtrFromString(fmt.Sprintf("У вас установлена самая свежая версия NatBypass (%s).\nОбновлений не требуется.", Version))
+				title, _ := windows.UTF16PtrFromString("Обновление NatBypass")
+				procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x40 /* MB_ICONINFORMATION */)
 				return
 			}
-			addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Запуск скачивания и обновления...", info.LatestVersion))
-			if err := updater.ApplyUpdate(context.Background(), info.AssetURL); err != nil {
-				addLog("❌ Ошибка применения обновления: " + err.Error())
+			addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Запрос подтверждения...", info.LatestVersion))
+			msgText := fmt.Sprintf("Доступна новая версия NatBypass: %s (текущая: %s)\n\nХотите скачать и установить обновление прямо сейчас?", info.LatestVersion, Version)
+			msg, _ := windows.UTF16PtrFromString(msgText)
+			title, _ := windows.UTF16PtrFromString("Доступно обновление")
+			ret, _, _ := procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x24 /* MB_YESNO | MB_ICONQUESTION */)
+			if ret == 6 /* IDYES */ {
+				addLog(fmt.Sprintf("⚡ Скачивание и применение обновления %s...", info.LatestVersion))
+				if err := updater.ApplyUpdate(context.Background(), info.AssetURL); err != nil {
+					addLog("❌ Ошибка применения обновления: " + err.Error())
+					errMsg, _ := windows.UTF16PtrFromString("Ошибка при установке обновления:\n" + err.Error())
+					errTitle, _ := windows.UTF16PtrFromString("Ошибка обновления")
+					procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(errMsg)), uintptr(unsafe.Pointer(errTitle)), 0x10)
+				}
 			}
 		}()
+
 
 	case ID_BTN_MODE_PARALLEL:
 		setSigModeUI("parallel")
@@ -5306,14 +5326,19 @@ func createFont(name string, height int, weight int) uintptr {
 	if h > 0 {
 		h = -h
 	}
+	const (
+		DEFAULT_CHARSET   = 1
+		CLEARTYPE_QUALITY = 5
+	)
 	hFont, _, _ := procCreateFontW.Call(
 		uintptr(int32(h)), 0, 0, 0,
 		uintptr(weight), 0, 0, 0,
-		1, 0, 0, 0, 0,
+		DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0,
 		uintptr(unsafe.Pointer(namePtr)),
 	)
 	return hFont
 }
+
 
 func setControlText(hwnd uintptr, text string) {
 	if hwnd == 0 {
