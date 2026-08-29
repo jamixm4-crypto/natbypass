@@ -784,10 +784,35 @@ func main() {
 	// 4. Создание постоянных ресурсов GDI, иконок и курсора
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	hCursor, _, _ = procLoadCursorW.Call(0, 32512) // IDC_ARROW
-	hAppIcon, _, _ = procLoadIconW.Call(hInstance, 1) // Встроенная иконка
+
+	// Загружаем иконку из встроенных ресурсов PE (ID 1 / 7) или напрямую из файла app.ico
+	hAppIcon, _, _ = procLoadIconW.Call(hInstance, 1)
+	if hAppIcon == 0 {
+		hAppIcon, _, _ = procLoadIconW.Call(hInstance, 7)
+	}
+	if hAppIcon == 0 {
+		hAppIcon, _, _ = procLoadImageW.Call(
+			hInstance,
+			1,
+			1, // IMAGE_ICON
+			0, 0,
+			0x00000040|0x00008000,
+		)
+	}
+	if hAppIcon == 0 {
+		icoPath, _ := windows.UTF16PtrFromString("app.ico")
+		hAppIcon, _, _ = procLoadImageW.Call(
+			0,
+			uintptr(unsafe.Pointer(icoPath)),
+			1, // IMAGE_ICON
+			0, 0,
+			0x00000010|0x00000040|0x00008000,
+		)
+	}
 	if hAppIcon == 0 {
 		hAppIcon, _, _ = procLoadIconW.Call(0, 32512)
 	}
+
 
 	hBrushBg, _, _ = procCreateSolidBrush.Call(COLOR_BG)
 	hBrushSidebar, _, _ = procCreateSolidBrush.Call(COLOR_SIDEBAR)
