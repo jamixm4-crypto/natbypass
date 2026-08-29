@@ -2,9 +2,9 @@ package webui
 
 import (
 	"context"
-	"crypto/subtle"
 	"embed"
 	"encoding/json"
+
 	"fmt"
 	"io"
 	"log/slog"
@@ -248,7 +248,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/qr/image", s.handleQRImage)
 	mux.HandleFunc("/api/peer/bookmark", s.handlePeerBookmark)
 	mux.HandleFunc("/api/peer/ping", s.handlePeerPing)
+	mux.HandleFunc("/api/auth/login", s.handleLogin)
+	mux.HandleFunc("/api/auth/logout", s.handleLogout)
+	mux.HandleFunc("/api/auth/check", s.handleAuthCheck)
 	mux.HandleFunc("/api/routing/status", s.handleRoutingStatus)
+
 	mux.HandleFunc("/api/routing/exit-node/toggle", s.handleRoutingExitNodeToggle)
 	mux.HandleFunc("/api/routing/subnet/toggle", s.handleRoutingSubnetToggle)
 	mux.HandleFunc("/api/routing/host/settings", s.handleRoutingHostSettings)
@@ -323,45 +327,50 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-// authMiddleware — HTTP Basic Auth защита (поддерживает пароль, KeeneticOS и Linux default)
+// authMiddleware — защита сессией и Basic Auth
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/qr/image" || r.URL.Path == "/healthz" {
+		// Публичные эндпоинты (страница, healthcheck, аутентификация, QR)
+		if r.URL.Path == "/" ||
+			r.URL.Path == "/healthz" ||
+			r.URL.Path == "/api/auth/login" ||
+			r.URL.Path == "/api/auth/logout" ||
+			r.URL.Path == "/api/auth/check" ||
+			r.URL.Path == "/api/qr/image" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// 1. Проверка пользовательского аутентификатора (KeeneticOS / System credentials)
-		if s.customAuth != nil {
-			user, pass, ok := r.BasicAuth()
-			if !ok || !s.customAuth(user, pass) {
-				w.Header().Set("WWW-Authenticate", `Basic realm="NatBypass Router (KeeneticOS / Admin)"`)
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("401 Unauthorized (требуются учетные данные администратора)\n"))
-				return
-			}
+		// Если авторизация не требуется (Windows локальный клиент без пароля в config)
+		authRequired := (s.password != "" || s.customAuth != nil || IsKeeneticOS() || runtime.GOOS != "windows")
+		if !authRequired {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// 2. Статическая проверка по пользователю и паролю из конфигурации
-		if s.password != "" {
-			user, pass, ok := r.BasicAuth()
-			userMatch := subtle.ConstantTimeCompare([]byte(user), []byte(s.user))
-			passMatch := subtle.ConstantTimeCompare([]byte(pass), []byte(s.password))
-			if !ok || userMatch != 1 || passMatch != 1 {
-				w.Header().Set("WWW-Authenticate", `Basic realm="NatBypass"`)
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("401 Unauthorized\n"))
-				return
-			}
+		// 1. Проверка сессионной cookie (nb_session)
+		if cookie, err := r.Cookie("nb_session"); err == nil && isValidSession(cookie.Value) {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		// 2. Проверка HTTP Basic Auth (для скриптов, CLI и curl)
+		if user, pass, ok := r.BasicAuth(); ok && s.checkCredentials(user, pass) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Не авторизован: возвращаем 401 JSON без всплывающего окна браузера, чтобы WebUI показал красивую форму логина
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":         false,
+			"error":      "Unauthorized",
+			"need_login": true,
+		})
 	})
 }
+
 
 
 // corsMiddleware — CORS заголовки
