@@ -3596,3 +3596,41 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   </script>
 </body>
 </html>
+
+    async function changeAdminPassword() {
+      const cur = document.getElementById('curAdminPass') ? document.getElementById('curAdminPass').value : '';
+      const newP = document.getElementById('newAdminPass') ? document.getElementById('newAdminPass').value : '';
+      const conf = document.getElementById('confirmAdminPass') ? document.getElementById('confirmAdminPass').value : '';
+
+      if (!newP) {
+        showToast('⚠️ Введите новый пароль');
+        return;
+      }
+      if (newP.length < 3) {
+        showToast('⚠️ Пароль должен быть не менее 3 символов');
+        return;
+      }
+      if (newP !== conf) {
+        showToast('❌ Новый пароль и подтверждение не совпадают');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/admin/password', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({current_password: cur, new_password: newP})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✅ ' + (json.data && json.data.message ? json.data.message : 'Пароль успешно изменен!'));
+          if (document.getElementById('curAdminPass')) document.getElementById('curAdminPass').value = '';
+          if (document.getElementById('newAdminPass')) document.getElementById('newAdminPass').value = '';
+          if (document.getElementById('confirmAdminPass')) document.getElementById('confirmAdminPass').value = '';
+        } else {
+          showToast('❌ Ошибка: ' + json.error);
+        }
+      } catch (e) {
+        showToast('❌ Ошибка связи с сервером');
+      }
+    }

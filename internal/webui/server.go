@@ -223,6 +223,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/peers", s.handlePeers)
 	mux.HandleFunc("/api/peers/clear", s.handlePeersClear)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/admin/password", s.handleAdminPasswordChange)
 	mux.HandleFunc("/api/refresh-ip", s.handleRefreshIP)
 	mux.HandleFunc("/api/channel/switch", s.handleChannelSwitch)
 	mux.HandleFunc("/api/channel/status", s.handleChannelStatus)
@@ -2391,3 +2392,52 @@ func (s *Server) handleRoutingHostSettings(w http.ResponseWriter, r *http.Reques
 }
 
 
+
+// handleAdminPasswordChange — POST /api/admin/password — смена пароля администратора WebUI
+func (s *Server) handleAdminPasswordChange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	if IsKeeneticOS() {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "На Keenetic пароль управляется через системный интерфейс KeeneticOS")
+		return
+	}
+
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "неверный формат запроса")
+		return
+	}
+
+	if req.NewPassword == "" || len(req.NewPassword) < 3 {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "новый пароль должен содержать минимум 3 символа")
+		return
+	}
+
+	// Проверяем текущий пароль
+	if s.password != "" && req.CurrentPassword != s.password {
+		s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль")
+		return
+	}
+
+	// Обновляем пароль в памяти сервера
+	s.password = req.NewPassword
+
+	// Сохраняем в config.yaml
+	if s.configPath != "" {
+		if cfg, err := config.Load(s.configPath); err == nil && cfg != nil {
+			cfg.WebUI.Password = req.NewPassword
+			_ = config.Save(cfg, s.configPath, false)
+		}
+	}
+
+	s.AddEvent("info", "Пароль администратора успешно изменен", "")
+	s.jsonResponse(w, http.StatusOK, map[string]string{
+		"message": "Пароль успешно обновлен",
+	}, "")
+}

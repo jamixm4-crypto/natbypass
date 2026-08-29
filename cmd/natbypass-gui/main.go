@@ -2988,8 +2988,14 @@ func startEngineFromConfig(c *config.Config) {
 	if hn == "" {
 		hn = "Win"
 	}
-	myDevID = fmt.Sprintf("%s-%s", hn, pubHex[:6])
-	writeDebug("Сгенерирован идентификатор устройства: " + myDevID)
+	if c.App.DeviceID != "" {
+		myDevID = c.App.DeviceID
+	} else {
+		myDevID = fmt.Sprintf("%s-%s", hn, pubHex[:6])
+		c.App.DeviceID = myDevID
+		_ = config.Save(c, configPath, false)
+	}
+	writeDebug("Идентификатор устройства: " + myDevID)
 
 	if wgKP, wgErr := wireguard.GenerateKeyPair(); wgErr == nil {
 		myWGPubKey = wgKP.PublicKey
@@ -4361,13 +4367,13 @@ func updateData() {
 		} else if onlineCount > 0 {
 			vpnConnected = false
 			setControlText(hLblStatus, fmt.Sprintf("🟡 СИГНАЛ В СЕТИ (Идёт прямое UDP пробитие NAT до %d пиров...)", onlineCount))
-			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟡 ПРОБИТИЕ NAT (Попытка прямого сокета... | VIP: %s)", myVirtualIP)
+			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 В СЕТИ (VIP: %s)", myVirtualIP)
 			buttonTypes[ID_BTN_VPN] = "yellow"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else {
 			vpnConnected = false
 			setControlText(hLblStatus, "🟡 ПОИСК УСТРОЙСТВ В СЕТИ...")
-			buttonLabels[ID_BTN_VPN] = "🔴 ОЖИДАНИЕ СВЯЗИ (0 пиров онлайн)"
+			buttonLabels[ID_BTN_VPN] = "🔴 ОЖИДАНИЕ СВЯЗИ (0 пиров)"
 			buttonTypes[ID_BTN_VPN] = "red"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		}

@@ -168,12 +168,12 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		// PowerShell fallback if netsh was blocked
 		if !ipAssigned {
 			psCmd := fmt.Sprintf(`New-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -ErrorAction SilentlyContinue`, adapterName, virtualIP, adapterName, virtualIP)
-			_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psCmd).Run()
+			_ = runHiddenPS(psCmd)
 		}
 
 		// 2. Переводим профиль сети адаптера в Private (критично для разрешения ICMP Ping на Windows 10/11 и Windows Server)
 		psProfile := fmt.Sprintf(`Set-NetConnectionProfile -InterfaceAlias "%s" -NetworkCategory Private -ErrorAction SilentlyContinue`, adapterName)
-		_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psProfile).Run()
+		_ = runHiddenPS(psProfile)
 
 		// 3. Выставляем метрику и MTU 1420 для защиты от фрагментации пакетов
 		_ = runNetsh("interface", "ipv4", "set", "interface",
@@ -339,3 +339,12 @@ func (d *Device) Close() error {
 }
 
 
+
+func runHiddenPS(cmdStr string) error {
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", cmdStr)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000,
+	}
+	return cmd.Run()
+}
