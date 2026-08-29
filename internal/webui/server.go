@@ -75,14 +75,21 @@ type Server struct {
 	eventsMu        sync.Mutex
 	setupDone       bool
 	deviceName      string
+	customAuth      func(user, pass string) bool
 	onProfileSwitch func(p *config.Profile) error
 	onConfigChange  func()
 	readyCh         chan struct{}
 	readyOnce       sync.Once
 }
 
-// SetOnProfileSwitch устанавливает колбэк для переключения профиля
+// SetCustomAuth устанавливает пользовательский обработчик авторизации (например, KeeneticOS)
+func (s *Server) SetCustomAuth(fn func(user, pass string) bool) {
+	s.customAuth = fn
+}
+
+// SetOnConfigChange устанавливает колбэк при изменении настроек
 func (s *Server) SetOnConfigChange(cb func()) { s.onConfigChange = cb }
+
 
 func (s *Server) SetOnProfileSwitch(cb func(p *config.Profile) error) {
 	s.onProfileSwitch = cb
@@ -315,27 +322,46 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-// authMiddleware — HTTP Basic Auth защита (активна только если задан пароль)
+// authMiddleware — HTTP Basic Auth защита (поддерживает пароль, KeeneticOS и Linux default)
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.password == "" || r.URL.Path == "/api/qr/image" {
+		if r.URL.Path == "/api/qr/image" || r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		user, pass, ok := r.BasicAuth()
-		userMatch := subtle.ConstantTimeCompare([]byte(user), []byte(s.user))
-		passMatch := subtle.ConstantTimeCompare([]byte(pass), []byte(s.password))
-		if !ok || userMatch != 1 || passMatch != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="NatBypass"`)
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("401 Unauthorized\n"))
+		// 1. Проверка пользовательского аутентификатора (KeeneticOS / System credentials)
+		if s.customAuth != nil {
+			user, pass, ok := r.BasicAuth()
+			if !ok || !s.customAuth(user, pass) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="NatBypass Router (KeeneticOS / Admin)"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("401 Unauthorized (требуются учетные данные администратора)\n"))
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 2. Статическая проверка по пользователю и паролю из конфигурации
+		if s.password != "" {
+			user, pass, ok := r.BasicAuth()
+			userMatch := subtle.ConstantTimeCompare([]byte(user), []byte(s.user))
+			passMatch := subtle.ConstantTimeCompare([]byte(pass), []byte(s.password))
+			if !ok || userMatch != 1 || passMatch != 1 {
+				w.Header().Set("WWW-Authenticate", `Basic realm="NatBypass"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("401 Unauthorized\n"))
+				return
+			}
+			next.ServeHTTP(w, r)
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
 }
+
 
 // corsMiddleware — CORS заголовки
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {

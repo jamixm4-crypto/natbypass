@@ -344,13 +344,35 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 		port = constants.DefaultWebUIPort
 	}
 
-	uiServer := webui.NewServer(port, cfg.WebUI.Username, cfg.WebUI.Password, registry, sigMgr)
+	username := cfg.WebUI.Username
+	password := cfg.WebUI.Password
+
+	var customAuth func(user, pass string) bool
+
+	if webui.IsKeeneticOS() {
+		log.Info().Msg("🛡️ Обнаружена KeeneticOS: активирована системная авторизация роутера")
+		customAuth = webui.VerifyKeeneticAuth
+	} else if runtime.GOOS != "linux" && runtime.GOOS != "windows" && username == "" && password == "" {
+		username = "admin"
+		password = "admin"
+		log.Info().Str("user", username).Msg("🔐 Web UI защищен авторизацией по умолчанию (admin/admin)")
+	} else if runtime.GOOS == "linux" && username == "" && password == "" {
+		username = "admin"
+		password = "admin"
+		log.Info().Str("user", username).Msg("🔐 Web UI защищен авторизацией по умолчанию (admin/admin)")
+	}
+
+	uiServer := webui.NewServer(port, username, password, registry, sigMgr)
+	if customAuth != nil {
+		uiServer.SetCustomAuth(customAuth)
+	}
 	uiServer.SetConfigPath(configFile)
 	uiServer.SetAppState(deviceID, "Определяется...", "Определяется...")
 	uiServer.SetDeviceName(deviceID)
 	uiServer.SetVersion(Version)
 	uiServer.SetVirtualIP(virtualIP)
 	uiServer.AddEvent("info", "NatBypass запущен", "version="+Version)
+
 
 	go func() {
 		if err := uiServer.Start(ctx); err != nil {
