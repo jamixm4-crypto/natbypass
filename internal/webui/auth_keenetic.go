@@ -7,6 +7,7 @@ import (
 	"crypto/md5"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -36,6 +37,7 @@ var (
 	keeneticCacheTime     time.Time
 	keeneticHostnameCache string
 	keeneticModelCache    string
+	keeneticRealmHttp     string
 )
 
 // IsKeeneticOS returns true if running on a Keenetic router.
@@ -79,17 +81,7 @@ func VerifyKeeneticAuth(username, password string) bool {
 		return false
 	}
 
-	// 1. Method 1: Official Keenetic RCI Challenge-Response HTTP Authentication with CookieJar
-	if verifyKeeneticRCIChallenge(username, password) {
-		return true
-	}
-
-	// 2. Method 2: Direct local RCI Basic Auth
-	if verifyViaLocalKeeneticHTTP(username, password) {
-		return true
-	}
-
-	// 3. Method 3: Direct Keenetic configuration parser and multi-realm hash verification
+	// 1. Method 1: Check offline config hashes first (instant 0ms response)
 	users := GetKeeneticUsers()
 	for _, u := range users {
 		if subtle.ConstantTimeCompare([]byte(strings.ToLower(u.Username)), []byte(strings.ToLower(username))) != 1 {
@@ -111,7 +103,60 @@ func VerifyKeeneticAuth(username, password string) bool {
 		}
 	}
 
+	// 2. Method 2: Official Keenetic RCI Challenge-Response HTTP Authentication with CookieJar
+	if verifyKeeneticRCIChallenge(username, password) {
+		return true
+	}
+
+	// 3. Method 3: Direct local RCI Basic Auth
+	if verifyViaLocalKeeneticHTTP(username, password) {
+		return true
+	}
+
 	return false
+}
+
+// getKeeneticProbeTargets dynamically gathers local IP addresses and ports to probe Keenetic web services
+func getKeeneticProbeTargets() []string {
+	var targets []string
+	seen := make(map[string]bool)
+
+	add := func(proto, host, port string) {
+		url := fmt.Sprintf("%s://%s", proto, host)
+		if port != "" && port != "80" && port != "443" {
+			url = fmt.Sprintf("%s://%s:%s", proto, host, port)
+		}
+		if !seen[url] {
+			seen[url] = true
+			targets = append(targets, url)
+		}
+	}
+
+	// Common localhost & LAN IPs
+	hosts := []string{"127.0.0.1", "192.168.1.1", "192.168.0.1"}
+
+	// Dynamically add all local interface IPv4 addresses
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			addrs, err := iface.Addrs()
+			if err == nil {
+				for _, addr := range addrs {
+					if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+						hosts = append(hosts, ipnet.IP.String())
+					}
+				}
+			}
+		}
+	}
+
+	for _, host := range hosts {
+		add("http", host, "80")
+		add("https", host, "443")
+		add("http", host, "81")
+	}
+
+	return targets
 }
 
 // verifyKeeneticRCIChallenge performs the official KeeneticOS 2-step challenge-response authentication:
@@ -121,135 +166,144 @@ func VerifyKeeneticAuth(username, password string) bool {
 //      auth_hash = sha256(challenge + hex(md5_hash))
 // 3. POST /auth with {"login": username, "password": auth_hash} -> 200 OK
 func verifyKeeneticRCIChallenge(username, password string) bool {
-	jar, _ := cookiejar.New(nil)
-	client := &http.Client{
-		Jar:     jar,
-		Timeout: 1500 * time.Millisecond,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout: 800 * time.Millisecond,
-			}).DialContext,
-		},
-	}
+	targets := getKeeneticProbeTargets()
 
-	targets := []string{
-		"http://127.0.0.1",
-		"http://127.0.0.1:80",
-		"http://127.0.0.1:81",
-		"http://192.168.1.1",
-		"http://192.168.1.1:80",
-	}
+	var wg sync.WaitGroup
+	var authSuccess int32
 
 	for _, target := range targets {
-		// Step 1: Request challenge
-		req, err := http.NewRequest("GET", target+"/auth", nil)
-		if err != nil {
-			continue
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			continue
-		}
+		wg.Add(1)
+		go func(tgt string) {
+			defer wg.Done()
 
-		challenge := resp.Header.Get("X-NDM-Challenge")
-		realm := resp.Header.Get("X-NDM-Realm")
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-
-		if challenge == "" {
-			continue
-		}
-
-		realmsToTry := []string{realm}
-		if realm == "" {
-			realmsToTry = []string{"Keenetic", "KeeneticOS", "NDMS"}
-		} else {
-			realmsToTry = append(realmsToTry, "Keenetic", "KeeneticOS", "NDMS")
-		}
-
-		if keeneticHostnameCache != "" {
-			realmsToTry = append(realmsToTry, keeneticHostnameCache)
-		}
-		if keeneticModelCache != "" {
-			realmsToTry = append(realmsToTry, keeneticModelCache)
-		}
-
-		for _, r := range realmsToTry {
-			// Official Keenetic RCI:
-			// 1. md5_hash = hex(md5(username:realm:password))
-			// 2. auth_hash = hex(sha256(challenge + md5_hash))
-			md5Raw := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
-			md5Hex := hex.EncodeToString(md5Raw[:])
-
-			sha256Raw := sha256.Sum256([]byte(challenge + md5Hex))
-			sha256Hex := hex.EncodeToString(sha256Raw[:])
-
-			payload, _ := json.Marshal(map[string]string{
-				"login":    username,
-				"password": sha256Hex,
-			})
-
-			pReq, pErr := http.NewRequest("POST", target+"/auth", bytes.NewReader(payload))
-			if pErr != nil {
-				continue
+			jar, _ := cookiejar.New(nil)
+			client := &http.Client{
+				Jar:     jar,
+				Timeout: 800 * time.Millisecond,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+					DialContext: (&net.Dialer{
+						Timeout: 350 * time.Millisecond,
+					}).DialContext,
+				},
 			}
-			pReq.Header.Set("Content-Type", "application/json")
-			pResp, pErr := client.Do(pReq)
-			if pErr == nil {
-				_, _ = io.Copy(io.Discard, pResp.Body)
-				pResp.Body.Close()
-				if pResp.StatusCode == http.StatusOK {
-					return true
+
+			// Step 1: Request challenge
+			req, err := http.NewRequest("GET", tgt+"/auth", nil)
+			if err != nil {
+				return
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				return
+			}
+
+			challenge := resp.Header.Get("X-NDM-Challenge")
+			realm := resp.Header.Get("X-NDM-Realm")
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+
+			if challenge == "" {
+				return
+			}
+
+			if realm != "" {
+				keeneticRealmHttp = realm
+			}
+
+			realmsToTry := []string{}
+			if realm != "" {
+				realmsToTry = append(realmsToTry, realm)
+			}
+			realmsToTry = append(realmsToTry, "Keenetic", "KeeneticOS", "NDMS", "Router")
+
+			if keeneticHostnameCache != "" {
+				realmsToTry = append(realmsToTry, keeneticHostnameCache)
+			}
+			if keeneticModelCache != "" {
+				realmsToTry = append(realmsToTry, keeneticModelCache)
+			}
+			if hn, err := os.Hostname(); err == nil && hn != "" {
+				realmsToTry = append(realmsToTry, hn)
+			}
+
+			for _, r := range realmsToTry {
+				// Official Keenetic RCI:
+				// 1. md5_hash = hex(md5(username:realm:password))
+				// 2. auth_hash = hex(sha256(challenge + md5_hash))
+				md5Raw := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
+				md5Hex := hex.EncodeToString(md5Raw[:])
+
+				sha256Raw := sha256.Sum256([]byte(challenge + md5Hex))
+				sha256Hex := hex.EncodeToString(sha256Raw[:])
+
+				payload, _ := json.Marshal(map[string]string{
+					"login":    username,
+					"password": sha256Hex,
+				})
+
+				pReq, pErr := http.NewRequest("POST", tgt+"/auth", bytes.NewReader(payload))
+				if pErr != nil {
+					continue
 				}
-			}
+				pReq.Header.Set("Content-Type", "application/json")
+				pResp, pErr := client.Do(pReq)
+				if pErr == nil {
+					_, _ = io.Copy(io.Discard, pResp.Body)
+					pResp.Body.Close()
+					if pResp.StatusCode == http.StatusOK {
+						authSuccess = 1
+						return
+					}
+				}
 
-			// Alternative sha256(username:realm:password)
-			sha256P := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
-			sha256PHex := hex.EncodeToString(sha256P[:])
-			cSha := sha256.Sum256([]byte(challenge + sha256PHex))
-			cShaHex := hex.EncodeToString(cSha[:])
+				// Alternative: SHA256 of login:realm:password
+				sha256P := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
+				sha256PHex := hex.EncodeToString(sha256P[:])
+				cSha := sha256.Sum256([]byte(challenge + sha256PHex))
+				cShaHex := hex.EncodeToString(cSha[:])
 
-			payload2, _ := json.Marshal(map[string]string{
-				"login":    username,
-				"password": cShaHex,
-			})
-			pReq2, pErr2 := http.NewRequest("POST", target+"/auth", bytes.NewReader(payload2))
-			if pErr2 == nil {
-				pReq2.Header.Set("Content-Type", "application/json")
-				pResp2, pErr2 := client.Do(pReq2)
+				payload2, _ := json.Marshal(map[string]string{
+					"login":    username,
+					"password": cShaHex,
+				})
+				pReq2, pErr2 := http.NewRequest("POST", tgt+"/auth", bytes.NewReader(payload2))
 				if pErr2 == nil {
-					_, _ = io.Copy(io.Discard, pResp2.Body)
-					pResp2.Body.Close()
-					if pResp2.StatusCode == http.StatusOK {
-						return true
+					pReq2.Header.Set("Content-Type", "application/json")
+					pResp2, pErr2 := client.Do(pReq2)
+					if pErr2 == nil {
+						_, _ = io.Copy(io.Discard, pResp2.Body)
+						pResp2.Body.Close()
+						if pResp2.StatusCode == http.StatusOK {
+							authSuccess = 1
+							return
+						}
 					}
 				}
 			}
-		}
+		}(target)
 	}
 
-	return false
+	wg.Wait()
+	return authSuccess == 1
 }
 
 // verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
 func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	client := &http.Client{
-		Timeout: 1000 * time.Millisecond,
+		Timeout: 500 * time.Millisecond,
 		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			DialContext: (&net.Dialer{
-				Timeout: 600 * time.Millisecond,
+				Timeout: 250 * time.Millisecond,
 			}).DialContext,
 		},
 	}
 
-	targets := []string{
-		"http://127.0.0.1/rci/show/version",
-		"http://127.0.0.1:80/rci/show/version",
-		"http://192.168.1.1/rci/show/version",
-	}
+	targets := getKeeneticProbeTargets()
 
 	for _, target := range targets {
-		req, err := http.NewRequest("GET", target, nil)
+		req, err := http.NewRequest("GET", target+"/rci/show/version", nil)
 		if err == nil {
 			req.SetBasicAuth(username, password)
 			if resp, err := client.Do(req); err == nil {
@@ -268,8 +322,9 @@ func verifyViaLocalKeeneticHTTP(username, password string) bool {
 // GetKeeneticUsers parses KeeneticOS configuration files and returns discovered users.
 func GetKeeneticUsers() []KeeneticUser {
 	keeneticCacheMu.RLock()
-	if len(keeneticUsersCache) > 0 && time.Since(keeneticCacheTime) < 30*time.Second {
-		users := keeneticUsersCache
+	if len(keeneticUsersCache) > 0 && time.Since(keeneticCacheTime) < 5*time.Minute {
+		users := make([]KeeneticUser, len(keeneticUsersCache))
+		copy(users, keeneticUsersCache)
 		keeneticCacheMu.RUnlock()
 		return users
 	}
@@ -322,12 +377,55 @@ func GetKeeneticUsers() []KeeneticUser {
 		}
 	}
 
-	// 2. ndmq CLI query
+	// 2. ndmq CLI queries
 	if len(users) == 0 {
 		ndmqPaths := []string{"ndmq", "/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq"}
 		for _, ndmq := range ndmqPaths {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			// A. show running-config
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 			out, err := exec.CommandContext(ctx, ndmq, "-p", "show running-config").Output()
+			cancel()
+			if err == nil && len(out) > 0 {
+				parsed, hn := parseKeeneticConfigFile(bytes.NewReader(out))
+				if hn != "" {
+					keeneticHostnameCache = hn
+				}
+				for _, u := range parsed {
+					if !seen[strings.ToLower(u.Username)] {
+						users = append(users, u)
+						seen[strings.ToLower(u.Username)] = true
+					}
+				}
+				if len(users) > 0 {
+					break
+				}
+			}
+
+			// B. show users
+			ctx2, cancel2 := context.WithTimeout(context.Background(), 1*time.Second)
+			out2, err2 := exec.CommandContext(ctx2, ndmq, "-p", "show users").Output()
+			cancel2()
+			if err2 == nil && len(out2) > 0 {
+				parsed, _ := parseKeeneticConfigFile(bytes.NewReader(out2))
+				for _, u := range parsed {
+					if !seen[strings.ToLower(u.Username)] {
+						users = append(users, u)
+						seen[strings.ToLower(u.Username)] = true
+					}
+				}
+				if len(users) > 0 {
+					break
+				}
+			}
+		}
+	}
+
+	// 3. ndmc CLI queries
+	if len(users) == 0 {
+		ndmcPaths := []string{"ndmc", "/bin/ndmc", "/usr/bin/ndmc", "/opt/bin/ndmc"}
+		for _, ndmc := range ndmcPaths {
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			out, err := exec.CommandContext(ctx, ndmc, "-c", "show running-config").Output()
 			cancel()
 			if err == nil && len(out) > 0 {
 				parsed, hn := parseKeeneticConfigFile(bytes.NewReader(out))
@@ -347,16 +445,16 @@ func GetKeeneticUsers() []KeeneticUser {
 		}
 	}
 
-	// 3. Fallback to /etc/shadow, /opt/etc/shadow
+	// 4. Fallback to /etc/shadow, /opt/etc/shadow, /etc/passwd
 	if len(users) == 0 {
-		shadowFiles := []string{"/etc/shadow", "/opt/etc/shadow"}
+		shadowFiles := []string{"/etc/shadow", "/opt/etc/shadow", "/etc/passwd", "/opt/etc/passwd"}
 		for _, sf := range shadowFiles {
 			if f, err := os.Open(sf); err == nil {
 				scanner := bufio.NewScanner(f)
 				for scanner.Scan() {
 					line := strings.TrimSpace(scanner.Text())
 					parts := strings.Split(line, ":")
-					if len(parts) >= 2 && parts[0] != "" && parts[1] != "" && parts[1] != "*" && parts[1] != "!" {
+					if len(parts) >= 2 && parts[0] != "" && parts[1] != "" && parts[1] != "*" && parts[1] != "!" && parts[1] != "x" {
 						name := parts[0]
 						if !seen[strings.ToLower(name)] {
 							users = append(users, KeeneticUser{
@@ -510,6 +608,7 @@ func extractPasswordFields(u *KeeneticUser, fields []string) {
 }
 
 func cleanHashPrefix(h string) string {
+	h = strings.Trim(h, "\"'")
 	if strings.HasPrefix(strings.ToUpper(h), "MD5:") {
 		return h[4:]
 	}
@@ -534,7 +633,7 @@ func detectHashType(h string) string {
 
 // verifyKeeneticHash tests password against all Keenetic hash algorithms and realm permutations
 func verifyKeeneticHash(username, password, storedHash, hashType string) bool {
-	storedLower := strings.ToLower(storedHash)
+	storedLower := strings.ToLower(strings.Trim(storedHash, "\"'"))
 
 	// 1. Plain MD5 of password
 	md5Sum := md5.Sum([]byte(password))
@@ -553,13 +652,15 @@ func verifyKeeneticHash(username, password, storedHash, hashType string) bool {
 		"Keenetic",
 		"KeeneticOS",
 		"NDMS",
-		"Keenetic Router",
 		"Router",
 		"admin",
 		"ndm",
 		"",
 	}
 
+	if keeneticRealmHttp != "" {
+		realms = append([]string{keeneticRealmHttp}, realms...)
+	}
 	if keeneticHostnameCache != "" {
 		realms = append([]string{keeneticHostnameCache}, realms...)
 	}
