@@ -26,8 +26,10 @@ const (
 	ChannelRetryDelay       = 300 * time.Millisecond
 
 	// UDP Wire protocol headers and payloads
-	TunHeaderSize    = 14
-	TunHeader        = "NATBYPASS:TUN:"
+	TunHeaderSize       = 14
+	TunHeader           = "NATBYPASS:TUN:"
+	TunPaddedHeaderSize = 14
+	TunPaddedHeader     = "NATBYPASS:TUP:" // Amnezia 3.x Dynamic Padding Header
 	PingPrefix       = "NATBYPASS:PING:"
 	PongPrefix       = "NATBYPASS:PONG:"
 	MTUProbePrefix   = "NATBYPASS:MTU:REQ:"

@@ -19,6 +19,8 @@ type AWGParams struct {
 	H2   string `json:"h2"`
 	H3   string `json:"h3"`
 	H4   string `json:"h4"`
+	Pmin int    `json:"pmin,omitempty"` // Amnezia 3.x Min Random Data Packet Padding
+	Pmax int    `json:"pmax,omitempty"` // Amnezia 3.x Max Random Data Packet Padding
 }
 
 func (a *AWGParams) UnmarshalJSON(data []byte) error {

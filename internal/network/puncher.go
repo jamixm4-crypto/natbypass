@@ -1,6 +1,8 @@
 package network
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"context"
 	"fmt"
 	"net"
@@ -379,14 +381,42 @@ func (p *UDPPuncher) SetDataCallback(cb DirectDataCallback) {
 	p.mu.Unlock()
 }
 
-// SendDataPacket sends a raw tunnel IP packet directly to the peer.
+// SendDataPacket sends a raw tunnel IP packet directly to the peer with optional Amnezia 3.x dynamic padding.
 func (p *UDPPuncher) SendDataPacket(targetAddr string, payload []byte) error {
-	if targetAddr == "" || p.conn == nil {
+	return p.SendDataPacketWithPadding(targetAddr, payload, 0, 0)
+}
+
+// SendDataPacketWithPadding applies Amnezia 3.x random trailer padding (pmin-pmax bytes) to disguise packet length.
+func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte, pmin, pmax int) error {
+	if targetAddr == "" || p.conn == nil || len(payload) == 0 {
 		return nil
 	}
-	rAddr, err := net.ResolveUDPAddr("udp4", targetAddr)
+	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
 	if err != nil {
-		return err
+		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
+		if err != nil {
+			return err
+		}
+	}
+
+	if pmax > 0 && pmax >= pmin {
+		padLen := pmin
+		if diff := pmax - pmin; diff > 0 {
+			var b [1]byte
+			_, _ = rand.Read(b[:])
+			padLen += int(b[0]) % (diff + 1)
+		}
+		if padLen > 0 {
+			header := []byte(constants.TunPaddedHeader)
+			pLen := uint16(len(payload))
+			fullPkt := make([]byte, len(header)+2+len(payload)+padLen)
+			copy(fullPkt, header)
+			binary.BigEndian.PutUint16(fullPkt[len(header):len(header)+2], pLen)
+			copy(fullPkt[len(header)+2:], payload)
+			_, _ = rand.Read(fullPkt[len(header)+2+len(payload):])
+			_, err = p.conn.WriteToUDP(fullPkt, rAddr)
+			return err
+		}
 	}
 
 	header := []byte(constants.TunHeader)
@@ -537,6 +567,11 @@ func (p *UDPPuncher) readLoop() {
 			p.handlePing(string(buf[:n]), remoteAddr)
 		case strings.HasPrefix(string(buf[:n]), constants.PongPrefix):
 			p.handlePong(string(buf[:n]), remoteAddr)
+		case n > constants.TunPaddedHeaderSize+2 && string(buf[:constants.TunPaddedHeaderSize]) == constants.TunPaddedHeader:
+			realLen := int(binary.BigEndian.Uint16(buf[constants.TunPaddedHeaderSize : constants.TunPaddedHeaderSize+2]))
+			if realLen > 0 && constants.TunPaddedHeaderSize+2+realLen <= n {
+				p.handleTunnelPacket(buf[constants.TunPaddedHeaderSize+2:constants.TunPaddedHeaderSize+2+realLen], remoteAddr)
+			}
 		case n > constants.TunHeaderSize && string(buf[:constants.TunHeaderSize]) == constants.TunHeader:
 			p.handleTunnelPacket(buf[constants.TunHeaderSize:n], remoteAddr)
 		}
