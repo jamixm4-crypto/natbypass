@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	Version = "1.9.066"
+	Version = "1.9.067"
 	Commit  = "release"
 )
 
@@ -2136,6 +2136,7 @@ func handleProfileSave() {
 	name := strings.TrimSpace(getControlText(hEditProfName))
 	topic := strings.TrimSpace(getControlText(hEditProfTopic))
 	broker := strings.TrimSpace(getControlText(hEditProfBroker))
+	vip := strings.TrimSpace(getControlText(hEditProfVIP))
 
 	if name != "" {
 		p.Name = name
@@ -2146,8 +2147,41 @@ func handleProfileSave() {
 	if broker != "" {
 		p.MQTTBroker = broker
 	}
+	if vip != "" {
+		cleanVIP := strings.TrimSpace(strings.Split(vip, "/")[0])
+		p.VirtualIP = cleanVIP
+	}
 
 	_ = config.Save(cfg, configPath, false)
+
+	if p.ID == cfg.ActiveProfileID {
+		setControlText(hEditMqttBr, p.MQTTBroker)
+		setControlText(hEditMqttTp, p.MQTTTopic)
+		if p.VirtualIP != "" {
+			cleanVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			cfg.Network.Address = cleanVIP
+			myVirtualIP = cleanVIP
+			if tunDev != nil {
+				_ = tunDev.SetVirtualIP(myVirtualIP)
+			}
+			if uiServer != nil {
+				uiServer.SetVirtualIP(myVirtualIP)
+			}
+			triggerPublish()
+		}
+		if registry != nil {
+			registry.ClearAll()
+		}
+		lastPeersHash = ""
+		procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+		if vpnConnected && engineCtx != nil {
+			go func() {
+				tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+				tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+				rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, p.MQTTBroker, p.MQTTTopic)
+			}()
+		}
+	}
 
 	if p.ID == cfg.ActiveProfileID {
 		setControlText(hEditMqttBr, p.MQTTBroker)
@@ -2616,7 +2650,7 @@ func setActiveAWGPresetButton(activeID uint32) {
 
 func buildModernUI(hInstance uintptr) {
 	lblLogo := createLabel(hInstance, "🛸 NatBypass", 20, 24, 180, 30, hFontTitle)
-	lblVer := createLabel(hInstance, fmt.Sprintf("v%s • P2P Mesh", Version), 20, 56, 180, 20, hFontBold)
+	lblVer := createLabel(hInstance, fmt.Sprintf("v%s • P2P Mesh", strings.TrimPrefix(Version, "v")), 20, 56, 180, 20, hFontBold)
 
 	navTitles := []string{
 		"🚀  Обзор и Сеть",
@@ -2647,10 +2681,10 @@ func buildModernUI(hInstance uintptr) {
 	hLblIpInfo = createLabel(hInstance, "Устройство: Определение... | Внешний IP: — | STUN: —", cx, 48, cw, 20, hFontNormal)
 	hLblChannels = createLabel(hInstance, "📡 Сигнальный канал: Инициализация...", cx, 70, cw, 20, hFontNormal)
 
-	hBtnVpn = createOwnerDrawButton(hInstance, "🔴 ОЖИДАНИЕ СВЯЗИ (Поиск устройств в сети...)", cx, 96, 330, 38, ID_BTN_VPN, "red")
-	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить IP", cx+340, 96, 130, 38, ID_BTN_REFRESH, "normal")
-	hBtnManageProfiles = createOwnerDrawButton(hInstance, "🌐 Профили сети...", cx+478, 96, 150, 38, ID_BTN_MANAGE_PROFILES, "normal")
-	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ В закладки", cx+636, 96, 154, 38, ID_BTN_BOOKMARK_PEER, "normal")
+	hBtnVpn = createOwnerDrawButton(hInstance, "🔴 ОЖИДАНИЕ СВЯЗИ (Поиск устройств в сети...)", cx, 96, 420, 38, ID_BTN_VPN, "red")
+	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить", cx+430, 96, 105, 38, ID_BTN_REFRESH, "normal")
+	hBtnManageProfiles = createOwnerDrawButton(hInstance, "🌐 Профили", cx+545, 96, 115, 38, ID_BTN_MANAGE_PROFILES, "normal")
+	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ Закладка", cx+670, 96, 120, 38, ID_BTN_BOOKMARK_PEER, "normal")
 
 	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "🌐 Выход в интернет: Локальный (Отключен)", cx, 140, 385, 40, ID_BTN_EXIT_NODE_SELECT, "normal")
 	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+395, 140, 395, 40, ID_BTN_TOGGLE_SUBNET, "normal")
@@ -4373,7 +4407,7 @@ func updateData() {
 				pingStr = fmt.Sprintf(" (%v)", minRTT.Round(time.Millisecond))
 			}
 			setControlText(hLblStatus, fmt.Sprintf("🟢 ПРЯМАЯ P2P СВЯЗЬ АКТИВНА (%d пир(ов)%s)", directP2PCount, pingStr))
-			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 ПОДКЛЮЧЕНО (Прямой P2P%s | VIP: %s)", pingStr, myVirtualIP)
+			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 Прямой P2P%s • VIP: %s", pingStr, myVirtualIP)
 			buttonTypes[ID_BTN_VPN] = "green"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else if onlineCount > 0 {

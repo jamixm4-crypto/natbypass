@@ -333,19 +333,24 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	nowNano := now.UnixNano()
 	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
 
-	// 1. Send 2 fast probe packets directly to target address
+	// 1. Send 2 paced probe packets directly to target address
 	_, err = p.conn.WriteToUDP(probeData, rAddr)
+	time.Sleep(2 * time.Millisecond)
 	_, _ = p.conn.WriteToUDP(probeData, rAddr)
 
-	// 2. Adaptive sweep across candidate ports for Symmetric NAT / CGNAT
-	targetIP := rAddr.IP
-	candidates := p.candidatePorts(rAddr.Port)
-	for _, port := range candidates {
-		if port == rAddr.Port {
-			continue
+	// 2. Targeted probing: only probe predicted ports if Symmetric NAT is detected
+	if p.GetNATType().IsSymmetric() {
+		targetIP := rAddr.IP
+		candidates := []int{rAddr.Port + 1, rAddr.Port + 2, rAddr.Port - 1, rAddr.Port - 2}
+		if p.portDelta != 0 {
+			candidates = append(candidates, rAddr.Port+p.portDelta, rAddr.Port+2*p.portDelta)
 		}
-		cAddr := &net.UDPAddr{IP: targetIP, Port: port}
-		_, _ = p.conn.WriteToUDP(probeData, cAddr)
+		for _, port := range candidates {
+			if port > 1024 && port < 65535 && port != rAddr.Port {
+				cAddr := &net.UDPAddr{IP: targetIP, Port: port}
+				_, _ = p.conn.WriteToUDP(probeData, cAddr)
+			}
+		}
 	}
 
 	return err
@@ -438,8 +443,8 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 	pongMsg := fmt.Sprintf("%s%s:%s", constants.PongPrefix, p.myDevID, sentTs)
 	_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
-	// Calculate real RTT from embedded sender timestamp
-	rtt := 35 * time.Millisecond
+	// Real RTT calculation
+	var rtt time.Duration
 	if sentNano, err := strconv.ParseInt(sentTs, 10, 64); err == nil && sentNano > 0 {
 		measured := time.Since(time.Unix(0, sentNano))
 		if measured > 0 && measured < 10*time.Second {

@@ -862,7 +862,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.066</span>
+          <span id="topUpdateLabel">v1.9.067</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -2309,6 +2309,36 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               hint.innerText = '🌐 Обнаружен роутер Keenetic. Введите логин и пароль администратора вашего роутера';
             } else {
               hint.innerText = '🔐 Введите логин и пароль для доступа к панели NatBypass (по умолчанию: admin/admin)';
+            }
+          }
+
+          const isWin = (d.is_windows === true || d.os === 'windows');
+          if (isWin) {
+            document.body.classList.add('is-windows');
+            ['nav-logout', 'btnTopLogout', 'btnSettingsLogout'].forEach(id => {
+              const el = document.getElementById(id);
+              if (el) {
+                el.style.setProperty('display', 'none', 'important');
+                el.remove();
+              }
+            });
+          } else {
+            // Linux, Keenetic, Routers, etc: Show logout button
+            const navLog = document.getElementById('nav-logout');
+            if (navLog) navLog.style.display = 'flex';
+            const topLog = document.getElementById('btnTopLogout');
+            if (topLog) topLog.style.display = 'flex';
+            const setLog = document.getElementById('btnSettingsLogout');
+            if (setLog) setLog.style.display = 'block';
+          }
+
+          // Password change card: Only on Linux / standard systems (NOT Keenetic, NOT Windows)
+          const passCard = document.getElementById('cardAdminPassword');
+          if (passCard) {
+            if (!isWin && !d.is_keenetic) {
+              passCard.style.display = 'block';
+            } else {
+              passCard.style.display = 'none';
             }
           }
 
