@@ -739,8 +739,14 @@ func publishLoop(
 		}
 	}
 
-	// Immediate initial beacon
-	publishOnce()
+	// Rapid initial discovery burst (3 beacons within 1.5s for instant mesh convergence)
+	go func() {
+		publishOnce()
+		time.Sleep(350 * time.Millisecond)
+		publishOnce()
+		time.Sleep(900 * time.Millisecond)
+		publishOnce()
+	}()
 
 	for {
 		select {
@@ -811,7 +817,9 @@ func receiveLoop(
 					}
 				}
 			}
-			isNewPeer := !registry.Exists(p.DeviceID)
+			existingPeer, peerFound := registry.Get(p.DeviceID)
+			needsFastReply := !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
+
 			registry.Upsert(&peer.Peer{
 				DeviceID:         p.DeviceID,
 				Nickname:         p.Nickname,
@@ -826,7 +834,7 @@ func receiveLoop(
 				VirtualIP:        p.VirtualIP,
 				IsExitNode:       p.IsExitNode,
 				AdvertisedRoutes: p.AdvertisedRoutes,
-				LastSeen:         p.Timestamp,
+				LastSeen:         time.Now(),
 				Online:           true,
 				AWG:              p.AWG,
 				OS:               p.OS,
@@ -835,13 +843,14 @@ func receiveLoop(
 				Version:          p.Version,
 				IsKeenetic:       p.IsKeenetic,
 			})
-			if isNewPeer {
-				// Реактивный ответ маяком новому узлу с джиттером для мгновенного обнаружения mesh-сети
-				go func(targetID string) {
-					jitter := time.Duration(15+rand.Intn(180)) * time.Millisecond
+
+			// Мгновенный ответный маяк при обнаружении нового узла, смене сокета или перезапуске клиента
+			if needsFastReply {
+				go func() {
+					jitter := time.Duration(10+rand.Intn(70)) * time.Millisecond
 					time.Sleep(jitter)
 					triggerPublish()
-				}(p.DeviceID)
+				}()
 			}
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"os/exec"
@@ -39,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.073"
+	Version = "1.9.074"
 	Commit  = "release"
 )
 
@@ -3882,6 +3883,9 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					pFlag = network.LookupCountryFlag(ctx, p.PublicIP)
 				}
 
+				existingPeer, peerFound := registry.Get(p.DeviceID)
+				needsFastReply := !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
+
 				registry.Upsert(&peer.Peer{
 					DeviceID:         p.DeviceID,
 					Nickname:         nick,
@@ -3904,6 +3908,13 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					Version:          p.Version,
 					IsKeenetic:       p.IsKeenetic,
 				})
+
+				if needsFastReply {
+					go func() {
+						time.Sleep(time.Duration(15+rand.Intn(80)) * time.Millisecond)
+						triggerPublish()
+					}()
+				}
 
 				nameInfo := p.DeviceID
 				if nick != "" {
