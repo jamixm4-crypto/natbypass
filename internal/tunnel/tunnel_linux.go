@@ -43,27 +43,62 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		adapterName = "nb0"
 	}
 
-	// 1. Открытие /dev/net/tun
-	file, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
-	if err != nil {
-		// Попытка загрузить модуль tun
-		_ = exec.Command("modprobe", "tun").Run()
-		file, err = os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
-		if err != nil {
-			return nil, fmt.Errorf("не удалось открыть /dev/net/tun: %w (требуется modprobe tun или права root)", err)
+	// 1. Поиск и открытие /dev/net/tun или /dev/tun
+	var file *os.File
+	var err error
+	tunPaths := []string{"/dev/net/tun", "/dev/tun"}
+	for _, p := range tunPaths {
+		file, err = os.OpenFile(p, os.O_RDWR, 0)
+		if err == nil {
+			break
 		}
 	}
 
-	// 2. Регистрация TUN устройства через ioctl
+	if file == nil {
+		// Попытка загрузить модуль tun и создать ноду устройства
+		_ = exec.Command("modprobe", "tun").Run()
+		_ = exec.Command("insmod", "/lib/modules/tun.ko").Run()
+		_ = exec.Command("mkdir", "-p", "/dev/net").Run()
+		_ = exec.Command("mknod", "/dev/net/tun", "c", "10", "200").Run()
+
+		for _, p := range tunPaths {
+			file, err = os.OpenFile(p, os.O_RDWR, 0)
+			if err == nil {
+				break
+			}
+		}
+	}
+
+	if file == nil {
+		return nil, fmt.Errorf("не удалось открыть /dev/net/tun: %w (требуется modprobe tun или права root)", err)
+	}
+
+	// 2. Регистрация TUN устройства через ioctl с поддержкой x86_64, arm64, mips, mipsle
 	var req ifreq
 	copy(req.ifrName[:], adapterName)
 	req.ifrFlags = IFF_TUN | IFF_NO_PI
 
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, file.Fd(), uintptr(TUNSETIFF), uintptr(unsafe.Pointer(&req)))
-	if errno != 0 {
+	tunIoctls := []uintptr{
+		0x400454ca, // Standard Linux (x86_64, arm, arm64)
+		0x800454ca, // Linux MIPS / MIPSLE (_IOW('T', 202, int) on MIPS where _IOC_WRITE has bit 31 set)
+		0x000054ca, // Raw TUNSETIFF constant (0x54ca)
+	}
+
+	var errno syscall.Errno
+	ioctlSuccess := false
+	for _, ioctlCmd := range tunIoctls {
+		_, _, errno = syscall.Syscall(syscall.SYS_IOCTL, file.Fd(), ioctlCmd, uintptr(unsafe.Pointer(&req)))
+		if errno == 0 {
+			ioctlSuccess = true
+			break
+		}
+	}
+
+	if !ioctlSuccess {
 		file.Close()
 		return nil, fmt.Errorf("ioctl TUNSETIFF error: %v", errno)
 	}
+
 
 	dev := &Device{
 		AdapterName: adapterName,

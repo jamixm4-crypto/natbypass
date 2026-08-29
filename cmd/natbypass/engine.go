@@ -20,6 +20,7 @@ import (
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
+	"github.com/natbypass/natbypass/internal/daemon"
 	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
@@ -34,6 +35,12 @@ import (
 // runEngine initializes and runs the core NatBypass networking pipeline.
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	setupLogging(cfg.App.LogLevel, cfg.App.LogFile)
+
+	if cfg.Daemon.PidFile != "" {
+		_ = daemon.WritePID(cfg.Daemon.PidFile)
+		defer daemon.RemovePID(cfg.Daemon.PidFile)
+	}
+
 	log.Info().
 		Str("version", Version).
 		Str("commit", Commit).
