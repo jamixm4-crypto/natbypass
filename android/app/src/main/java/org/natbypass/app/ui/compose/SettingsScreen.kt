@@ -48,6 +48,7 @@ fun SettingsScreen(
 
     // Device / App settings (stored in SharedPreferences)
     var deviceName      by remember { mutableStateOf(prefs.getString("device_name", Build.MODEL) ?: Build.MODEL) }
+    var virtualIp       by remember { mutableStateOf(prefs.getString("virtual_ip", "") ?: "") }
     var publishInterval by remember { mutableStateOf(prefs.getInt("publish_interval", 8).toString()) }
     var autoStart       by remember { mutableStateOf(prefs.getBoolean("auto_start_on_boot", false)) }
     var saveLogs        by remember { mutableStateOf(prefs.getBoolean("save_logs", false)) }
@@ -92,6 +93,7 @@ fun SettingsScreen(
             } else {
                 mqttBroker  = prefs.getString("mqtt_broker", "tcp://broker.emqx.io:1883") ?: ""
                 mqttTopic   = prefs.getString("mqtt_topic", "natbypass/mynet/peers") ?: ""
+                virtualIp   = prefs.getString("virtual_ip", MobileBridge.getVirtualIP()) ?: MobileBridge.getVirtualIP()
                 mqttUser    = prefs.getString("mqtt_user", "") ?: ""
                 mqttPass    = prefs.getString("mqtt_pass", "") ?: ""
                 tgToken     = prefs.getString("tg_token", "") ?: ""
@@ -113,6 +115,7 @@ fun SettingsScreen(
     fun save() {
         prefs.edit().apply {
             putString("device_name", deviceName.trim())
+            putString("virtual_ip", virtualIp.trim())
             putInt("publish_interval", publishInterval.toIntOrNull() ?: 8)
             putBoolean("auto_start_on_boot", autoStart)
             putBoolean("save_logs", saveLogs)
@@ -321,6 +324,16 @@ fun SettingsScreen(
 
             // ── Device ────────────────────────────────────────────────────
             SettingsSection(title = "Устройство", icon = Icons.Outlined.PhoneAndroid) {
+                OutlinedTextField(
+                    value = virtualIp,
+                    onValueChange = { virtualIp = it },
+                    label = { Text("Виртуальный IP (Virtual IP)") },
+                    placeholder = { Text("100.64.200.10/24") },
+                    leadingIcon = { Icon(Icons.Outlined.Fingerprint, null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = deviceName,
                     onValueChange = { deviceName = it },

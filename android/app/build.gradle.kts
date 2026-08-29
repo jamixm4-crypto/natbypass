@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
@@ -12,8 +12,8 @@ android {
         minSdk = 24
         targetSdk = 34
 
-        val vName = (project.findProperty("versionName") as? String)?.trim() ?: "1.6.9"
-        val vCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 169
+        val vName = (project.findProperty("versionName") as? String)?.trim() ?: "1.9.070"
+        val vCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 10970
         versionCode = vCode
         versionName = vName
 
