@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	Version = "1.9.063"
+	Version = "1.9.064"
 	Commit  = "release"
 )
 
@@ -4345,22 +4345,22 @@ func updateData() {
 			}
 		}
 
-		// Реальная верификация статуса прямого соединения
+		// Реальная верификация статуса mesh-соединения
 		if directP2PCount > 0 {
 			vpnConnected = true
 			pingStr := ""
 			if minRTT > 0 {
-				pingStr = fmt.Sprintf(" | Пинг: %v", minRTT.Round(time.Millisecond))
+				pingStr = fmt.Sprintf(" (%v)", minRTT.Round(time.Millisecond))
 			}
 			setControlText(hLblStatus, fmt.Sprintf("🟢 ПРЯМАЯ P2P СВЯЗЬ АКТИВНА (%d пир(ов)%s)", directP2PCount, pingStr))
-			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 ПОДКЛЮЧЕНО (Прямой P2P | VIP: %s%s)", myVirtualIP, pingStr)
+			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 ПОДКЛЮЧЕНО (Прямой P2P%s | VIP: %s)", pingStr, myVirtualIP)
 			buttonTypes[ID_BTN_VPN] = "green"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else if onlineCount > 0 {
-			vpnConnected = false
-			setControlText(hLblStatus, fmt.Sprintf("🟡 СИГНАЛ В СЕТИ (Идёт прямое UDP пробитие NAT до %d пиров...)", onlineCount))
-			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 В СЕТИ (VIP: %s)", myVirtualIP)
-			buttonTypes[ID_BTN_VPN] = "yellow"
+			vpnConnected = true
+			setControlText(hLblStatus, fmt.Sprintf("🟢 СЕТЬ АКТИВНА (%d пир(ов) онлайн | Релей/STUN)", onlineCount))
+			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 В СЕТИ (%d пир(ов) | VIP: %s)", onlineCount, myVirtualIP)
+			buttonTypes[ID_BTN_VPN] = "green"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else {
 			vpnConnected = false

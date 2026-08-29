@@ -1850,6 +1850,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		MQTTPass   string `json:"mqtt_pass"`
 		TGToken    string `json:"tg_token"`
 		TGChatID   int64  `json:"tg_chat_id"`
+		VirtualIP  string `json:"virtual_ip"`
 		TGProxy    string `json:"tg_proxy"`
 		AWGPreset  string `json:"awg_preset"`
 		AutoSwitch bool   `json:"auto_switch"`
@@ -1888,6 +1889,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		TGToken:    req.TGToken,
 		TGChatID:   req.TGChatID,
 		TGProxy:    req.TGProxy,
+		VirtualIP:  req.VirtualIP,
 		AWGPreset:  req.AWGPreset,
 		IsActive:   req.AutoSwitch || len(cfg.Profiles) == 0,
 		CreatedAt:  time.Now(),
@@ -1925,6 +1927,7 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		MQTTPass   string `json:"mqtt_pass"`
 		TGToken    string `json:"tg_token"`
 		TGChatID   int64  `json:"tg_chat_id"`
+		VirtualIP  string `json:"virtual_ip"`
 		TGProxy    string `json:"tg_proxy"`
 		AWGPreset  string `json:"awg_preset"`
 	}
@@ -1985,6 +1988,9 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TGProxy != "" {
 		target.TGProxy = req.TGProxy
+	}
+	if req.VirtualIP != "" {
+		target.VirtualIP = req.VirtualIP
 	}
 	if req.AWGPreset != "" {
 		target.AWGPreset = req.AWGPreset

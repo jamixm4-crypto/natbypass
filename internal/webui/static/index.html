@@ -861,7 +861,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.063</span>
+          <span id="topUpdateLabel">v1.9.064</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1535,6 +1535,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <input type="text" id="newProfName" class="form-input" placeholder="Например: Домашняя сеть, Офис, Семья" value="Личная сеть">
       </div>
       <div class="form-group" style="margin-bottom:12px;">
+        <label class="form-label">🌐 Виртуальный IP адрес узла (Virtual IP / CIDR):</label>
+        <input type="text" id="newProfVIP" class="form-input mono" placeholder="100.64.200.1/24 (или оставьте пустым для авто)">
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
         <label class="form-label">MQTT Топик (оставьте пустым для безопасной автогенерации):</label>
         <input type="text" id="newProfTopic" class="form-input mono" placeholder="Задайте уникальный секретный топик для вашей сети">
       </div>
@@ -1560,6 +1564,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div class="form-group" style="margin-bottom:12px;">
         <label class="form-label">Имя профиля:</label>
         <input type="text" id="editProfName" class="form-input" placeholder="Имя профиля сети">
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label class="form-label">🌐 Виртуальный IP адрес узла (Virtual IP / CIDR):</label>
+        <input type="text" id="editProfVIP" class="form-input mono" placeholder="100.64.200.1/24">
       </div>
       <div class="form-group" style="margin-bottom:12px;">
         <label class="form-label">MQTT Топик (секрет сети):</label>
@@ -3197,7 +3205,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
             <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; border-top:1px solid rgba(255,255,255,0.06); padding-top:12px;">
               <div style="display:flex; gap:6px;">
-                <button onclick="openEditProfileModal('${p.id}', '${escapeHtml(p.name)}', '${escapeHtml(p.mqtt_topic)}', '${escapeHtml(p.mqtt_broker || 'tcp://broker.emqx.io:1883')}')" class="btn btn-glass" style="padding:5px 10px; font-size:0.76rem;" title="Редактировать параметры сети">
+                <button onclick="openEditProfileModal('${p.id}', '${escapeHtml(p.name)}', '${escapeHtml(p.mqtt_topic)}', '${escapeHtml(p.mqtt_broker || 'tcp://broker.emqx.io:1883')}', '${escapeHtml(p.virtual_ip || '')}')" class="btn btn-glass" style="padding:5px 10px; font-size:0.76rem;" title="Редактировать параметры сети">
                   ✏️ Изменить
                 </button>
                 <button onclick="shareProfileQR('${p.id}', '${escapeHtml(p.name)}')" class="btn btn-glass" style="padding:5px 10px; font-size:0.76rem;" title="Показать QR-код для мобильного приложения">
@@ -3243,7 +3251,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <div style="font-size:0.75rem; color:var(--text-muted); font-family:monospace;">${escapeHtml(p.mqtt_topic)}</div>
           </div>
           <div style="display:flex; gap:6px;">
-            <button onclick="openEditProfileModal('${p.id}', '${escapeHtml(p.name)}', '${escapeHtml(p.mqtt_topic)}', '${escapeHtml(p.mqtt_broker || 'tcp://broker.emqx.io:1883')}')" class="btn-pill" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); color:#38bdf8; padding:4px 8px; font-size:0.76rem; border-radius:10px; cursor:pointer;" title="Изменить">✏️</button>
+            <button onclick="openEditProfileModal('${p.id}', '${escapeHtml(p.name)}', '${escapeHtml(p.mqtt_topic)}', '${escapeHtml(p.mqtt_broker || 'tcp://broker.emqx.io:1883')}', '${escapeHtml(p.virtual_ip || '')}')" class="btn-pill" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); color:#38bdf8; padding:4px 8px; font-size:0.76rem; border-radius:10px; cursor:pointer;" title="Изменить">✏️</button>
             <button onclick="shareProfileQR('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.35); color:#c084fc; padding:4px 8px; font-size:0.76rem; border-radius:10px; cursor:pointer;" title="Показать QR-код">📱 QR</button>
             <button onclick="switchProfile('${p.id}')" class="btn-pill" style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#4ade80; padding:4px 10px; font-size:0.78rem; font-weight:700; border-radius:10px; cursor:pointer;">Подключить</button>
             <button onclick="deleteProfile('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#ef4444; padding:4px 8px; font-size:0.78rem; border-radius:10px; cursor:pointer;" title="Удалить профиль">🗑️</button>
@@ -3264,11 +3272,14 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       document.getElementById('profileModal').style.display = 'none';
     }
 
-    function openEditProfileModal(id, name, topic, broker) {
-      document.getElementById('editProfId').value = id;
-      document.getElementById('editProfName').value = name;
-      document.getElementById('editProfTopic').value = topic;
-      document.getElementById('editProfBroker').value = broker;
+    function openEditProfileModal(id, name, topic, broker, vip) {
+      document.getElementById('editProfId').value = id || '';
+      document.getElementById('editProfName').value = name || '';
+      document.getElementById('editProfTopic').value = topic || '';
+      document.getElementById('editProfBroker').value = broker || 'tcp://broker.emqx.io:1883';
+      if (document.getElementById('editProfVIP')) {
+        document.getElementById('editProfVIP').value = vip || '';
+      }
       document.getElementById('editProfileModal').classList.add('active');
       document.getElementById('editProfileModal').style.display = 'flex';
     }
@@ -3283,14 +3294,14 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const name = document.getElementById('editProfName').value.trim();
       const mqtt_topic = document.getElementById('editProfTopic').value.trim();
       const mqtt_broker = document.getElementById('editProfBroker').value.trim();
-      const virtual_ip = document.getElementById('editProfVirtualIP').value.trim();
+      const virtual_ip = document.getElementById('editProfVIP') ? document.getElementById('editProfVIP').value.trim() : '';
 
       if (!id) return;
       try {
         const res = await fetch('/api/profiles/update', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({id, name, mqtt_topic, mqtt_broker})
+          body: JSON.stringify({id, name, mqtt_topic, mqtt_broker, virtual_ip})
         });
         const json = await res.json();
         if (json.ok) {

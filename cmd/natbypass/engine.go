@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"os/exec"
@@ -33,6 +34,18 @@ import (
 
 
 // runEngine initializes and runs the core NatBypass networking pipeline.
+
+var (
+	triggerPublishCh = make(chan struct{}, 10)
+)
+
+func triggerPublish() {
+	select {
+	case triggerPublishCh <- struct{}{}:
+	default:
+	}
+}
+
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	setupLogging(cfg.App.LogLevel, cfg.App.LogFile)
 
@@ -658,6 +671,8 @@ func publishLoop(
 			return
 		case <-ticker.C:
 			publishOnce()
+		case <-triggerPublishCh:
+			publishOnce()
 		}
 	}
 }
@@ -719,6 +734,7 @@ func receiveLoop(
 					}
 				}
 			}
+			isNewPeer := !registry.Exists(p.DeviceID)
 			registry.Upsert(&peer.Peer{
 				DeviceID:         p.DeviceID,
 				PublicKey:        p.PublicKey,
@@ -735,6 +751,14 @@ func receiveLoop(
 				Online:           true,
 				AWG:              p.AWG,
 			})
+			if isNewPeer {
+				// Реактивный ответ маяком новому узлу с джиттером для мгновенного обнаружения mesh-сети
+				go func(targetID string) {
+					jitter := time.Duration(15+rand.Intn(180)) * time.Millisecond
+					time.Sleep(jitter)
+					triggerPublish()
+				}(p.DeviceID)
+			}
 		}
 	}
 }

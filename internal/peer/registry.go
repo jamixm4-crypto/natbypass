@@ -308,3 +308,10 @@ func (r *Registry) StartMonitor(ctx context.Context, interval time.Duration) {
 		}
 	}()
 }
+// Exists returns true if peer deviceID is currently known in the registry
+func (r *Registry) Exists(deviceID string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.peers[deviceID]
+	return ok
+}

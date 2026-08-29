@@ -1,4 +1,4 @@
-﻿package network
+package network
 
 import (
 	"context"
@@ -81,6 +81,9 @@ func (d *Discoverer) GetPublicIP(ctx context.Context) (net.IP, error) {
 }
 
 func (d *Discoverer) GetPublicIPCached(ctx context.Context, maxAge time.Duration) (net.IP, error) {
+	if maxAge < 5*time.Minute {
+		maxAge = 5 * time.Minute
+	}
 	d.mu.Lock()
 	if d.cachedIP != nil && time.Since(d.cachedTime) < maxAge {
 		ip := d.cachedIP
