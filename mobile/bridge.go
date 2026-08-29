@@ -142,13 +142,15 @@ func negotiateVirtualIP() {
 	if globalRegistry == nil {
 		return
 	}
-	peers := globalRegistry.List()
 	usedIPs := make(map[string]string)
-	for _, p := range peers {
-		if p.Online && p.VirtualIP != "" {
-			usedIPs[p.VirtualIP] = p.DeviceID
+	for _, p := range globalRegistry.List() {
+		pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		if p.Online && pVIP != "" {
+			usedIPs[pVIP] = p.DeviceID
 		}
 	}
+
+
 	conflictDev, hasConflict := usedIPs[globalVirtualIP]
 	if hasConflict && conflictDev != "" {
 		if globalDevID > conflictDev {
@@ -615,7 +617,8 @@ func attachTUN(tunFd int) {
 						var targetPeer *peer.Peer
 						if globalRegistry != nil {
 							for _, p := range globalRegistry.List() {
-								if p.VirtualIP != "" && p.VirtualIP == destIP.String() {
+								pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+								if pVIP != "" && pVIP == destIP.String() {
 									targetPeer = p
 									break
 								}
@@ -627,6 +630,7 @@ func attachTUN(tunFd int) {
 								}
 							}
 						}
+
 
 						if targetPeer == nil && globalExitNode != "" && globalRegistry != nil {
 							if ep, ok := globalRegistry.Get(globalExitNode); ok && ep.Online {
@@ -708,12 +712,14 @@ func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
 		_ = globalPuncher.SendDataPacket(fromAddr.String(), reply)
 	} else if globalPuncher != nil && globalRegistry != nil {
 		for _, p := range globalRegistry.List() {
-			if p.VirtualIP == srcIP.String() && p.ActiveEndpoint != "" {
+			pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			if (pVIP == srcIP.String() || p.VirtualIP == srcIP.String()) && p.ActiveEndpoint != "" {
 				_ = globalPuncher.SendDataPacket(p.ActiveEndpoint, reply)
 				break
 			}
 		}
 	}
+
 }
 
 func calcChecksum(data []byte) uint16 {

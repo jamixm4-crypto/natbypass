@@ -103,7 +103,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}()
 
 		// L3 Data-plane: Inbound packets from UDP Puncher & MQTT Relay -> Write to TUN and handle ICMP
-		onInboundPacket := func(payload []byte) {
+		onInboundPacket := func(payload []byte, directAddr *net.UDPAddr) {
 			if len(payload) < 20 {
 				return
 			}
@@ -114,9 +114,28 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
 				dstIP := net.IPv4(payload[16], payload[17], payload[18], payload[19]).String()
 				cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-				if dstIP == cleanVIP || dstIP == myVirtualIP {
+				if dstIP == cleanVIP || dstIP == myVirtualIP || strings.HasPrefix(dstIP, "100.64.200.") {
 					if reply := createICMPEchoReply(payload); reply != nil {
+						sentDirect := false
+						// 1. Direct UDP socket reply (instant guarantee)
+						if directAddr != nil && puncher != nil {
+							if err := puncher.SendDataPacket(directAddr.String(), reply); err == nil {
+								sentDirect = true
+							}
+						}
+
+						// 2. Peer registry routing lookup
 						p, found := registry.GetByVirtualIP(srcIP)
+						if !found || p == nil {
+							for _, item := range registry.List() {
+								pVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
+								if pVIP == srcIP && pVIP != "" {
+									p = item
+									found = true
+									break
+								}
+							}
+						}
 						if !found || p == nil {
 							peers := registry.List()
 							if len(peers) == 1 {
@@ -125,7 +144,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 						if found && p != nil {
-							sentUDP := false
+							sentUDP := sentDirect
 							if p.DirectP2P && p.ActiveEndpoint != "" && puncher != nil {
 								if err := puncher.SendDataPacket(p.ActiveEndpoint, reply); err == nil {
 									sentUDP = true
@@ -145,13 +164,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 		if puncher != nil {
 			puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
-				onInboundPacket(payload)
+				onInboundPacket(payload, srcAddr)
 			})
 		}
 
 		if sigMgr != nil {
 			sigMgr.SubscribeTunnelData(deviceID, func(pkt []byte) {
-				onInboundPacket(pkt)
+				onInboundPacket(pkt, nil)
 			})
 		}
 
@@ -175,6 +194,26 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 				p, found := registry.GetByVirtualIP(dstIP)
 				if !found || p == nil {
+					for _, item := range registry.List() {
+						pVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
+						if pVIP == dstIP && pVIP != "" {
+							p = item
+							found = true
+							break
+						}
+						for _, route := range item.AdvertisedRoutes {
+							if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(net.ParseIP(dstIP)) {
+								p = item
+								found = true
+								break
+							}
+						}
+						if found {
+							break
+						}
+					}
+				}
+				if !found || p == nil {
 					peers := registry.List()
 					if len(peers) == 1 {
 						p = peers[0]
@@ -196,6 +235,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 					}
 				}
+
 
 			}
 		}()

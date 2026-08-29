@@ -3078,13 +3078,14 @@ func startEngineFromConfig(c *config.Config) {
 						peers := registry.List()
 						var targetPeer *peer.Peer
 
-						// 1. Прямое совпадение по VirtualIP (например, 100.64.200.2)
 						for _, p := range peers {
-							if p.DeviceID != myDevID && p.VirtualIP == destStr {
+							pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+							if p.DeviceID != myDevID && (p.VirtualIP == destStr || pVIP == destStr) {
 								targetPeer = p
 								break
 							}
 						}
+
 
 						// 2. Маршрут к подсети пира (например, 192.168.1.0/24 или 10.0.0.0/8)
 						if targetPeer == nil {
