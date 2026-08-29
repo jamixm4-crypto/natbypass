@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -13,15 +14,57 @@ import (
 )
 
 
+
 var (
 	sessionStore   = make(map[string]SessionEntry)
 	sessionStoreMu sync.RWMutex
+	sessionFilePath = getSessionStoragePath()
 )
 
 type SessionEntry struct {
-	Username  string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	Username  string    `json:"username"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func getSessionStoragePath() string {
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat("/opt/var/run"); err == nil {
+			return "/opt/var/run/.natbypass_sessions.json"
+		}
+		if _, err := os.Stat("/tmp"); err == nil {
+			return "/tmp/.natbypass_sessions.json"
+		}
+	}
+	return ".sessions.json"
+}
+
+func init() {
+	loadSessionsFromDisk()
+}
+
+func loadSessionsFromDisk() {
+	sessionStoreMu.Lock()
+	defer sessionStoreMu.Unlock()
+	if data, err := os.ReadFile(sessionFilePath); err == nil {
+		var loaded map[string]SessionEntry
+		if err := json.Unmarshal(data, &loaded); err == nil && loaded != nil {
+			now := time.Now()
+			for k, v := range loaded {
+				if now.Before(v.ExpiresAt) {
+					sessionStore[k] = v
+				}
+			}
+		}
+	}
+}
+
+func saveSessionsToDisk() {
+	sessionStoreMu.RLock()
+	defer sessionStoreMu.RUnlock()
+	if data, err := json.Marshal(sessionStore); err == nil {
+		_ = os.WriteFile(sessionFilePath, data, 0600)
+	}
 }
 
 func generateSessionToken() string {
@@ -33,13 +76,21 @@ func generateSessionToken() string {
 func createSession(username string) string {
 	token := generateSessionToken()
 	sessionStoreMu.Lock()
-	defer sessionStoreMu.Unlock()
 	sessionStore[token] = SessionEntry{
 		Username:  username,
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
 	}
+	sessionStoreMu.Unlock()
+	saveSessionsToDisk()
 	return token
+}
+
+func deleteSession(token string) {
+	sessionStoreMu.Lock()
+	delete(sessionStore, token)
+	sessionStoreMu.Unlock()
+	saveSessionsToDisk()
 }
 
 func isValidSession(token string) bool {
