@@ -25,7 +25,9 @@ import (
 
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/crypto"
+	"github.com/natbypass/natbypass/internal/license"
 	"github.com/natbypass/natbypass/internal/network"
+
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/tunnel"
@@ -299,9 +301,10 @@ var (
 	buttonLabels = make(map[uint32]string)
 	buttonTypes  = make(map[uint32]string)
 
-	navButtons [6]uintptr
+	navButtons [7]uintptr
 	currentTab = 0
-	tabPages   [6][]uintptr
+	tabPages   [7][]uintptr
+
 
 	// Вкладка 0: Обзор
 	hLblStatus            uintptr
@@ -453,7 +456,20 @@ var (
 	dlgResultOK   bool
 	dlgFinished   bool
 	hDlgEdit      uintptr
+
+	// Лицензия и Trial
+	trialMgr          *license.TrialManager
+	licenseMgr         *license.LicenseManager
+	hLblLicenseStatus  uintptr
+	hLblLicenseType    uintptr
+	hLblLicenseHWID    uintptr
+	hLblTrialBar       uintptr
+	hEditLicenseKey    uintptr
+	hBtnActivateLic    uintptr
+	hBtnCopyHWID       uintptr
+	hBtnBuyLicense     uintptr
 )
+
 
 const (
 	ID_TIMER_POLL = 1001
@@ -465,6 +481,8 @@ const (
 	ID_NAV_SETTINGS  = 3004
 	ID_NAV_DIAG      = 3005
 	ID_NAV_LOGS      = 3006
+	ID_NAV_LICENSE   = 3007
+
 
 	// Действия
 	ID_BTN_VPN             = 4001
@@ -509,7 +527,13 @@ const (
 	ID_BTN_PROF_EXPORT = 4064
 	ID_BTN_PROF_IMPORT = 4065
 	ID_BTN_PROF_QR     = 4066
+
+	// Лицензия
+	ID_BTN_ACTIVATE_LIC = 4070
+	ID_BTN_COPY_HWID    = 4071
+	ID_BTN_BUY_LIC      = 4072
 )
+
 
 func initDebugLog() {
 	startTime = time.Now()
@@ -707,6 +731,15 @@ func main() {
 
 	// Запуск сторожевого таймера дебаггера
 	startSystemWatchdog()
+
+	// 3. Инициализация системы лицензирования
+	if tm, err := license.NewTrialManager(); err == nil {
+		trialMgr = tm
+		licenseMgr = license.NewLicenseManager(tm)
+		writeDebug(fmt.Sprintf("🔑 Лицензия: %s | Тип: %s", licenseMgr.StatusLine(), licenseMgr.GetLicenseType()))
+	} else {
+		writeDebug("⚠️ Не удалось инициализировать Trial: " + err.Error())
+	}
 
 	cfgFile := flag.String("config", "config.yaml", "Path to config.yaml")
 	flag.Parse()
@@ -1234,9 +1267,22 @@ func handleCommand(id uint16) {
 		selectTab(4)
 	case ID_NAV_LOGS:
 		selectTab(5)
+	case ID_NAV_LICENSE:
+		selectTab(6)
+
+	case ID_BTN_ACTIVATE_LIC:
+		handleActivateLicense()
+	case ID_BTN_COPY_HWID:
+		if licenseMgr != nil {
+			copyToClipboard(license.GetHWID())
+			addLog("📋 HWID скопирован в буфер обмена")
+		}
+	case ID_BTN_BUY_LIC:
+		_ = exec.Command("cmd.exe", "/c", "start", "", "https://natbypass.com/buy").Start()
 
 	case ID_BTN_MANAGE_PROFILES:
 		selectTab(1)
+
 
 	case ID_BTN_PROF_SWITCH:
 		handleProfileSwitch()
@@ -2562,8 +2608,9 @@ func buildModernUI(hInstance uintptr) {
 		"⚙️  Настройки",
 		"🩺  Диагностика",
 		"📋  Журнал событий",
+		"🔑  Лицензия",
 	}
-	navIDs := []uint32{ID_NAV_DASHBOARD, ID_NAV_PROFILES, ID_NAV_AWG, ID_NAV_SETTINGS, ID_NAV_DIAG, ID_NAV_LOGS}
+	navIDs := []uint32{ID_NAV_DASHBOARD, ID_NAV_PROFILES, ID_NAV_AWG, ID_NAV_SETTINGS, ID_NAV_DIAG, ID_NAV_LOGS, ID_NAV_LICENSE}
 
 	for i, t := range navTitles {
 		navButtons[i] = createOwnerDrawButton(hInstance, t, 16, 96+(i*44), 188, 36, navIDs[i], "nav")
@@ -2571,6 +2618,7 @@ func buildModernUI(hInstance uintptr) {
 	if !showDiagnostics {
 		procShowWindow.Call(navButtons[4], uintptr(SW_HIDE))
 	}
+
 
 	allControls = append(allControls, lblLogo, lblVer)
 
@@ -2785,6 +2833,56 @@ func buildModernUI(hInstance uintptr) {
 	tabPages[5] = []uintptr{lblLogTitle, hBtnSaveLogs, hBtnClrLogs, hEditLogs}
 	writeDebug("buildModernUI: страница 5 создана")
 
+	// СТРАНИЦА 6: ЛИЦЕНЗИЯ
+	lblLicTitle := createLabel(hInstance, "🔑 Лицензия и Пробный период", cx, 20, cw, 28, hFontTitle)
+
+	hLblTrialBar = createLabel(hInstance, "✅ Инициализация...", cx, 56, cw, 24, hFontHeader)
+
+	lblLicSep1 := createLabel(hInstance, "─────────────────────────────────────────────────────────────────────────────────────────────────────", cx, 85, cw, 18, hFontSmall)
+
+	lblLicTypeHead := createLabel(hInstance, "Тип лицензии:", cx, 110, 180, 20, hFontBold)
+	hLblLicenseType = createLabel(hInstance, "Trial (Пробный период)", cx+190, 110, cw-200, 20, hFontNormal)
+
+	lblLicStatusHead := createLabel(hInstance, "Статус:", cx, 138, 180, 20, hFontBold)
+	hLblLicenseStatus = createLabel(hInstance, "Загрузка...", cx+190, 138, cw-200, 20, hFontNormal)
+
+	lblLicHWIDHead := createLabel(hInstance, "Ваш HWID:", cx, 166, 180, 20, hFontBold)
+	hLblLicenseHWID = createLabel(hInstance, license.GetHWID(), cx+190, 166, cw-330, 20, hFontMono)
+	hBtnCopyHWID = createOwnerDrawButton(hInstance, "📋 Скопировать", cx+cw-130, 160, 130, 28, ID_BTN_COPY_HWID, "normal")
+
+	lblLicSep2 := createLabel(hInstance, "─────────────────────────────────────────────────────────────────────────────────────────────────────", cx, 200, cw, 18, hFontSmall)
+
+	lblLicActHead := createLabel(hInstance, "🔑 Активация лицензионного ключа", cx, 224, cw, 22, hFontHeader)
+	lblLicKeyHint := createLabel(hInstance, "Формат ключа: ИМЯ:ДАТА_UNIX:ТИП:HWID:ПОДПИСЬ", cx, 250, cw, 18, hFontSmall)
+	hEditLicenseKey = createEdit(hInstance, "", cx, 274, cw-160, 32, false, false, hFontNormal)
+	hBtnActivateLic = createOwnerDrawButton(hInstance, "✅ Активировать", cx+cw-150, 274, 150, 32, ID_BTN_ACTIVATE_LIC, "green")
+
+	lblLicSep3 := createLabel(hInstance, "─────────────────────────────────────────────────────────────────────────────────────────────────────", cx, 320, cw, 18, hFontSmall)
+
+	lblTrialLimits := createLabel(hInstance, "📊 Ограничения пробного периода (Trial):", cx, 344, cw, 22, hFontHeader)
+	lblLimit1 := createLabel(hInstance, "  • Максимум 2 устройства в сети", cx, 372, cw, 20, hFontNormal)
+	lblLimit2 := createLabel(hInstance, "  • Максимум 1 профиль сети", cx, 396, cw, 20, hFontNormal)
+	lblLimit3 := createLabel(hInstance, "  • Водяной знак TRIAL в статусе", cx, 420, cw, 20, hFontNormal)
+	lblLimit4 := createLabel(hInstance, "  • Все функции AWG 2.0 доступны", cx, 444, cw, 20, hFontNormal)
+
+	lblLicSep4 := createLabel(hInstance, "─────────────────────────────────────────────────────────────────────────────────────────────────────", cx, 478, cw, 18, hFontSmall)
+
+	lblBuyHead := createLabel(hInstance, "💳 Купить полную лицензию и убрать ограничения:", cx, 502, cw, 22, hFontHeader)
+	hBtnBuyLicense = createOwnerDrawButton(hInstance, "🌐 Купить лицензию на natbypass.com", cx, 530, 340, 40, ID_BTN_BUY_LIC, "primary")
+
+	tabPages[6] = []uintptr{
+		lblLicTitle, hLblTrialBar, lblLicSep1,
+		lblLicTypeHead, hLblLicenseType,
+		lblLicStatusHead, hLblLicenseStatus,
+		lblLicHWIDHead, hLblLicenseHWID, hBtnCopyHWID,
+		lblLicSep2, lblLicActHead, lblLicKeyHint,
+		hEditLicenseKey, hBtnActivateLic,
+		lblLicSep3, lblTrialLimits,
+		lblLimit1, lblLimit2, lblLimit3, lblLimit4,
+		lblLicSep4, lblBuyHead, hBtnBuyLicense,
+	}
+	writeDebug("buildModernUI: страница 6 (Лицензия) создана")
+
 	// СТАРТОВЫЙ ЭКРАН (STARTUP / SPLASH OVERLAY)
 	hSplashTitle = createLabel(hInstance, "🛸 NatBypass P2P Mesh Engine", cx+40, 50, cw-80, 36, hFontTitle)
 	hSplashSub = createLabel(hInstance, "Автономная P2P mesh-сеть нового поколения • нициализация...", cx+40, 92, cw-80, 22, hFontNormal)
@@ -2843,6 +2941,12 @@ func hideSplashScreen() {
 		procShowWindow.Call(h, uintptr(SW_HIDE))
 	}
 	selectTab(0)
+
+	// Отложенное предупреждение об истечении Trial (через 2с после отображения UI)
+	go func() {
+		time.Sleep(2 * time.Second)
+		showTrialExpiryWarning()
+	}()
 }
 
 func selectTab(index int) {
@@ -4415,7 +4519,37 @@ func updateData() {
 	if currentTab == 4 {
 		flushLogsToUI()
 	}
+
+	// Обновляем вкладку Лицензии при каждом тике
+	updateLicenseTab()
 }
+
+// updateLicenseTab refreshes the License tab controls from current license/trial state.
+func updateLicenseTab() {
+	if trialMgr == nil || licenseMgr == nil {
+		return
+	}
+	if hLblTrialBar == 0 {
+		return
+	}
+
+	ts := trialMgr.GetStatus()
+	setControlText(hLblTrialBar, ts.FormatStatus())
+	setControlText(hLblLicenseStatus, licenseMgr.StatusLine())
+
+	lt := licenseMgr.GetLicenseType()
+	switch lt {
+	case license.LicenseTypeEnterprise:
+		setControlText(hLblLicenseType, "✅ Enterprise")
+	case license.LicenseTypePro:
+		setControlText(hLblLicenseType, "✅ Pro")
+	case license.LicenseTypePersonal:
+		setControlText(hLblLicenseType, "✅ Personal")
+	default:
+		setControlText(hLblLicenseType, fmt.Sprintf("⏳ Trial (%d/%d дней)", license.TrialDays-ts.DaysRemaining, license.TrialDays))
+	}
+}
+
 
 func flushLogsToUI() {
 	logsMutex.Lock()
@@ -4591,6 +4725,63 @@ func fillConfigFields() {
 		} else {
 			setSigModeUI("mqtt_only")
 		}
+	}
+}
+
+// handleActivateLicense reads the key from the edit field and validates it.
+func handleActivateLicense() {
+	if licenseMgr == nil {
+		msgKey, _ := syscall.UTF16PtrFromString("Система лицензирования не инициализирована")
+		msgTitle, _ := syscall.UTF16PtrFromString("Ошибка")
+		procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msgKey)), uintptr(unsafe.Pointer(msgTitle)), 0x10)
+		return
+	}
+
+	key := strings.TrimSpace(getControlText(hEditLicenseKey))
+	if key == "" {
+		msgKey, _ := syscall.UTF16PtrFromString("Введите лицензионный ключ в поле выше")
+		msgTitle, _ := syscall.UTF16PtrFromString("Активация лицензии")
+		procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msgKey)), uintptr(unsafe.Pointer(msgTitle)), 0x40)
+		return
+	}
+
+	if err := licenseMgr.ActivateOffline(key); err != nil {
+		errMsg, _ := syscall.UTF16PtrFromString("❌ Ошибка активации:\n\n" + err.Error())
+		errTitle, _ := syscall.UTF16PtrFromString("Ошибка лицензии")
+		procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(errMsg)), uintptr(unsafe.Pointer(errTitle)), 0x10)
+		addLog("⛔ Ошибка активации лицензии: " + err.Error())
+		return
+	}
+
+	// Success
+	lic := licenseMgr.GetCurrentLicense()
+	successMsg, _ := syscall.UTF16PtrFromString(fmt.Sprintf("✅ Лицензия успешно активирована!\n\nТип: %s\nКому выдана: %s\nДействует до: %s",
+		lic.LicenseType, lic.IssuedTo, lic.ValidUntil.Format("02.01.2006")))
+	successTitle, _ := syscall.UTF16PtrFromString("Лицензия активирована")
+	procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(successMsg)), uintptr(unsafe.Pointer(successTitle)), 0x40)
+	addLog(fmt.Sprintf("✅ Лицензия активирована: %s (%s)", lic.LicenseType, lic.IssuedTo))
+	setControlText(hEditLicenseKey, "")
+	updateLicenseTab()
+}
+
+// showTrialExpiryWarning shows a popup if trial expires within 3 days or has expired.
+func showTrialExpiryWarning() {
+	if trialMgr == nil || licenseMgr == nil {
+		return
+	}
+	// Only show for trial users
+	if licenseMgr.GetLicenseType() != license.LicenseTypeTrial {
+		return
+	}
+	ts := trialMgr.GetStatus()
+	if ts.IsExpired {
+		msg, _ := syscall.UTF16PtrFromString("⛔ Пробный период NatBypass истёк!\n\nПриложение переходит в режим только-для-чтения.\nПожалуйста, приобретите лицензию для продолжения использования.")
+		title, _ := syscall.UTF16PtrFromString("Пробный период истёк")
+		procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x30)
+	} else if ts.DaysRemaining <= 3 {
+		msg, _ := syscall.UTF16PtrFromString(fmt.Sprintf("⚠️ Пробный период заканчивается через %d дн.!\n\nПожалуйста, приобретите лицензию, чтобы продолжить использование NatBypass без ограничений.", ts.DaysRemaining))
+		title, _ := syscall.UTF16PtrFromString("Внимание: Trial скоро истечёт")
+		procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x30)
 	}
 }
 

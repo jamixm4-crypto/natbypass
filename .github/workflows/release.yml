@@ -85,6 +85,7 @@ jobs:
           files: |
             build/NatBypass.exe
             build/NatBypass-GUI.exe
+            build/NatBypass-Diag.exe
             build/NatBypass.exe.sig
             build/NatBypass.exe.pem
             build/natbypass-cli.exe
