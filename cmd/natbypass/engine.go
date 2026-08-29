@@ -47,7 +47,14 @@ func triggerPublish() {
 }
 
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
-	setupLogging(cfg.App.LogLevel, cfg.App.LogFile)
+	logTarget := ""
+	if cfg.App.SaveLogsToDisk {
+		logTarget = cfg.App.LogFile
+		if logTarget == "" {
+			logTarget = "natbypass.log"
+		}
+	}
+	setupLogging(cfg.App.LogLevel, logTarget)
 
 	if cfg.Daemon.PidFile == "" {
 		if runtime.GOOS == "linux" {
@@ -393,6 +400,7 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 	if customAuth != nil {
 		uiServer.SetCustomAuth(customAuth)
 	}
+	uiServer.SetOnConfigChange(triggerPublish)
 	uiServer.SetConfigPath(configFile)
 	uiServer.SetAppState(deviceID, "Определяется...", "Определяется...")
 	uiServer.SetDeviceName(deviceID)
@@ -641,6 +649,8 @@ func publishLoop(
 
 		payload := &signaling.Payload{
 			DeviceID:        deviceID,
+			Nickname:        cfg.App.DeviceName,
+			DeviceName:      cfg.App.DeviceName,
 			PublicKey:       crypto.KeyToHex(pubKey),
 			PublicIP:        ip.String(),
 			STUNAddr:        stunAddr,
@@ -737,6 +747,8 @@ func receiveLoop(
 			isNewPeer := !registry.Exists(p.DeviceID)
 			registry.Upsert(&peer.Peer{
 				DeviceID:         p.DeviceID,
+				Nickname:         p.Nickname,
+				DeviceName:       p.DeviceName,
 				PublicKey:        p.PublicKey,
 				PublicIP:         p.PublicIP,
 				STUNAddr:         p.STUNAddr,

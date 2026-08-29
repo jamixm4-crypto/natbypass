@@ -11,6 +11,8 @@ const (
 	DefaultIPTimeout       = 10 * time.Second
 	DefaultWGListenPort    = 51820
 	DefaultWGMTU           = 1420
+	MTUMedium              = 1360
+	MTUMinimum             = 1280
 	DefaultVirtualIPSubnet = "100.64.200.0/24"
 
 	// Peer registry lifecycle and timeouts
@@ -28,10 +30,13 @@ const (
 	TunHeader        = "NATBYPASS:TUN:"
 	PingPrefix       = "NATBYPASS:PING:"
 	PongPrefix       = "NATBYPASS:PONG:"
+	MTUProbePrefix   = "NATBYPASS:MTU:REQ:"
+	MTUAckPrefix     = "NATBYPASS:MTU:ACK:"
 	KeepAlivePayload = "KAEP"
 
-	// UDP Hole punching rate limits
+	// UDP Hole punching & keepalive intervals
 	ProbeBurstCount    = 2
 	MaxProbesPerSecond = 2
 	MinProbeInterval   = 500 * time.Millisecond
+	KeepAliveInterval  = 15 * time.Second
 )

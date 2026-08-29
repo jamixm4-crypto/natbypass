@@ -1105,6 +1105,9 @@ func (s *Server) handleDeviceRename(w http.ResponseWriter, r *http.Request) {
 	}
 	s.AddEvent("info", fmt.Sprintf("Устройство переименовано: %s → %s", oldName, req.Name), "")
 	slog.Info("Устройство переименовано через Web UI", "old", oldName, "new", req.Name)
+	if s.onConfigChange != nil {
+		s.onConfigChange()
+	}
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "name": req.Name}, "")
 }
 
@@ -1664,6 +1667,9 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	if s.registry != nil {
 		s.registry.ClearAll()
 	}
+	if s.onConfigChange != nil {
+		s.onConfigChange()
+	}
 	msg := "Настройки успешно сохранены! Кэш устройств сброшен."
 	if isWindows {
 		s.AddEvent("info", "Конфигурация зашифрована DPAPI и сохранена — кэш устройств очищен", fmt.Sprintf("device=%s", req.DeviceName))
@@ -2010,6 +2016,9 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 
 	_ = config.Save(cfg, s.configPath, false)
 	s.AddEvent("info", "Обновлен профиль сети: "+target.Name, "Топик: "+target.MQTTTopic)
+	if s.onConfigChange != nil {
+		s.onConfigChange()
+	}
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"ok":      true,

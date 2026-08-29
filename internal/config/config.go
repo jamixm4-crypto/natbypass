@@ -22,8 +22,8 @@ type AppConfig struct {
 	LogFile         string            `mapstructure:"log_file" yaml:"log_file,omitempty"`
 	DeviceID        string            `mapstructure:"device_id" yaml:"device_id,omitempty"`
 	DeviceName      string            `mapstructure:"device_name" yaml:"device_name"`
-	SaveLogsToDisk  bool              `mapstructure:"save_logs" yaml:"save_logs"`
-	ShowDiagnostics bool              `mapstructure:"show_diagnostics" yaml:"show_diagnostics"`
+	SaveLogsToDisk  bool              `mapstructure:"save_logs" yaml:"save_logs" json:"save_logs_to_disk"`
+	ShowDiagnostics bool              `mapstructure:"show_diagnostics" yaml:"show_diagnostics" json:"show_diagnostics"`
 	AddressBook     map[string]string `mapstructure:"address_book" yaml:"address_book,omitempty"`
 	PublishInterval int               `mapstructure:"publish_interval" yaml:"publish_interval"`
 }

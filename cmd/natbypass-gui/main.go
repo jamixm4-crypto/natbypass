@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	Version = "1.9.064"
+	Version = "1.9.065"
 	Commit  = "release"
 )
 
@@ -335,6 +335,7 @@ var (
 	hBtnProfExport  uintptr
 	hEditProfTopic  uintptr
 	hEditProfBroker uintptr
+	hEditProfVIP    uintptr
 	hBtnProfSave    uintptr
 	hBtnProfDelete  uintptr
 	selectedProfID  string
@@ -2604,7 +2605,7 @@ func setActiveAWGPresetButton(activeID uint32) {
 
 func buildModernUI(hInstance uintptr) {
 	lblLogo := createLabel(hInstance, "🛸 NatBypass", 20, 24, 180, 30, hFontTitle)
-	lblVer := createLabel(hInstance, "Desktop Client • P2P Mesh", 20, 56, 180, 20, hFontNormal)
+	lblVer := createLabel(hInstance, fmt.Sprintf("v%s • P2P Mesh", Version), 20, 56, 180, 20, hFontBold)
 
 	navTitles := []string{
 		"🚀  Обзор и Сеть",
@@ -2673,14 +2674,18 @@ func buildModernUI(hInstance uintptr) {
 	lblProfBroker := createLabel(hInstance, "MQTT Брокер:", cx, 452, 160, 20, hFontBold)
 	hEditProfBroker = createEdit(hInstance, "", cx+170, 448, 620, 28, false, false, hFontNormal)
 
-	hBtnProfSave = createOwnerDrawButton(hInstance, "💾 Сохранить изменения профиля", cx+170, 492, 340, 38, ID_BTN_PROF_SAVE, "primary")
-	hBtnProfDelete = createOwnerDrawButton(hInstance, "🗑️ Удалить эту сеть", cx+520, 492, 270, 38, ID_BTN_PROF_DELETE, "red")
+	lblProfVIP := createLabel(hInstance, "Virtual IP (напр. 100.64.200.5):", cx, 488, 160, 20, hFontBold)
+	hEditProfVIP = createEdit(hInstance, "", cx+170, 484, 620, 28, false, false, hFontNormal)
+
+	hBtnProfSave = createOwnerDrawButton(hInstance, "💾 Сохранить изменения профиля", cx+170, 526, 340, 38, ID_BTN_PROF_SAVE, "primary")
+	hBtnProfDelete = createOwnerDrawButton(hInstance, "🗑️ Удалить эту сеть", cx+520, 526, 270, 38, ID_BTN_PROF_DELETE, "red")
 
 	tabPages[1] = []uintptr{
 		lblProfTitle, lblProfDesc, hListProfiles,
 		hBtnProfSwitch, hBtnProfQR, hBtnProfCreate, hBtnProfImport,
 		lblProfEditHead, lblProfName, hEditProfName, hBtnProfExport,
 		lblProfTopic, hEditProfTopic, lblProfBroker, hEditProfBroker,
+		lblProfVIP, hEditProfVIP,
 		hBtnProfSave, hBtnProfDelete,
 	}
 	writeDebug("buildModernUI: страница 1 создана")
@@ -2974,6 +2979,9 @@ func startEngineFromConfig(c *config.Config) {
 	engineCtx = ctx
 	engineCancel = cancel
 	triggerPublishCh = make(chan struct{}, 10)
+	if c.Network.Address != "" {
+		myVirtualIP = strings.TrimSpace(strings.Split(c.Network.Address, "/")[0])
+	}
 
 	var err error
 	myPubKey, myPrivKey, err = crypto.GenerateKeyPair()
@@ -3011,6 +3019,7 @@ func startEngineFromConfig(c *config.Config) {
 	uiServer.SetDeviceName(myNick)
 	uiServer.SetVersion(Version)
 	uiServer.SetConfigPath(configPath)
+	uiServer.SetOnConfigChange(triggerPublish)
 	go func() {
 		if err := uiServer.Start(ctx); err != nil {
 			writeDebug("Web UI сервер: " + err.Error())

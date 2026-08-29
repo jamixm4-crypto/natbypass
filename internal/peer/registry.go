@@ -16,6 +16,7 @@ import (
 type Peer struct {
 	DeviceID         string               `json:"device_id"`
 	Nickname         string               `json:"nickname,omitempty"`
+	DeviceName       string               `json:"device_name,omitempty"`
 	PublicKey        string               `json:"public_key"`
 	PublicIP         string               `json:"public_ip"`
 	LocalAddr        string               `json:"local_addr,omitempty"`
@@ -77,6 +78,14 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	}
 	if newer.Nickname == "" && existing.Nickname != "" {
 		newer.Nickname = existing.Nickname
+	}
+	if newer.DeviceName == "" && existing.DeviceName != "" {
+		newer.DeviceName = existing.DeviceName
+	}
+	if newer.DeviceName != "" && newer.Nickname == "" {
+		newer.Nickname = newer.DeviceName
+	} else if newer.Nickname != "" && newer.DeviceName == "" {
+		newer.DeviceName = newer.Nickname
 	}
 	if newer.VirtualIP == "" && existing.VirtualIP != "" {
 		newer.VirtualIP = existing.VirtualIP
@@ -196,6 +205,11 @@ func (r *Registry) Upsert(p *Peer) {
 		p.LastTelegramSeen = now
 	}
 
+	if p.Nickname == "" && p.DeviceName != "" {
+		p.Nickname = p.DeviceName
+	} else if p.DeviceName == "" && p.Nickname != "" {
+		p.DeviceName = p.Nickname
+	}
 	if existing, ok := r.peers[p.DeviceID]; ok {
 		existing.MergeFrom(p)
 	} else {

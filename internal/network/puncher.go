@@ -15,6 +15,7 @@ import (
 
 type DirectPingCallback func(deviceID string, rtt time.Duration, fromAddr string)
 type DirectDataCallback func(srcAddr *net.UDPAddr, payload []byte)
+type DirectMTUCallback func(deviceID string, mtu int, fromAddr string)
 
 type UDPPuncher struct {
 	conn         *net.UDPConn
@@ -25,6 +26,8 @@ type UDPPuncher struct {
 	stunServers  []string
 	onPingResult DirectPingCallback
 	onDataPacket DirectDataCallback
+	onMTUResult  DirectMTUCallback
+	mappedEndpoints map[string]struct{}
 	stunRespCh   chan struct{}
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -81,6 +84,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		myDevID:         myDevID,
 		stunServers:     stunServers,
 		onPingResult:    onPing,
+		mappedEndpoints: make(map[string]struct{}),
 		stunRespCh:      make(chan struct{}, 8),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -540,4 +544,48 @@ func (p *UDPPuncher) Close() error {
 		return p.conn.Close()
 	}
 	return nil
+}
+// SendDualPathProbe sends hole punch probes to both STUN public endpoint and LAN IP.
+func (p *UDPPuncher) SendDualPathProbe(stunAddr, localAddr string) error {
+	var err1, err2 error
+	if stunAddr != "" {
+		err1 = p.SendHolePunchProbe(stunAddr)
+	}
+	if localAddr != "" && localAddr != stunAddr {
+		err2 = p.SendHolePunchProbe(localAddr)
+	}
+	if err1 != nil {
+		return err1
+	}
+	return err2
+}
+
+// SendMTUProbe transmits an exact-sized UDP probe packet to test path MTU.
+func (p *UDPPuncher) SendMTUProbe(targetAddr string, targetMTU int) error {
+	if targetAddr == "" || p.conn == nil || targetMTU < 1280 || targetMTU > 1500 {
+		return nil
+	}
+	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+	if err != nil {
+		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
+		if err != nil {
+			return err
+		}
+	}
+
+	header := fmt.Sprintf("%s%d:%s:", constants.MTUProbePrefix, targetMTU, p.myDevID)
+	pkt := make([]byte, targetMTU)
+	copy(pkt, []byte(header))
+	for i := len(header); i < targetMTU; i++ {
+		pkt[i] = byte(i % 256)
+	}
+
+	_, err = p.conn.WriteToUDP(pkt, rAddr)
+	return err
+}
+
+func (p *UDPPuncher) SetMTUCallback(cb DirectMTUCallback) {
+	p.mu.Lock()
+	p.onMTUResult = cb
+	p.mu.Unlock()
 }
