@@ -382,7 +382,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             "arm64",
-					Version:          "1.9.071",
+					Version:          "1.9.072",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
