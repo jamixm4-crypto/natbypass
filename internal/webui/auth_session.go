@@ -72,7 +72,7 @@ func (s *Server) checkCredentials(username, password string) bool {
 		return false
 	}
 
-	// 1. Configured static credentials
+	// 1. Configured static credentials (from config.yaml)
 	if s.user != "" && s.password != "" {
 		uMatch := subtle.ConstantTimeCompare([]byte(s.user), []byte(username)) == 1
 		pMatch := subtle.ConstantTimeCompare([]byte(s.password), []byte(password)) == 1
@@ -81,18 +81,21 @@ func (s *Server) checkCredentials(username, password string) bool {
 		}
 	}
 
-	// 2. KeeneticOS system auth integration
+	// 2. KeeneticOS: STRICTLY check router system credentials, ZERO fallback to admin/admin
+	if IsKeeneticOS() {
+		if s.customAuth != nil && s.customAuth(username, password) {
+			return true
+		}
+		return VerifyKeeneticAuth(username, password)
+	}
+
+	// 3. Custom external authenticator if provided
 	if s.customAuth != nil && s.customAuth(username, password) {
 		return true
 	}
 
-	// 3. Fallback: admin/admin always accepted
+	// 4. Default fallback on non-router systems (Linux/Windows generic admin/admin)
 	if (username == "admin" || username == "root") && (password == "admin" || password == "admin123") {
-		return true
-	}
-
-	// 4. Also check direct Keenetic auth
-	if IsKeeneticOS() && VerifyKeeneticAuth(username, password) {
 		return true
 	}
 
@@ -118,9 +121,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	req.Username = strings.TrimSpace(req.Username)
 	if !s.checkCredentials(req.Username, req.Password) {
-		s.jsonResponse(w, http.StatusUnauthorized, nil, "Неверный логин или пароль. Для Keenetic введите учетные данные от роутера или admin/admin.")
+		if IsKeeneticOS() {
+			s.jsonResponse(w, http.StatusUnauthorized, nil, "Неверный логин или пароль. Введите учетные данные администратора вашего роутера Keenetic.")
+		} else {
+			s.jsonResponse(w, http.StatusUnauthorized, nil, "Неверный логин или пароль.")
+		}
 		return
 	}
+
 
 	token := createSession(req.Username)
 	http.SetCookie(w, &http.Cookie{

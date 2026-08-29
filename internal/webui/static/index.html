@@ -765,7 +765,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </form>
 
       <div style="margin-top:20px; font-size:0.75rem; color:var(--text-dim);">
-        🌐 Для Keenetic: учетные данные администратора роутера или <code class="mono" style="color:#c084fc;">admin/admin</code>
+        🌐 🌐 Для роутеров Keenetic: вход <b>строго по учётным данным администратора роутера</b> (логин и пароль от веб-интерфейса Keenetic)
       </div>
     </div>
   </div>
@@ -2286,7 +2286,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const hint = document.getElementById('authHintText');
           if (hint) {
             if (d.is_keenetic) {
-              hint.innerText = '🌐 Обнаружен роутер Keenetic. Введите логин и пароль от роутера или admin/admin';
+              hint.innerText = '🌐 Обнаружен роутер Keenetic. Введите логин и пароль администратора вашего роутера';
             } else {
               hint.innerText = '🔐 Введите логин и пароль для доступа к панели NatBypass (по умолчанию: admin/admin)';
             }

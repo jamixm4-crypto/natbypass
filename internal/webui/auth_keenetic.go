@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"os/exec"
 	"runtime"
@@ -34,6 +35,7 @@ var (
 	keeneticCacheMu       sync.RWMutex
 	keeneticCacheTime     time.Time
 	keeneticHostnameCache string
+	keeneticModelCache    string
 )
 
 // IsKeeneticOS returns true if running on a Keenetic router.
@@ -71,18 +73,18 @@ func IsKeeneticOS() bool {
 	return false
 }
 
-// VerifyKeeneticAuth checks username and password against KeeneticOS credentials.
+// VerifyKeeneticAuth strictly checks username and password against KeeneticOS credentials.
 func VerifyKeeneticAuth(username, password string) bool {
 	if username == "" || password == "" {
 		return false
 	}
 
-	// 1. Method 1: Official Keenetic RCI Challenge-Response HTTP Authentication
+	// 1. Method 1: Official Keenetic RCI Challenge-Response HTTP Authentication with CookieJar
 	if verifyKeeneticRCIChallenge(username, password) {
 		return true
 	}
 
-	// 2. Method 2: Direct local RCI probe with Basic Auth
+	// 2. Method 2: Direct local RCI Basic Auth
 	if verifyViaLocalKeeneticHTTP(username, password) {
 		return true
 	}
@@ -101,7 +103,7 @@ func VerifyKeeneticAuth(username, password string) bool {
 			}
 		}
 
-		// Hash match (MD5/SHA256 with hostname, Keenetic, NDMS realms)
+		// Hash match (MD5/SHA256 with model, hostname, Keenetic, NDMS realms)
 		if u.PasswordHash != "" {
 			if verifyKeeneticHash(u.Username, password, u.PasswordHash, u.HashType) {
 				return true
@@ -112,23 +114,29 @@ func VerifyKeeneticAuth(username, password string) bool {
 	return false
 }
 
-// verifyKeeneticRCIChallenge performs official KeeneticOS 2-step challenge-response authentication:
-// 1. GET /auth -> reads X-NDM-Challenge and X-NDM-Realm
-// 2. Computes SHA256 / MD5 digest with challenge
-// 3. POST /auth with {"login": username, "password": challenge_hash} -> 200 OK
+// verifyKeeneticRCIChallenge performs the official KeeneticOS 2-step challenge-response authentication:
+// 1. GET /auth -> reads X-NDM-Challenge and X-NDM-Realm, storing session cookies
+// 2. Computes:
+//      md5_hash = md5(username + ":" + realm + ":" + password)
+//      auth_hash = sha256(challenge + hex(md5_hash))
+// 3. POST /auth with {"login": username, "password": auth_hash} -> 200 OK
 func verifyKeeneticRCIChallenge(username, password string) bool {
+	jar, _ := cookiejar.New(nil)
 	client := &http.Client{
-		Timeout: 1200 * time.Millisecond,
+		Jar:     jar,
+		Timeout: 1500 * time.Millisecond,
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
-				Timeout: 600 * time.Millisecond,
+				Timeout: 800 * time.Millisecond,
 			}).DialContext,
 		},
 	}
 
 	targets := []string{
+		"http://127.0.0.1",
 		"http://127.0.0.1:80",
 		"http://127.0.0.1:81",
+		"http://192.168.1.1",
 		"http://192.168.1.1:80",
 	}
 
@@ -149,47 +157,38 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 		resp.Body.Close()
 
 		if challenge == "" {
-			// Older KeeneticOS might use /rci/ auth
 			continue
 		}
 
+		realmsToTry := []string{realm}
 		if realm == "" {
-			realm = "Keenetic"
+			realmsToTry = []string{"Keenetic", "KeeneticOS", "NDMS"}
+		} else {
+			realmsToTry = append(realmsToTry, "Keenetic", "KeeneticOS", "NDMS")
 		}
 
-		// Try MD5 and SHA256 challenge permutations
-		hashesToTest := []string{}
+		if keeneticHostnameCache != "" {
+			realmsToTry = append(realmsToTry, keeneticHostnameCache)
+		}
+		if keeneticModelCache != "" {
+			realmsToTry = append(realmsToTry, keeneticModelCache)
+		}
 
-		// A. KeeneticOS standard MD5 challenge:
-		// h1 = MD5(username + ":" + realm + ":" + password)
-		// auth = SHA256(challenge + hex(h1)) or MD5(challenge + hex(h1)) or SHA256(challenge + password)
-		md5h1 := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, realm, password)))
-		md5h1Hex := hex.EncodeToString(md5h1[:])
+		for _, r := range realmsToTry {
+			// Official Keenetic RCI:
+			// 1. md5_hash = hex(md5(username:realm:password))
+			// 2. auth_hash = hex(sha256(challenge + md5_hash))
+			md5Raw := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
+			md5Hex := hex.EncodeToString(md5Raw[:])
 
-		sha256h1 := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%s", username, realm, password)))
-		sha256h1Hex := hex.EncodeToString(sha256h1[:])
+			sha256Raw := sha256.Sum256([]byte(challenge + md5Hex))
+			sha256Hex := hex.EncodeToString(sha256Raw[:])
 
-		// Challenge hashes:
-		c1 := sha256.Sum256([]byte(challenge + md5h1Hex))
-		hashesToTest = append(hashesToTest, hex.EncodeToString(c1[:]))
-
-		c2 := sha256.Sum256([]byte(challenge + sha256h1Hex))
-		hashesToTest = append(hashesToTest, hex.EncodeToString(c2[:]))
-
-		c3 := md5.Sum([]byte(challenge + md5h1Hex))
-		hashesToTest = append(hashesToTest, hex.EncodeToString(c3[:]))
-
-		c4 := sha256.Sum256([]byte(challenge + password))
-		hashesToTest = append(hashesToTest, hex.EncodeToString(c4[:]))
-
-		// Plain password
-		hashesToTest = append(hashesToTest, password)
-
-		for _, authPass := range hashesToTest {
 			payload, _ := json.Marshal(map[string]string{
 				"login":    username,
-				"password": authPass,
+				"password": sha256Hex,
 			})
+
 			pReq, pErr := http.NewRequest("POST", target+"/auth", bytes.NewReader(payload))
 			if pErr != nil {
 				continue
@@ -201,6 +200,29 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 				pResp.Body.Close()
 				if pResp.StatusCode == http.StatusOK {
 					return true
+				}
+			}
+
+			// Alternative sha256(username:realm:password)
+			sha256P := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
+			sha256PHex := hex.EncodeToString(sha256P[:])
+			cSha := sha256.Sum256([]byte(challenge + sha256PHex))
+			cShaHex := hex.EncodeToString(cSha[:])
+
+			payload2, _ := json.Marshal(map[string]string{
+				"login":    username,
+				"password": cShaHex,
+			})
+			pReq2, pErr2 := http.NewRequest("POST", target+"/auth", bytes.NewReader(payload2))
+			if pErr2 == nil {
+				pReq2.Header.Set("Content-Type", "application/json")
+				pResp2, pErr2 := client.Do(pReq2)
+				if pErr2 == nil {
+					_, _ = io.Copy(io.Discard, pResp2.Body)
+					pResp2.Body.Close()
+					if pResp2.StatusCode == http.StatusOK {
+						return true
+					}
 				}
 			}
 		}
@@ -221,13 +243,13 @@ func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	}
 
 	targets := []string{
-		"http://127.0.0.1:80",
-		"http://127.0.0.1:81",
-		"http://192.168.1.1:80",
+		"http://127.0.0.1/rci/show/version",
+		"http://127.0.0.1:80/rci/show/version",
+		"http://192.168.1.1/rci/show/version",
 	}
 
 	for _, target := range targets {
-		req, err := http.NewRequest("GET", target+"/rci/show/version", nil)
+		req, err := http.NewRequest("GET", target, nil)
 		if err == nil {
 			req.SetBasicAuth(username, password)
 			if resp, err := client.Do(req); err == nil {
@@ -255,6 +277,16 @@ func GetKeeneticUsers() []KeeneticUser {
 
 	keeneticCacheMu.Lock()
 	defer keeneticCacheMu.Unlock()
+
+	// Load model if not cached
+	if keeneticModelCache == "" {
+		for _, mf := range []string{"/tmp/sysinfo/model", "/proc/device-tree/model", "/etc/openwrt_release"} {
+			if data, err := os.ReadFile(mf); err == nil {
+				keeneticModelCache = strings.TrimSpace(string(data))
+				break
+			}
+		}
+	}
 
 	var users []KeeneticUser
 	seen := make(map[string]bool)
@@ -379,7 +411,7 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 		}
 
 		// Single line user definition: "user <name> password ..."
-		if fields[0] == "user" && len(fields) >= 3 && fields[2] == "password" {
+		if fields[0] == "user" && len(fields) >= 3 && (fields[2] == "password" || fields[2] == "md5") {
 			if currentUser != nil {
 				users = append(users, *currentUser)
 				currentUser = nil
@@ -403,8 +435,8 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 			continue
 		}
 
-		// Inside multi-line block: "password ..."
-		if currentUser != nil && fields[0] == "password" {
+		// Inside multi-line block: "password ..." or "password md5 ..."
+		if currentUser != nil && (fields[0] == "password" || fields[0] == "md5") {
 			extractPasswordFields(currentUser, fields)
 			users = append(users, *currentUser)
 			currentUser = nil
@@ -426,7 +458,7 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 }
 
 func parseSingleUserLine(fields []string) *KeeneticUser {
-	if len(fields) < 4 || fields[0] != "user" || fields[2] != "password" {
+	if len(fields) < 3 || fields[0] != "user" {
 		return nil
 	}
 	u := &KeeneticUser{Username: fields[1]}
@@ -436,6 +468,25 @@ func parseSingleUserLine(fields []string) *KeeneticUser {
 
 func extractPasswordFields(u *KeeneticUser, fields []string) {
 	if len(fields) < 2 {
+		return
+	}
+
+	// formats:
+	// ["password", "md5", "7815696..."]
+	// ["password", "hash", "md5", "7815696..."]
+	// ["password", "hash", "sha256", "8c69..."]
+	// ["password", "mypassword"]
+	// ["md5", "7815696..."]
+
+	if fields[0] == "md5" {
+		u.PasswordHash = cleanHashPrefix(fields[1])
+		u.HashType = "md5"
+		return
+	}
+
+	if fields[1] == "md5" && len(fields) >= 3 {
+		u.PasswordHash = cleanHashPrefix(fields[2])
+		u.HashType = "md5"
 		return
 	}
 
@@ -511,6 +562,9 @@ func verifyKeeneticHash(username, password, storedHash, hashType string) bool {
 
 	if keeneticHostnameCache != "" {
 		realms = append([]string{keeneticHostnameCache}, realms...)
+	}
+	if keeneticModelCache != "" {
+		realms = append([]string{keeneticModelCache}, realms...)
 	}
 	if hn, err := os.Hostname(); err == nil && hn != "" {
 		realms = append([]string{hn}, realms...)
