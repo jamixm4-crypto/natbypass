@@ -2609,20 +2609,31 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
         const vIP = p.virtual_ip || ('10.200.0.' + (idx + 2));
 
-        let plat = p.platform || p.os || '';
-        if (!plat) {
-          const lowerId = p.device_id.toLowerCase();
-          if (lowerId.includes('cloud') || lowerId.includes('linux') || lowerId.includes('debian')) {
-            plat = '🐧 Linux';
-          } else if (lowerId.includes('keenetic') || lowerId.includes('jcloud') || lowerId.includes('router')) {
-            plat = '🌐 Keenetic';
-          } else if (lowerId.includes('android')) {
-            plat = '🤖 Android';
-          } else {
-            plat = '🪟 Windows';
-          }
+        let platName = 'Linux';
+        let platCls = 'badge-purple';
+
+        let isKeen = p.is_keenetic || (p.platform && p.platform.toLowerCase().includes('keenetic')) || (p.os && p.os.toLowerCase().includes('keenetic')) || ((p.device_id || '').toLowerCase().includes('keenetic')) || ((p.device_id || '').toLowerCase().includes('router'));
+        let isWin = (!isKeen) && ((p.platform && p.platform.toLowerCase().includes('win')) || (p.os && p.os.toLowerCase().includes('win')));
+        let isAndroid = (p.platform && p.platform.toLowerCase().includes('android')) || (p.os && p.os.toLowerCase().includes('android')) || ((p.device_id || '').toLowerCase().includes('android'));
+        let isMac = (p.platform && (p.platform.toLowerCase().includes('darwin') || p.platform.toLowerCase().includes('mac'))) || (p.os && (p.os.toLowerCase().includes('darwin') || p.os.toLowerCase().includes('mac')));
+
+        if (isKeen) {
+          platName = 'KeeneticOS';
+          platCls = 'badge-blue';
+        } else if (isAndroid) {
+          platName = 'Android';
+          platCls = 'badge-green';
+        } else if (isWin) {
+          platName = 'Windows';
+          platCls = 'badge-purple';
+        } else if (isMac) {
+          platName = 'macOS';
+          platCls = 'badge-cyan';
         }
-        const platBadge = `<span class="badge badge-purple" style="font-size:0.68rem; padding:2px 6px; font-weight:600; margin-left:4px;">${plat}</span>`;
+
+        let archStr = p.arch ? ' (' + p.arch + ')' : '';
+        let verStr = p.version ? ' • v' + p.version.replace(/^v/, '') : '';
+        const platBadge = '<span class="badge ' + platCls + '" style="font-size:0.68rem; padding:2px 6px; font-weight:600; margin-left:4px;">' + platName + archStr + verStr + '</span>';
         const flag = p.country_flag || '🌐';
         const addrStr = p.stun_addr || p.public_ip || '—';
         const ipDisplayWithFlag = `<span title="Геолокация IP" style="margin-right:3px;">${flag}</span><span style="font-size:0.8rem;">${addrStr}</span>`;

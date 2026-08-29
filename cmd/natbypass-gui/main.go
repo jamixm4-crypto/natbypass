@@ -4499,21 +4499,25 @@ func updateData() {
 						extraInfo = " " + strings.Join(extraTags, " ")
 					}
 
-					platBadge := p.Platform
-					if platBadge == "" {
-						if p.OS == "windows" {
-							platBadge = "Windows"
-						} else if p.OS == "android" {
-							platBadge = "Android"
-						} else if p.OS == "linux" {
-							platBadge = "Linux"
-						} else if p.OS == "darwin" {
-							platBadge = "macOS"
-						} else if p.OS != "" {
-							platBadge = p.OS
-						} else {
-							platBadge = "Устройство"
-						}
+					platBadge := "Linux"
+					if p.IsKeenetic || strings.Contains(strings.ToLower(p.Platform), "keenetic") || strings.Contains(strings.ToLower(p.OS), "keenetic") || strings.Contains(strings.ToLower(p.DeviceID), "keenetic") || strings.Contains(strings.ToLower(p.DeviceID), "router") {
+						platBadge = "KeeneticOS"
+					} else if p.OS == "windows" || strings.Contains(strings.ToLower(p.Platform), "win") {
+						platBadge = "Windows"
+					} else if p.OS == "android" || strings.Contains(strings.ToLower(p.Platform), "android") {
+						platBadge = "Android"
+					} else if p.OS == "darwin" || strings.Contains(strings.ToLower(p.Platform), "mac") {
+						platBadge = "macOS"
+					} else if p.Platform != "" {
+						platBadge = p.Platform
+					} else if p.OS != "" {
+						platBadge = p.OS
+					}
+					if p.Arch != "" {
+						platBadge = fmt.Sprintf("%s (%s)", platBadge, p.Arch)
+					}
+					if p.Version != "" {
+						platBadge = fmt.Sprintf("%s • v%s", platBadge, strings.TrimPrefix(p.Version, "v"))
 					}
 					platBadge = strings.TrimSpace(platBadge)
 

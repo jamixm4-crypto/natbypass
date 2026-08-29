@@ -677,6 +677,22 @@ func publishLoop(
 			WGPort:          wgPort,
 			Timestamp:       time.Now(),
 			VirtualIP:       currentVIP,
+			OS:              runtime.GOOS,
+			Platform: func() string {
+				if webui.IsKeeneticOS() {
+					return "KeeneticOS"
+				}
+				switch runtime.GOOS {
+				case "windows":
+					return "Windows"
+				case "linux":
+					return "Linux"
+				case "darwin":
+					return "macOS"
+				default:
+					return runtime.GOOS
+				}
+			}(),
 			Arch:            runtime.GOARCH,
 			Version:         Version,
 			IsKeenetic:      webui.IsKeeneticOS(),
