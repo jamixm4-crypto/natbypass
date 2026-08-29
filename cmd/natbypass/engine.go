@@ -36,6 +36,20 @@ import (
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	setupLogging(cfg.App.LogLevel, cfg.App.LogFile)
 
+	if cfg.Daemon.PidFile == "" {
+		if runtime.GOOS == "linux" {
+			if _, err := os.Stat("/opt/var/run"); err == nil {
+				cfg.Daemon.PidFile = "/opt/var/run/natbypass.pid"
+			} else if _, err := os.Stat("/run"); err == nil {
+				cfg.Daemon.PidFile = "/run/natbypass.pid"
+			} else {
+				cfg.Daemon.PidFile = "/var/run/natbypass.pid"
+			}
+		} else {
+			cfg.Daemon.PidFile = "natbypass.pid"
+		}
+	}
+
 	if cfg.Daemon.PidFile != "" {
 		_ = daemon.WritePID(cfg.Daemon.PidFile)
 		defer daemon.RemovePID(cfg.Daemon.PidFile)

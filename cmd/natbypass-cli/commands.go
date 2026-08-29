@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
+	"time"
 	"runtime"
 	"strconv"
 	"syscall"
 
 	"github.com/natbypass/natbypass/internal/config"
+	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/wireguard"
@@ -55,25 +59,51 @@ func newGuiCmd() *cobra.Command {
 	}
 }
 
+// findRunningPID finds the active NatBypass process PID across candidate files.
+func findRunningPID(pidFile string) int {
+	pidCandidates := []string{
+		pidFile,
+		"/run/natbypass.pid",
+		"/var/run/natbypass.pid",
+		"/opt/var/run/natbypass.pid",
+		"/tmp/natbypass.pid",
+		"natbypass.pid",
+	}
+
+	for _, pPath := range pidCandidates {
+		if pPath == "" {
+			continue
+		}
+		if data, err := os.ReadFile(pPath); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && pid > 0 {
+				if proc, err := os.FindProcess(pid); err == nil {
+					if err := proc.Signal(syscall.Signal(0)); err == nil {
+						return pid
+					}
+				}
+			}
+		}
+	}
+	return 0
+}
+
 // newStopCmd creates the daemon stop command.
 func newStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
 		Short: "Stop the running daemon via PID file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfigOrDefault(configFile, false)
-			if err != nil {
-				return err
+			cfg, _ := loadConfigOrDefault(configFile, false)
+			pidFile := ""
+			if cfg != nil {
+				pidFile = cfg.Daemon.PidFile
 			}
 
-			data, err := os.ReadFile(cfg.Daemon.PidFile)
-			if err != nil {
-				return fmt.Errorf("PID file not found (%s): daemon is not running", cfg.Daemon.PidFile)
+			pid := findRunningPID(pidFile)
+			if pid <= 0 {
+				return fmt.Errorf("daemon is not running (PID not found)")
 			}
-			pid, err := strconv.Atoi(string(data))
-			if err != nil {
-				return fmt.Errorf("invalid PID in pid file: %w", err)
-			}
+
 			proc, err := os.FindProcess(pid)
 			if err != nil {
 				return fmt.Errorf("process not found: %w", err)
@@ -93,27 +123,46 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Check running status of the daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := loadConfigOrDefault(configFile, false)
-			if err != nil {
-				return err
+			cfg, _ := loadConfigOrDefault(configFile, false)
+			if cfg == nil {
+				cfg = buildDefaultConfig()
 			}
-			data, err := os.ReadFile(cfg.Daemon.PidFile)
-			if err != nil {
-				fmt.Println("Status: NOT RUNNING")
+
+			port := cfg.WebUI.Port
+			if webUIPort > 0 {
+				port = webUIPort
+			}
+			if port <= 0 {
+				port = constants.DefaultWebUIPort
+			}
+
+			// 1. Check PID
+			runningPID := findRunningPID(cfg.Daemon.PidFile)
+
+			// 2. Probe HTTP API (127.0.0.1:port/healthz)
+			client := http.Client{Timeout: 500 * time.Millisecond}
+			resp, httpErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
+			isHttpRunning := (httpErr == nil && resp != nil && resp.StatusCode == 200)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+
+			if runningPID > 0 || isHttpRunning {
+				if runningPID > 0 {
+					fmt.Printf("Status: RUNNING (PID: %d)\n", runningPID)
+				} else {
+					fmt.Println("Status: RUNNING")
+				}
+				fmt.Printf("Web UI: http://localhost:%d\n", port)
 				return nil
 			}
-			pid, _ := strconv.Atoi(string(data))
-			proc, err := os.FindProcess(pid)
-			if err != nil || proc.Signal(syscall.Signal(0)) != nil {
-				fmt.Printf("Status: STOPPED (stale PID: %d)\n", pid)
-				return nil
-			}
-			fmt.Printf("Status: RUNNING (PID: %d)\n", pid)
-			fmt.Printf("Web UI: http://localhost:%d\n", cfg.WebUI.Port)
+
+			fmt.Println("Status: NOT RUNNING")
 			return nil
 		},
 	}
 }
+
 
 // newKeygenCmd creates the key generation command for NaCl keys.
 func newKeygenCmd() *cobra.Command {
