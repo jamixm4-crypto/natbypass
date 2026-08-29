@@ -125,9 +125,12 @@ class NatBypassVpnService : VpnService() {
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
             val useExitNode = selectedExitNode.isNotEmpty()
 
+            val rawVip = currentVip.substringBefore("/").trim().ifEmpty { "100.64.200.10" }
+            val prefix = currentVip.substringAfter("/", "24").toIntOrNull() ?: 24
+
             val builder = Builder()
                 .setSession("NatBypass")
-                .addAddress(currentVip, 24)
+                .addAddress(rawVip, prefix)
                 .setMtu(1420)
                 .setBlocking(false)
                 .allowBypass()

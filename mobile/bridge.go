@@ -382,7 +382,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             "arm64",
-					Version:          "1.9.074",
+					Version:          "1.9.075",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -875,6 +875,7 @@ func RefreshPublicIP() {
 			if globalConfig.WireGuard.AWG.Enabled || globalAWGPreset != "standard" {
 				awgParams = getAWGParamsFromPreset(globalAWGPreset)
 			}
+			cleanVIP := strings.TrimSpace(strings.Split(globalVirtualIP, "/")[0])
 			payload := &signaling.Payload{
 				DeviceID:         globalDevID,
 				Nickname:         globalDevName,
@@ -882,10 +883,15 @@ func RefreshPublicIP() {
 				PublicIP:         globalPublicIP,
 				STUNAddr:         globalSTUN,
 				IPv6Addr:         globalIPv6,
-				VirtualIP:        globalVirtualIP,
+				VirtualIP:        cleanVIP,
 				NATType:          "unknown",
 				Timestamp:        time.Now(),
 				AWG:              awgParams,
+				OS:               "android",
+				Platform:         "Android",
+				Arch:             "arm64",
+				Version:          Version,
+				IsKeenetic:       false,
 				NetworkKey:       activeKey,
 				Topic:            activeTopic,
 			}
@@ -971,7 +977,7 @@ func TestMQTT(broker, topic, user, pass string) string {
 func SetVirtualIP(vip string) {
 	engineMu.Lock()
 	defer engineMu.Unlock()
-	clean := strings.TrimSpace(vip)
+	clean := strings.TrimSpace(strings.Split(vip, "/")[0])
 	if clean != "" {
 		globalVirtualIP = clean
 		if globalConfig != nil {
@@ -1741,10 +1747,11 @@ func SetProfileVirtualIP(profileID, vip string) bool {
 	}
 	for i := range globalConfig.Profiles {
 		if globalConfig.Profiles[i].ID == profileID {
-			globalConfig.Profiles[i].VirtualIP = vip
+			cleanVIP := strings.TrimSpace(strings.Split(vip, "/")[0])
+			globalConfig.Profiles[i].VirtualIP = cleanVIP
 			if globalConfig.Profiles[i].IsActive || globalConfig.ActiveProfileID == profileID {
-				globalConfig.Network.Address = vip
-				globalVirtualIP = vip
+				globalConfig.Network.Address = cleanVIP
+				globalVirtualIP = cleanVIP
 			}
 			return true
 		}

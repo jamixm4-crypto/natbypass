@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.074"
+	Version = "1.9.075"
 	Commit  = "release"
 )
 
@@ -3612,7 +3612,7 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					DeviceID:         myDevID,
 					Nickname:         myNick,
 					DeviceName:       myNick,
-					VirtualIP:        myVirtualIP,
+					VirtualIP:        strings.TrimSpace(strings.Split(myVirtualIP, "/")[0]),
 					PublicKey:        crypto.KeyToHex(myPubKey),
 					PublicIP:         myPublicIP,
 					LocalAddr:        fmt.Sprintf("%s:%d", localIP, pPort),

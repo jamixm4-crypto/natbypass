@@ -707,7 +707,7 @@ func publishLoop(
 			WGPubKey:        wgPubKey,
 			WGPort:          wgPort,
 			Timestamp:       time.Now(),
-			VirtualIP:       currentVIP,
+			VirtualIP:       strings.TrimSpace(strings.Split(currentVIP, "/")[0]),
 			OS:              runtime.GOOS,
 			Platform: func() string {
 				if webui.IsKeeneticOS() {
