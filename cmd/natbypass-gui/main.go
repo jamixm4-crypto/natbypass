@@ -4120,16 +4120,21 @@ func publishCurrentState(ctx context.Context) {
 		}
 	}
 
+	toSend := payload
+	if enc, err := signaling.EncryptPayload(payload, myPubKey, myPrivKey); err == nil && enc != nil {
+		toSend = enc
+	}
+
 	for _, ch := range sigChannels {
 		// Если пиры подключены и канал Telegram — не спамим в чат/группу
 		if ch.Name() == "telegram" && hasDirectConnectedPeers {
 			continue
 		}
 
-		go func(c signaling.SignalingChannel) {
+		go func(c signaling.SignalingChannel, outPayload *signaling.Payload) {
 			sendCtx, sendCancel := context.WithTimeout(ctx, 10*time.Second)
 			defer sendCancel()
-			if err := c.Send(sendCtx, payload); err == nil {
+			if err := c.Send(sendCtx, outPayload); err == nil {
 				atomic.AddUint64(&packetsSentCount, 1)
 				msg := fmt.Sprintf("📤 [%s] Отправлен анонс в сеть (VIP: %s | STUN: %s | LAN: %s)", c.Name(), myVirtualIP, mySTUNAddr, localAddr)
 				addLog(msg)
@@ -4139,9 +4144,10 @@ func publishCurrentState(ctx context.Context) {
 				addLog(errMsg)
 				writeDebug(errMsg)
 			}
-		}(ch)
+		}(ch, toSend)
 	}
 }
+
 
 func stopEngine() {
 	engineMu.Lock()

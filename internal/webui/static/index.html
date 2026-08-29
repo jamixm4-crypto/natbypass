@@ -3568,9 +3568,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
     }
 
-        setInterval(refreshData, 2000);
     window.addEventListener('DOMContentLoaded', () => {
-      checkAuthStatus();
       // Ensure all sidebar nav items have direct click bindings
       document.querySelectorAll('.nav-item').forEach(item => {
         const id = item.id;
@@ -3583,11 +3581,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
       });
 
-      refreshData();
-      loadConfig();
-      loadProfiles();
-      // Background update check after 3s
-      setTimeout(checkUpdateManual, 3000);
+      checkAuthStatus();
     });
   </script>
 </body>
