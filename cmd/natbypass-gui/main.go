@@ -275,6 +275,7 @@ type MSG struct {
 
 // Глобальные постоянные GDI ресурсы (создаются 1 раз при старте, 0 утечек)
 var (
+	guiMagicSock *network.MagicSock
 	hMainWnd     uintptr
 	hAppIcon     uintptr
 	hCursor      uintptr
@@ -3076,6 +3077,9 @@ func startEngineFromConfig(c *config.Config) {
 	udpListenPort := c.Network.UDPPort
 	puncher, err := network.NewUDPPuncher(udpListenPort, myDevID, c.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		atomic.AddUint64(&packetsRecvCount, 1)
+		if guiMagicSock != nil {
+			guiMagicSock.RecordProbeSuccess(remoteDevID, fromAddr, rtt)
+		}
 		if p, ok := registry.Get(remoteDevID); ok {
 			p.DirectP2P = true
 			if rtt > 0 && rtt <= 1500*time.Millisecond {
@@ -3100,6 +3104,9 @@ func startEngineFromConfig(c *config.Config) {
 	})
 	if err == nil {
 		udpPuncher = puncher
+		guiMagicSock = network.NewMagicSock(puncher, func(devID, oldPath, newPath string, pType network.PathType) {
+			writeDebug(fmt.Sprintf("🧲 Magicsock GUI: путь к %s переключен: %s -> %s (%s)", devID, oldPath, newPath, pType))
+		})
 		writeDebug(fmt.Sprintf("UDPPuncher слушает локальный UDP порт :%d", puncher.LocalPort()))
 
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
@@ -3197,19 +3204,29 @@ func startEngineFromConfig(c *config.Config) {
 
 						if targetPeer != nil {
 							sentDirect := false
-							if udpPuncher != nil {
-								if targetPeer.ActiveEndpoint != "" {
-									if err := udpPuncher.SendDataPacket(targetPeer.ActiveEndpoint, packet); err == nil {
-										sentDirect = true
-									}
-								} else if targetPeer.LocalAddr != "" {
-									if err := udpPuncher.SendDataPacket(targetPeer.LocalAddr, packet); err == nil {
-										sentDirect = true
-									}
-								} else if targetPeer.STUNAddr != "" {
-									if err := udpPuncher.SendDataPacket(targetPeer.STUNAddr, packet); err == nil {
-										sentDirect = true
-									}
+							targetEP := targetPeer.ActiveEndpoint
+							if guiMagicSock != nil {
+								if bestEP, _, _ := guiMagicSock.GetActiveRoute(targetPeer.DeviceID); bestEP != "" {
+									targetEP = bestEP
+								}
+							}
+							if targetEP == "" {
+								targetEP = targetPeer.STUNAddr
+							}
+							if targetEP == "" {
+								targetEP = targetPeer.LocalAddr
+							}
+
+							pmin := 0
+							pmax := 0
+							if targetPeer.AWG != nil {
+								pmin = targetPeer.AWG.Pmin
+								pmax = targetPeer.AWG.Pmax
+							}
+
+							if udpPuncher != nil && targetEP != "" {
+								if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
+									sentDirect = true
 								}
 							}
 							// Релей через MQTT используется ИСКЛЮЧИТЕЛЬНО если прямой UDP-сокет недоступен
@@ -3444,6 +3461,9 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						nick = p.DeviceName
 					}
 
+					if guiMagicSock != nil {
+						guiMagicSock.RegisterPeerEndpoints(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr)
+					}
 					registry.Upsert(&peer.Peer{
 						DeviceID:         p.DeviceID,
 						Nickname:         nick,

@@ -36,6 +36,7 @@ import (
 // runEngine initializes and runs the core NatBypass networking pipeline.
 
 var (
+	magicSock        *network.MagicSock
 	triggerPublishCh = make(chan struct{}, 10)
 )
 
@@ -259,12 +260,25 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 				if found && p != nil {
 					sentDirect := false
-					if p.DirectP2P && p.ActiveEndpoint != "" && puncher != nil {
-						if err := puncher.SendDataPacket(p.ActiveEndpoint, pkt); err == nil {
-							sentDirect = true
+					targetEP := p.ActiveEndpoint
+					if magicSock != nil {
+						if bestEP, _, _ := magicSock.GetActiveRoute(p.DeviceID); bestEP != "" {
+							targetEP = bestEP
 						}
-					} else if puncher != nil && p.STUNAddr != "" {
-						if err := puncher.SendDataPacket(p.STUNAddr, pkt); err == nil {
+					}
+					if targetEP == "" {
+						targetEP = p.STUNAddr
+					}
+
+					pmin := 0
+					pmax := 0
+					if p.AWG != nil {
+						pmin = p.AWG.Pmin
+						pmax = p.AWG.Pmax
+					}
+
+					if targetEP != "" && puncher != nil {
+						if err := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
 							sentDirect = true
 						}
 					}
