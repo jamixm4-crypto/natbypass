@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -29,10 +30,10 @@ type KeeneticUser struct {
 }
 
 var (
-	keeneticUsersCache []KeeneticUser
-	keeneticCacheMu    sync.RWMutex
-	keeneticCacheTime  time.Time
-	keeneticRealmCache string
+	keeneticUsersCache    []KeeneticUser
+	keeneticCacheMu       sync.RWMutex
+	keeneticCacheTime     time.Time
+	keeneticHostnameCache string
 )
 
 // IsKeeneticOS returns true if running on a Keenetic router.
@@ -76,22 +77,17 @@ func VerifyKeeneticAuth(username, password string) bool {
 		return false
 	}
 
-	// 1. Fallback admin/admin is always accepted so user is never locked out
-	if username == "admin" && password == "admin" {
+	// 1. Method 1: Official Keenetic RCI Challenge-Response HTTP Authentication
+	if verifyKeeneticRCIChallenge(username, password) {
 		return true
 	}
 
-	// 2. Method 1: Local Keenetic HTTP/RCI Authentication Probe
+	// 2. Method 2: Direct local RCI probe with Basic Auth
 	if verifyViaLocalKeeneticHTTP(username, password) {
 		return true
 	}
 
-	// 3. Method 2: ndmc / ndmq CLI query check
-	if verifyViaNDMC(username, password) {
-		return true
-	}
-
-	// 4. Method 3: Direct Keenetic configuration and shadow file parser
+	// 3. Method 3: Direct Keenetic configuration parser and multi-realm hash verification
 	users := GetKeeneticUsers()
 	for _, u := range users {
 		if subtle.ConstantTimeCompare([]byte(strings.ToLower(u.Username)), []byte(strings.ToLower(username))) != 1 {
@@ -105,7 +101,7 @@ func VerifyKeeneticAuth(username, password string) bool {
 			}
 		}
 
-		// Hash match
+		// Hash match (MD5/SHA256 with hostname, Keenetic, NDMS realms)
 		if u.PasswordHash != "" {
 			if verifyKeeneticHash(u.Username, password, u.PasswordHash, u.HashType) {
 				return true
@@ -116,7 +112,104 @@ func VerifyKeeneticAuth(username, password string) bool {
 	return false
 }
 
-// verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API (127.0.0.1:80 / 192.168.1.1:80)
+// verifyKeeneticRCIChallenge performs official KeeneticOS 2-step challenge-response authentication:
+// 1. GET /auth -> reads X-NDM-Challenge and X-NDM-Realm
+// 2. Computes SHA256 / MD5 digest with challenge
+// 3. POST /auth with {"login": username, "password": challenge_hash} -> 200 OK
+func verifyKeeneticRCIChallenge(username, password string) bool {
+	client := &http.Client{
+		Timeout: 1200 * time.Millisecond,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 600 * time.Millisecond,
+			}).DialContext,
+		},
+	}
+
+	targets := []string{
+		"http://127.0.0.1:80",
+		"http://127.0.0.1:81",
+		"http://192.168.1.1:80",
+	}
+
+	for _, target := range targets {
+		// Step 1: Request challenge
+		req, err := http.NewRequest("GET", target+"/auth", nil)
+		if err != nil {
+			continue
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+
+		challenge := resp.Header.Get("X-NDM-Challenge")
+		realm := resp.Header.Get("X-NDM-Realm")
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		if challenge == "" {
+			// Older KeeneticOS might use /rci/ auth
+			continue
+		}
+
+		if realm == "" {
+			realm = "Keenetic"
+		}
+
+		// Try MD5 and SHA256 challenge permutations
+		hashesToTest := []string{}
+
+		// A. KeeneticOS standard MD5 challenge:
+		// h1 = MD5(username + ":" + realm + ":" + password)
+		// auth = SHA256(challenge + hex(h1)) or MD5(challenge + hex(h1)) or SHA256(challenge + password)
+		md5h1 := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, realm, password)))
+		md5h1Hex := hex.EncodeToString(md5h1[:])
+
+		sha256h1 := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%s", username, realm, password)))
+		sha256h1Hex := hex.EncodeToString(sha256h1[:])
+
+		// Challenge hashes:
+		c1 := sha256.Sum256([]byte(challenge + md5h1Hex))
+		hashesToTest = append(hashesToTest, hex.EncodeToString(c1[:]))
+
+		c2 := sha256.Sum256([]byte(challenge + sha256h1Hex))
+		hashesToTest = append(hashesToTest, hex.EncodeToString(c2[:]))
+
+		c3 := md5.Sum([]byte(challenge + md5h1Hex))
+		hashesToTest = append(hashesToTest, hex.EncodeToString(c3[:]))
+
+		c4 := sha256.Sum256([]byte(challenge + password))
+		hashesToTest = append(hashesToTest, hex.EncodeToString(c4[:]))
+
+		// Plain password
+		hashesToTest = append(hashesToTest, password)
+
+		for _, authPass := range hashesToTest {
+			payload, _ := json.Marshal(map[string]string{
+				"login":    username,
+				"password": authPass,
+			})
+			pReq, pErr := http.NewRequest("POST", target+"/auth", bytes.NewReader(payload))
+			if pErr != nil {
+				continue
+			}
+			pReq.Header.Set("Content-Type", "application/json")
+			pResp, pErr := client.Do(pReq)
+			if pErr == nil {
+				_, _ = io.Copy(io.Discard, pResp.Body)
+				pResp.Body.Close()
+				if pResp.StatusCode == http.StatusOK {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
 func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	client := &http.Client{
 		Timeout: 1000 * time.Millisecond,
@@ -134,27 +227,13 @@ func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	}
 
 	for _, target := range targets {
-		// A. Try GET /rci/show/version with Basic Auth
-		reqB, errB := http.NewRequest("GET", target+"/rci/show/version", nil)
-		if errB == nil {
-			reqB.SetBasicAuth(username, password)
-			if respB, err := client.Do(reqB); err == nil {
-				_, _ = io.Copy(io.Discard, respB.Body)
-				respB.Body.Close()
-				if respB.StatusCode == http.StatusOK {
-					return true
-				}
-			}
-		}
-
-		// B. Try GET /rci/ with Basic Auth
-		reqC, errC := http.NewRequest("GET", target+"/rci/", nil)
-		if errC == nil {
-			reqC.SetBasicAuth(username, password)
-			if respC, err := client.Do(reqC); err == nil {
-				_, _ = io.Copy(io.Discard, respC.Body)
-				respC.Body.Close()
-				if respC.StatusCode == http.StatusOK {
+		req, err := http.NewRequest("GET", target+"/rci/show/version", nil)
+		if err == nil {
+			req.SetBasicAuth(username, password)
+			if resp, err := client.Do(req); err == nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
 					return true
 				}
 			}
@@ -164,25 +243,7 @@ func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	return false
 }
 
-// verifyViaNDMC checks credentials via ndmc CLI
-func verifyViaNDMC(username, password string) bool {
-	ndmcPaths := []string{"ndmc", "/bin/ndmc", "/usr/bin/ndmc", "/opt/bin/ndmc"}
-	for _, ndmc := range ndmcPaths {
-		ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
-		cmd := exec.CommandContext(ctx, ndmc, "-c", "show version")
-		out, err := cmd.Output()
-		cancel()
-		if err == nil && len(out) > 0 {
-			outStr := string(out)
-			if strings.Contains(outStr, "version") || strings.Contains(outStr, "release") {
-				// Running under root on router; ndmc connects directly
-			}
-		}
-	}
-	return false
-}
-
-// GetKeeneticUsers parses KeeneticOS configuration files (supporting single-line and multi-line blocks).
+// GetKeeneticUsers parses KeeneticOS configuration files and returns discovered users.
 func GetKeeneticUsers() []KeeneticUser {
 	keeneticCacheMu.RLock()
 	if len(keeneticUsersCache) > 0 && time.Since(keeneticCacheTime) < 30*time.Second {
@@ -198,7 +259,6 @@ func GetKeeneticUsers() []KeeneticUser {
 	var users []KeeneticUser
 	seen := make(map[string]bool)
 
-	// 1. Config files in KeeneticOS & Entware
 	configFiles := []string{
 		"/storage/startup-config",
 		"/storage/running-config",
@@ -213,8 +273,11 @@ func GetKeeneticUsers() []KeeneticUser {
 
 	for _, cfgFile := range configFiles {
 		if f, err := os.Open(cfgFile); err == nil {
-			parsed := parseKeeneticConfigFile(f)
+			parsed, hn := parseKeeneticConfigFile(f)
 			f.Close()
+			if hn != "" {
+				keeneticHostnameCache = hn
+			}
 			for _, u := range parsed {
 				if !seen[strings.ToLower(u.Username)] {
 					users = append(users, u)
@@ -227,7 +290,7 @@ func GetKeeneticUsers() []KeeneticUser {
 		}
 	}
 
-	// 2. Try ndmq CLI query if config files on disk were not found
+	// 2. ndmq CLI query
 	if len(users) == 0 {
 		ndmqPaths := []string{"ndmq", "/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq"}
 		for _, ndmq := range ndmqPaths {
@@ -235,7 +298,10 @@ func GetKeeneticUsers() []KeeneticUser {
 			out, err := exec.CommandContext(ctx, ndmq, "-p", "show running-config").Output()
 			cancel()
 			if err == nil && len(out) > 0 {
-				parsed := parseKeeneticConfigFile(bytes.NewReader(out))
+				parsed, hn := parseKeeneticConfigFile(bytes.NewReader(out))
+				if hn != "" {
+					keeneticHostnameCache = hn
+				}
 				for _, u := range parsed {
 					if !seen[strings.ToLower(u.Username)] {
 						users = append(users, u)
@@ -283,18 +349,10 @@ func GetKeeneticUsers() []KeeneticUser {
 	return users
 }
 
-// parseKeeneticConfigFile handles both single-line and multi-line Keenetic user declarations:
-// Single line:
-//   user admin password hash md5 7815696ecbf1c96e6894b779456d330e
-//   user admin password secret123
-// Multi line:
-//   user admin
-//       password hash md5 7815696ecbf1c96e6894b779456d330e
-//       tag http
-//   user admin
-//       password secret123
-func parseKeeneticConfigFile(r io.Reader) []KeeneticUser {
+// parseKeeneticConfigFile parses configuration and extracts users and system hostname.
+func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 	var users []KeeneticUser
+	var hostname string
 	scanner := bufio.NewScanner(r)
 	var currentUser *KeeneticUser
 
@@ -308,6 +366,16 @@ func parseKeeneticConfigFile(r io.Reader) []KeeneticUser {
 		fields := strings.Fields(trimmed)
 		if len(fields) == 0 {
 			continue
+		}
+
+		// Detect system hostname
+		if (fields[0] == "system" && len(fields) >= 3 && fields[1] == "hostname") ||
+			(fields[0] == "hostname" && len(fields) >= 2) {
+			if len(fields) >= 3 && fields[0] == "system" {
+				hostname = fields[2]
+			} else {
+				hostname = fields[1]
+			}
 		}
 
 		// Single line user definition: "user <name> password ..."
@@ -354,7 +422,7 @@ func parseKeeneticConfigFile(r io.Reader) []KeeneticUser {
 		users = append(users, *currentUser)
 	}
 
-	return users
+	return users, hostname
 }
 
 func parseSingleUserLine(fields []string) *KeeneticUser {
@@ -367,22 +435,17 @@ func parseSingleUserLine(fields []string) *KeeneticUser {
 }
 
 func extractPasswordFields(u *KeeneticUser, fields []string) {
-	// fields starts with "password", e.g. ["password", "hash", "md5", "7815696..."]
-	// or ["password", "hash", "MD5:7815696..."]
-	// or ["password", "mypassword"]
 	if len(fields) < 2 {
 		return
 	}
 
 	if fields[1] == "hash" && len(fields) >= 3 {
 		if len(fields) >= 4 {
-			// "password hash md5 <hash>"
 			hType := strings.ToLower(fields[2])
 			hVal := fields[3]
 			u.PasswordHash = cleanHashPrefix(hVal)
 			u.HashType = hType
 		} else {
-			// "password hash <hash>"
 			hVal := fields[2]
 			u.PasswordHash = cleanHashPrefix(hVal)
 			u.HashType = detectHashType(u.PasswordHash)
@@ -446,20 +509,28 @@ func verifyKeeneticHash(username, password, storedHash, hashType string) bool {
 		"",
 	}
 
+	if keeneticHostnameCache != "" {
+		realms = append([]string{keeneticHostnameCache}, realms...)
+	}
+	if hn, err := os.Hostname(); err == nil && hn != "" {
+		realms = append([]string{hn}, realms...)
+	}
+
 	for _, realm := range realms {
-		// Standard HTTP Digest: username:realm:password
+		// A. MD5(username + ":" + realm + ":" + password)
 		dStr := fmt.Sprintf("%s:%s:%s", username, realm, password)
 		h := md5.Sum([]byte(dStr))
 		if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(h[:])), []byte(storedLower)) == 1 {
 			return true
 		}
 
+		// B. SHA256(username + ":" + realm + ":" + password)
 		sH := sha256.Sum256([]byte(dStr))
 		if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sH[:])), []byte(storedLower)) == 1 {
 			return true
 		}
 
-		// Alternative: realm:password
+		// C. MD5(realm + ":" + password)
 		if realm != "" {
 			altStr := fmt.Sprintf("%s:%s", realm, password)
 			altH := md5.Sum([]byte(altStr))
