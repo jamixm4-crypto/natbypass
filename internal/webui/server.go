@@ -330,8 +330,14 @@ func (s *Server) Start(ctx context.Context) error {
 // authMiddleware — защита сессией и Basic Auth
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Публичные эндпоинты (страница, healthcheck, аутентификация, QR)
+		// Публичные эндпоинты (страница, статика, healthcheck, аутентификация, QR)
 		if r.URL.Path == "/" ||
+			r.URL.Path == "/manifest.json" ||
+			r.URL.Path == "/favicon.ico" ||
+			r.URL.Path == "/icon.png" ||
+			r.URL.Path == "/app.ico" ||
+			r.URL.Path == "/apple-touch-icon.png" ||
+			r.URL.Path == "/robots.txt" ||
 			r.URL.Path == "/healthz" ||
 			r.URL.Path == "/api/auth/login" ||
 			r.URL.Path == "/api/auth/logout" ||
