@@ -73,7 +73,8 @@ jobs:
 
           $env:GOARCH = "mipsle"
           $env:GOMIPS = "softfloat"
-          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-router-mipsle ./cmd/natbypass-cli
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-keenetic-mipsle ./cmd/natbypass-cli
+          Copy-Item build/natbypass-keenetic-mipsle build/natbypass-router-mipsle -Force
 
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"
@@ -91,5 +92,6 @@ jobs:
             build/natbypass-cli.exe
             build/natbypass-linux-amd64
             build/natbypass-linux-arm64
+            build/natbypass-keenetic-mipsle
             build/natbypass-router-mipsle
             build/natbypass-router-mips

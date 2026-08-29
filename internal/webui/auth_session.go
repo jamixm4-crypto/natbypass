@@ -178,6 +178,7 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 			"auth_required": authRequired,
 			"username":      getSessionUsername(cookie.Value),
 			"is_keenetic":   IsKeeneticOS(),
+			"os":            runtime.GOOS,
 		}, "")
 		return
 	}
@@ -189,6 +190,7 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 			"auth_required": authRequired,
 			"username":      user,
 			"is_keenetic":   IsKeeneticOS(),
+			"os":            runtime.GOOS,
 		}, "")
 		return
 	}
@@ -197,5 +199,6 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 		"authenticated": !authRequired,
 		"auth_required": authRequired,
 		"is_keenetic":   IsKeeneticOS(),
+			"os":            runtime.GOOS,
 	}, "")
 }

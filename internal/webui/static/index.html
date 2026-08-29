@@ -2332,6 +2332,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (scr) scr.style.display = 'none';
     }
 
+    let appPollTimer = null;
+    function startAppPolling() {
+      if (appPollTimer) clearInterval(appPollTimer);
+      refreshData();
+      loadConfig();
+      loadProfiles();
+      setTimeout(checkUpdateManual, 3000);
+      appPollTimer = setInterval(refreshData, 2000);
+    }
+
     async function doLogin(e) {
       if (e) e.preventDefault();
       const u = document.getElementById('authUsername').value.trim();
