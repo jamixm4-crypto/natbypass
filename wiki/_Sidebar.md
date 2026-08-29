@@ -1,4 +1,4 @@
-﻿### [🌐 Главная страница](https://github.com/jamixm4-crypto/natbypass/wiki/Home)
+### [🌐 Главная страница](https://github.com/jamixm4-crypto/natbypass/wiki/Home)
 
 ---
 ### 🚀 Старт
@@ -16,8 +16,8 @@
 ---
 ### 🛡️ Протоколы
 * [🛡️ AmneziaWG 2.0 (DPI)](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass)
-* [💬 Telegram & MQTT](https://github.com/jamixm4-crypto/natbypass/wiki/Signaling-Telegram-MQTT)
-* [🛡️ Xray VLESS Reality](https://github.com/jamixm4-crypto/natbypass/wiki/Xray-Reality-Relay)
+* [💬 Сигнализация (Telegram, MQTT, DNS)](https://github.com/jamixm4-crypto/natbypass/wiki/Signaling-Telegram-MQTT)
+* [🚀 Дорожная карта (QUIC / Hysteria 2)](https://github.com/jamixm4-crypto/natbypass/wiki/Roadmap-and-Protocols)
 
 ---
 ### 🔧 Поддержка

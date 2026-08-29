@@ -19,10 +19,10 @@ NatBypass построен на принципах децентрализова�
 Если прямой UDP-трафик блокируется фильтрами DPI или сложным двойным Symmetric NAT:
 
 ```
-[Уровень 1: Direct UDP] ➔ [Уровень 2: AmneziaWG 2.0] ➔ [Уровень 3: MQTT Datagram] ➔ [Уровень 4: Xray Reality TCP 443]
+[Уровень 1: Direct UDP] ➔ [Уровень 2: AmneziaWG 2.0] ➔ [Уровень 3: MQTT Datagram] ➔ [Уровень 4: Hysteria 2 / QUIC TCP 443]
 ```
 
 1. **Direct UDP:** Оптимальная производительность без шифровального оверхеда.
 2. **AmneziaWG 2.0:** Обфускация заголовков и мусорные байты $J_c, S_1, S_2, H_1..H_4$ против ТСПУ.
 3. **MQTT Datagram Stream:** Пакетная ретрансляция через брокер сообщений при блокировке произвольного UDP.
-4. **Xray VLESS Reality:** Камуфляж трафика под TLS 1.3 к легитимным сайтам (Microsoft/Apple) по порту TCP 443.
+4. **Hysteria 2 VLESS Reality:** Камуфляж трафика под TLS 1.3 к легитимным сайтам (Microsoft/Apple) по порту TCP 443.

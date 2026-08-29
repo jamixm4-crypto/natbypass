@@ -118,12 +118,50 @@ func VerifyKeeneticAuth(username, password string) bool {
 
 // getKeeneticProbeTargets dynamically gathers local IP addresses and ports to probe Keenetic web services
 func getKeeneticProbeTargets() []string {
-	return []string{
+	targets := []string{
 		"http://127.0.0.1:80",
 		"https://127.0.0.1:443",
 	}
-}
 
+	seen := map[string]bool{
+		"http://127.0.0.1:80": true,
+		"https://127.0.0.1:443": true,
+	}
+
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, i := range ifaces {
+			addrs, err := i.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				if ip == nil || ip.IsLoopback() || ip.To4() == nil {
+					continue
+				}
+				ipStr := ip.String()
+				u1 := "http://" + ipStr + ":80"
+				u2 := "https://" + ipStr + ":443"
+				if !seen[u1] {
+					seen[u1] = true
+					targets = append(targets, u1)
+				}
+				if !seen[u2] {
+					seen[u2] = true
+					targets = append(targets, u2)
+				}
+			}
+		}
+	}
+	return targets
+}
 
 // verifyKeeneticRCIChallenge performs the official KeeneticOS 2-step challenge-response authentication:
 // 1. GET /auth -> reads X-NDM-Challenge and X-NDM-Realm, storing session cookies

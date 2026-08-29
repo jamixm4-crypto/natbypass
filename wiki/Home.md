@@ -28,7 +28,7 @@
 ### 🛡️ Обход блокировок и Протоколы
 * [**🛡️ Обход блокировок через AmneziaWG 2.0**](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass) — тюнинг параметров Jc, S1, S2, H1..H4 для пробития TSPU / DPI.
 * [**💬 Каналы сигнализации (Telegram & MQTT)**](https://github.com/jamixm4-crypto/natbypass/wiki/Signaling-Telegram-MQTT) — настройка собственного Telegram-бота или приватного MQTT брокера.
-* [**🛡️ Xray VLESS + XTLS Reality Relay**](https://github.com/jamixm4-crypto/natbypass/wiki/Xray-Reality-Relay) — ультимативный 4-й уровень резервной связи через маскированный TCP 443.
+* [**🛡️ Hysteria 2 VLESS + XTLS Reality Relay**](https://github.com/jamixm4-crypto/natbypass/wiki/Roadmap-and-Protocols) — ультимативный 4-й уровень резервной связи через маскированный TCP 443.
 
 ---
 
