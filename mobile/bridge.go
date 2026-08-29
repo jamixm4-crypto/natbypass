@@ -1744,7 +1744,7 @@ func SetProfileVirtualIP(profileID, vip string) bool {
 			globalConfig.Profiles[i].VirtualIP = vip
 			if globalConfig.Profiles[i].IsActive || globalConfig.ActiveProfileID == profileID {
 				globalConfig.Network.Address = vip
-				myVirtualIP = vip
+				globalVirtualIP = vip
 			}
 			return true
 		}
