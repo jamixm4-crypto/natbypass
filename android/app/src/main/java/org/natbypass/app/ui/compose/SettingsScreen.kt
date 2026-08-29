@@ -81,6 +81,7 @@ fun SettingsScreen(
                 activeProfileName = active.optString("name", "Основная сеть")
                 mqttBroker        = active.optString("mqtt_broker", "tcp://broker.emqx.io:1883")
                 mqttTopic         = active.optString("mqtt_topic", "")
+                virtualIp         = active.optString("virtual_ip", MobileBridge.getVirtualIP())
                 mqttUser          = active.optString("mqtt_user", "")
                 mqttPass          = active.optString("mqtt_pass", "")
                 tgToken           = active.optString("tg_token", "")
@@ -131,6 +132,9 @@ fun SettingsScreen(
         MobileBridge.setAllowExitNode(allowExitNode)
         MobileBridge.setAdvertisedRoutes(advSubnets.trim())
 
+        if (virtualIp.isNotBlank()) {
+            MobileBridge.setVirtualIP(virtualIp.trim())
+        }
         if (activeProfileId.isNotEmpty()) {
             MobileBridge.updateProfile(
                 activeProfileId,

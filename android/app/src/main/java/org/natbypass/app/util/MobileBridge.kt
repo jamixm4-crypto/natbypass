@@ -63,6 +63,13 @@ object MobileBridge {
         } catch (e: Exception) {}
     }
 
+    fun setVirtualIP(vip: String) {
+        val method = getMethod("setVirtualIP") ?: return
+        try {
+            method.invoke(null, vip)
+        } catch (e: Exception) {}
+    }
+
     fun getVirtualIP(): String {
         val method = getMethod("getVirtualIP") ?: return "100.64.200.10"
         return try {

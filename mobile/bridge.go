@@ -506,6 +506,28 @@ func StartEngine(configYAML string, tunFd int) string {
 		probeTicker := time.NewTicker(3 * time.Second)
 		defer probeTicker.Stop()
 
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-probeTicker.C:
+					if puncher != nil && globalRegistry != nil {
+						for _, peerItem := range globalRegistry.List() {
+							if peerItem.Online {
+								if peerItem.STUNAddr != "" {
+									_ = puncher.SendHolePunchProbe(peerItem.STUNAddr)
+								}
+								if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr {
+									_ = puncher.SendHolePunchProbe(peerItem.LocalAddr)
+								}
+							}
+						}
+					}
+				}
+			}
+		}()
+
 		// Логируем NAT тип через 6 секунд после старта
 		time.AfterFunc(6*time.Second, func() {
 			if puncher != nil {
@@ -937,6 +959,23 @@ func TestMQTT(broker, topic, user, pass string) string {
 }
 
 // GetVirtualIP возвращает текущий виртуальный IP устройства в P2P сети
+// SetVirtualIP устанавливает кастомный Virtual IP для мобильного устройства
+func SetVirtualIP(vip string) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	clean := strings.TrimSpace(vip)
+	if clean != "" {
+		globalVirtualIP = clean
+		if globalConfig != nil {
+			globalConfig.Network.Address = clean
+			if p := globalConfig.EnsureActiveProfile(); p != nil {
+				p.VirtualIP = clean
+			}
+		}
+		logger.Info().Str("vip", clean).Msg("Virtual IP мобильного устройства обновлен")
+	}
+}
+
 func GetVirtualIP() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()

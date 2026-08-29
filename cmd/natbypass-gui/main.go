@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	Version = "1.9.067"
+	Version = "1.9.068"
 	Commit  = "release"
 )
 
@@ -2148,8 +2148,7 @@ func handleProfileSave() {
 		p.MQTTBroker = broker
 	}
 	if vip != "" {
-		cleanVIP := strings.TrimSpace(strings.Split(vip, "/")[0])
-		p.VirtualIP = cleanVIP
+		p.VirtualIP = strings.TrimSpace(vip)
 	}
 
 	_ = config.Save(cfg, configPath, false)
