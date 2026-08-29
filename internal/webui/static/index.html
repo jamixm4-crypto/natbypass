@@ -706,13 +706,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <li id="nav-devices" class="nav-item" data-tooltip="Устройства" onclick="switchTab('devices')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
       </li>
-      <li id="nav-profiles" class="nav-item" data-tooltip="Сети & Профили" onclick="switchTab('profiles')">
+      <li id="nav-profiles" class="nav-item" data-tooltip="Сети и профили" onclick="switchTab('profiles')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
       </li>
       <li id="nav-channels" class="nav-item" data-tooltip="Каналы связи" onclick="switchTab('channels')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"></path><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"></path><circle cx="12" cy="12" r="2"></circle><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"></path><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"></path></svg>
       </li>
-      <li id="nav-routing" class="nav-item" data-tooltip="Шлюз & Сети" onclick="switchTab('routing')">
+      <li id="nav-routing" class="nav-item" data-tooltip="Шлюз и подсети" onclick="switchTab('routing')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" x2="22" y1="12" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
       </li>
       <li id="nav-awg" class="nav-item" data-tooltip="AmneziaWG 2.0" onclick="switchTab('awg')">
@@ -779,6 +779,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     <!-- TAB 1: DASHBOARD (EXACT SCREENSHOT LAYOUT) -->
     <div id="tab-dashboard" class="tab-pane active">
+      <!-- Live P2P Connection Status Banner -->
+      <div id="connStatusBanner" style="display:flex; justify-content:center; align-items:center; gap:10px; background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.35); border-radius:12px; padding:10px 16px; margin-bottom:14px; font-weight:800; font-size:0.88rem; text-align:center; white-space:normal;">
+        <span id="connStatusDot" style="width:10px; height:10px; border-radius:50%; background:#f59e0b; box-shadow:0 0 10px #f59e0b; display:inline-block;"></span>
+        <span id="connStatusText">ОЖИДАНИЕ СВЯЗИ (0 пиров онлайн)</span>
+      </div>
       <!-- Active Gateway Banner -->
       <div id="activeGatewayBanner" style="display:none; background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.4); border-radius:12px; padding:8px 14px; margin-bottom:12px; justify-content:space-between; align-items:center;">
         <div style="display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:700;">
@@ -857,7 +862,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div class="glass-card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
           <div>
-            <h3 style="font-size: 1rem; font-weight: 700;">👥 Устройства в вашей P2P Mesh сети</h3>
+            <h3 style="font-size: 1.05rem; font-weight: 800; white-space: normal;">👥 ПОИСК УСТРОЙСТВ В СЕТИ & ПИРЫ MESH</h3>
             <p style="font-size: 0.78rem; color: var(--text-muted);">Прямая связь сокет-в-сокет без промежуточных серверов</p>
           </div>
           <div style="display:flex; gap:8px;">
@@ -1065,7 +1070,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div class="glass-card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
           <div>
-            <h2 style="font-size: 1.15rem; font-weight: 800;">🩺 Системная диагностика связности</h2>
+            <h2>💻 СИСТЕМНАЯ ДИАГНОСТИКА & ДЕБАГГЕР NATBYPASS</h2>
             <p style="color: var(--text-muted); font-size: 0.8rem;">Комплексная проверка интернета, STUN, NAT-типа и пиров</p>
           </div>
           <div style="display:flex; gap: 8px;">
@@ -1073,7 +1078,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <button onclick="copyDiagReport()" class="btn btn-glass">📋 Скопировать отчет</button>
           </div>
         </div>
-        <div id="diagBox" class="mono" style="background: rgba(10, 14, 24, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 18px; font-size: 0.86rem; line-height: 1.8;">
+        <pre id="diagBox" class="mono" style="background: rgba(10, 14, 24, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 18px; font-size: 0.86rem; line-height: 1.8;">
           Нажмите «Запустить тест» для проверки связности...
         </div>
       </div>
@@ -1098,13 +1103,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         </div>
       </div>
 
-      <div class="glass-card" style="margin-bottom: 16px;">
+      <div class="glass-card" style="margin-bottom: 24px;">
         <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">🏷️ Основные параметры & Система</h2>
         
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
           <div class="form-group">
             <label class="form-label">🏷️ Имя вашего устройства (Никнейм):</label>
-            <input type="text" id="cfgNick" class="form-input" placeholder="Мой ПК">
+            <input type="text" id="cfgNick" class="form-input" placeholder="Имя, которое увидят другие устройства в сети"><small style="color:var(--text-muted); font-size:0.75rem; margin-top:4px; display:block;">Имя, которое увидят другие устройства в сети</small>
           </div>
 
           <div class="form-group">
@@ -1133,7 +1138,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         </div>
       </div>
 
-      <div class="glass-card" style="margin-bottom: 16px;">
+      <div class="glass-card" style="margin-bottom: 24px;">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom: 16px;">
           <div>
             <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 4px;">📡 Сигнальные каналы (Telegram & MQTT)</h2>
@@ -1425,7 +1430,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
       <div class="form-group" style="margin-bottom:12px;">
         <label class="form-label">MQTT Топик (оставьте пустым для безопасной автогенерации):</label>
-        <input type="text" id="newProfTopic" class="form-input mono" placeholder="natbypass/mesh/...">
+        <input type="text" id="newProfTopic" class="form-input mono" placeholder="Задайте уникальный секретный топик для вашей сети">
       </div>
       <div class="form-group" style="margin-bottom:16px;">
         <label class="form-label">MQTT Брокер:</label>
@@ -1549,6 +1554,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     let currentTab = 'dashboard';
     let currentChannelMode = 'parallel';
     let cachedPeers = [];
+
+    function formatPeersCount(n) {
+      n = Math.abs(n || 0);
+      const n10 = n % 10;
+      const n100 = n % 100;
+      if (n10 === 1 && n100 !== 11) return n + ' пир';
+      if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) return n + ' пира';
+      return n + ' пиров';
+    }
+
     let latencyHistory = [8, 12, 10, 14, 11, 16, 12, 15, 14, 12, 16, 14];
     let stunPulsePhase = 0;
 
@@ -2173,6 +2188,30 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const avgLat = d.avg_latency_ms || 0;
 
           document.getElementById('statPeersCount').innerText = totalPeers;
+
+          const banner = document.getElementById('connStatusBanner');
+          const bannerText = document.getElementById('connStatusText');
+          const bannerDot = document.getElementById('connStatusDot');
+          if (banner && bannerText) {
+            if (totalPeers === 0) {
+              banner.style.background = 'rgba(245, 158, 11, 0.12)';
+              banner.style.borderColor = 'rgba(245, 158, 11, 0.35)';
+              bannerText.innerText = 'ОЖИДАНИЕ СВЯЗИ (0 пиров онлайн)';
+              if (bannerDot) {
+                bannerDot.style.background = '#f59e0b';
+                bannerDot.style.boxShadow = '0 0 10px #f59e0b';
+              }
+            } else {
+              banner.style.background = 'rgba(16, 185, 129, 0.15)';
+              banner.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+              bannerText.innerText = 'СВЯЗЬ АКТИВНА (' + formatPeersCount(totalPeers) + ' онлайн)';
+              if (bannerDot) {
+                bannerDot.style.background = '#10b981';
+                bannerDot.style.boxShadow = '0 0 10px #10b981';
+              }
+            }
+          }
+
           document.getElementById('statP2PCount').innerText = `⚡ ${p2pActive} Direct P2P`;
           document.getElementById('statAvgLatency').innerText = (avgLat > 0 ? avgLat : (totalPeers > 0 ? 12 : 0)) + ' ms';
           const topVip = document.getElementById('topVipLabel');
@@ -2232,7 +2271,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const curVal = (selExit && selExit.value) ? selExit.value : currentSelectedExitNode;
 
       if (!peers || peers.length === 0) {
-        const empty = `<tr><td colspan="7" style="text-align:center; color: var(--text-dim); padding: 18px;">📡 Ожидание маяков устройств в топике mesh...</td></tr>`;
+        const empty = `<tr><td colspan="7" style="text-align:center; color: var(--text-dim); padding: 22px; font-weight: 600;">📡 ОЖИДАНИЕ СВЯЗИ (0 пиров онлайн) — ПОИСК УСТРОЙСТВ В СЕТИ...</td></tr>`;
         if (qb) qb.innerHTML = empty;
         if (fb) fb.innerHTML = empty;
         if (selExit) selExit.innerHTML = '<option value="">🚫 Локальный интернет (Шлюз выключен)</option>';
