@@ -2107,16 +2107,18 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
         try {
           const res = await fetch('/api/status?_t=' + Date.now(), { cache: 'no-store' });
-          if (res.ok) {
+          // If server responds with 200, 401 (auth required), or 302, it is fully back online!
+          if (res.ok || res.status === 200 || res.status === 401 || res.status === 302) {
             clearInterval(checkInterval);
             if (progStatus) {
-              progStatus.innerText = '✓ Новая версия успешно запущена! Обновление страницы...';
+              progStatus.innerText = '✓ Новая версия успешно запущена! Перезагрузка страницы...';
               progStatus.style.color = '#10b981';
             }
-            showToast('🎉 NatBypass успешно обновлен до новой версии!');
+            showToast('🎉 NatBypass успешно обновлен!');
             setTimeout(() => {
-              window.location.replace(window.location.pathname + '?v=' + Date.now());
-            }, 500);
+              window.location.reload();
+            }, 400);
+            return;
           }
         } catch (e) {
           // Ждём старта службы

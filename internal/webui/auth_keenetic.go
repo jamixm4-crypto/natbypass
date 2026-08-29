@@ -132,10 +132,12 @@ func getKeeneticProbeTargets() []string {
 		}
 	}
 
-	// Common localhost & LAN IPs
-	hosts := []string{"127.0.0.1", "192.168.1.1", "192.168.0.1"}
+	// Localhost is always active on router
+	add("http", "127.0.0.1", "80")
+	add("https", "127.0.0.1", "443")
+	add("http", "192.168.1.1", "80")
 
-	// Dynamically add all local interface IPv4 addresses
+	// Dynamically check interface IPs
 	ifaces, err := net.Interfaces()
 	if err == nil {
 		for _, iface := range ifaces {
@@ -143,17 +145,12 @@ func getKeeneticProbeTargets() []string {
 			if err == nil {
 				for _, addr := range addrs {
 					if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
-						hosts = append(hosts, ipnet.IP.String())
+						ip := ipnet.IP.String()
+						add("http", ip, "80")
 					}
 				}
 			}
 		}
-	}
-
-	for _, host := range hosts {
-		add("http", host, "80")
-		add("https", host, "443")
-		add("http", host, "81")
 	}
 
 	return targets
@@ -179,11 +176,11 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 			jar, _ := cookiejar.New(nil)
 			client := &http.Client{
 				Jar:     jar,
-				Timeout: 800 * time.Millisecond,
+				Timeout: 200 * time.Millisecond,
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 					DialContext: (&net.Dialer{
-						Timeout: 350 * time.Millisecond,
+						Timeout: 200 * time.Millisecond,
 					}).DialContext,
 				},
 			}
@@ -291,11 +288,11 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 // verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
 func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	client := &http.Client{
-		Timeout: 500 * time.Millisecond,
+		Timeout: 200 * time.Millisecond,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			DialContext: (&net.Dialer{
-				Timeout: 250 * time.Millisecond,
+				Timeout: 150 * time.Millisecond,
 			}).DialContext,
 		},
 	}
