@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	Version = "1.9.065"
+	Version = "1.9.066"
 	Commit  = "release"
 )
 
@@ -2038,6 +2038,7 @@ func onProfileSelectionChange() {
 	setControlText(hEditProfName, p.Name)
 	setControlText(hEditProfTopic, p.MQTTTopic)
 	setControlText(hEditProfBroker, p.MQTTBroker)
+	setControlText(hEditProfVIP, p.VirtualIP)
 }
 
 func handleProfileSwitch() {
@@ -2058,6 +2059,16 @@ func handleProfileSwitch() {
 	_ = config.Save(cfg, configPath, false)
 	setControlText(hEditMqttBr, target.MQTTBroker)
 	setControlText(hEditMqttTp, target.MQTTTopic)
+	if target.VirtualIP != "" {
+		myVirtualIP = strings.TrimSpace(strings.Split(target.VirtualIP, "/")[0])
+		if tunDev != nil {
+			_ = tunDev.SetVirtualIP(myVirtualIP)
+		}
+		if uiServer != nil {
+			uiServer.SetVirtualIP(myVirtualIP)
+		}
+		triggerPublish()
+	}
 
 	if registry != nil {
 		registry.ClearAll()

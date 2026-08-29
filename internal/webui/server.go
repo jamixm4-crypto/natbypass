@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"crypto/subtle"
 	"context"
 	"embed"
 	"encoding/json"
@@ -1535,6 +1536,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		DeviceName      string `json:"device_name"`
+		VirtualIP       string `json:"virtual_ip"`
 		PublishInterval int    `json:"publish_interval"`
 		MqttBroker      string `json:"mqtt_broker"`
 		MqttTopic       string `json:"mqtt_topic"`
@@ -1569,6 +1571,14 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	cfg.App.SaveLogsToDisk = req.SaveLogsToDisk
 	cfg.App.ShowDiagnostics = req.ShowDiagnostics
 	s.deviceName = req.DeviceName
+	if req.VirtualIP != "" {
+		cleanVIP := strings.TrimSpace(strings.Split(req.VirtualIP, "/")[0])
+		cfg.Network.Address = req.VirtualIP
+		if active := cfg.EnsureActiveProfile(); active != nil {
+			active.VirtualIP = cleanVIP
+		}
+		s.SetVirtualIP(cleanVIP)
+	}
 
 	cfg.Network.UpnpEnabled = req.UpnpEnabled
 	cfg.Network.DoHEnabled = req.DoHEnabled
@@ -2006,6 +2016,9 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if target.ID == cfg.ActiveProfileID {
 		cfg.SyncSignalingWithProfile(target)
+		if target.VirtualIP != "" {
+			s.SetVirtualIP(strings.TrimSpace(strings.Split(target.VirtualIP, "/")[0]))
+		}
 		if s.onProfileSwitch != nil {
 			_ = s.onProfileSwitch(target)
 		}
@@ -2057,6 +2070,12 @@ func (s *Server) handleProfileSwitch(w http.ResponseWriter, r *http.Request) {
 
 	if s.onProfileSwitch != nil {
 		_ = s.onProfileSwitch(active)
+	}
+	if active.VirtualIP != "" {
+		s.SetVirtualIP(strings.TrimSpace(strings.Split(active.VirtualIP, "/")[0]))
+	}
+	if s.onConfigChange != nil {
+		s.onConfigChange()
 	}
 	if s.registry != nil {
 		s.registry.ClearAll()
@@ -2435,9 +2454,19 @@ func (s *Server) handleAdminPasswordChange(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Проверяем текущий пароль
-	if s.password != "" && req.CurrentPassword != s.password {
-		s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль")
-		return
+	if s.password != "" {
+		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte(s.password)) != 1 {
+			s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль")
+			return
+		}
+	} else {
+		if req.CurrentPassword != "admin" && req.CurrentPassword != "admin123" && req.CurrentPassword != "" {
+			s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль (по умолчанию: admin)")
+			return
+		}
+	}
+	if s.user == "" {
+		s.user = "admin"
 	}
 
 	// Обновляем пароль в памяти сервера

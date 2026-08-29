@@ -529,8 +529,25 @@ func publishLoop(
 	defer ticker.Stop()
 
 	var stunAddr string
+	lastVIP := virtualIP
 
 	publishOnce := func() {
+		// Dynamic reload of current config & Virtual IP
+		currentVIP := virtualIP
+		if configFile != "" {
+			if reloaded, rErr := config.Load(configFile); rErr == nil && reloaded != nil {
+				*cfg = *reloaded
+			}
+		}
+		currentVIP = resolveVirtualIP(cfg, deviceID)
+		if currentVIP != "" && currentVIP != lastVIP {
+			lastVIP = currentVIP
+			if tunDev != nil {
+				_ = tunDev.SetVirtualIP(currentVIP)
+			}
+			log.Info().Str("old_vip", virtualIP).Str("new_vip", currentVIP).Msg("Virtual IP dynamically updated on interface")
+		}
+
 		ip, _ := ipDisc.GetPublicIPCached(ctx, publishInterval/2)
 
 		var awgParams *signaling.AWGParams
@@ -659,7 +676,7 @@ func publishLoop(
 			WGPubKey:        wgPubKey,
 			WGPort:          wgPort,
 			Timestamp:       time.Now(),
-			VirtualIP:       virtualIP,
+			VirtualIP:       currentVIP,
 			AWG:             awgParams,
 			MTU:             activeMTU,
 			AdaptationEpoch: activeEpoch,
