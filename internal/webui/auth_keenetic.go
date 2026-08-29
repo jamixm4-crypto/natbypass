@@ -1,4 +1,4 @@
-﻿package webui
+package webui
 
 import (
 	"bufio"
@@ -118,44 +118,12 @@ func VerifyKeeneticAuth(username, password string) bool {
 
 // getKeeneticProbeTargets dynamically gathers local IP addresses and ports to probe Keenetic web services
 func getKeeneticProbeTargets() []string {
-	var targets []string
-	seen := make(map[string]bool)
-
-	add := func(proto, host, port string) {
-		url := fmt.Sprintf("%s://%s", proto, host)
-		if port != "" && port != "80" && port != "443" {
-			url = fmt.Sprintf("%s://%s:%s", proto, host, port)
-		}
-		if !seen[url] {
-			seen[url] = true
-			targets = append(targets, url)
-		}
+	return []string{
+		"http://127.0.0.1:80",
+		"https://127.0.0.1:443",
 	}
-
-	hosts := []string{"127.0.0.1", "192.168.1.1", "192.168.0.1", "192.168.91.1", "192.168.11.1"}
-
-	ifaces, err := net.Interfaces()
-	if err == nil {
-		for _, iface := range ifaces {
-			addrs, err := iface.Addrs()
-			if err == nil {
-				for _, addr := range addrs {
-					if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
-						hosts = append(hosts, ipnet.IP.String())
-					}
-				}
-			}
-		}
-	}
-
-	for _, host := range hosts {
-		add("http", host, "80")
-		add("https", host, "443")
-		add("http", host, "81")
-	}
-
-	return targets
 }
+
 
 // verifyKeeneticRCIChallenge performs the official KeeneticOS 2-step challenge-response authentication:
 // 1. GET /auth -> reads X-NDM-Challenge and X-NDM-Realm, storing session cookies
@@ -177,11 +145,11 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 			jar, _ := cookiejar.New(nil)
 			client := &http.Client{
 				Jar:     jar,
-				Timeout: 2500 * time.Millisecond,
+				Timeout: 1200 * time.Millisecond,
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 					DialContext: (&net.Dialer{
-						Timeout: 2500 * time.Millisecond,
+						Timeout: 1200 * time.Millisecond,
 					}).DialContext,
 				},
 			}
@@ -289,7 +257,7 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 // verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
 func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	client := &http.Client{
-		Timeout: 2500 * time.Millisecond,
+		Timeout: 1200 * time.Millisecond,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			DialContext: (&net.Dialer{

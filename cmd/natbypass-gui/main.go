@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	Version = "1.9.60"
+	Version = "1.9.62"
 	Commit  = "release"
 )
 
@@ -3692,7 +3692,17 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				if !ok {
 					return
 				}
-				if p == nil || p.DeviceID == "" || p.DeviceID == myDevID {
+				if p == nil {
+					continue
+				}
+
+				if len(p.Encrypted) > 0 {
+					if dec, err := signaling.DecryptPayload(p, myPubKey, myPrivKey); err == nil && dec != nil {
+						p = dec
+					}
+				}
+
+				if p.DeviceID == "" || p.DeviceID == myDevID {
 					continue
 				}
 
@@ -3705,15 +3715,10 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						activeTopic = active.MQTTTopic
 					}
 				}
-				match := false
-				if activeKey != "" && p.NetworkKey == activeKey {
-					match = true
-				} else if activeTopic != "" && p.Topic == activeTopic {
-					match = true
-				} else if activeKey == "" && activeTopic == "" {
-					match = true
+				if activeKey != "" && p.NetworkKey != "" && p.NetworkKey != activeKey {
+					continue
 				}
-				if !match {
+				if activeTopic != "" && p.Topic != "" && p.Topic != activeTopic {
 					continue
 				}
 

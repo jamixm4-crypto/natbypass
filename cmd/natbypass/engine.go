@@ -265,7 +265,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	// Dedicated rapid 2.5s keepalive & probe loop for maintaining carrier CGNAT mappings
 	if puncher != nil {
 		go func() {
-			kaTicker := time.NewTicker(2500 * time.Millisecond)
+			kaTicker := time.NewTicker(15 * time.Second)
 			defer kaTicker.Stop()
 			for {
 				select {
@@ -713,19 +713,14 @@ func receiveLoop(
 			}
 
 			if puncher != nil {
-				go func(targetSTUN string, extraCandidates []string) {
-					for burst := 0; burst < 6; burst++ {
-						if targetSTUN != "" {
-							_ = puncher.SendHolePunchProbe(targetSTUN)
-						}
-						for _, cand := range extraCandidates {
-							if cand != "" && cand != targetSTUN {
-								_ = puncher.SendHolePunchProbe(cand)
-							}
-						}
-						time.Sleep(2 * time.Second)
+				if p.STUNAddr != "" {
+					_ = puncher.SendHolePunchProbe(p.STUNAddr)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" && cand != p.STUNAddr {
+						_ = puncher.SendHolePunchProbe(cand)
 					}
-				}(p.STUNAddr, p.Candidates)
+				}
 			}
 			registry.Upsert(&peer.Peer{
 				DeviceID:         p.DeviceID,

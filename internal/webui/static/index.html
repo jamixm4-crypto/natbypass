@@ -824,7 +824,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <li id="nav-settings" class="nav-item" data-tooltip="Настройки" onclick="switchTab('settings')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
       </li>
-      <li id="nav-logout" class="nav-item" data-tooltip="Выйти из системы" onclick="doLogout()" style="margin-top: 16px; border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1);">
+      <li id="nav-logout" class="nav-item" data-tooltip="Выйти из системы" onclick="doLogout()" style="display: none; margin-top: 16px; border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1);">
         <svg viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
       </li>
     </ul>
@@ -861,7 +861,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.11</span>
+          <span id="topUpdateLabel">v1.9.62</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -875,7 +875,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <div class="online-dot"></div>
         </div>
 
-        <button id="btnTopLogout" onclick="doLogout()" class="btn-pill" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; padding: 4px 12px; border-radius: 14px; font-weight: 700; font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Выйти из системы (Logout)">
+        <button id="btnTopLogout" onclick="doLogout()" class="btn-pill" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; padding: 4px 12px; border-radius: 14px; font-weight: 700; font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Выйти из системы (Logout)">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           <span>Выйти</span>
         </button>
@@ -1371,7 +1371,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <button onclick="clearPeersCache()" class="btn btn-glass" style="width:100%; justify-content:center; padding: 10px; border-color: rgba(239, 68, 68, 0.4); color: #f87171;">
             🧹 Очистить кэш устройств и пересканировать сеть
           </button>
-          <button onclick="doLogout()" class="btn btn-glass" style="width:100%; justify-content:center; padding: 10px; border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.1); color: #f87171; font-weight:700;">
+          <button id="btnSettingsLogout" onclick="doLogout()" class="btn btn-glass" style="display: none; width:100%; justify-content:center; padding: 10px; border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.1); color: #f87171; font-weight:700;">
             🚪 Выйти из системы (Завершить сеанс)
           </button>
         </div>
