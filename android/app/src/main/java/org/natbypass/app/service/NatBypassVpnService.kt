@@ -80,9 +80,10 @@ class NatBypassVpnService : VpnService() {
         if (isRunning && !forceReconfigure) return
 
         try {
-            var rawVip = org.natbypass.app.util.MobileBridge.getVirtualIP().trim()
-            if (rawVip.contains("/")) rawVip = rawVip.substringBefore("/")
-            val currentVip = if (rawVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))) rawVip else "100.64.200.10"
+            val rawVipStr = org.natbypass.app.util.MobileBridge.getVirtualIP().trim()
+            val parsedVip = rawVipStr.substringBefore("/").trim()
+            val currentVip = if (parsedVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))) parsedVip else "100.64.200.10"
+            val prefix = rawVipStr.substringAfter("/", "24").toIntOrNull() ?: 24
 
             val notif = buildNotification("Подключено к P2P сети ($currentVip)", showDisconnect = true)
             try {
@@ -125,12 +126,9 @@ class NatBypassVpnService : VpnService() {
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
             val useExitNode = selectedExitNode.isNotEmpty()
 
-            val rawVip = currentVip.substringBefore("/").trim().ifEmpty { "100.64.200.10" }
-            val prefix = currentVip.substringAfter("/", "24").toIntOrNull() ?: 24
-
             val builder = Builder()
                 .setSession("NatBypass")
-                .addAddress(rawVip, prefix)
+                .addAddress(currentVip, prefix)
                 .setMtu(1420)
                 .setBlocking(false)
                 .allowBypass()
