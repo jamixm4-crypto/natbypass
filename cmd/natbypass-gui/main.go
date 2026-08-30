@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.118"
+	Version = "1.9.119"
 	Commit  = "release"
 )
 
@@ -2119,16 +2119,15 @@ func handleProfileSwitch() {
 	applyAWGProfileToGUI(target)
 	setControlText(hEditMqttBr, target.MQTTBroker)
 	setControlText(hEditMqttTp, target.MQTTTopic)
-	if target.VirtualIP != "" {
-		myVirtualIP = strings.TrimSpace(strings.Split(target.VirtualIP, "/")[0])
-		if tunDev != nil {
-			_ = tunDev.SetVirtualIP(myVirtualIP)
-		}
-		if uiServer != nil {
-			uiServer.SetVirtualIP(myVirtualIP)
-		}
-		triggerPublish()
+	myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
+	cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+	if tunDev != nil {
+		_ = tunDev.SetVirtualIP(cleanVIP)
 	}
+	if uiServer != nil {
+		uiServer.SetVirtualIP(cleanVIP)
+	}
+	triggerPublish()
 
 	if registry != nil {
 		registry.ClearAll()
@@ -2358,6 +2357,17 @@ func handleProfileImport() {
 	_ = config.Save(cfg, configPath, false)
 	applyAWGProfileToGUI(saved)
 
+	myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
+	cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+	if tunDev != nil {
+		_ = tunDev.SetVirtualIP(cleanVIP)
+	}
+	if uiServer != nil {
+		uiServer.SetVirtualIP(cleanVIP)
+	}
+	setControlText(hEditMqttBr, saved.MQTTBroker)
+	setControlText(hEditMqttTp, saved.MQTTTopic)
+
 	if registry != nil {
 		registry.ClearAll()
 	}
@@ -2373,7 +2383,8 @@ func handleProfileImport() {
 	}
 
 	refreshProfilesUI()
-	addLog(fmt.Sprintf("📥 Успешно импортирован и активирован профиль «%s» (Топик: %s)", saved.Name, saved.MQTTTopic))
+	triggerPublish()
+	addLog(fmt.Sprintf("📥 Успешно импортирован и активирован профиль «%s» (VIP: %s, Топик: %s)", saved.Name, cleanVIP, saved.MQTTTopic))
 }
 
 func showProfileImportDialog() (string, bool) {
