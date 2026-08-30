@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.103"
+	Version = "1.9.104"
 	Commit  = "release"
 )
 
@@ -3026,11 +3026,7 @@ func startEngineFromConfig(c *config.Config) {
 	engineCtx = ctx
 	engineCancel = cancel
 	triggerPublishCh = make(chan struct{}, 10)
-	if activeProf := c.EnsureActiveProfile(); activeProf != nil && activeProf.VirtualIP != "" {
-		myVirtualIP = strings.TrimSpace(strings.Split(activeProf.VirtualIP, "/")[0])
-	} else if c.Network.Address != "" {
-		myVirtualIP = strings.TrimSpace(strings.Split(c.Network.Address, "/")[0])
-	}
+	myVirtualIP = config.ResolveVirtualIP(c, myDevID)
 
 	var err error
 	myPubKey, myPrivKey, err = crypto.GenerateKeyPair()

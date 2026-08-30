@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -398,15 +397,7 @@ func resolveDeviceID(cfg *config.Config, pubKey [32]byte) string {
 }
 
 func resolveVirtualIP(cfg *config.Config, deviceID string) string {
-	if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.VirtualIP != "" {
-		return strings.TrimSpace(strings.Split(activeProf.VirtualIP, "/")[0])
-	}
-	if cfg.Network.Address != "" {
-		return strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
-	}
-	h := sha256.Sum256([]byte(deviceID))
-	octet := int(h[0]%250) + 2
-	return fmt.Sprintf("100.64.200.%d", octet)
+	return config.ResolveVirtualIP(cfg, deviceID)
 }
 
 func startPeerRegistry(ctx context.Context) *peer.Registry {

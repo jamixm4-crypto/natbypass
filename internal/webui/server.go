@@ -615,18 +615,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.103"
+		ver = "1.9.104"
 	}
 
 	cfg, _ := config.Load(s.configPath)
-	vip := s.state.VirtualIP
-	if cfg != nil {
-		if act := cfg.GetActiveProfile(); act != nil && act.VirtualIP != "" {
-			vip = strings.TrimSpace(strings.Split(act.VirtualIP, "/")[0])
-		} else if cfg.Network.Address != "" {
-			vip = strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
-		}
-	}
+	vip := config.ResolveVirtualIP(cfg, s.state.DeviceID)
 
 	status := map[string]interface{}{
 		"version":         ver,
@@ -1398,7 +1391,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.103"
+		ver = "1.9.104"
 	}
 
 vip := s.state.VirtualIP
@@ -2102,6 +2095,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		TGChatID:            req.TGChatID,
 		TGProxy:             req.TGProxy,
 		VirtualIP:           req.VirtualIP,
+		Subnet:              config.ExtractSubnetPrefix(req.VirtualIP) + ".0/24",
 		AWGPreset:           req.AWGPreset,
 		Jc:                  jc,
 		Jmin:                jmin,
@@ -2433,6 +2427,10 @@ func (s *Server) handleProfileImport(w http.ResponseWriter, r *http.Request) {
 		cfg = &config.Config{}
 	}
 
+	if parsed.VirtualIP == "" {
+		prefix := config.ExtractSubnetPrefix(parsed.Subnet)
+		parsed.VirtualIP = config.GenerateSubnetIP(prefix, s.state.DeviceID)
+	}
 	parsed.IsActive = req.AutoSwitch
 	saved := cfg.AddOrUpdateProfile(*parsed)
 	_ = config.Save(cfg, s.configPath, false)

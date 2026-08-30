@@ -19,6 +19,7 @@ type Profile struct {
 	Name                string    `json:"name" mapstructure:"name" yaml:"name"`
 	NetworkKey          string    `json:"network_key,omitempty" mapstructure:"network_key" yaml:"network_key,omitempty"`
 	VirtualIP           string    `json:"virtual_ip,omitempty" mapstructure:"virtual_ip" yaml:"virtual_ip,omitempty"`
+	Subnet              string    `json:"subnet,omitempty" mapstructure:"subnet" yaml:"subnet,omitempty"`
 	MQTTBroker          string    `json:"mqtt_broker" mapstructure:"mqtt_broker" yaml:"mqtt_broker"`
 	MQTTTopic           string    `json:"mqtt_topic" mapstructure:"mqtt_topic" yaml:"mqtt_topic"`
 	MQTTUser            string    `json:"mqtt_user,omitempty" mapstructure:"mqtt_user" yaml:"mqtt_user,omitempty"`
@@ -385,6 +386,11 @@ func ExportProfileURI(p Profile) string {
 	if p.NetworkKey != "" {
 		q.Set("key", p.NetworkKey)
 	}
+	if p.VirtualIP != "" {
+		q.Set("subnet", ExtractSubnetPrefix(p.VirtualIP)+".0/24")
+	} else if p.Subnet != "" {
+		q.Set("subnet", ExtractSubnetPrefix(p.Subnet)+".0/24")
+	}
 	if p.MQTTUser != "" {
 		q.Set("user", p.MQTTUser)
 	}
@@ -460,6 +466,7 @@ func ImportProfileURI(raw string) (*Profile, error) {
 				ID:         id,
 				Name:       name,
 				NetworkKey: q.Get("key"),
+				Subnet:     q.Get("subnet"),
 				MQTTBroker: broker,
 				MQTTTopic:  topic,
 				MQTTUser:   q.Get("user"),
@@ -540,4 +547,57 @@ func (p *Profile) GetDeterministicVIP(deviceID string) string {
 	vip := fmt.Sprintf("100.64.200.%d", octet)
 	p.VirtualIP = vip
 	return vip
+}
+
+// ExtractSubnetPrefix извлекает подсеть вида "10.10.77" из "10.10.77.1/24", "10.10.77.0" или "10.10.77.1"
+func ExtractSubnetPrefix(vipOrSubnet string) string {
+	raw := strings.TrimSpace(vipOrSubnet)
+	if raw == "" {
+		return "100.64.200"
+	}
+	if idx := strings.Index(raw, "/"); idx != -1 {
+		raw = raw[:idx]
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) >= 3 {
+		return fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
+	}
+	return "100.64.200"
+}
+
+// GenerateSubnetIP генерирует детерминированный уникальный IP-адрес в подсети для указанного deviceID
+func GenerateSubnetIP(prefix string, deviceID string) string {
+	if prefix == "" {
+		prefix = "100.64.200"
+	}
+	h := sha256.Sum256([]byte(deviceID))
+	// Диапазон октетов 2..254 (избегая 1 как дефолтный шлюз/создатель и 0/255)
+	octet := int(h[0]%250) + 2
+	if octet == 1 {
+		octet = 2
+	}
+	return fmt.Sprintf("%s.%d", prefix, octet)
+}
+
+// ResolveVirtualIP возвращает актуальный уникальный Virtual IP узла в подсети активного профиля
+func ResolveVirtualIP(cfg *Config, deviceID string) string {
+	if cfg == nil {
+		return GenerateSubnetIP("100.64.200", deviceID)
+	}
+	activeProf := cfg.EnsureActiveProfile()
+	if activeProf != nil {
+		if activeProf.VirtualIP != "" {
+			clean := strings.TrimSpace(strings.Split(activeProf.VirtualIP, "/")[0])
+			if !strings.HasSuffix(clean, ".0") {
+				return clean
+			}
+			prefix := ExtractSubnetPrefix(activeProf.VirtualIP)
+			return GenerateSubnetIP(prefix, deviceID)
+		}
+		if activeProf.Subnet != "" {
+			prefix := ExtractSubnetPrefix(activeProf.Subnet)
+			return GenerateSubnetIP(prefix, deviceID)
+		}
+	}
+	return GenerateSubnetIP("100.64.200", deviceID)
 }
