@@ -564,14 +564,14 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 		}
 		peerIndex := 2
 		for _, p := range s.registry.List() {
+			if p == nil || p.DeviceID == "" {
+				continue
+			}
 			// Не показываем свой собственный ПК в списке удаленных пиров
 			if myID != "" && p.DeviceID == myID {
 				continue
 			}
-			// Пропускаем фантомные/неинициализированные узлы без ключей и адресов
-			if p.PublicKey == "" && p.VirtualIP == "" && p.STUNAddr == "" && p.PublicIP == "" {
-				continue
-			}
+
 			if time.Since(p.LastSeen) > 90*time.Second {
 				p.Online = false
 				p.DirectP2P = false
@@ -635,7 +635,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.124"
+		ver = "1.9.125"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1411,7 +1411,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.124"
+		ver = "1.9.125"
 	}
 
 	vip := s.state.VirtualIP

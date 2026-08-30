@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.124"
+	Version = "1.9.125"
 	Commit  = "release"
 )
 
@@ -4610,8 +4610,8 @@ func updateData() {
 				addListBoxItem(hListPeers, "  📡 Ожидание подключения других устройств... (0 пиров онлайн)")
 			} else {
 				for _, p := range peers {
-					if !p.Online && time.Since(p.LastSeen) > 90*time.Second {
-						continue // Скрываем фантомные отключенные узлы
+					if p == nil || p.DeviceID == "" {
+						continue
 					}
 					addressBookMu.RLock()
 					bookmarkedName, isBookmarked := addressBook[p.DeviceID]
