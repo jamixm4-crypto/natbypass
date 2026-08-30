@@ -595,7 +595,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.094"
+		ver = "1.9.095"
 	}
 
 	status := map[string]interface{}{
@@ -1354,7 +1354,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.094"
+		ver = "1.9.095"
 	}
 
 	data := map[string]interface{}{
