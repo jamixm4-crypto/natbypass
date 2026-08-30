@@ -305,13 +305,15 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 
 	var candidates []string
 	if osName == "windows" {
-		if strings.Contains(currentExe, "cli") {
+		if strings.Contains(currentExe, "gui") {
+			candidates = []string{"natbypass-gui.exe", "natbypass-gui"}
+		} else if strings.Contains(currentExe, "cli") {
 			candidates = []string{"natbypass-cli.exe", "natbypass-cli"}
 		} else if strings.Contains(currentExe, "diag") {
 			candidates = []string{"natbypass-diag.exe", "natbypass-diag"}
 		} else {
-			// На Windows всегда отдаем приоритет нативному приложению NatBypass-GUI.exe
-			candidates = []string{"natbypass-gui.exe", "natbypass-gui", "natbypass.exe", "natbypass-windows-amd64.exe"}
+			// Если запущен NatBypass.exe — строго обновляем NatBypass.exe
+			candidates = []string{"natbypass.exe", "natbypass-windows-amd64.exe"}
 		}
 	} else if osName == "linux" {
 		if arch == "arm64" {
