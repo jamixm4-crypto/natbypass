@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.093"
+	Version = "1.9.094"
 	Commit  = "release"
 )
 
@@ -3819,7 +3819,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						activeTopic = active.MQTTTopic
 					}
 				}
-				if activeKey != "" && p.NetworkKey != "" && p.NetworkKey != activeKey {
+				if activeKey != "" && p.NetworkKey != activeKey {
 					continue
 				}
 				if activeTopic != "" && p.Topic != "" && p.Topic != activeTopic {

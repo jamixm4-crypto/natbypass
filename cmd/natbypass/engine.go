@@ -380,7 +380,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	go initialDiscovery(engineCtx, puncher, ipDisc, uiServer, deviceID)
 
 	go publishLoop(engineCtx, cfg, deviceID, myVirtualIP, pubKey, privKey, uiServer, registry, puncher, ipDisc, wgPubKey, wgPort, sigMgr, tunDev)
-	go receiveLoop(engineCtx, deviceID, pubKey, privKey, registry, puncher, sigMgr, tunDev)
+	go receiveLoop(engineCtx, cfg, deviceID, pubKey, privKey, registry, puncher, sigMgr, tunDev)
 	go handleSIGHUP(engineCtx, cfg)
 
 
@@ -817,6 +817,7 @@ func publishLoop(
 
 func receiveLoop(
 	ctx context.Context,
+	cfg *config.Config,
 	deviceID string,
 	pubKey, privKey [32]byte,
 	registry *peer.Registry,
@@ -846,6 +847,14 @@ func receiveLoop(
 			}
 			if p.DeviceID == deviceID {
 				continue
+			}
+
+			// Строгая изоляция сетей: отсекаем чужие маяки с другим или пустым NetworkKey
+			activeProf := cfg.EnsureActiveProfile()
+			if activeProf != nil && activeProf.NetworkKey != "" {
+				if p.NetworkKey != activeProf.NetworkKey {
+					continue
+				}
 			}
 
 			// MDAR: Синхронизация эпохи адаптации сети от удаленного узла

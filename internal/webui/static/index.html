@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>NatBypass — P2P Mesh Network</title>
   <link rel="icon" type="image/png" sizes="512x512" href="/icon.png">
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -893,7 +896,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.093</span>
+          <span id="topUpdateLabel">v1.9.094</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -904,7 +907,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.093</span>
+          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.094</span>
           <div class="online-dot"></div>
         </div>
 
@@ -2234,7 +2237,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             }
             showToast('🎉 NatBypass успешно обновлен!');
             setTimeout(() => {
-              window.location.reload();
+              window.location.href = window.location.origin + window.location.pathname + '?v=' + Date.now();
             }, 400);
             return;
           }
@@ -2765,8 +2768,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                 ${platBadge}
               </div>
             </td>
-            <td class="mono" style="color:#38bdf8; font-weight:700;">${vIP}</td>
-            <td class="mono" style="color:var(--text-muted);">${ipDisplayWithFlag}</td>
+            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
+            <td class="mono" style="color:var(--text-muted); cursor:pointer;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
             <td>${chanBadge}</td>
             <td>${p2pBadge}</td>
             <td>${latDisplay}</td>
@@ -2788,8 +2791,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               </div>
               <small class="mono" style="color:var(--text-dim); font-weight:400;">${p.device_id}</small>
             </td>
-            <td class="mono" style="color:#38bdf8; font-weight:700;">${vIP}</td>
-            <td class="mono" style="color:var(--text-muted);">${ipDisplayWithFlag}</td>
+            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
+            <td class="mono" style="color:var(--text-muted); cursor:pointer;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
             <td>${chanBadge}</td>
             <td>${p2pBadge}</td>
             <td>${latDisplay}</td>
@@ -2903,8 +2906,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       if (!meshAnimRunning) {
         meshAnimRunning = true;
-        function animLoop() {
-          meshAnimTime += 0.035;
+        let lastFrameTime = performance.now();
+        function animLoop(now) {
+          const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+          lastFrameTime = now;
+          // Плавная скорость: 0.45 цикла/сек вне зависимости от герцовки монитора (60/120/144/240Hz)
+          meshAnimTime += dt * 0.45;
           drawMeshTopology();
           requestAnimationFrame(animLoop);
         }
@@ -3034,20 +3041,29 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         meshNodes.push(internetNode);
       }
 
-      // Position Direct Peers (Right & Bottom Right of Self)
+      // 3. Автоматическое гармоничное распределение Direct Peers по широкой радиальной дуге
+      const dCount = directPeers.length;
       directPeers.forEach((p, idx) => {
-        const angle = (idx - (directPeers.length - 1) / 2) * 0.7;
-        const dist = 180;
-        const defaultX = selfNode.x + Math.cos(angle) * dist + 80;
-        const defaultY = selfNode.y + Math.sin(angle) * dist;
+        let posX, posY;
+        const radDist = Math.min(clientW * 0.35, 185);
+        if (dCount === 1) {
+          posX = selfNode.x + radDist;
+          posY = cy;
+        } else {
+          const startAngle = -0.85;
+          const endAngle = 0.85;
+          const angle = startAngle + (idx / (dCount - 1)) * (endAngle - startAngle);
+          posX = selfNode.x + Math.cos(angle) * radDist;
+          posY = cy + Math.sin(angle) * (clientH * 0.38);
+        }
 
         const pingMs = p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0);
         const node = {
           id: p.device_id,
           name: p.nickname ? p.nickname : (p.device_name ? p.device_name : p.device_id.substring(0, 10)),
           vip: p.virtual_ip || '—',
-          x: (oldPositions[p.device_id] ? oldPositions[p.device_id].x : defaultX),
-          y: (oldPositions[p.device_id] ? oldPositions[p.device_id].y : Math.max(50, Math.min(clientH - 50, defaultY))),
+          x: (oldPositions[p.device_id] ? oldPositions[p.device_id].x : Math.max(50, Math.min(clientW - 50, posX))),
+          y: (oldPositions[p.device_id] ? oldPositions[p.device_id].y : Math.max(45, Math.min(clientH - 45, posY))),
           isSelf: false,
           online: p.online,
           direct: true,
@@ -3060,7 +3076,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         };
         meshNodes.push(node);
 
-        // Direct Socket Edge: Self <===> Peer
         meshEdges.push({
           from: selfNode,
           to: node,
@@ -3070,7 +3085,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           ping: pingMs
         });
 
-        // If Exit Node: Node ===> Internet
         if (p.is_exit_node && internetNode) {
           meshEdges.push({
             from: node,
@@ -3083,18 +3097,25 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
       });
 
-      // Position Relay Peers (Top Right, connected via Relay Hub)
+      // 4. Автоматическое распределение Relay Peers справа вверху от Relay Hub
+      const rCount = relayPeers.length;
       relayPeers.forEach((p, idx) => {
-        const offsetStep = (idx - (relayPeers.length - 1) / 2) * 90;
-        const defaultX = (relayHubNode ? relayHubNode.x + 140 + offsetStep : cx + 120);
-        const defaultY = (relayHubNode ? relayHubNode.y + 70 : 80);
+        let posX, posY;
+        if (rCount === 1) {
+          posX = (relayHubNode ? relayHubNode.x + 130 : cx + 120);
+          posY = (relayHubNode ? relayHubNode.y + 65 : 85);
+        } else {
+          const stepY = (clientH - 110) / Math.max(1, rCount - 1);
+          posX = clientW * 0.72 + (idx % 2 === 0 ? 0 : 35);
+          posY = 50 + idx * stepY;
+        }
 
         const node = {
           id: p.device_id,
           name: p.nickname ? p.nickname : (p.device_name ? p.device_name : p.device_id.substring(0, 10)),
           vip: p.virtual_ip || '—',
-          x: (oldPositions[p.device_id] ? oldPositions[p.device_id].x : Math.max(60, Math.min(clientW - 60, defaultX))),
-          y: (oldPositions[p.device_id] ? oldPositions[p.device_id].y : Math.max(50, Math.min(clientH - 50, defaultY))),
+          x: (oldPositions[p.device_id] ? oldPositions[p.device_id].x : Math.max(60, Math.min(clientW - 60, posX))),
+          y: (oldPositions[p.device_id] ? oldPositions[p.device_id].y : Math.max(45, Math.min(clientH - 45, posY))),
           isSelf: false,
           online: p.online,
           direct: false,
@@ -3107,7 +3128,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         };
         meshNodes.push(node);
 
-        // Edge: Relay Hub <---> Relay Peer
         if (relayHubNode) {
           meshEdges.push({
             from: relayHubNode,
@@ -3128,6 +3148,33 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           });
         }
       });
+
+      // 5. Физический солвер отталкивания коллизий (Anti-Collision Spacing)
+      for (let iter = 0; iter < 10; iter++) {
+        for (let i = 0; i < meshNodes.length; i++) {
+          for (let j = i + 1; j < meshNodes.length; j++) {
+            const n1 = meshNodes[i];
+            const n2 = meshNodes[j];
+            const dx = n2.x - n1.x;
+            const dy = n2.y - n1.y;
+            const dist = Math.hypot(dx, dy);
+            const minDist = (n1.radius + n2.radius) + 32;
+            if (dist < minDist && dist > 0.001) {
+              const overlap = (minDist - dist) / 2;
+              const nx = dx / dist;
+              const ny = dy / dist;
+              if (!n1.isSelf && !n1.isHub) {
+                n1.x = Math.max(40, Math.min(clientW - 40, n1.x - nx * overlap));
+                n1.y = Math.max(40, Math.min(clientH - 40, n1.y - ny * overlap));
+              }
+              if (!n2.isSelf && !n2.isHub) {
+                n2.x = Math.max(40, Math.min(clientW - 40, n2.x + nx * overlap));
+                n2.y = Math.max(40, Math.min(clientH - 40, n2.y + ny * overlap));
+              }
+            }
+          }
+        }
+      }
     }
 
     function drawMeshTopology() {
@@ -3148,7 +3195,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
 
       // 1. Draw Edges
-      meshEdges.forEach(edge => {
+      meshEdges.forEach((edge, edgeIdx) => {
         const from = edge.from;
         const to = edge.to;
         if (!from || !to) return;
@@ -3174,8 +3221,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Animated Packet Particle traveling along edge
-        const t = (meshAnimTime % 1.0);
+        // Animated Packet Particle traveling along edge with staggered phase
+        const edgePhase = (edgeIdx || 0) * 0.23;
+        const t = ((meshAnimTime + edgePhase) % 1.0);
         const px = from.x + (to.x - from.x) * t;
         const py = from.y + (to.y - from.y) * t;
         ctx.beginPath();
