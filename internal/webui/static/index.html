@@ -537,9 +537,9 @@
       box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
     }
 
-    .badge-purple {
+    .badge-cyan {
       background: rgba(168, 85, 247, 0.15);
-      color: #c084fc;
+      color: #38bdf8;
       border: 1px solid rgba(14, 165, 233, 0.3);
       box-shadow: 0 0 10px rgba(14, 165, 233, 0.15);
     }
@@ -1006,10 +1006,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v2.0.002</span>
+          <span id="topUpdateLabel">v1.9.100</span>
         </button>
 
-        <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
+        <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
           <span>📱 QR</span>
         </button>
@@ -1017,7 +1017,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v2.0.002</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.100</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1031,16 +1031,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     <!-- TAB 1: DASHBOARD (EXACT SCREENSHOT LAYOUT) -->
     <div id="tab-dashboard" class="tab-pane active">
       <!-- Live P2P Connection Status Banner -->
-      <div id="connStatusBanner" style="display:flex; justify-content:center; align-items:center; gap:10px; background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.35); border-radius:12px; padding:10px 16px; margin-bottom:14px; font-weight:800; font-size:0.88rem; text-align:center; white-space:normal;">
+      <div id="connStatusBanner" style="display:flex; justify-content:center; align-items:center; gap:10px; background:rgba(15,23,42,0.85); border:1px solid rgba(51,65,85,0.7); border-radius:12px; padding:10px 16px; margin-bottom:14px; font-weight:800; font-size:0.88rem; text-align:center; white-space:normal;">
         <span id="connStatusDot" style="width:10px; height:10px; border-radius:50%; background:#f59e0b; box-shadow:0 0 10px #f59e0b; display:inline-block;"></span>
         <span id="connStatusText">ОЖИДАНИЕ СВЯЗИ (0 пиров онлайн)</span>
       </div>
       <!-- Active Gateway Banner -->
-      <div id="activeGatewayBanner" style="display:none; background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.4); border-radius:12px; padding:8px 14px; margin-bottom:12px; justify-content:space-between; align-items:center;">
+      <div id="activeGatewayBanner" style="display:none; background:rgba(15,23,42,0.85); border:1px solid rgba(51,65,85,0.7); border-radius:12px; padding:8px 14px; margin-bottom:12px; justify-content:space-between; align-items:center;">
         <div style="display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:700;">
           <span style="font-size:1.1rem;">🌐</span>
           <span>Весь интернет маршрутизируется через узел:</span>
-          <span id="gatewayBannerName" style="color:#c084fc;" class="mono">—</span>
+          <span id="gatewayBannerName" style="color:#38bdf8;" class="mono">—</span>
         </div>
         <button onclick="toggleClientExitNode(currentSelectedExitNode, currentActiveExitVIP, false)" class="btn-pill" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#f87171; padding:3px 10px; font-weight:700; font-size:0.74rem; cursor:pointer;">🔌 Отключить шлюз</button>
       </div>
@@ -1051,7 +1051,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <div class="metric-val" id="statPeersCount">0</div>
             <div class="metric-label" id="statPeersLabel">Устройств в Mesh сети</div>
             <div style="margin-top: 14px;">
-              <span class="badge badge-purple" id="statP2PCount">⚡ 0 Direct P2P</span>
+              <span class="badge badge-cyan" id="statP2PCount">⚡ 0 Direct P2P</span>
             </div>
           </div>
           <div class="donut-ring">
@@ -1072,12 +1072,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <span class="badge badge-cyan" id="statChannelBadge">Канал: Параллельно</span>
           </div>
 
-          <!-- Dynamic SVG Wave for P2P Throughput -->
-          <div class="wave-container">
-            <svg id="svgThroughputWave" width="100%" height="100%" viewBox="0 0 300 70" preserveAspectRatio="none">
-              <path id="pathThroughputArea" d="M0,70 L300,70 Z" fill="url(#waveGrad)" />
-              <path id="pathThroughputLine" d="M0,60 L300,60" fill="none" stroke="#38bdf8" stroke-width="2.5" />
-            </svg>
+          <!-- Dynamic Smooth 60fps Canvas for P2P Throughput -->
+          <div class="wave-container" style="height:70px; margin-top:8px; border-radius:8px; overflow:hidden; background:rgba(15,23,42,0.6); border:1px solid rgba(51,65,85,0.4);">
+            <canvas id="canvasThroughput" style="width:100%; height:100%; display:block;"></canvas>
           </div>
         </div>
 
@@ -1085,7 +1082,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="glass-card card-right-large">
           <div style="display:flex; justify-content:space-between; align-items:flex-start;">
             <div>
-              <div class="metric-val" id="statAvgLatency" style="color: #c084fc;">0 ms</div>
+              <div class="metric-val" id="statAvgLatency" style="color: #38bdf8;">0 ms</div>
               <div class="metric-label">Средняя задержка Direct P2P</div>
             </div>
             <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
@@ -1098,7 +1095,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <div style="height: 90px; width: 100%; margin: 8px 0;">
             <svg id="svgLatencyWave" width="100%" height="100%" viewBox="0 0 380 120" preserveAspectRatio="none">
               <path id="pathLatencyArea" d="M0,90 Q50,30 100,75 T200,40 T300,60 T380,25 L380,120 L0,120 Z" fill="url(#waveGrad2)" />
-              <path id="pathLatencyLine" d="M0,90 Q50,30 100,75 T200,40 T300,60 T380,25" fill="none" stroke="#38bdf8" stroke-width="3" filter="drop-shadow(0 0 8px rgba(56, 189, 248, 0.8))" />
+              <path id="pathLatencyLine" d="M0,90 Q50,30 100,75 T200,40 T300,60 T380,25" fill="none" stroke="#38bdf8" stroke-width="3"  />
             </svg>
           </div>
 
@@ -1116,12 +1113,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <div>
             <h3 style="font-size: 1.05rem; font-weight: 800; display:flex; align-items:center; gap:8px;">
               <span>🕸️ ТОПОЛОГИЯ И ЗДОРОВЬЕ MESH-СЕТИ</span>
-              <span class="badge badge-purple" id="badgeMeshNodesCount" style="font-size:0.7rem;">0 узлов</span>
+              <span class="badge badge-cyan" id="badgeMeshNodesCount" style="font-size:0.7rem;">0 узлов</span>
             </h3>
             <p style="font-size: 0.78rem; color: var(--text-muted);">Интерактивный граф сокет-в-сокет соединений в реальном времени</p>
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
-            <span style="font-size:0.75rem; color:var(--text-muted);"><span style="color:#34d399;">●</span> Direct P2P &nbsp; <span style="color:#c084fc;">●</span> Relay &nbsp; <span style="color:#f87171;">●</span> Offline</span>
+            <span style="font-size:0.75rem; color:var(--text-muted);"><span style="color:#34d399;">●</span> Direct P2P &nbsp; <span style="color:#38bdf8;">●</span> Relay &nbsp; <span style="color:#f87171;">●</span> Offline</span>
             <button onclick="renderMeshTopologyGraph()" class="btn btn-glass" style="font-size: 0.75rem; padding:4px 10px;">🔄 Обновить граф</button>
           </div>
         </div>
@@ -1214,7 +1211,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <div class="glass-card" id="cardChanTg" onclick="switchChannelMode('telegram')" style="cursor:pointer; padding:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <h3 style="font-size:0.95rem; font-weight:700;">💬 Только Telegram</h3>
-              <span class="badge badge-purple">Резерв</span>
+              <span class="badge badge-cyan">Резерв</span>
             </div>
             <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">Скрытый обмен через Telegram Bot API с поддержкой SOCKS5 прокси.</p>
           </div>
@@ -1370,7 +1367,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <button onclick="applyAWGSettings()" class="btn btn-neon">💾 Применить и перезапустить</button>
           <button onclick="copyAwgConf()" class="btn btn-glass">📋 Скопировать конфиг</button>
           <a href="/api/awg/config" download="natbypass.conf" class="btn btn-glass">💾 Скачать natbypass.conf</a>
-          <button onclick="openQRModal('awg')" class="btn btn-glass" style="color:#c084fc; border-color:rgba(168,85,247,0.4);">📱 Показать QR для телефона</button>
+          <button onclick="openQRModal('awg')" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.4);">📱 Показать QR для телефона</button>
         </div>
       </div>
     </div>
@@ -1716,13 +1713,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="background:rgba(168,85,247,0.08); border:1px solid rgba(168,85,247,0.3); border-radius:14px; padding:16px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <span style="font-size:0.75rem; font-weight:700; color:#4ade80; text-transform:uppercase; letter-spacing:0.5px;">🟢 ТЕКУЩИЙ АКТИВНЫЙ ПРОФИЛЬ</span>
-          <span id="activeProfileBadge" class="badge badge-purple">DPI обход</span>
+          <span id="activeProfileBadge" class="badge badge-cyan">DPI обход</span>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
           <h4 id="activeProfileName" style="font-size:1.2rem; font-weight:800; color:#ffffff; margin:0;">Основная сеть</h4>
           <div style="display:flex; gap:6px;">
             <button onclick="editActiveProfile()" class="btn-pill" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;" title="Изменить параметры этой сети">✏️ Изменить</button>
-            <button onclick="shareActiveProfileQR()" class="btn-pill" style="background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); color:#c084fc; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;" title="Показать QR-код">📱 QR-код</button>
+            <button onclick="shareActiveProfileQR()" class="btn-pill" style="background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); color:#38bdf8; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;" title="Показать QR-код">📱 QR-код</button>
             <button onclick="copyActiveProfileURI()" class="btn-pill" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#ffffff; padding:5px 10px; font-size:0.78rem; font-weight:700; border-radius:12px; cursor:pointer;" title="Скопировать ссылку">🔗 Ссылка</button>
           </div>
         </div>
@@ -1901,7 +1898,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="background:rgba(14,20,32,0.8); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:16px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
           <span style="font-size:0.85rem; color:var(--text-dim);">Текущая версия:</span>
-          <span id="lblCurrentVer" class="badge badge-purple mono" style="font-weight:700;">v1.1.6</span>
+          <span id="lblCurrentVer" class="badge badge-cyan mono" style="font-weight:700;">v1.1.6</span>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
           <span style="font-size:0.85rem; color:var(--text-dim);">Последний релиз:</span>
@@ -2267,7 +2264,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               txtNotes.innerText = d.release_notes;
             }
           } else {
-            lblLatest.className = 'badge badge-purple mono';
+            lblLatest.className = 'badge badge-cyan mono';
             lblLatest.innerText = (d.latest_version || d.current_version || 'v1.0.0') + ' (Билд актуален)' + pubStr;
             btnApply.innerText = '🔄 Принудительно обновить (свежий билд)';
             btnApply.style.background = 'linear-gradient(135deg, #10b981, #06b6d4)';
@@ -2521,66 +2518,201 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       return d;
     }
 
-    // Dynamic SVG Wave Renderers with Smooth Interpolation
-    function updateLatencyChart(avgLat) {
-      if (avgLat > 0) {
-        latencyHistory.push(avgLat);
-      } else {
-        if (latencyHistory.length === 0) {
-          latencyHistory = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        } else {
-          latencyHistory.push(0);
+    // Professional 60 FPS Real-Time Smooth Canvas Chart
+    class SmoothStreamChart {
+      constructor(canvasId, options) {
+        this.canvas = document.getElementById(canvasId);
+        if (!this.canvas) return;
+        this.ctx = this.canvas.getContext('2d');
+        this.options = Object.assign({
+          lineColor: '#38bdf8',
+          fillColorTop: 'rgba(56, 189, 248, 0.22)',
+          fillColorBottom: 'rgba(56, 189, 248, 0.01)',
+          gridColor: 'rgba(51, 65, 85, 0.35)',
+          minMax: 40,
+          unit: 'ms',
+          scrollSpeed: 45 // pixels per second
+        }, options);
+
+        this.points = [];
+        this.targetValue = 0;
+        this.currentValue = 0;
+        this.currentMax = this.options.minMax;
+        this.lastTime = performance.now();
+
+        this.resize();
+        window.addEventListener('resize', () => this.resize());
+        this.animate = this.animate.bind(this);
+        requestAnimationFrame(this.animate);
+      }
+
+      resize() {
+        if (!this.canvas) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        this.width = rect.width;
+        this.height = rect.height;
+        this.canvas.width = rect.width * dpr;
+        this.canvas.height = rect.height * dpr;
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // Pre-fill buffer across width
+        if (this.points.length === 0) {
+          const count = Math.ceil(this.width / 8) + 5;
+          for (let i = 0; i < count; i++) {
+            this.points.push({ x: i * 8, yVal: 0 });
+          }
         }
       }
-      if (latencyHistory.length > 18) latencyHistory.shift();
 
-      const maxLat = Math.max(...latencyHistory, 40);
-      const points = latencyHistory.map((val, idx) => {
-        const x = (idx / (latencyHistory.length - 1)) * 380;
-        const normalized = val > 0 ? (val / maxLat) : 0.05;
-        const y = 110 - (normalized * 85);
-        return {x, y};
-      });
+      pushValue(val) {
+        this.targetValue = val > 0 ? val : 0;
+      }
 
-      const pathD = createSmoothSpline(points);
-      const lineElem = document.getElementById('pathLatencyLine');
-      const areaElem = document.getElementById('pathLatencyArea');
-      if (lineElem && pathD) lineElem.setAttribute('d', pathD);
-      if (areaElem && pathD) areaElem.setAttribute('d', pathD + ' L380,120 L0,120 Z');
+      animate(now) {
+        const dt = (now - this.lastTime) / 1000;
+        this.lastTime = now;
+
+        if (this.ctx && this.width > 0) {
+          // Smoothly lerp currentValue towards targetValue
+          this.currentValue += (this.targetValue - this.currentValue) * Math.min(1, dt * 5.0);
+
+          // Smoothly adapt max scale
+          const destMax = Math.max(this.targetValue * 1.25, this.options.minMax);
+          this.currentMax += (destMax - this.currentMax) * Math.min(1, dt * 3.0);
+
+          // Advance points smoothly to left
+          const dx = this.options.scrollSpeed * dt;
+          for (let i = 0; i < this.points.length; i++) {
+            this.points[i].x -= dx;
+          }
+
+          // Add new point on right if needed
+          const lastP = this.points[this.points.length - 1];
+          if (!lastP || lastP.x < this.width + 12) {
+            const newX = lastP ? lastP.x + 8 : this.width;
+            this.points.push({ x: newX, yVal: this.currentValue });
+          }
+
+          // Remove points that scrolled past left boundary
+          while (this.points.length > 2 && this.points[0].x < -16) {
+            this.points.shift();
+          }
+
+          this.draw();
+        }
+        requestAnimationFrame(this.animate);
+      }
+
+      draw() {
+        const ctx = this.ctx;
+        const w = this.width;
+        const h = this.height;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // Draw clean subtle grid
+        ctx.strokeStyle = this.options.gridColor;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+
+        // 3 horizontal guide lines
+        for (let i = 1; i <= 3; i++) {
+          const y = (h / 4) * i;
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        if (this.points.length < 2) return;
+
+        // Calculate screen coordinates
+        const coords = this.points.map(p => {
+          const norm = Math.min(1, Math.max(0, p.yVal / this.currentMax));
+          const y = (h - 6) - (norm * (h - 14));
+          return { x: p.x, y };
+        });
+
+        // Fill area under curve
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, this.options.fillColorTop);
+        grad.addColorStop(1, this.options.fillColorBottom);
+
+        ctx.beginPath();
+        ctx.moveTo(coords[0].x, h);
+        ctx.lineTo(coords[0].x, coords[0].y);
+
+        for (let i = 0; i < coords.length - 1; i++) {
+          const mx = (coords[i].x + coords[i + 1].x) / 2;
+          const my = (coords[i].y + coords[i + 1].y) / 2;
+          ctx.quadraticCurveTo(coords[i].x, coords[i].y, mx, my);
+        }
+        const last = coords[coords.length - 1];
+        ctx.lineTo(last.x, last.y);
+        ctx.lineTo(last.x, h);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Draw crisp solid line
+        ctx.beginPath();
+        ctx.moveTo(coords[0].x, coords[0].y);
+        for (let i = 0; i < coords.length - 1; i++) {
+          const mx = (coords[i].x + coords[i + 1].x) / 2;
+          const my = (coords[i].y + coords[i + 1].y) / 2;
+          ctx.quadraticCurveTo(coords[i].x, coords[i].y, mx, my);
+        }
+        ctx.lineTo(last.x, last.y);
+        ctx.strokeStyle = this.options.lineColor;
+        ctx.lineWidth = this.options.lineWidth;
+        ctx.stroke();
+      }
     }
 
-    let throughputHistory = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let latencyChartInstance = null;
+    let throughputChartInstance = null;
+
+    function initCharts() {
+      if (!latencyChartInstance) {
+        latencyChartInstance = new SmoothStreamChart('canvasLatency', {
+          lineColor: '#38bdf8',
+          fillColorTop: 'rgba(56, 189, 248, 0.25)',
+          fillColorBottom: 'rgba(56, 189, 248, 0.01)',
+          minMax: 40,
+          scrollSpeed: 40
+        });
+      }
+      if (!throughputChartInstance) {
+        throughputChartInstance = new SmoothStreamChart('canvasThroughput', {
+          lineColor: '#10b981',
+          fillColorTop: 'rgba(16, 185, 129, 0.25)',
+          fillColorBottom: 'rgba(16, 185, 129, 0.01)',
+          minMax: 20,
+          scrollSpeed: 40
+        });
+      }
+    }
+
+    function updateLatencyChart(avgLat) {
+      if (!latencyChartInstance) initCharts();
+      if (latencyChartInstance) latencyChartInstance.pushValue(avgLat);
+    }
 
     function updateThroughputWave(p2pActive, throughputKB, throughputStr) {
       const lblThroughput = document.getElementById('statThroughput');
-      const lineElem = document.getElementById('pathThroughputLine');
-      const areaElem = document.getElementById('pathThroughputArea');
+      if (!throughputChartInstance) initCharts();
 
       if (!p2pActive || p2pActive <= 0) {
         if (lblThroughput) lblThroughput.innerText = '—';
-        if (lineElem) lineElem.setAttribute('d', 'M0,60 L300,60');
-        if (areaElem) areaElem.setAttribute('d', 'M0,70 L300,70 Z');
+        if (throughputChartInstance) throughputChartInstance.pushValue(0);
         return;
       }
 
-      const val = throughputKB > 0 ? throughputKB : 12;
-      throughputHistory.push(val);
-      if (throughputHistory.length > 16) throughputHistory.shift();
-
-      if (lblThroughput) {
-        lblThroughput.innerText = throughputStr || (val + ' KB/s');
-      }
-
-      const maxVal = Math.max(...throughputHistory, 30);
-      const points = throughputHistory.map((v, i) => {
-        const x = (i / (throughputHistory.length - 1)) * 300;
-        const y = 58 - ((v / maxVal) * 42);
-        return {x, y};
-      });
-
-      const pathD = createSmoothSpline(points);
-      if (lineElem && pathD) lineElem.setAttribute('d', pathD);
-      if (areaElem && pathD) areaElem.setAttribute('d', pathD + ' L300,70 L0,70 Z');
+      const val = throughputKB > 0 ? throughputKB : 16;
+      if (lblThroughput) lblThroughput.innerText = throughputStr || (val + ' KB/s');
+      if (throughputChartInstance) throughputChartInstance.pushValue(val);
     }
 
     
@@ -2903,11 +3035,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         // Канал доступности устройства
         let chanBadge = '';
         if (p.has_mqtt && p.has_telegram) {
-          chanBadge = `<span class="badge" style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.45); color:#c084fc; font-size:0.72rem; padding:2px 7px;" title="Доступен одновременно через MQTT и Telegram">⚡+💬 MQTT+TG</span>`;
+          chanBadge = `<span class="badge" style="background:rgba(168,85,247,0.18); border:1px solid rgba(168,85,247,0.45); color:#38bdf8; font-size:0.72rem; padding:2px 7px;" title="Доступен одновременно через MQTT и Telegram">⚡+💬 MQTT+TG</span>`;
         } else if (p.has_telegram || p.channel === 'telegram') {
           chanBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:2px 7px;" title="Доступен через Telegram">💬 Telegram</span>`;
         } else if (p.has_mqtt || p.channel === 'mqtt') {
-          chanBadge = `<span class="badge badge-purple" style="font-size:0.72rem; padding:2px 7px;" title="Доступен через MQTT">⚡ MQTT</span>`;
+          chanBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:2px 7px;" title="Доступен через MQTT">⚡ MQTT</span>`;
         } else if (p.channel === 'lan' || p.local_addr) {
           chanBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:2px 7px;" title="Локальная сеть">🏠 LAN</span>`;
         } else {
@@ -2922,8 +3054,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             exitBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" title="Нажмите чтобы отключить шлюз">🟢 Exit Node (АКТИВЕН)</span>`;
             exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#22c55e; color:#000; font-weight:700; padding:3px 9px; font-size:0.72rem;">🟢 Шлюз ВКЛ</button>`;
           } else {
-            exitBadge = `<span class="badge badge-purple" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" title="Нажмите чтобы направить интернет через этот узел">🌐 Exit Node</span>`;
-            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#c084fc; border-color:rgba(168,85,247,0.4); padding:3px 9px; font-size:0.72rem;">🌐 В интернет</button>`;
+            exitBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" title="Нажмите чтобы направить интернет через этот узел">🌐 Exit Node</span>`;
+            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.4); padding:3px 9px; font-size:0.72rem;">🌐 В интернет</button>`;
           }
         }
 
@@ -2950,14 +3082,14 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         let isMac = (!isKeen) && (pPlat.includes('darwin') || pPlat.includes('mac') || pOS.includes('darwin') || pOS.includes('mac') || pDev.includes('macbook'));
 
         let platName = 'Linux';
-        let platCls = 'badge-purple';
+        let platCls = 'badge-cyan';
 
         if (isKeen) {
           platName = 'KeeneticOS';
           platCls = 'badge-blue';
         } else if (isWin) {
           platName = 'Windows';
-          platCls = 'badge-purple';
+          platCls = 'badge-cyan';
         } else if (isAndroid) {
           platName = 'Android';
           platCls = 'badge-green';
@@ -4106,7 +4238,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           </div>
           <div style="display:flex; gap:6px;">
             <button onclick="openEditProfileModal('${p.id}', '${escapeHtml(p.name)}', '${escapeHtml(p.mqtt_topic)}', '${escapeHtml(p.mqtt_broker || 'tcp://broker.emqx.io:1883')}', '${escapeHtml(p.virtual_ip || '')}')" class="btn-pill" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); color:#38bdf8; padding:4px 8px; font-size:0.76rem; border-radius:10px; cursor:pointer;" title="Изменить">✏️</button>
-            <button onclick="shareProfileQR('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.35); color:#c084fc; padding:4px 8px; font-size:0.76rem; border-radius:10px; cursor:pointer;" title="Показать QR-код">📱 QR</button>
+            <button onclick="shareProfileQR('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(15,23,42,0.85); border:1px solid rgba(51,65,85,0.7); color:#38bdf8; padding:4px 8px; font-size:0.76rem; border-radius:10px; cursor:pointer;" title="Показать QR-код">📱 QR</button>
             <button onclick="switchProfile('${p.id}')" class="btn-pill" style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#4ade80; padding:4px 10px; font-size:0.78rem; font-weight:700; border-radius:10px; cursor:pointer;">Подключить</button>
             <button onclick="deleteProfile('${p.id}', '${escapeHtml(p.name)}')" class="btn-pill" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#ef4444; padding:4px 8px; font-size:0.78rem; border-radius:10px; cursor:pointer;" title="Удалить профиль">🗑️</button>
           </div>
