@@ -15,6 +15,7 @@
 
 ---
 ### 🛡️ Протоколы
+* [🛡️ AmneziaWG 3.1 (Миграция)](https://github.com/jamixm4-crypto/natbypass/wiki/AWG-3.1-Migration)
 * [🛡️ AmneziaWG 2.0 (DPI)](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass)
 * [💬 Сигнализация (Telegram, MQTT, DNS)](https://github.com/jamixm4-crypto/natbypass/wiki/Signaling-Telegram-MQTT)
 * [🚀 Дорожная карта (QUIC / Hysteria 2)](https://github.com/jamixm4-crypto/natbypass/wiki/Roadmap-and-Protocols)
