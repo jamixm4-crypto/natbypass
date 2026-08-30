@@ -50,7 +50,7 @@ func GenerateDefaultProfile(name string) Profile {
 		NetworkKey: GenerateRandomHex(16),
 		MQTTBroker: "tcp://broker.emqx.io:1883",
 		MQTTTopic:  "natbypass/mesh/" + topicID,
-		AWGPreset:  "dpi",
+		AWGPreset:  "awg31_strict",
 		IsActive:   true,
 		CreatedAt:  time.Now(),
 	}
@@ -195,6 +195,13 @@ func (c *Config) SyncSignalingWithProfile(p *Profile) {
 		})
 	}
 
+	if p.VirtualIP != "" {
+		c.Network.Address = p.VirtualIP
+	}
+	if p.AWGPreset != "" {
+		c.WireGuard.AWGPreset = p.AWGPreset
+		c.WireGuard.AWG.Preset = p.AWGPreset
+	}
 	c.Signaling.Channels = newChannels
 }
 

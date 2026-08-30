@@ -398,11 +398,11 @@ func resolveDeviceID(cfg *config.Config, pubKey [32]byte) string {
 }
 
 func resolveVirtualIP(cfg *config.Config, deviceID string) string {
-	if cfg.Network.Address != "" {
-		return strings.Split(cfg.Network.Address, "/")[0]
-	}
 	if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.VirtualIP != "" {
-		return strings.Split(activeProf.VirtualIP, "/")[0]
+		return strings.TrimSpace(strings.Split(activeProf.VirtualIP, "/")[0])
+	}
+	if cfg.Network.Address != "" {
+		return strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
 	}
 	h := sha256.Sum256([]byte(deviceID))
 	octet := int(h[0]%250) + 2

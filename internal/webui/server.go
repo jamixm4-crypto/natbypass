@@ -593,7 +593,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.092"
+		ver = "1.9.093"
 	}
 
 	status := map[string]interface{}{
@@ -1352,7 +1352,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.092"
+		ver = "1.9.093"
 	}
 
 	data := map[string]interface{}{
@@ -1994,7 +1994,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		req.MQTTBroker = "tcp://broker.emqx.io:1883"
 	}
 	if req.AWGPreset == "" {
-		req.AWGPreset = "dpi"
+		req.AWGPreset = "awg31_strict"
 	}
 
 	newProf := config.Profile{
@@ -2017,8 +2017,19 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	saved := cfg.AddOrUpdateProfile(newProf)
 	_ = config.Save(cfg, s.configPath, false)
 
-	if req.AutoSwitch && s.onProfileSwitch != nil {
-		_ = s.onProfileSwitch(saved)
+	if req.AutoSwitch {
+		if s.onProfileSwitch != nil {
+			_ = s.onProfileSwitch(saved)
+		}
+		if saved.VirtualIP != "" {
+			s.SetVirtualIP(strings.TrimSpace(strings.Split(saved.VirtualIP, "/")[0]))
+		}
+		if s.onConfigChange != nil {
+			s.onConfigChange()
+		}
+		if s.registry != nil {
+			s.registry.ClearAll()
+		}
 		s.AddEvent("channel_switch", "Создан и активирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
 	} else {
 		s.AddEvent("info", "Создан новый профиль сети: "+newProf.Name, "Топик: "+newProf.MQTTTopic)

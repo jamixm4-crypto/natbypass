@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.092"
+	Version = "1.9.093"
 	Commit  = "release"
 )
 
@@ -2101,7 +2101,7 @@ func handleProfileCreate() {
 		NetworkKey: config.GenerateRandomHex(16),
 		MQTTBroker: "tcp://broker.emqx.io:1883",
 		MQTTTopic:  "natbypass/mesh/" + config.GenerateRandomHex(8),
-		AWGPreset:  "dpi",
+		AWGPreset:  "awg31_strict",
 		IsActive:   true,
 		CreatedAt:  time.Now(),
 	}
@@ -2738,13 +2738,13 @@ func buildModernUI(hInstance uintptr) {
 	writeDebug("buildModernUI: страница 1 создана")
 
 	// СТРАНИЦА 2: AMNEZIAWG 2.0
-	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 2.0 — Защита от блокировок DPI", cx, 20, cw, 28, hFontTitle)
-	lblAwgDesc := createLabel(hInstance, "Маскирует протокол WireGuard мусорными пакетами и заголовками (ТСПУ / РКН).", cx, 48, cw, 20, hFontNormal)
+	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 3.1 — Защита от блокировок DPI (ТСПУ 2026)", cx, 20, cw, 28, hFontTitle)
+	lblAwgDesc := createLabel(hInstance, "Поведенческая обфускация: Header Protection (ChaCha20), Random Trailers, Content Padding и джиттер таймеров.", cx, 48, cw, 20, hFontNormal)
 
-	hBtnAwgStd = createOwnerDrawButton(hInstance, "🟢 Стандартный WG", cx, 78, 190, 36, ID_BTN_AWG_STD, "normal")
-	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🟡 Обход DPI (AWG)", cx+200, 78, 190, 36, ID_BTN_AWG_DPI, "primary")
-	hBtnAwgStealth = createOwnerDrawButton(hInstance, "🔴 Скрытный режим", cx+400, 78, 190, 36, ID_BTN_AWG_STEALTH, "normal")
-	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайные ключи", cx+600, 78, 190, 36, ID_BTN_RAND_AWG, "normal")
+	hBtnAwgStd = createOwnerDrawButton(hInstance, "🛡️ AWG 2.0 Anti-TSPU", cx, 78, 190, 36, ID_BTN_AWG_STD, "normal")
+	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🔒 AWG 3.1 Strict (РФ)", cx+200, 78, 190, 36, ID_BTN_AWG_DPI, "primary")
+	hBtnAwgStealth = createOwnerDrawButton(hInstance, "⚖️ AWG 3.1 Balanced", cx+400, 78, 190, 36, ID_BTN_AWG_STEALTH, "normal")
+	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайный 3.1", cx+600, 78, 190, 36, ID_BTN_RAND_AWG, "normal")
 
 	lblJc := createLabel(hInstance, "Jc (мусор):", cx, 128, 75, 20, hFontNormal)
 	hEditAwgJc = createEdit(hInstance, "4", cx+80, 124, 55, 28, false, false, hFontNormal)
@@ -3026,7 +3026,9 @@ func startEngineFromConfig(c *config.Config) {
 	engineCtx = ctx
 	engineCancel = cancel
 	triggerPublishCh = make(chan struct{}, 10)
-	if c.Network.Address != "" {
+	if activeProf := c.EnsureActiveProfile(); activeProf != nil && activeProf.VirtualIP != "" {
+		myVirtualIP = strings.TrimSpace(strings.Split(activeProf.VirtualIP, "/")[0])
+	} else if c.Network.Address != "" {
 		myVirtualIP = strings.TrimSpace(strings.Split(c.Network.Address, "/")[0])
 	}
 
@@ -4694,11 +4696,14 @@ func renderAWGTextFromUI() {
 		}
 	}
 
+	if cachedAWGParams.Version == "" {
+		cachedAWGParams = wireguard.GenerateAWG31StrictParams()
+	}
 	awgCfg := wireguard.AWGConfig{
 		WGConfig: wireguard.WGConfig{
 			PrivateKey: privKeyDisplay,
 			Address:    fmt.Sprintf("%s/24", myVirtualIP),
-			ListenPort: 51820,
+			ListenPort: 443,
 			MTU:        1420,
 			Peers:      wgPeers,
 		},
