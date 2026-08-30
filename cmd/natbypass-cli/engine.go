@@ -834,13 +834,7 @@ func receiveLoop(
 				continue
 			}
 
-			// Строгая изоляция сетей: отсекаем чужие маяки с другим NetworkKey
-			activeProf := cfg.EnsureActiveProfile()
-			if activeProf != nil && activeProf.NetworkKey != "" && p.NetworkKey != "" {
-				if p.NetworkKey != activeProf.NetworkKey {
-					continue
-				}
-			}
+			// Маяки внутри одной сигнальной комнаты принимаются безусловно
 
 			// MDAR: Синхронизация эпохи адаптации сети от удаленного узла
 			if p.AdaptationEpoch > currentAdaptEpoch {

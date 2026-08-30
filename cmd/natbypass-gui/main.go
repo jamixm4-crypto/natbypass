@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.123"
+	Version = "1.9.124"
 	Commit  = "release"
 )
 
@@ -3927,21 +3927,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					continue
 				}
 
-				activeKey := ""
-				activeTopic := ""
-				if cfg != nil {
-					active := cfg.EnsureActiveProfile()
-					if active != nil {
-						activeKey = active.NetworkKey
-						activeTopic = active.MQTTTopic
-					}
-				}
-				if activeKey != "" && p.NetworkKey != "" && p.NetworkKey != activeKey {
-					continue
-				}
-				if activeTopic != "" && p.Topic != "" && p.Topic != activeTopic {
-					continue
-				}
+				// Принимаем все маяки внутри сигнальной комнаты
 
 				if p.Offline || p.Leave {
 					nameInfo := p.DeviceID

@@ -121,6 +121,7 @@ type UDPPuncher struct {
 	keepAliveTargets map[string]time.Time
 	keepAliveMu      sync.Mutex
 	addrCache        sync.Map
+	lastReversePing  sync.Map
 }
 
 // resolveAddr resolves a UDP address string with caching to avoid per-packet overhead.
@@ -597,9 +598,17 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 	pongMsg := fmt.Sprintf("%s%s:%s", constants.PongPrefix, p.myDevID, sentTs)
 	_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
+	// Отправляем встречный PING (ограничен 1 разом в 2 секунды на пир) для взаимного сквозного пробития NAT сокет-в-сокет
+	now := time.Now()
+	if last, ok := p.lastReversePing.Load(senderID); !ok || now.Sub(last.(time.Time)) > 2*time.Second {
+		p.lastReversePing.Store(senderID, now)
+		reversePing := fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, now.UnixNano())
+		_, _ = p.conn.WriteToUDP([]byte(reversePing), remoteAddr)
+	}
+
 	// Inbound PING confirms that the remote peer reached us directly over UDP
 	if p.onPingResult != nil && remoteAddr != nil {
-		p.onPingResult(senderID, 0, remoteAddr.String())
+		p.onPingResult(senderID, 15*time.Millisecond, remoteAddr.String())
 	}
 }
 

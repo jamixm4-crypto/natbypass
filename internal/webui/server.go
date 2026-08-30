@@ -635,7 +635,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.123"
+		ver = "1.9.124"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1411,7 +1411,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.123"
+		ver = "1.9.124"
 	}
 
 	vip := s.state.VirtualIP
