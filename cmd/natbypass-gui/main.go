@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.120"
+	Version = "1.9.121"
 	Commit  = "release"
 )
 
@@ -3441,10 +3441,9 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}()
 
-	// Фоновый цикл прямой отправки UDP Hole Punch пакетов (каждые 15 секунд)
-	// Проверяем только «лучший» эндпоинт пира — не рассылаем 5 пакетов одновременно
+	// Фоновый цикл прямой отправки UDP Hole Punch пакетов (каждые 12 секунд для удержания CGNAT маппингов)
 	go func() {
-		probeTicker := time.NewTicker(45 * time.Second)
+		probeTicker := time.NewTicker(12 * time.Second)
 		defer probeTicker.Stop()
 		for {
 			select {
