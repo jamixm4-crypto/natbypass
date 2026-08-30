@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # NatBypass — пример конфигурации
 # Скопируйте в config.yaml и заполните свои значения
 # Переменные окружения: NATBYPASS_<SECTION>_<KEY> (uppercase)
@@ -144,3 +144,15 @@ daemon:
   syslog_enabled: false
   # Задержка перед перезапуском после ошибки (секунд)
   restart_delay: 5
+
+# UDP Relay / WSS Relay — ⠫㭨 �।�� ३ ४ ५ ।᫮ (Port 443)
+relay:
+  enabled: false
+  # WSS-ॣ (WebSocket Secure, port 443) — TCP fallback
+  wss_server: ""
+  # UDP-ॣ — ०⪨ ०ᯫᬠ IP- ४ ᥢ UDP
+  # ০⠭: < 80ms, throughput > 1 Mbps
+  udp_server: "relay.natbypass.example.com:47832"
+  # 32- ०⥭⮢ ९ (hex, 64 ᨬ) ।ᯥ ।  ChaCha20-Poly1305
+  # ०ᯮ ⮧ । ०ᥢ, ९ ᯨᮬ ।০ privKey
+  session_key: "your-32-byte-hex-session-key-here-aabbccdd"

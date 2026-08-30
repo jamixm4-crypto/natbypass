@@ -119,10 +119,13 @@ type CryptoConfig struct {
 }
 
 // DaemonConfig — настройки демона
-// RelayConfig — настройки резервного WSS / HTTPS релея (порт 443)
+// RelayConfig — настройки резервного WSS / HTTPS релея (порт 443) и быстрого UDP-релея.
 type RelayConfig struct {
-	Enabled bool   `mapstructure:"enabled" yaml:"enabled"`
-	Server  string `mapstructure:"server" yaml:"server,omitempty"`
+	Enabled    bool   `mapstructure:"enabled" yaml:"enabled"`
+	Server     string `mapstructure:"server" yaml:"server,omitempty"`
+	WSSServer  string `mapstructure:"wss_server" yaml:"wss_server,omitempty"`
+	UDPServer  string `mapstructure:"udp_server" yaml:"udp_server,omitempty"`
+	SessionKey string `mapstructure:"session_key" yaml:"session_key,omitempty"`
 }
 
 type DaemonConfig struct {
