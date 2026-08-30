@@ -753,8 +753,18 @@ func publishLoop(
 			localAddr = fmt.Sprintf("%s:%d", localIP, puncher.LocalPort())
 		}
 
+		activeProf := cfg.EnsureActiveProfile()
+		activeKey := ""
+		activeTopic := ""
+		if activeProf != nil {
+			activeKey = activeProf.NetworkKey
+			activeTopic = activeProf.MQTTTopic
+		}
+
 		payload := &signaling.Payload{
 			DeviceID:        deviceID,
+			NetworkKey:      activeKey,
+			Topic:           activeTopic,
 			LocalAddr:       localAddr,
 			Nickname:        cfg.App.DeviceName,
 			DeviceName:      cfg.App.DeviceName,
@@ -792,10 +802,7 @@ func publishLoop(
 			DPIPreset:       activeDPI,
 		}
 
-		encrypted, encErr := signaling.EncryptPayload(payload, pubKey, privKey)
-		if encErr == nil {
-			sigMgr.Send(ctx, encrypted)
-		}
+		_ = sigMgr.Send(ctx, payload)
 	}
 
 	// Rapid initial discovery burst (3 beacons within 1.5s for instant mesh convergence)
@@ -853,9 +860,9 @@ func receiveLoop(
 				continue
 			}
 
-			// Строгая изоляция сетей: отсекаем чужие маяки с другим или пустым NetworkKey
+			// Строгая изоляция сетей: отсекаем чужие маяки с другим NetworkKey
 			activeProf := cfg.EnsureActiveProfile()
-			if activeProf != nil && activeProf.NetworkKey != "" {
+			if activeProf != nil && activeProf.NetworkKey != "" && p.NetworkKey != "" {
 				if p.NetworkKey != activeProf.NetworkKey {
 					continue
 				}

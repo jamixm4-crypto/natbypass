@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.102"
+	Version = "1.9.103"
 	Commit  = "release"
 )
 
@@ -3450,7 +3450,7 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						}
 					}
 					match := false
-					if activeKey != "" && p.NetworkKey == activeKey {
+					if activeKey == "" || p.NetworkKey == "" || p.NetworkKey == activeKey {
 						match = true
 					} else if activeTopic != "" && p.Topic == activeTopic {
 						match = true
@@ -3819,7 +3819,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						activeTopic = active.MQTTTopic
 					}
 				}
-				if activeKey != "" && p.NetworkKey != activeKey {
+				if activeKey != "" && p.NetworkKey != "" && p.NetworkKey != activeKey {
 					continue
 				}
 				if activeTopic != "" && p.Topic != "" && p.Topic != activeTopic {
@@ -4257,9 +4257,6 @@ func publishCurrentState(ctx context.Context) {
 	}
 
 	toSend := payload
-	if enc, err := signaling.EncryptPayload(payload, myPubKey, myPrivKey); err == nil && enc != nil {
-		toSend = enc
-	}
 
 	for _, ch := range sigChannels {
 		// Если пиры подключены и канал Telegram — не спамим в чат/группу
