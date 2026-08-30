@@ -333,12 +333,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 
 						// 1. Direct UDP socket send (acts as live data + continuous NAT hole maintenance)
+						sentUDP := false
 						if targetEP != "" && puncher != nil {
-							_ = puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
+							if err3 := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err3 == nil {
+								sentUDP = true
+							}
 						}
 
-						// 2. Seamless Relay fallback if direct P2P is not yet confirmed
-						if !p.DirectP2P {
+						// 2. Seamless Relay fallback if direct endpoint is not available or P2P not yet confirmed
+						if (!p.DirectP2P || !sentUDP) && (!sentUDP || targetEP == "") {
 							if udpRelay != nil && udpRelay.IsConnected() {
 								_ = udpRelay.SendPacket(p.DeviceID, pkt)
 							} else if wssClient != nil && wssClient.IsConnected() {
