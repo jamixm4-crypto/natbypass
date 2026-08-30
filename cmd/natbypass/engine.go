@@ -166,64 +166,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 		}()
 
-		// L3 Data-plane: Inbound packets from UDP Puncher & MQTT Relay -> Write to TUN and handle ICMP
+		// L3 Data-plane: Inbound packets from UDP Puncher & MQTT Relay -> Write directly to kernel TUN
 		onInboundPacket := func(payload []byte, directAddr *net.UDPAddr) {
 			if len(payload) < 20 {
 				return
 			}
-			_ = tunDev.WritePacket(payload)
-
-			// Userspace Guaranteed ICMP Echo Responder fallback
-			ihl := int(payload[0]&0x0F) * 4
-			if len(payload) >= ihl+8 && payload[9] == 1 && payload[ihl] == 8 {
-				srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
-				dstIP := net.IPv4(payload[16], payload[17], payload[18], payload[19]).String()
-				cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-				if dstIP == cleanVIP || dstIP == myVirtualIP {
-					if reply := createICMPEchoReply(payload); reply != nil {
-						sentDirect := false
-						// 1. Direct UDP socket reply (instant guarantee)
-						if directAddr != nil && puncher != nil {
-							if err := puncher.SendDataPacket(directAddr.String(), reply); err == nil {
-								sentDirect = true
-							}
-						}
-
-						// 2. Peer registry routing lookup
-						p, found := registry.GetByVirtualIP(srcIP)
-						if !found || p == nil {
-							for _, item := range registry.List() {
-								pVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
-								if pVIP == srcIP && pVIP != "" {
-									p = item
-									found = true
-									break
-								}
-							}
-						}
-						if !found || p == nil {
-							peers := registry.List()
-							if len(peers) == 1 {
-								p = peers[0]
-								found = true
-							}
-						}
-						if found && p != nil {
-							sentUDP := sentDirect
-							if p.DirectP2P && p.ActiveEndpoint != "" && puncher != nil {
-								if err := puncher.SendDataPacket(p.ActiveEndpoint, reply); err == nil {
-									sentUDP = true
-								}
-								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-									_ = puncher.SendDataPacket(p.STUNAddr, reply)
-								}
-							}
-							if (!sentUDP || !p.DirectP2P) && sigMgr != nil {
-								_ = sigMgr.PublishTunnelData(p.DeviceID, reply)
-							}
-						}
-					}
-				}
+			srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
+			cleanVIP := strings.TrimSpace(strings.Split(config.ResolveVirtualIP(cfg, deviceID), "/")[0])
+			if srcIP == cleanVIP && cleanVIP != "" {
+				return // Protect against loopback reflection
+			}
+			if tunDev != nil {
+				_ = tunDev.WritePacket(payload)
 			}
 		}
 
