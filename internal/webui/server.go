@@ -632,7 +632,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.112"
+		ver = "1.9.113"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1408,16 +1408,12 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.112"
+		ver = "1.9.113"
 	}
 
-vip := s.state.VirtualIP
+	vip := s.state.VirtualIP
 	if cfg != nil {
-		if act := cfg.GetActiveProfile(); act != nil && act.VirtualIP != "" {
-			vip = strings.TrimSpace(strings.Split(act.VirtualIP, "/")[0])
-		} else if cfg.Network.Address != "" {
-			vip = strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
-		}
+		vip = config.ResolveVirtualIP(cfg, s.state.DeviceID)
 	}
 
 	hasIPConflict := false

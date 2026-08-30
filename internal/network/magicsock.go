@@ -1,12 +1,10 @@
-﻿package network
+package network
 
 import (
 	"context"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/natbypass/natbypass/internal/constants"
 )
 
 // PathType represents the classification of a network transport candidate.
@@ -239,7 +237,7 @@ func (ms *MagicSock) GetActiveRoute(deviceID string) (string, PathType, time.Dur
 	return pr.ActiveEndpoint, pr.ActiveType, pr.BestLatency
 }
 
-// TriggerRoamingProbes fires immediate multi-path probe bursts (3 packets with 50ms pacing) to all candidates across all peers.
+// TriggerRoamingProbes fires smooth, jittered candidate probes without congesting network queues.
 func (ms *MagicSock) TriggerRoamingProbes() {
 	if ms.puncher == nil {
 		return
@@ -251,21 +249,17 @@ func (ms *MagicSock) TriggerRoamingProbes() {
 		pr.mu.RLock()
 		for _, cand := range pr.Candidates {
 			if cand.Address != "" {
-				for i := 0; i < constants.ProbeBurstCount; i++ {
-					_ = ms.puncher.SendHolePunchProbe(cand.Address)
-					if i < constants.ProbeBurstCount-1 {
-						time.Sleep(50 * time.Millisecond)
-					}
-				}
+				_ = ms.puncher.SendHolePunchProbe(cand.Address)
+				time.Sleep(5 * time.Millisecond)
 			}
 		}
 		pr.mu.RUnlock()
 	}
 }
 
-// maintenanceLoop runs background health checks and path optimization every 2 seconds.
+// maintenanceLoop runs smooth background path health checks every 10 seconds without bufferbloat.
 func (ms *MagicSock) maintenanceLoop() {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {

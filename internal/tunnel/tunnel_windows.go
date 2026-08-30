@@ -196,19 +196,16 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
 			"name=NatBypass ICMP In",
 			"dir=in", "action=allow",
-			"protocol=icmpv4:any,any",
-			fmt.Sprintf("interface=%s", adapterName),
+			"protocol=icmpv4",
 		)
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
 			"name=NatBypass All In",
 			"dir=in", "action=allow",
-			fmt.Sprintf("interface=%s", adapterName),
-		)
-		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass Mesh Inbound",
-			"dir=in", "action=allow",
+			"protocol=any",
 			"remoteip=any",
 		)
+		psFW := fmt.Sprintf(`New-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -Direction Inbound -Protocol ICMPv4 -IcmpType 8 -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue; New-NetFirewallRule -DisplayName "NatBypass Adapter All" -Direction Inbound -InterfaceAlias "%s" -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue`, adapterName)
+		_ = runHiddenPS(psFW)
 
 		// 5. Явный маршрут для подсети виртуального IP и 100.64.200.0/24
 		cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])

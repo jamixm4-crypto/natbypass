@@ -1006,7 +1006,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.112</span>
+          <span id="topUpdateLabel">v1.9.113</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1017,7 +1017,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.112</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.113</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1030,6 +1030,18 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     <!-- TAB 1: DASHBOARD (EXACT SCREENSHOT LAYOUT) -->
     <div id="tab-dashboard" class="tab-pane active">
+      <!-- IP Conflict Warning Banner -->
+      <div id="bannerIPConflict" style="display:none; background: linear-gradient(135deg, rgba(239,68,68,0.25), rgba(15,23,42,0.9)); border: 2px solid #ef4444; border-radius: 12px; padding: 14px 18px; margin-bottom: 14px; align-items: center; justify-content: space-between; gap: 14px; box-shadow: 0 0 20px rgba(239,68,68,0.3);">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="font-size:1.8rem;">⚠️</span>
+          <div>
+            <div style="font-weight:800; color:#fca5a5; font-size:0.95rem;">КОЛЛИЗИЯ IP-АДРЕСОВ В СЕТИ!</div>
+            <div style="font-size:0.85rem; color:#f1f5f9; margin-top:2px;">Удаленный узел <b id="conflictPeerName" style="color:#ffffff;">...</b> использует такой же Virtual IP (<b id="conflictIPVal" style="color:#f87171;">...</b>). Измените ваш IP адрес в Профиле во избежание сбоев!</div>
+          </div>
+        </div>
+        <button onclick="switchTab('profiles')" class="btn" style="background:#ef4444; color:#ffffff; font-weight:700; border:none; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer; white-space:nowrap;">Сменить свой IP</button>
+      </div>
+
       <!-- Live P2P Connection Status Banner -->
       <div id="connStatusBanner" style="display:flex; justify-content:center; align-items:center; gap:10px; background:rgba(15,23,42,0.85); border:1px solid rgba(51,65,85,0.7); border-radius:12px; padding:10px 16px; margin-bottom:14px; font-weight:800; font-size:0.88rem; text-align:center; white-space:normal;">
         <span id="connStatusDot" style="width:10px; height:10px; border-radius:50%; background:#f59e0b; box-shadow:0 0 10px #f59e0b; display:inline-block;"></span>
