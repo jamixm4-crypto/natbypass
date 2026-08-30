@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.129"
+	Version = "1.9.130"
 	Commit  = "release"
 )
 
@@ -3184,6 +3184,7 @@ func startEngineFromConfig(c *config.Config) {
 	})
 	if err == nil {
 		udpPuncher = puncher
+		puncher.StartKeepAliveLoop()
 		guiMagicSock = network.NewMagicSock(puncher, func(devID, oldPath, newPath string, pType network.PathType) {
 			writeDebug(fmt.Sprintf("🧲 Magicsock GUI: путь к %s переключен: %s -> %s (%s)", devID, oldPath, newPath, pType))
 		})

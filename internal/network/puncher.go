@@ -478,19 +478,18 @@ func (p *UDPPuncher) RemoveKeepAliveTarget(addr string) {
 	delete(p.keepAliveTargets, addr)
 }
 
-// SendKeepAlive sends a tiny keep-alive packet to maintain CGNAT port mappings.
+// SendKeepAlive sends a periodic active ping packet to maintain bidirectional CGNAT port mappings.
 func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
 	}
-	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+	rAddr, err := p.resolveAddr(targetAddr)
 	if err != nil {
-		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
-		if err != nil {
-			return err
-		}
+		return err
 	}
-	_, err = p.conn.WriteToUDP([]byte(constants.KeepAlivePayload), rAddr)
+	nowNano := time.Now().UnixNano()
+	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
+	_, err = p.conn.WriteToUDP(probeData, rAddr)
 	return err
 }
 
@@ -697,7 +696,10 @@ func (p *UDPPuncher) readLoop() {
 		case stun.IsMessage(buf[:n]):
 			p.handleSTUNMessage(buf[:n])
 		case n >= 4 && string(buf[:4]) == constants.KeepAlivePayload:
-			// Silent keep-alive, no-op
+			// Двусторонний ответ KeepAlive для поддержания исходящей трансляции NAT
+			if remoteAddr != nil && conn != nil {
+				_, _ = conn.WriteToUDP([]byte(constants.KeepAlivePayload), remoteAddr)
+			}
 		case strings.HasPrefix(string(buf[:n]), constants.PingPrefix):
 			p.handlePing(string(buf[:n]), remoteAddr)
 		case strings.HasPrefix(string(buf[:n]), constants.PongPrefix):

@@ -40,5 +40,5 @@ const (
 	ProbeBurstCount    = 3
 	MaxProbesPerSecond = 10
 	MinProbeInterval   = 100 * time.Millisecond
-	KeepAliveInterval  = 8 * time.Second
+	KeepAliveInterval  = 4 * time.Second
 )

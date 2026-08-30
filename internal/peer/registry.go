@@ -76,11 +76,12 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.Latency = existing.Latency
 		newer.PingMs = existing.PingMs
 	}
-	if !newer.DirectP2P && existing.DirectP2P && (existing.LastSeen.IsZero() || time.Since(existing.LastSeen) < 60*time.Second) {
-		newer.DirectP2P = true
+	// Guaranteed preservation of established P2P endpoint across signaling updates
+	if existing.ActiveEndpoint != "" {
 		if newer.ActiveEndpoint == "" {
 			newer.ActiveEndpoint = existing.ActiveEndpoint
 		}
+		newer.DirectP2P = true
 	} else if newer.ActiveEndpoint != "" {
 		newer.DirectP2P = true
 	}

@@ -330,7 +330,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	// Dedicated rapid 2.5s keepalive & probe loop for maintaining carrier CGNAT mappings
 	if puncher != nil {
 		go func() {
-			kaTicker := time.NewTicker(15 * time.Second)
+			kaTicker := time.NewTicker(4 * time.Second)
 			defer kaTicker.Stop()
 			for {
 				select {
@@ -514,6 +514,9 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 	var punchErr error
 	puncher, punchErr = network.NewUDPPuncher(udpListenPort, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		log.Info().Str("peer", remoteDevID).Float64("rtt_ms", float64(rtt.Microseconds())/1000.0).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] Connection confirmed via UDP ping")
+		if magicSock != nil {
+			magicSock.RecordProbeSuccess(remoteDevID, fromAddr, rtt)
+		}
 		if p, ok := registry.Get(remoteDevID); ok && p != nil {
 			oldEP := p.ActiveEndpoint
 			p.DirectP2P = true
@@ -536,7 +539,11 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 	if punchErr != nil {
 		log.Warn().Err(punchErr).Msg("Failed to initialize UDP puncher socket")
 	} else if puncher != nil {
-		log.Info().Int("port", puncher.LocalPort()).Msg("UDP puncher active on persistent socket")
+		puncher.StartKeepAliveLoop()
+		magicSock = network.NewMagicSock(puncher, func(devID, oldPath, newPath string, pType network.PathType) {
+			log.Info().Str("peer", devID).Str("old", oldPath).Str("new", newPath).Str("type", string(pType)).Msg("🔀 MagicSock: Path switched")
+		})
+		log.Info().Int("port", puncher.LocalPort()).Msg("UDP puncher active on persistent socket with MagicSock and KeepAlive")
 	}
 
 	return puncher, ipDisc
@@ -880,30 +887,48 @@ func receiveLoop(
 				mdarMu.Unlock()
 			}
 
-			if puncher != nil {
-				if p.ActiveEndpoint != "" {
-					_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
-				}
-				if p.STUNAddr != "" {
-					_ = puncher.SendHolePunchProbe(p.STUNAddr)
-				}
-				if p.LocalAddr != "" {
-					_ = puncher.SendHolePunchProbe(p.LocalAddr)
-				}
-				if p.IPv6Addr != "" {
-					_ = puncher.SendHolePunchProbe(p.IPv6Addr)
-				}
-				for _, cand := range p.Candidates {
-					if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
-						_ = puncher.SendHolePunchProbe(cand)
-					}
-				}
-				if p.PublicIP != "" && p.WGPort > 0 {
-					_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
-				}
-			}
 			existingPeer, peerFound := registry.Get(p.DeviceID)
 			needsFastReply := !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
+
+			// При наличии стабильного прямого P2P сокета — не сбиваем его зондированием чужих локальных подсетей
+			if puncher != nil {
+				if existingPeer != nil && existingPeer.DirectP2P && existingPeer.ActiveEndpoint != "" {
+					_ = puncher.SendKeepAlive(existingPeer.ActiveEndpoint)
+				} else {
+					if p.ActiveEndpoint != "" {
+						_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+					}
+					if p.STUNAddr != "" {
+						_ = puncher.SendHolePunchProbe(p.STUNAddr)
+					}
+					if p.LocalAddr != "" {
+						_ = puncher.SendHolePunchProbe(p.LocalAddr)
+					}
+					if p.IPv6Addr != "" {
+						_ = puncher.SendHolePunchProbe(p.IPv6Addr)
+					}
+					for _, cand := range p.Candidates {
+						if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
+							_ = puncher.SendHolePunchProbe(cand)
+						}
+					}
+					if p.PublicIP != "" && p.WGPort > 0 {
+						_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+					}
+				}
+			}
+			if magicSock != nil {
+				magicSock.RegisterPeerEndpoints(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr)
+			}
+
+			preservedEP := ""
+			preservedDirect := false
+			preservedLat := int64(0)
+			if existingPeer != nil {
+				preservedEP = existingPeer.ActiveEndpoint
+				preservedDirect = existingPeer.DirectP2P
+				preservedLat = existingPeer.PingMs
+			}
 
 			registry.Upsert(&peer.Peer{
 				DeviceID:         p.DeviceID,
@@ -921,6 +946,9 @@ func receiveLoop(
 				AdvertisedRoutes: p.AdvertisedRoutes,
 				LastSeen:         time.Now(),
 				Online:           true,
+				DirectP2P:        preservedDirect,
+				ActiveEndpoint:   preservedEP,
+				PingMs:           preservedLat,
 				AWG:              p.AWG,
 				OS:               p.OS,
 				Platform:         p.Platform,
