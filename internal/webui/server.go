@@ -572,43 +572,46 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 			if p.PublicKey == "" && p.VirtualIP == "" && p.STUNAddr == "" && p.PublicIP == "" {
 				continue
 			}
-			if p.Online && time.Since(p.LastSeen) < 90*time.Second {
-				if p.VirtualIP == "" {
-					p.VirtualIP = fmt.Sprintf("100.64.200.%d", peerIndex)
-				}
-				peerIndex++
+			if time.Since(p.LastSeen) > 90*time.Second {
+				p.Online = false
+				p.DirectP2P = false
+			}
 
-				// Проверка коллизии IP-адресов
-				p.IPConflict = false
-				curCfg, _ := config.Load(s.configPath)
-				if myVIP := config.ResolveVirtualIP(curCfg, s.state.DeviceID); myVIP != "" {
-					pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-					cleanMyVIP := strings.TrimSpace(strings.Split(myVIP, "/")[0])
-					if pVIP == cleanMyVIP && p.DeviceID != s.state.DeviceID {
-						p.IPConflict = true
-					}
-				}
+			if p.VirtualIP == "" {
+				p.VirtualIP = fmt.Sprintf("100.64.200.%d", peerIndex)
+			}
+			peerIndex++
 
-				// Проверка соответствия параметров AWG 3.1
-				p.AWGMismatch = false
-				if s.configPath != "" {
-					if curCfg, _ := config.Load(s.configPath); curCfg != nil {
-						loc := curCfg.GetAWGParams()
-						if p.AWG != nil && (p.AWG.H1 != "" || loc.H1 != 0) {
-							locH1 := fmt.Sprintf("%d", loc.H1)
-							locH2 := fmt.Sprintf("%d", loc.H2)
-							locH3 := fmt.Sprintf("%d", loc.H3)
-							locH4 := fmt.Sprintf("%d", loc.H4)
-							if p.AWG.H1 != locH1 || p.AWG.H2 != locH2 || p.AWG.H3 != locH3 || p.AWG.H4 != locH4 ||
-								p.AWG.S1 != loc.S1 || p.AWG.S2 != loc.S2 || p.AWG.Jc != loc.Jc {
-								p.AWGMismatch = true
-							}
+			// Проверка коллизии IP-адресов
+			p.IPConflict = false
+			curCfg, _ := config.Load(s.configPath)
+			if myVIP := config.ResolveVirtualIP(curCfg, s.state.DeviceID); myVIP != "" {
+				pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+				cleanMyVIP := strings.TrimSpace(strings.Split(myVIP, "/")[0])
+				if pVIP == cleanMyVIP && p.DeviceID != s.state.DeviceID {
+					p.IPConflict = true
+				}
+			}
+
+			// Проверка соответствия параметров AWG 3.1
+			p.AWGMismatch = false
+			if s.configPath != "" {
+				if curCfg, _ := config.Load(s.configPath); curCfg != nil {
+					loc := curCfg.GetAWGParams()
+					if p.AWG != nil && (p.AWG.H1 != "" || loc.H1 != 0) {
+						locH1 := fmt.Sprintf("%d", loc.H1)
+						locH2 := fmt.Sprintf("%d", loc.H2)
+						locH3 := fmt.Sprintf("%d", loc.H3)
+						locH4 := fmt.Sprintf("%d", loc.H4)
+						if p.AWG.H1 != locH1 || p.AWG.H2 != locH2 || p.AWG.H3 != locH3 || p.AWG.H4 != locH4 ||
+							p.AWG.S1 != loc.S1 || p.AWG.S2 != loc.S2 || p.AWG.Jc != loc.Jc {
+							p.AWGMismatch = true
 						}
 					}
 				}
-
-				activePeers = append(activePeers, p)
 			}
+
+			activePeers = append(activePeers, p)
 		}
 	}
 	if activePeers == nil {
@@ -632,7 +635,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.122"
+		ver = "1.9.123"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1408,7 +1411,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.122"
+		ver = "1.9.123"
 	}
 
 	vip := s.state.VirtualIP
