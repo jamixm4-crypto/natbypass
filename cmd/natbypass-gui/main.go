@@ -39,8 +39,63 @@ import (
 	"github.com/skip2/go-qrcode"
 )
 
+func applyAWGProfileToGUI(p *config.Profile) {
+	if p == nil || cfg == nil {
+		return
+	}
+	cfg.SyncAWGWithProfile(p)
+
+	if hEditAwgH1 != 0 && p.H1 > 0 {
+		setControlText(hEditAwgH1, fmt.Sprintf("%d", p.H1))
+	}
+	if hEditAwgH2 != 0 && p.H2 > 0 {
+		setControlText(hEditAwgH2, fmt.Sprintf("%d", p.H2))
+	}
+	if hEditAwgH3 != 0 && p.H3 > 0 {
+		setControlText(hEditAwgH3, fmt.Sprintf("%d", p.H3))
+	}
+	if hEditAwgH4 != 0 && p.H4 > 0 {
+		setControlText(hEditAwgH4, fmt.Sprintf("%d", p.H4))
+	}
+	if hEditAwgS1 != 0 && p.S1 > 0 {
+		setControlText(hEditAwgS1, fmt.Sprintf("%d", p.S1))
+	}
+	if hEditAwgS2 != 0 && p.S2 > 0 {
+		setControlText(hEditAwgS2, fmt.Sprintf("%d", p.S2))
+	}
+	if hEditAwgJc != 0 && p.Jc > 0 {
+		setControlText(hEditAwgJc, fmt.Sprintf("%d", p.Jc))
+	}
+	if hEditAwgJmin != 0 && p.Jmin > 0 {
+		setControlText(hEditAwgJmin, fmt.Sprintf("%d", p.Jmin))
+	}
+	if hEditAwgJmax != 0 && p.Jmax > 0 {
+		setControlText(hEditAwgJmax, fmt.Sprintf("%d", p.Jmax))
+	}
+
+	cachedAWGParams = wireguard.AWGParams{
+		Enabled:                 true,
+		Version:                 wireguard.AWGVersion31,
+		Jc:                      p.Jc,
+		Jmin:                    p.Jmin,
+		Jmax:                    p.Jmax,
+		S1:                      p.S1,
+		S2:                      p.S2,
+		H1:                      p.H1,
+		H2:                      p.H2,
+		H3:                      p.H3,
+		H4:                      p.H4,
+		HeaderProtectionEnabled: p.HeaderProtectionKey != "",
+		RandomTrailers:          p.RandomTrailers,
+		DisableCookies:          p.DisableCookies,
+	}
+	renderAWGTextFromUI()
+	triggerPublish()
+}
+
+
 var (
-	Version = "1.9.116"
+	Version = "1.9.118"
 	Commit  = "release"
 )
 
@@ -2059,7 +2114,9 @@ func handleProfileSwitch() {
 		addLog("❌ Ошибка переключения: " + err.Error())
 		return
 	}
+	cfg.SyncAWGWithProfile(target)
 	_ = config.Save(cfg, configPath, false)
+	applyAWGProfileToGUI(target)
 	setControlText(hEditMqttBr, target.MQTTBroker)
 	setControlText(hEditMqttTp, target.MQTTTopic)
 	if target.VirtualIP != "" {
@@ -2297,7 +2354,9 @@ func handleProfileImport() {
 	}
 	parsed.IsActive = true
 	saved := cfg.AddOrUpdateProfile(*parsed)
+	cfg.SyncAWGWithProfile(saved)
 	_ = config.Save(cfg, configPath, false)
+	applyAWGProfileToGUI(saved)
 
 	if registry != nil {
 		registry.ClearAll()
@@ -3587,27 +3646,36 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					h4, _ := strconv.ParseUint(h4Str, 10, 32)
 
 					cachedAWGParams = wireguard.AWGParams{
-						Enabled: true,
-						Jc:      jc,
-						Jmin:    jmin,
-						Jmax:    jmax,
-						S1:      s1,
-						S2:      s2,
-						H1:      uint32(h1),
-						H2:      uint32(h2),
-						H3:      uint32(h3),
-						H4:      uint32(h4),
+						Enabled:                 true,
+						Version:                 wireguard.AWGVersion31,
+						Jc:                      jc,
+						Jmin:                    jmin,
+						Jmax:                    jmax,
+						S1:                      s1,
+						S2:                      s2,
+						H1:                      uint32(h1),
+						H2:                      uint32(h2),
+						H3:                      uint32(h3),
+						H4:                      uint32(h4),
+						HeaderProtectionEnabled: cfg.WireGuard.AWG.HeaderProtectionKey != "",
+						RandomTrailers:          cfg.WireGuard.AWG.RandomTrailers,
+						DisableCookies:          cfg.WireGuard.AWG.DisableCookies,
 					}
 					awgParams = &signaling.AWGParams{
-						Jc:   jc,
-						Jmin: jmin,
-						Jmax: jmax,
-						S1:   s1,
-						S2:   s2,
-						H1:   h1Str,
-						H2:   h2Str,
-						H3:   h3Str,
-						H4:   h4Str,
+						Jc:                      jc,
+						Jmin:                    jmin,
+						Jmax:                    jmax,
+						S1:                      s1,
+						S2:                      s2,
+						H1:                      h1Str,
+						H2:                      h2Str,
+						H3:                      h3Str,
+						H4:                      h4Str,
+						Version:                 "3.1",
+						Preset:                  cfg.WireGuard.AWGPreset,
+						HeaderProtectionEnabled: cfg.WireGuard.AWG.HeaderProtectionKey != "",
+						RandomTrailers:          cfg.WireGuard.AWG.RandomTrailers,
+						DisableCookies:          cfg.WireGuard.AWG.DisableCookies,
 					}
 				} else if cachedAWGParams.Enabled {
 					awgParams = &signaling.AWGParams{
@@ -4761,6 +4829,10 @@ func fillConfigFields() {
 			setControlText(hEditMyNick, cfg.App.DeviceName)
 		}
 
+		active := cfg.EnsureActiveProfile()
+		if active != nil {
+			applyAWGProfileToGUI(active)
+		}
 		allowExitNode = cfg.Network.AllowExitNode
 		if hBtnAllowExit != 0 {
 			if allowExitNode {

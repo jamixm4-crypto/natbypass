@@ -290,6 +290,33 @@ func (c *Config) SyncSignalingWithProfile(p *Profile) {
 	c.Signaling.Channels = newChannels
 }
 
+// SyncAWGWithProfile синхронизирует параметры AWG 3.1 активного профиля с конфигурацией WireGuard
+func (c *Config) SyncAWGWithProfile(p *Profile) {
+	if p == nil {
+		return
+	}
+	if p.AWGPreset != "" {
+		c.WireGuard.AWGPreset = p.AWGPreset
+		c.WireGuard.AWG.Preset = p.AWGPreset
+	}
+	if p.H1 != 0 && p.H2 != 0 {
+		c.WireGuard.AWG.H1 = p.H1
+		c.WireGuard.AWG.H2 = p.H2
+		c.WireGuard.AWG.H3 = p.H3
+		c.WireGuard.AWG.H4 = p.H4
+		c.WireGuard.AWG.S1 = p.S1
+		c.WireGuard.AWG.S2 = p.S2
+		c.WireGuard.AWG.Jc = p.Jc
+		c.WireGuard.AWG.Jmin = p.Jmin
+		c.WireGuard.AWG.Jmax = p.Jmax
+		c.WireGuard.AWG.HeaderProtectionKey = p.HeaderProtectionKey
+		c.WireGuard.AWG.RandomTrailers = p.RandomTrailers
+		c.WireGuard.AWG.DisableCookies = p.DisableCookies
+		c.WireGuard.AWG.Enabled = true
+		c.WireGuard.AWG.Version = "3.1"
+	}
+}
+
 // SwitchProfile переключает активный профиль по ID
 func (c *Config) SwitchProfile(profileID string) (*Profile, error) {
 	var target *Profile
