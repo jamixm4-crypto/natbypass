@@ -615,7 +615,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "2.0.001"
+		ver = "2.0.002"
 	}
 
 	status := map[string]interface{}{
@@ -1360,9 +1360,23 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg, _ := config.Load(s.configPath)
-	awgActive := false
-	if cfg != nil && cfg.WireGuard.AWG.Enabled {
-		awgActive = true
+	awgActive := true
+	awgVer := "3.1"
+	awgPreset := "awg31_strict"
+	if cfg != nil {
+		if cfg.WireGuard.AWGVersion != "" {
+			awgVer = cfg.WireGuard.AWGVersion
+		} else if cfg.WireGuard.AWG.Version != "" {
+			awgVer = cfg.WireGuard.AWG.Version
+		}
+		if cfg.WireGuard.AWGPreset != "" {
+			awgPreset = cfg.WireGuard.AWGPreset
+		} else if cfg.WireGuard.AWG.Preset != "" {
+			awgPreset = cfg.WireGuard.AWG.Preset
+		}
+		if !cfg.WireGuard.Enabled && !cfg.WireGuard.AWG.Enabled {
+			awgActive = false
+		}
 	}
 
 	throughputStr := "—"
@@ -1374,7 +1388,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "2.0.001"
+		ver = "2.0.002"
 	}
 
 	data := map[string]interface{}{
@@ -1393,6 +1407,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"device_id":         devID,
 		"device_name":       s.deviceName,
 		"awg_active":        awgActive,
+		"awg_version":       awgVer,
+		"awg_preset":        awgPreset,
 		"throughput_str":    throughputStr,
 		"throughput_kb":     throughputKB,
 	}
@@ -1415,7 +1431,7 @@ func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"total_peers": len(peersList),
 		"encryption_ciphers": []map[string]string{
-			{"name": "ChaCha20-Poly1305", "type": "WireGuard / AWG 2.0", "status": "Активен"},
+			{"name": "ChaCha20-Poly1305", "type": "WireGuard / AWG 3.1", "status": "Активен"},
 			{"name": "Curve25519 / NaCl", "type": "Signaling Relay", "status": "Активен"},
 		},
 	}

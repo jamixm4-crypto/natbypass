@@ -1006,7 +1006,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v2.0.001</span>
+          <span id="topUpdateLabel">v2.0.002</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1017,7 +1017,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v2.0.001</span>
+          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v2.0.002</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1089,7 +1089,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               <div class="metric-label">Средняя задержка Direct P2P</div>
             </div>
             <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-              <span class="badge badge-success" id="statAwgBadge">🛡️ AWG 2.0 Активен</span>
+              <span class="badge badge-success" id="statAwgBadge">🛡️ AWG 3.1 Активен</span>
               <span style="font-size:0.75rem; color:var(--text-dim);" id="statUptime">Uptime: 0m</span>
             </div>
           </div>
@@ -2763,7 +2763,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             } else {
               banner.style.background = 'rgba(16, 185, 129, 0.15)';
               banner.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-              bannerText.innerText = 'СВЯЗЬ АКТИВНА (' + formatPeersCount(totalPeers) + ' онлайн)';
+              const awgSuffix = (d.awg_active !== false) ? (' • 🛡️ AWG ' + (d.awg_version || '3.1')) : '';
+              bannerText.innerText = 'СВЯЗЬ АКТИВНА (' + formatPeersCount(totalPeers) + ' онлайн' + (p2pActive > 0 ? (' • ⚡ ' + p2pActive + ' P2P') : '') + awgSuffix + ')';
               if (bannerDot) {
                 bannerDot.style.background = '#10b981';
                 bannerDot.style.boxShadow = '0 0 10px #10b981';
@@ -2778,6 +2779,22 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           document.getElementById('topStunLabel').innerText = 'STUN: ' + (d.stun_addr || 'Определяется...');
           document.getElementById('statChannelBadge').innerText = 'Канал: ' + (d.channel || 'Параллельно');
           document.getElementById('statUptime').innerText = 'Uptime: ' + (d.uptime || '0m');
+
+          const awgBadge = document.getElementById('statAwgBadge');
+          if (awgBadge) {
+            const awgVer = d.awg_version || '3.1';
+            const awgPreset = d.awg_preset || 'awg31_strict';
+            if (d.awg_active !== false) {
+              awgBadge.className = 'badge badge-success';
+              awgBadge.innerHTML = '🛡️ AWG ' + awgVer + ' Активен';
+              awgBadge.title = 'Протокол AmneziaWG ' + awgVer + ' (' + awgPreset + ') активен с защитой заголовков ChaCha20';
+            } else {
+              awgBadge.className = 'badge';
+              awgBadge.style.background = 'rgba(255,255,255,0.1)';
+              awgBadge.style.color = 'var(--text-dim)';
+              awgBadge.innerHTML = '🛡️ AWG Выключен';
+            }
+          }
 
           // Donut Ring Calculation
           const donutFill = document.getElementById('donutFill');
@@ -2851,22 +2868,23 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       peers.forEach((p, idx) => {
         const name = p.nickname ? `⭐ ${p.nickname}` : p.device_id;
         const isDirect = Boolean(p.direct_p2p && (p.active_endpoint || p.ping_ms > 0));
-        const hasAWG = Boolean(p.awg && p.awg.enabled || p.wg_pub_key);
+        const hasAWG = Boolean(p.awg || p.wg_pubkey || p.wg_pub_key || (p.public_key && p.public_key.length > 20));
+        const pAWGVer = (p.awg && p.awg.version) ? p.awg.version : '3.1';
         let p2pBadge = '';
         if (p.awg_mismatch) {
           p2pBadge = '<span class="badge" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.6); color:#fca5a5; font-size:0.72rem; font-weight:700;" title="Параметры AWG (H1-H4, S1-S2, Jc) на этом узле не совпадают с вашими! Связь по WireGuard невозможна. Обновите профиль или синхронизируйте настройки">⚠️ AWG Различается (нет связи)</span>';
         } else if (isDirect) {
           if (hasAWG) {
-            p2pBadge = '<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700;">⚡ Direct P2P + 🛡️ AWG 3.1</span>';
+            p2pBadge = '<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700;">⚡ Direct P2P • 🛡️ AWG ' + pAWGVer + '</span>';
           } else {
             p2pBadge = '<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px;">⚡ Direct P2P</span>';
           }
         } else if (p.direct_p2p && !p.active_endpoint) {
-          p2pBadge = '<span class="badge" style="background:rgba(234,179,8,0.15); border:1px solid rgba(234,179,8,0.4); color:#fde047; font-size:0.72rem;">🟡 Пробитие NAT...</span>';
+          p2pBadge = '<span class="badge" style="background:rgba(234,179,8,0.15); border:1px solid rgba(234,179,8,0.4); color:#fde047; font-size:0.72rem;">🟡 Пробитие NAT... • 🛡️ AWG ' + pAWGVer + '</span>';
         } else if (p.nat_blocked) {
-          p2pBadge = '<span class="badge" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; font-size:0.72rem;">🔒 Relay (Symmetric NAT)</span>';
+          p2pBadge = '<span class="badge" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; font-size:0.72rem;">🔒 Relay • 🛡️ AWG ' + pAWGVer + '</span>';
         } else {
-          p2pBadge = '<span class="badge badge-cyan" style="font-size:0.72rem;">🌐 Relay</span>';
+          p2pBadge = '<span class="badge badge-cyan" style="font-size:0.72rem;">🌐 Relay • 🛡️ AWG ' + pAWGVer + '</span>';
         }
 
 
@@ -3544,7 +3562,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     }
 
     async function generateRandomAWG() {
-      showToast('🎲 Генерация криптостойких параметров AWG 2.0...');
+      showToast('🎲 Генерация криптостойких параметров AWG 3.1...');
       try {
         const res = await fetch('/api/awg/random-params');
         const json = await res.json();
