@@ -471,15 +471,24 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		udpListenPort = constants.DefaultUDPPort
 	}
 
-	puncher, punchErr := network.NewUDPPuncher(udpListenPort, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+	var puncher *network.UDPPuncher
+	var punchErr error
+	puncher, punchErr = network.NewUDPPuncher(udpListenPort, deviceID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		log.Info().Str("peer", remoteDevID).Float64("rtt_ms", float64(rtt.Microseconds())/1000.0).Str("from", fromAddr).Msg("⚡ [P2P Direct UDP] Connection confirmed via UDP ping")
 		if p, ok := registry.Get(remoteDevID); ok && p != nil {
+			oldEP := p.ActiveEndpoint
 			p.DirectP2P = true
 			p.Latency = rtt
 			p.PingMs = rtt.Milliseconds()
 			p.ActiveEndpoint = fromAddr
 			p.NATBlocked = false
 			registry.Upsert(p)
+			if oldEP != "" && oldEP != fromAddr && puncher != nil {
+				puncher.RemoveKeepAliveTarget(oldEP)
+			}
+			if puncher != nil {
+				puncher.AddKeepAliveTarget(fromAddr)
+			}
 		}
 	})
 

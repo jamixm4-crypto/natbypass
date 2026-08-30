@@ -117,6 +117,9 @@ type UDPPuncher struct {
 	lastProbeMap     map[string]time.Time
 	lastCleanupTime  time.Time
 	pingRateLimiter  *IPRateLimiter
+
+	keepAliveTargets map[string]time.Time
+	keepAliveMu      sync.Mutex
 }
 
 // NewUDPPuncher creates a new persistent UDP socket for STUN, hole punching, and data transfer.
@@ -371,7 +374,7 @@ func (p *UDPPuncher) candidatePorts(base int) []int {
 }
 
 
-// SendHolePunchProbe sends direct UDP probe packets to the target peer endpoint and candidate ports.
+// SendHolePunchProbe отправляет probe пакеты без rate limiter для максимальной отзывчивости пинга
 func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
@@ -384,35 +387,18 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 		}
 	}
 
-	p.probeMu.Lock()
-	now := time.Now()
-
-	// Periodic cleanup of lastProbeMap entries older than 60s
-	if now.Sub(p.lastCleanupTime) > 60*time.Second {
-		for k, t := range p.lastProbeMap {
-			if now.Sub(t) > 60*time.Second {
-				delete(p.lastProbeMap, k)
-			}
-		}
-		p.lastCleanupTime = now
-	}
-
-	if now.Sub(p.lastProbeMap[targetAddr]) < constants.MinProbeInterval {
-		p.probeMu.Unlock()
-		return nil // Rate limit: maximum 2 probes/second per address
-	}
-	p.lastProbeMap[targetAddr] = now
-	p.probeMu.Unlock()
-
-	nowNano := now.UnixNano()
+	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
 
-	// 1. Send 2 paced probe packets directly to target address
-	_, err = p.conn.WriteToUDP(probeData, rAddr)
-	time.Sleep(2 * time.Millisecond)
-	_, _ = p.conn.WriteToUDP(probeData, rAddr)
+	// Send 3 paced probe packets (burst)
+	for i := 0; i < constants.ProbeBurstCount; i++ {
+		_, _ = p.conn.WriteToUDP(probeData, rAddr)
+		if i < constants.ProbeBurstCount-1 {
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
 
-	// 2. Targeted probing: only probe predicted ports if Symmetric NAT is detected
+	// Targeted probing for Symmetric NAT
 	if p.GetNATType().IsSymmetric() {
 		targetIP := rAddr.IP
 		candidates := []int{rAddr.Port + 1, rAddr.Port + 2, rAddr.Port - 1, rAddr.Port - 2}
@@ -427,7 +413,57 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 		}
 	}
 
-	return err
+	return nil
+}
+
+
+// StartKeepAliveLoop запускает автоматическую отправку keepalive для активных пиров
+func (p *UDPPuncher) StartKeepAliveLoop() {
+	go func() {
+		ticker := time.NewTicker(constants.KeepAliveInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-p.ctx.Done():
+				return
+			case <-ticker.C:
+				p.keepAliveMu.Lock()
+				targets := make([]string, 0, len(p.keepAliveTargets))
+				for addr := range p.keepAliveTargets {
+					targets = append(targets, addr)
+				}
+				p.keepAliveMu.Unlock()
+
+				for _, addr := range targets {
+					_ = p.SendKeepAlive(addr)
+				}
+			}
+		}
+	}()
+}
+
+// AddKeepAliveTarget добавляет адрес для автоматической отправки keepalive
+func (p *UDPPuncher) AddKeepAliveTarget(addr string) {
+	if addr == "" {
+		return
+	}
+	p.keepAliveMu.Lock()
+	defer p.keepAliveMu.Unlock()
+	if p.keepAliveTargets == nil {
+		p.keepAliveTargets = make(map[string]time.Time)
+	}
+	p.keepAliveTargets[addr] = time.Now()
+}
+
+// RemoveKeepAliveTarget удаляет адрес из списка keepalive
+func (p *UDPPuncher) RemoveKeepAliveTarget(addr string) {
+	if addr == "" {
+		return
+	}
+	p.keepAliveMu.Lock()
+	defer p.keepAliveMu.Unlock()
+	delete(p.keepAliveTargets, addr)
 }
 
 // SendKeepAlive sends a tiny keep-alive packet to maintain CGNAT port mappings.

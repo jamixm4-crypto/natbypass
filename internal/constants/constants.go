@@ -37,8 +37,8 @@ const (
 	KeepAlivePayload = "KAEP"
 
 	// UDP Hole punching & keepalive intervals
-	ProbeBurstCount    = 2
-	MaxProbesPerSecond = 2
-	MinProbeInterval   = 500 * time.Millisecond
-	KeepAliveInterval  = 15 * time.Second
+	ProbeBurstCount    = 3
+	MaxProbesPerSecond = 10
+	MinProbeInterval   = 100 * time.Millisecond
+	KeepAliveInterval  = 8 * time.Second
 )

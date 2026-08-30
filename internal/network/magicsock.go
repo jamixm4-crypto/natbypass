@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/natbypass/natbypass/internal/constants"
 )
 
 // PathType represents the classification of a network transport candidate.
@@ -167,7 +169,10 @@ func (ms *MagicSock) RecordProbeSuccess(deviceID, fromAddr string, rtt time.Dura
 			shouldSwitch = true
 		} else if cand.Priority <= activeCand.Priority && cand.Latency < activeCand.Latency {
 			shouldSwitch = true
-		} else if time.Since(activeCand.LastSuccess) > 15*time.Second {
+		} else if time.Since(activeCand.LastSuccess) > 5*time.Second {
+			shouldSwitch = true
+		} else if cand.Latency > 0 && activeCand.Latency > 0 && cand.Latency < activeCand.Latency/2 {
+			// Switch if new path is 2x faster
 			shouldSwitch = true
 		}
 	} else {
@@ -187,6 +192,39 @@ func (ms *MagicSock) RecordProbeSuccess(deviceID, fromAddr string, rtt time.Dura
 	}
 }
 
+
+// RecordProbeFailure увеличивает счётчик неудач и переключает путь при 3 неудачах подряд
+func (ms *MagicSock) RecordProbeFailure(deviceID, fromAddr string) {
+	ms.mu.RLock()
+	pr, ok := ms.peerRoutes[deviceID]
+	ms.mu.RUnlock()
+	if !ok || pr == nil {
+		return
+	}
+
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+
+	if cand, ok := pr.Candidates[fromAddr]; ok {
+		cand.Failures++
+		// Если 3 неудачи подряд — переключаемся на лучший альтернативный путь
+		if cand.Failures >= 3 && pr.ActiveEndpoint == fromAddr {
+			for addr, c := range pr.Candidates {
+				if addr != fromAddr && c.LastSuccess.After(time.Now().Add(-10*time.Second)) {
+					old := pr.ActiveEndpoint
+					pr.ActiveEndpoint = addr
+					pr.ActiveType = c.Type
+					pr.BestLatency = c.Latency
+					if ms.onPathSwitch != nil {
+						ms.onPathSwitch(deviceID, old, addr, c.Type)
+					}
+					break
+				}
+			}
+		}
+	}
+}
+
 // GetActiveRoute returns the best current transmission endpoint for a peer.
 func (ms *MagicSock) GetActiveRoute(deviceID string) (string, PathType, time.Duration) {
 	ms.mu.RLock()
@@ -201,7 +239,7 @@ func (ms *MagicSock) GetActiveRoute(deviceID string) (string, PathType, time.Dur
 	return pr.ActiveEndpoint, pr.ActiveType, pr.BestLatency
 }
 
-// TriggerRoamingProbes fires immediate multi-path probe bursts to all candidates across all peers.
+// TriggerRoamingProbes fires immediate multi-path probe bursts (3 packets with 50ms pacing) to all candidates across all peers.
 func (ms *MagicSock) TriggerRoamingProbes() {
 	if ms.puncher == nil {
 		return
@@ -213,16 +251,21 @@ func (ms *MagicSock) TriggerRoamingProbes() {
 		pr.mu.RLock()
 		for _, cand := range pr.Candidates {
 			if cand.Address != "" {
-				_ = ms.puncher.SendHolePunchProbe(cand.Address)
+				for i := 0; i < constants.ProbeBurstCount; i++ {
+					_ = ms.puncher.SendHolePunchProbe(cand.Address)
+					if i < constants.ProbeBurstCount-1 {
+						time.Sleep(50 * time.Millisecond)
+					}
+				}
 			}
 		}
 		pr.mu.RUnlock()
 	}
 }
 
-// maintenanceLoop runs background health checks and path optimization every 4 seconds.
+// maintenanceLoop runs background health checks and path optimization every 2 seconds.
 func (ms *MagicSock) maintenanceLoop() {
-	ticker := time.NewTicker(4 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	for {
