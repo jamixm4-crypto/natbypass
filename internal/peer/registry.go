@@ -69,26 +69,18 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
-	// Timestamp-based race condition resolution and active endpoint protection
-	if newer.LastSeen.After(existing.LastSeen) || existing.LastSeen.IsZero() {
-		// Newer beacon has precedence, but protect active direct P2P endpoint if newer hasn't probed yet
-		if newer.ActiveEndpoint != "" {
-			existing.ActiveEndpoint = newer.ActiveEndpoint
-			existing.DirectP2P = newer.DirectP2P
-		} else if existing.DirectP2P && time.Since(existing.LastSeen) < 45*time.Second {
+	// Timestamp-based race condition resolution and active direct P2P endpoint protection
+	if existing.DirectP2P && (existing.LastSeen.IsZero() || time.Since(existing.LastSeen) < 45*time.Second) {
+		if newer.ActiveEndpoint == "" {
 			newer.DirectP2P = true
 			newer.ActiveEndpoint = existing.ActiveEndpoint
-			newer.Latency = existing.Latency
-			newer.PingMs = existing.PingMs
+			if newer.Latency == 0 && existing.Latency > 0 {
+				newer.Latency = existing.Latency
+				newer.PingMs = existing.PingMs
+			}
 		}
-	} else {
-		// Existing beacon is newer: keep existing direct P2P endpoint if fresh
-		if newer.ActiveEndpoint == "" && existing.DirectP2P && time.Since(existing.LastSeen) < 45*time.Second {
-			newer.DirectP2P = true
-			newer.ActiveEndpoint = existing.ActiveEndpoint
-			newer.Latency = existing.Latency
-			newer.PingMs = existing.PingMs
-		}
+	} else if newer.ActiveEndpoint != "" {
+		newer.DirectP2P = true
 	}
 
 	if newer.Arch == "" && existing.Arch != "" {
