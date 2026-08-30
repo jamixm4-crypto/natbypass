@@ -26,3 +26,16 @@ func TestKillSwitch_Lifecycle(t *testing.T) {
 		t.Fatalf("expected kill switch to be disabled after Disable()")
 	}
 }
+
+func TestKillSwitch_AutoRecovery(t *testing.T) {
+	ks := NewKillSwitch()
+	_ = ks.Enable("nb0")
+	if !ks.IsEnabled() {
+		t.Fatalf("expected kill switch to be enabled")
+	}
+
+	_ = ks.Disable()
+	if ks.IsEnabled() {
+		t.Fatalf("expected kill switch to be disabled")
+	}
+}

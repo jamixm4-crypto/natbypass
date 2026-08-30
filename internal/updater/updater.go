@@ -116,18 +116,30 @@ func (u *Updater) DownloadAndVerify(release *ReleaseInfo) (string, error) {
 		return "", fmt.Errorf("failed to read binary data: %w", err)
 	}
 
-	// Если задан публичный ключ Ed25519 — проверяем подпись из .sig файла
+	// Если задан публичный ключ — проверка подписи ОБЯЗАТЕЛЬНА
 	if len(u.publicKey) == ed25519.PublicKeySize {
 		sigURL := release.AssetURL + ".sig"
 		sigResp, err := http.Get(sigURL)
-		if err == nil && sigResp.StatusCode == http.StatusOK {
-			defer sigResp.Body.Close()
-			signature, sigErr := io.ReadAll(sigResp.Body)
-			if sigErr == nil && len(signature) == ed25519.SignatureSize {
-				if !ed25519.Verify(u.publicKey, binaryData, signature) {
-					return "", fmt.Errorf("Ed25519 signature verification failed")
-				}
-			}
+		if err != nil {
+			return "", fmt.Errorf("CRITICAL: signature file unavailable, refusing update: %w", err)
+		}
+		defer sigResp.Body.Close()
+
+		if sigResp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("CRITICAL: signature file returned HTTP %d, refusing update", sigResp.StatusCode)
+		}
+
+		signature, err := io.ReadAll(sigResp.Body)
+		if err != nil {
+			return "", fmt.Errorf("CRITICAL: failed to read signature: %w", err)
+		}
+
+		if len(signature) != ed25519.SignatureSize {
+			return "", fmt.Errorf("CRITICAL: invalid signature size %d", len(signature))
+		}
+
+		if !ed25519.Verify(u.publicKey, binaryData, signature) {
+			return "", fmt.Errorf("CRITICAL: Ed25519 signature verification FAILED, possible tampering")
 		}
 	}
 

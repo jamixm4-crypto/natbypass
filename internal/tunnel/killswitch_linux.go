@@ -73,6 +73,7 @@ func (k *KillSwitch) disableInternal() error {
 	_ = exec.Command("iptables", "-D", "OUTPUT", "-d", "192.168.0.0/16", "-j", "ACCEPT").Run()
 	_ = exec.Command("iptables", "-D", "OUTPUT", "-d", "10.0.0.0/8", "-j", "ACCEPT").Run()
 	_ = exec.Command("iptables", "-D", "OUTPUT", "-d", "172.16.0.0/12", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-D", "OUTPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT").Run()
 	k.enabled = false
 	return nil
 }
@@ -84,7 +85,7 @@ func (k *KillSwitch) IsEnabled() bool {
 	return k.enabled
 }
 
-// AutoEnableOnTunnelDown запускает фоновый мониторинг TUN и включает Kill Switch при падении интерфейса.
+// AutoEnableOnTunnelDown запускает мониторинг TUN и управляет Kill Switch автоматически.
 func (k *KillSwitch) AutoEnableOnTunnelDown(ctx context.Context, tunInterface string) {
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
@@ -106,8 +107,16 @@ func (k *KillSwitch) AutoEnableOnTunnelDown(ctx context.Context, tunInterface st
 						break
 					}
 				}
-				if !found && !k.IsEnabled() {
+
+				k.mu.Lock()
+				if !found && !k.enabled {
+					k.mu.Unlock()
 					_ = k.Enable(tunInterface)
+				} else if found && k.enabled {
+					k.mu.Unlock()
+					_ = k.Disable()
+				} else {
+					k.mu.Unlock()
 				}
 			}
 		}

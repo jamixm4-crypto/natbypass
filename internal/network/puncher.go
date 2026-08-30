@@ -653,30 +653,49 @@ func (p *UDPPuncher) readLoop() {
 	}
 }
 
-// HopPort закрывает текущий сокет и переоткрывает UDP-порт на случайном значении (10000-60000).
+// HopPort закрывает текущий сокет и переоткрывает UDP-порт на случайном значении без race condition.
 func (p *UDPPuncher) HopPort() (int, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
-	if p.conn != nil {
-		_ = p.conn.Close()
+	// 1. Останавливаем старый readLoop через cancel
+	if p.cancel != nil {
+		p.cancel()
 	}
 
+	// 2. Закрываем старый сокет
+	if p.conn != nil {
+		_ = p.conn.Close()
+		p.conn = nil
+	}
+
+	// 3. Создаём новый контекст
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+
+	// 4. Открываем новый сокет
 	lAddr, _ := net.ResolveUDPAddr("udp", ":0")
 	conn, err := net.ListenUDP("udp", lAddr)
 	if err != nil {
 		lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
 		conn, err = net.ListenUDP("udp4", lAddr4)
 		if err != nil {
+			p.mu.Unlock()
 			return 0, fmt.Errorf("failed to re-bind port during hop: %w", err)
 		}
 	}
 
 	p.conn = conn
 	p.localPort = conn.LocalAddr().(*net.UDPAddr).Port
+	p.mu.Unlock()
 
-	// Перезапуск цикла чтения
+	// 5. Перезапуск цикла чтения
 	go p.readLoop()
+
+	// 6. Обновляем STUN mapping
+	go func() {
+		ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+		defer cancel()
+		_, _, _ = p.DiscoverMappedAddress(ctx)
+	}()
 
 	return p.localPort, nil
 }

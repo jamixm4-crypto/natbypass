@@ -95,7 +95,19 @@ func (s *SessionState) Decrypt(data []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	aead, err := chacha20poly1305.New(s.ReceivingChain.ChainKey)
+	// Ключ сообщения через HMAC-SHA256
+	mac := hmac.New(sha256.New, s.ReceivingChain.ChainKey)
+	mac.Write([]byte{0x01})
+	msgKey := mac.Sum(nil)
+
+	// Ротация цепочки ключей
+	macNext := hmac.New(sha256.New, s.ReceivingChain.ChainKey)
+	macNext.Write([]byte{0x02})
+	s.ReceivingChain.ChainKey = macNext.Sum(nil)
+	s.ReceivingChain.Counter++
+
+	// Создаём AEAD из message key
+	aead, err := chacha20poly1305.New(msgKey)
 	if err != nil {
 		return nil, err
 	}
@@ -104,22 +116,8 @@ func (s *SessionState) Decrypt(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("ciphertext too short")
 	}
 
-	mac := hmac.New(sha256.New, s.ReceivingChain.ChainKey)
-	mac.Write([]byte{0x01})
-	msgKey := mac.Sum(nil)
+	nonce := data[:aead.NonceSize()]
+	ciphertext := data[aead.NonceSize():]
 
-	macNext := hmac.New(sha256.New, s.ReceivingChain.ChainKey)
-	macNext.Write([]byte{0x02})
-	s.ReceivingChain.ChainKey = macNext.Sum(nil)
-	s.ReceivingChain.Counter++
-
-	msgAead, err := chacha20poly1305.New(msgKey)
-	if err != nil {
-		return nil, err
-	}
-
-	nonce := data[:msgAead.NonceSize()]
-	ciphertext := data[msgAead.NonceSize():]
-
-	return msgAead.Open(nil, nonce, ciphertext, nil)
+	return aead.Open(nil, nonce, ciphertext, nil)
 }
