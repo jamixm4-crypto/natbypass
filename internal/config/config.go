@@ -221,11 +221,19 @@ func setDefaults(v *viper.Viper) {
 		"https://checkip.amazonaws.com",
 	})
 
+	v.SetDefault("wireguard.enabled", true)
 	v.SetDefault("wireguard.interface", "wg0")
 	v.SetDefault("wireguard.listen_port", 443)
 	v.SetDefault("wireguard.mtu", 1420)
 	v.SetDefault("wireguard.awg_version", "3.1")
 	v.SetDefault("wireguard.awg_preset", "awg31_strict")
+	v.SetDefault("wireguard.awg.enabled", true)
+	v.SetDefault("wireguard.awg.version", "3.1")
+	v.SetDefault("wireguard.awg.preset", "awg31_strict")
+	v.SetDefault("wireguard.awg.listen_port", 443)
+	v.SetDefault("wireguard.awg.header_protection_enabled", true)
+	v.SetDefault("wireguard.awg.random_trailers", true)
+	v.SetDefault("wireguard.awg.disable_cookies", true)
 
 	v.SetDefault("daemon.pid_file", "/var/run/natbypass.pid")
 	v.SetDefault("daemon.restart_delay", 5)
