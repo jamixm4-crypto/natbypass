@@ -26,14 +26,26 @@ func runRouteCmd(name string, args ...string) error {
 	return nil
 }
 
-// EnableHostIPForwarding sets IP forwarding on interface "NatBypass", enables IP routing in Windows registry,
-// and activates Windows NetNat (kernel NAT masquerading) for the mesh subnet.
-func EnableHostIPForwarding() error {
+// EnableHostIPForwardingSubnet sets IP forwarding and activates Windows NetNat for dynamic mesh subnet.
+func EnableHostIPForwardingSubnet(subnet string) error {
+	if subnet == "" {
+		subnet = "100.64.200.0/24"
+	}
+	cleanSubnet := subnet
+	if !strings.Contains(cleanSubnet, "/") {
+		parts := strings.Split(cleanSubnet, ".")
+		if len(parts) >= 3 {
+			cleanSubnet = fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
+		} else {
+			cleanSubnet = "100.64.200.0/24"
+		}
+	}
+
 	// 1. Enable forwarding on NatBypass adapter
 	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "interface", "NatBypass", "forwarding=enabled")
 
 	// 2. Enable IP routing in Windows Registry & NetNat & enable forwarding on all active network adapters
-	psScript := `
+	psScript := fmt.Sprintf(`
 		Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'IPEnableRouter' -Value 1 -ErrorAction SilentlyContinue
 		Set-Service -Name RemoteAccess -StartupType Automatic -ErrorAction SilentlyContinue
 		Start-Service -Name RemoteAccess -ErrorAction SilentlyContinue
@@ -41,10 +53,9 @@ func EnableHostIPForwarding() error {
 		Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
 			netsh interface ipv4 set interface $_.InterfaceAlias forwarding=enabled
 		}
-		if (-not (Get-NetNat -Name 'NatBypassNAT' -ErrorAction SilentlyContinue)) {
-			New-NetNat -Name 'NatBypassNAT' -InternalIPInterfaceAddressPrefix '100.64.200.0/24' -ErrorAction SilentlyContinue
-		}
-	`
+		Remove-NetNat -Name 'NatBypassNAT' -Confirm:$false -ErrorAction SilentlyContinue
+		New-NetNat -Name 'NatBypassNAT' -InternalIPInterfaceAddressPrefix '%s' -ErrorAction SilentlyContinue
+	`, cleanSubnet)
 	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 
 	// 3. Add Windows firewall rules for interface forwarding
@@ -52,6 +63,11 @@ func EnableHostIPForwarding() error {
 	_ = runRouteCmd("netsh", "advfirewall", "firewall", "add", "rule", "name=NatBypass Forward Out", "dir=out", "action=allow", "interface=NatBypass")
 
 	return nil
+}
+
+// EnableHostIPForwarding enables IP forwarding for default mesh subnet.
+func EnableHostIPForwarding() error {
+	return EnableHostIPForwardingSubnet("100.64.200.0/24")
 }
 
 // DisableHostIPForwarding disables IP forwarding and cleans up NetNat rule.
@@ -67,12 +83,13 @@ func EnableExitNodeRouting(gatewayVIP string) error {
 	if gatewayVIP == "" {
 		return fmt.Errorf("gateway VIP is required")
 	}
-	if err := runRouteCmd("route", "add", "0.0.0.0", "mask", "128.0.0.0", gatewayVIP, "metric", "5"); err != nil {
-		return fmt.Errorf("failed to add default route 0.0.0.0/1 via %s: %w", gatewayVIP, err)
+	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+	if err := runRouteCmd("route", "add", "0.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"); err != nil {
+		return fmt.Errorf("failed to add default route 0.0.0.0/1 via %s: %w", cleanVIP, err)
 	}
-	if err := runRouteCmd("route", "add", "128.0.0.0", "mask", "128.0.0.0", gatewayVIP, "metric", "5"); err != nil {
-		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", gatewayVIP)
-		return fmt.Errorf("failed to add default route 128.0.0.0/1 via %s: %w", gatewayVIP, err)
+	if err := runRouteCmd("route", "add", "128.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"); err != nil {
+		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", cleanVIP)
+		return fmt.Errorf("failed to add default route 128.0.0.0/1 via %s: %w", cleanVIP, err)
 	}
 	return nil
 }

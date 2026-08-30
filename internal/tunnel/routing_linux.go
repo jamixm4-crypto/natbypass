@@ -19,17 +19,42 @@ func runLinuxCmd(name string, args ...string) error {
 	return nil
 }
 
-// EnableHostIPForwarding enables kernel IPv4 forwarding and adds iptables NAT masquerading for mesh subnet.
-func EnableHostIPForwarding() error {
+// EnableHostIPForwardingSubnet enables kernel IPv4 forwarding and adds iptables NAT masquerading for mesh subnet.
+func EnableHostIPForwardingSubnet(subnet string) error {
 	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.ip_forward=1")
-	_ = runLinuxCmd("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
-	_ = runLinuxCmd("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
+	if subnet == "" {
+		subnet = "100.64.200.0/24"
+	}
+	cleanSubnet := subnet
+	if !strings.Contains(cleanSubnet, "/") {
+		parts := strings.Split(cleanSubnet, ".")
+		if len(parts) >= 3 {
+			cleanSubnet = fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
+		} else {
+			cleanSubnet = "100.64.200.0/24"
+		}
+	}
+	iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
+	for _, ipt := range iptablesPaths {
+		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", cleanSubnet, "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", cleanSubnet, "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
+	}
 	return nil
+}
+
+// EnableHostIPForwarding enables kernel IPv4 forwarding and adds iptables NAT masquerading for default mesh subnet.
+func EnableHostIPForwarding() error {
+	return EnableHostIPForwardingSubnet("100.64.200.0/24")
 }
 
 // DisableHostIPForwarding removes iptables NAT masquerading rule.
 func DisableHostIPForwarding() error {
-	_ = runLinuxCmd("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
+	iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
+	for _, ipt := range iptablesPaths {
+		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
+	}
 	return nil
 }
 
@@ -38,26 +63,38 @@ func EnableExitNodeRouting(gatewayVIP string) error {
 	if gatewayVIP == "" {
 		return fmt.Errorf("gateway VIP is required")
 	}
-	_ = runLinuxCmd("ip", "route", "add", "0.0.0.0/1", "via", gatewayVIP)
-	_ = runLinuxCmd("ip", "route", "add", "128.0.0.0/1", "via", gatewayVIP)
+	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+	err1 := runLinuxCmd("ip", "route", "add", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "onlink")
+	if err1 != nil {
+		_ = runLinuxCmd("ip", "route", "add", "0.0.0.0/1", "via", cleanVIP)
+	}
+	err2 := runLinuxCmd("ip", "route", "add", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "onlink")
+	if err2 != nil {
+		_ = runLinuxCmd("ip", "route", "add", "128.0.0.0/1", "via", cleanVIP)
+	}
 	return nil
 }
 
 // DisableExitNodeRouting removes def1 routes.
 func DisableExitNodeRouting(gatewayVIP string) error {
 	if gatewayVIP != "" {
-		_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1", "via", gatewayVIP)
-		_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1", "via", gatewayVIP)
-	} else {
-		_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1")
-		_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1")
+		cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+		_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1", "via", cleanVIP)
+		_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1", "via", cleanVIP)
 	}
+	_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1")
+	_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1")
 	return nil
 }
 
-// AddSubnetRoute adds a route for a subnet CIDR via gatewayVIP.
+// AddSubnetRoute adds a route for a subnet CIDR via gatewayVIP with dev nb0 onlink.
 func AddSubnetRoute(subnetCIDR string, gatewayVIP string) error {
-	return runLinuxCmd("ip", "route", "add", subnetCIDR, "via", gatewayVIP)
+	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+	err := runLinuxCmd("ip", "route", "add", subnetCIDR, "via", cleanVIP, "dev", "nb0", "onlink")
+	if err != nil {
+		return runLinuxCmd("ip", "route", "add", subnetCIDR, "via", cleanVIP)
+	}
+	return nil
 }
 
 // RemoveSubnetRoute removes a route for a subnet CIDR via gatewayVIP.

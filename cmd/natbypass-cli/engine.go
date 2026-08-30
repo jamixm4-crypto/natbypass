@@ -171,10 +171,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if len(payload) < 20 {
 				return
 			}
+			if payload[0]>>4 != 4 {
+				return // Must be IPv4
+			}
 			srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
 			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 			if srcIP == cleanVIP && cleanVIP != "" {
 				return // Protect against loopback reflection
+			}
+			// Verify IPv4 Total Length to ensure exact packet boundary
+			totalLen := int(binary.BigEndian.Uint16(payload[2:4]))
+			if totalLen >= 20 && totalLen <= len(payload) {
+				payload = payload[:totalLen]
 			}
 			if tunDev != nil {
 				_ = tunDev.WritePacket(payload)
@@ -228,8 +236,23 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					if !ok {
 						return
 					}
-					dstIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19]).String()
-					p, found := registry.GetByVirtualIP(dstIP)
+					if len(pkt) < 20 || pkt[0]>>4 != 4 {
+						continue
+					}
+					dstNetIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
+					dstIP := dstNetIP.String()
+					cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+
+					// Ignore multicast, broadcast, loopback
+					if dstNetIP.IsMulticast() || dstNetIP.IsUnspecified() || dstIP == "255.255.255.255" || dstIP == cleanVIP || strings.HasSuffix(dstIP, ".255") {
+						continue
+					}
+
+					var p *peer.Peer
+					var found bool
+
+					// 1. Direct match on Virtual IP
+					p, found = registry.GetByVirtualIP(dstIP)
 					if !found || p == nil {
 						for _, item := range registry.List() {
 							pVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
@@ -238,15 +261,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								found = true
 								break
 							}
+						}
+					}
+
+					// 2. Longest Prefix Match (LPM) on AdvertisedRoutes
+					if !found || p == nil {
+						bestPrefixLen := -1
+						for _, item := range registry.List() {
 							for _, route := range item.AdvertisedRoutes {
-								if _, ipNet, err2 := net.ParseCIDR(route); err2 == nil && ipNet.Contains(net.ParseIP(dstIP)) {
-									p = item
-									found = true
-									break
+								if _, ipNet, err2 := net.ParseCIDR(strings.TrimSpace(route)); err2 == nil && ipNet.Contains(dstNetIP) {
+									ones, _ := ipNet.Mask.Size()
+									if ones > bestPrefixLen {
+										bestPrefixLen = ones
+										p = item
+										found = true
+									}
 								}
-							}
-							if found {
-								break
 							}
 						}
 					}

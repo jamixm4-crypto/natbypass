@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.128"
+	Version = "1.9.129"
 	Commit  = "release"
 )
 
@@ -3277,20 +3277,21 @@ func startEngineFromConfig(c *config.Config) {
 								}
 							}
 
-							// 2. Маршрут к подсети пира (например, 192.168.1.0/24 или 10.0.0.0/8)
+							// 2. Маршрут к подсети пира с Longest Prefix Match (LPM)
 							if targetPeer == nil {
+								bestPrefixLen := -1
 								for _, p := range peers {
 									if p.DeviceID == myDevID {
 										continue
 									}
 									for _, route := range p.AdvertisedRoutes {
-										if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
-											targetPeer = p
-											break
+										if _, ipNet, err := net.ParseCIDR(strings.TrimSpace(route)); err == nil && ipNet.Contains(destIP) {
+											ones, _ := ipNet.Mask.Size()
+											if ones > bestPrefixLen {
+												bestPrefixLen = ones
+												targetPeer = p
+											}
 										}
-									}
-									if targetPeer != nil {
-										break
 									}
 								}
 							}

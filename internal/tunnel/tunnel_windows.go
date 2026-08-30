@@ -150,13 +150,14 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 			return c.Run()
 		}
 
+		cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
 		// 1. Ожидаем готовности интерфейса в NDIS и устанавливаем статический IP через netsh
 		ipAssigned := false
 		for i := 0; i < 10; i++ {
 			err := runNetsh("interface", "ipv4", "set", "address",
 				fmt.Sprintf("name=%s", adapterName),
 				"source=static",
-				fmt.Sprintf("address=%s", virtualIP),
+				fmt.Sprintf("address=%s", cleanVIP),
 				"mask=255.255.255.0",
 			)
 			if err == nil {
@@ -168,7 +169,7 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 
 		// PowerShell fallback if netsh was blocked
 		if !ipAssigned {
-			psCmd := fmt.Sprintf(`New-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -ErrorAction SilentlyContinue`, adapterName, virtualIP, adapterName, virtualIP)
+			psCmd := fmt.Sprintf(`New-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -ErrorAction SilentlyContinue`, adapterName, cleanVIP, adapterName, cleanVIP)
 			_ = runHiddenPS(psCmd)
 		}
 
@@ -208,7 +209,6 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		_ = runHiddenPS(psFW)
 
 		// 5. Явный маршрут для подсети виртуального IP и 100.64.200.0/24
-		cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
 		prefix := "100.64.200"
 		parts := strings.Split(cleanVIP, ".")
 		if len(parts) >= 3 {
