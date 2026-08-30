@@ -123,18 +123,23 @@ type UDPPuncher struct {
 	addrCache        sync.Map
 }
 
-// resolveAddr resolves a UDP address string with caching to avoid per-packet DNS overhead.
+// resolveAddr resolves a UDP address string with caching to avoid per-packet overhead.
+// Tries dual-stack "udp" first, falls back to "udp4" exactly as the original code did.
 func (p *UDPPuncher) resolveAddr(targetAddr string) (*net.UDPAddr, error) {
 	if cached, ok := p.addrCache.Load(targetAddr); ok {
 		return cached.(*net.UDPAddr), nil
 	}
-	rAddr, err := net.ResolveUDPAddr("udp4", targetAddr)
+	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
 	if err != nil {
-		return nil, err
+		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
+		if err != nil {
+			return nil, err
+		}
 	}
 	p.addrCache.Store(targetAddr, rAddr)
 	return rAddr, nil
 }
+
 
 // NewUDPPuncher creates a new persistent UDP socket for STUN, hole punching, and data transfer.
 func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPing DirectPingCallback) (*UDPPuncher, error) {
