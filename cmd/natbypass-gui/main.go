@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.119"
+	Version = "1.9.120"
 	Commit  = "release"
 )
 
@@ -3346,14 +3346,36 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}()
 
+	activeProf := c.EnsureActiveProfile()
+	if activeProf != nil {
+		c.SyncSignalingWithProfile(activeProf)
+		c.SyncAWGWithProfile(activeProf)
+	}
+
 	tgToken := ""
 	tgChat := ""
 	mqBroker := "tcp://broker.emqx.io:1883"
-	mqTopic := "natbypass/mynet/peers"
+	mqTopic := "natbypass/mesh/default"
+	if activeProf != nil {
+		if activeProf.MQTTBroker != "" {
+			mqBroker = activeProf.MQTTBroker
+		}
+		if activeProf.MQTTTopic != "" {
+			mqTopic = activeProf.MQTTTopic
+		}
+		if activeProf.TGToken != "" {
+			tgToken = activeProf.TGToken
+			tgChat = fmt.Sprintf("%d", activeProf.TGChatID)
+		}
+	}
 	for _, ch := range c.Signaling.Channels {
 		if ch.Type == "telegram" && ch.Params != nil {
-			tgToken = ch.Params["token"]
-			tgChat = ch.Params["chat_id"]
+			if ch.Params["token"] != "" {
+				tgToken = ch.Params["token"]
+			}
+			if ch.Params["chat_id"] != "" {
+				tgChat = ch.Params["chat_id"]
+			}
 		}
 		if ch.Type == "mqtt" && ch.Params != nil {
 			if ch.Params["broker_url"] != "" {
