@@ -409,22 +409,36 @@ func ExportProfileURI(p Profile) string {
 	if p.AWGPreset != "" {
 		q.Set("awg", p.AWGPreset)
 	}
-	if p.H1 != 0 {
-		q.Set("h1", fmt.Sprintf("%d", p.H1))
-		q.Set("h2", fmt.Sprintf("%d", p.H2))
-		q.Set("h3", fmt.Sprintf("%d", p.H3))
-		q.Set("h4", fmt.Sprintf("%d", p.H4))
-		q.Set("s1", fmt.Sprintf("%d", p.S1))
-		q.Set("s2", fmt.Sprintf("%d", p.S2))
-		q.Set("jc", fmt.Sprintf("%d", p.Jc))
-		q.Set("jmin", fmt.Sprintf("%d", p.Jmin))
-		q.Set("jmax", fmt.Sprintf("%d", p.Jmax))
-		if p.HeaderProtectionKey != "" {
-			q.Set("hpk", p.HeaderProtectionKey)
-		}
-		q.Set("rt", fmt.Sprintf("%t", p.RandomTrailers))
-		q.Set("dc", fmt.Sprintf("%t", p.DisableCookies))
+	// Гарантируем экспорт полных параметров AWG 3.1, чтобы все узлы в сети имели 100% идентичные ключи обфускации
+	h1, h2, h3, h4 := p.H1, p.H2, p.H3, p.H4
+	s1, s2, jc, jmin, jmax := p.S1, p.S2, p.Jc, p.Jmin, p.Jmax
+	hpk := p.HeaderProtectionKey
+	rt := p.RandomTrailers
+	dc := p.DisableCookies
+
+	if h1 == 0 || h2 == 0 || h3 == 0 || h4 == 0 {
+		genJc, genJmin, genJmax, genS1, genS2, genH1, genH2, genH3, genH4, genHPK := GenerateRandomAWGProfileParams()
+		jc, jmin, jmax, s1, s2 = genJc, genJmin, genJmax, genS1, genS2
+		h1, h2, h3, h4 = genH1, genH2, genH3, genH4
+		hpk = genHPK
+		rt = true
+		dc = true
 	}
+
+	q.Set("h1", fmt.Sprintf("%d", h1))
+	q.Set("h2", fmt.Sprintf("%d", h2))
+	q.Set("h3", fmt.Sprintf("%d", h3))
+	q.Set("h4", fmt.Sprintf("%d", h4))
+	q.Set("s1", fmt.Sprintf("%d", s1))
+	q.Set("s2", fmt.Sprintf("%d", s2))
+	q.Set("jc", fmt.Sprintf("%d", jc))
+	q.Set("jmin", fmt.Sprintf("%d", jmin))
+	q.Set("jmax", fmt.Sprintf("%d", jmax))
+	if hpk != "" {
+		q.Set("hpk", hpk)
+	}
+	q.Set("rt", fmt.Sprintf("%t", rt))
+	q.Set("dc", fmt.Sprintf("%t", dc))
 
 	return "natbypass://profile?" + q.Encode()
 }
