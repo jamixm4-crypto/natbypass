@@ -83,6 +83,7 @@ type DirectDataCallback func(srcAddr *net.UDPAddr, payload []byte)
 type DirectMTUCallback func(deviceID string, mtu int, fromAddr string)
 
 type UDPPuncher struct {
+	trafficShaper   *TrafficShaper
 	conn         *net.UDPConn
 	localPort    int
 	mappedIP     net.IP
@@ -489,6 +490,14 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 	copy(fullPkt, header)
 	copy(fullPkt[len(header):], payload)
 
+	p.mu.Lock()
+	shaper := p.trafficShaper
+	p.mu.Unlock()
+
+	if shaper != nil && shaper.IsEnabled() {
+		return shaper.SendPacket(p.conn, rAddr, fullPkt)
+	}
+
 	_, err = p.conn.WriteToUDP(fullPkt, rAddr)
 	return err
 }
@@ -654,6 +663,13 @@ func (p *UDPPuncher) readLoop() {
 }
 
 // HopPort закрывает текущий сокет и переоткрывает UDP-порт на случайном значении без race condition.
+// SetTrafficShaper подключает шейпер для маскировки UDP-пакетов под видеопотоки.
+func (p *UDPPuncher) SetTrafficShaper(shaper *TrafficShaper) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.trafficShaper = shaper
+}
+
 func (p *UDPPuncher) HopPort() (int, error) {
 	p.mu.Lock()
 

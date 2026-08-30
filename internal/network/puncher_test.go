@@ -17,7 +17,6 @@ func TestHopPort_NoRace(t *testing.T) {
 		t.Fatalf("expected non-zero local port")
 	}
 
-	// Hop port sequentially to verify socket teardown and recreate without race
 	for i := 0; i < 3; i++ {
 		newPort, err := p.HopPort()
 		if err != nil {
@@ -27,5 +26,20 @@ func TestHopPort_NoRace(t *testing.T) {
 			t.Fatalf("HopPort returned 0 port on iteration %d", i)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestTrafficShaper_PuncherIntegration(t *testing.T) {
+	p, err := NewUDPPuncher(0, "test-dev-shaper", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create UDPPuncher: %v", err)
+	}
+	defer p.Close()
+
+	shaper := NewTrafficShaper(true)
+	p.SetTrafficShaper(shaper)
+
+	if p.trafficShaper == nil || !p.trafficShaper.IsEnabled() {
+		t.Fatalf("expected traffic shaper to be set and enabled")
 	}
 }
