@@ -607,7 +607,7 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 
 	// Inbound PING confirms that the remote peer reached us directly over UDP
 	if p.onPingResult != nil && remoteAddr != nil {
-		p.onPingResult(senderID, 15*time.Millisecond, remoteAddr.String())
+		p.onPingResult(senderID, 0, remoteAddr.String())
 	}
 }
 

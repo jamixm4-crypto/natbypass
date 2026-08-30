@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.131"
+	Version = "1.9.132"
 	Commit  = "release"
 )
 
@@ -3169,9 +3169,6 @@ func startEngineFromConfig(c *config.Config) {
 					p.Latency = rtt
 				}
 				p.PingMs = p.Latency.Milliseconds()
-			} else if p.PingMs == 0 {
-				p.PingMs = 12
-				p.Latency = 12 * time.Millisecond
 			}
 			p.ActiveEndpoint = fromAddr
 			p.Online = true

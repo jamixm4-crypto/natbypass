@@ -635,7 +635,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.131"
+		ver = "1.9.132"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1419,7 +1419,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.131"
+		ver = "1.9.132"
 	}
 
 	vip := s.state.VirtualIP
@@ -1594,7 +1594,7 @@ func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Если пир в сети онлайн
-			latMs := int64(14)
+			latMs := int64(0)
 			if p.Latency > 0 {
 				latMs = p.Latency.Milliseconds()
 			}
@@ -1606,7 +1606,7 @@ func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"device_id": req.DeviceID, "latency_ms": 12, "direct_p2p": true}, "")
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"device_id": req.DeviceID, "latency_ms": 0, "direct_p2p": false}, "")
 }
 
 // handleAWGParams — POST /api/awg/params — обновление параметров обфускации AWG 2.0
