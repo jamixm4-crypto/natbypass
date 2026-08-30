@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.080"
+	Version = "1.9.081"
 	Commit  = "release"
 )
 
@@ -3344,17 +3344,26 @@ func startEngineFromConfig(c *config.Config) {
 				if udpPuncher != nil && registry != nil {
 					peers := registry.List()
 					for _, p := range peers {
-						// Приоритет: ActiveEndpoint > STUNAddr > LocalAddr
-						// Не шлём сразу по 5 адресам — это создаёт шторм
-						target := p.ActiveEndpoint
-						if target == "" {
-							target = p.STUNAddr
-						}
-						if target == "" {
-							target = p.LocalAddr
-						}
-						if target != "" {
-							_ = udpPuncher.SendHolePunchProbe(target)
+						if p.DirectP2P && p.ActiveEndpoint != "" {
+							_ = udpPuncher.SendKeepAlive(p.ActiveEndpoint)
+						} else {
+							if p.ActiveEndpoint != "" {
+								_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
+							}
+							if p.STUNAddr != "" {
+								_ = udpPuncher.SendHolePunchProbe(p.STUNAddr)
+							}
+							if p.LocalAddr != "" {
+								_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
+							}
+							if p.IPv6Addr != "" {
+								_ = udpPuncher.SendHolePunchProbe(p.IPv6Addr)
+							}
+							for _, cand := range p.Candidates {
+								if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
+									_ = udpPuncher.SendHolePunchProbe(cand)
+								}
+							}
 						}
 					}
 				}
@@ -3924,10 +3933,24 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				addLog(msg)
 				writeDebug(msg)
 
-				// Немедленно посылаем прямой UDP-пакет для пробития сокета
+				// Немедленно посылаем прямой UDP-пакет для пробития сокета по всем кандидатам
 				if udpPuncher != nil {
+					if p.ActiveEndpoint != "" {
+						_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
+					}
 					if p.STUNAddr != "" {
 						_ = udpPuncher.SendHolePunchProbe(p.STUNAddr)
+					}
+					if p.LocalAddr != "" {
+						_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
+					}
+					if p.IPv6Addr != "" {
+						_ = udpPuncher.SendHolePunchProbe(p.IPv6Addr)
+					}
+					for _, cand := range p.Candidates {
+						if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
+							_ = udpPuncher.SendHolePunchProbe(cand)
+						}
 					}
 					if p.PublicIP != "" {
 						port := p.WGPort
@@ -3935,9 +3958,6 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 							port = 47832
 						}
 						_ = udpPuncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
-					}
-					if p.LocalAddr != "" {
-						_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
 					}
 				}
 

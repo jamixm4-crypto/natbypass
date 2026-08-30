@@ -314,13 +314,25 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
 							_ = puncher.SendKeepAlive(p.ActiveEndpoint)
 						} else {
+							if p.ActiveEndpoint != "" {
+								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+							}
 							if p.STUNAddr != "" {
 								_ = puncher.SendHolePunchProbe(p.STUNAddr)
 							}
+							if p.LocalAddr != "" {
+								_ = puncher.SendHolePunchProbe(p.LocalAddr)
+							}
+							if p.IPv6Addr != "" {
+								_ = puncher.SendHolePunchProbe(p.IPv6Addr)
+							}
 							for _, cand := range p.Candidates {
-								if cand != "" && cand != p.STUNAddr {
+								if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
 									_ = puncher.SendHolePunchProbe(cand)
 								}
+							}
+							if p.PublicIP != "" && p.WGPort > 0 {
+								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
 							}
 						}
 					}
@@ -812,13 +824,25 @@ func receiveLoop(
 			}
 
 			if puncher != nil {
+				if p.ActiveEndpoint != "" {
+					_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+				}
 				if p.STUNAddr != "" {
 					_ = puncher.SendHolePunchProbe(p.STUNAddr)
 				}
+				if p.LocalAddr != "" {
+					_ = puncher.SendHolePunchProbe(p.LocalAddr)
+				}
+				if p.IPv6Addr != "" {
+					_ = puncher.SendHolePunchProbe(p.IPv6Addr)
+				}
 				for _, cand := range p.Candidates {
-					if cand != "" && cand != p.STUNAddr {
+					if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
 						_ = puncher.SendHolePunchProbe(cand)
 					}
+				}
+				if p.PublicIP != "" && p.WGPort > 0 {
+					_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
 				}
 			}
 			existingPeer, peerFound := registry.Get(p.DeviceID)
