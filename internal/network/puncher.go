@@ -120,6 +120,20 @@ type UDPPuncher struct {
 
 	keepAliveTargets map[string]time.Time
 	keepAliveMu      sync.Mutex
+	addrCache        sync.Map
+}
+
+// resolveAddr resolves a UDP address string with caching to avoid per-packet DNS overhead.
+func (p *UDPPuncher) resolveAddr(targetAddr string) (*net.UDPAddr, error) {
+	if cached, ok := p.addrCache.Load(targetAddr); ok {
+		return cached.(*net.UDPAddr), nil
+	}
+	rAddr, err := net.ResolveUDPAddr("udp4", targetAddr)
+	if err != nil {
+		return nil, err
+	}
+	p.addrCache.Store(targetAddr, rAddr)
+	return rAddr, nil
 }
 
 // NewUDPPuncher creates a new persistent UDP socket for STUN, hole punching, and data transfer.
@@ -379,12 +393,9 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
 	}
-	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+	rAddr, err := p.resolveAddr(targetAddr)
 	if err != nil {
-		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
 	nowNano := time.Now().UnixNano()
@@ -494,12 +505,9 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 	if targetAddr == "" || p.conn == nil || len(payload) == 0 {
 		return nil
 	}
-	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+	rAddr, err := p.resolveAddr(targetAddr)
 	if err != nil {
-		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
 	if pmax > 0 && pmax >= pmin {
@@ -768,6 +776,7 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	}
 
 	p.conn = conn
+	p.addrCache.Range(func(k, v any) bool { p.addrCache.Delete(k); return true })
 	p.localPort = conn.LocalAddr().(*net.UDPAddr).Port
 	p.mu.Unlock()
 

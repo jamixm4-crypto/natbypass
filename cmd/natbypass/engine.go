@@ -172,7 +172,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				return
 			}
 			srcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
-			cleanVIP := strings.TrimSpace(strings.Split(config.ResolveVirtualIP(cfg, deviceID), "/")[0])
+			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 			if srcIP == cleanVIP && cleanVIP != "" {
 				return // Protect against loopback reflection
 			}
@@ -195,6 +195,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 
 		// L3 Data-plane: Outbound packets from TUN -> Dispatch to peer over UDP Direct or MQTT Relay
+		pktCh := make(chan []byte, 256)
 		go func() {
 			for {
 				select {
@@ -202,88 +203,96 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					return
 				default:
 				}
-
 				pkt, err := tunDev.ReadPacket()
 				if err != nil {
-					time.Sleep(2 * time.Millisecond)
+					time.Sleep(1 * time.Millisecond)
 					continue
 				}
 				if len(pkt) < 20 {
 					continue
 				}
-
-				dstIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19]).String()
-
-				p, found := registry.GetByVirtualIP(dstIP)
-				if !found || p == nil {
-					for _, item := range registry.List() {
-						pVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
-						if pVIP == dstIP && pVIP != "" {
-							p = item
-							found = true
-							break
-						}
-						for _, route := range item.AdvertisedRoutes {
-							if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(net.ParseIP(dstIP)) {
+				pktCopy := make([]byte, len(pkt))
+				copy(pktCopy, pkt)
+				select {
+				case pktCh <- pktCopy:
+				default:
+				}
+			}
+		}()
+		go func() {
+			for {
+				select {
+				case <-engineCtx.Done():
+					return
+				case pkt, ok := <-pktCh:
+					if !ok {
+						return
+					}
+					dstIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19]).String()
+					p, found := registry.GetByVirtualIP(dstIP)
+					if !found || p == nil {
+						for _, item := range registry.List() {
+							pVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
+							if pVIP == dstIP && pVIP != "" {
 								p = item
 								found = true
 								break
 							}
+							for _, route := range item.AdvertisedRoutes {
+								if _, ipNet, err2 := net.ParseCIDR(route); err2 == nil && ipNet.Contains(net.ParseIP(dstIP)) {
+									p = item
+									found = true
+									break
+								}
+							}
+							if found {
+								break
+							}
 						}
-						if found {
-							break
+					}
+					if found && p != nil {
+						sentDirect := false
+						targetEP := p.ActiveEndpoint
+						if magicSock != nil {
+							if bestEP, _, _ := magicSock.GetActiveRoute(p.DeviceID); bestEP != "" {
+								targetEP = bestEP
+							}
+						}
+						if targetEP == "" {
+							targetEP = p.STUNAddr
+						}
+						if targetEP == "" {
+							targetEP = p.LocalAddr
+						}
+						if targetEP == "" && p.PublicIP != "" && p.WGPort > 0 {
+							targetEP = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
+						}
+						pmin := 0
+						pmax := 0
+						if p.AWG != nil {
+							pmin = p.AWG.Pmin
+							pmax = p.AWG.Pmax
+						}
+						if targetEP != "" && puncher != nil {
+							if err3 := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err3 == nil {
+								sentDirect = true
+							}
+						}
+						if !sentDirect && udpRelay != nil && udpRelay.IsConnected() {
+							if err3 := udpRelay.SendPacket(p.DeviceID, pkt); err3 == nil {
+								sentDirect = true
+							}
+						}
+						if !sentDirect && wssClient != nil && wssClient.IsConnected() {
+							if err3 := wssClient.SendPacket(p.DeviceID, pkt); err3 == nil {
+								sentDirect = true
+							}
+						}
+						if !sentDirect && sigMgr != nil {
+							_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 						}
 					}
 				}
-
-
-				if found && p != nil {
-					sentDirect := false
-					targetEP := p.ActiveEndpoint
-					if magicSock != nil {
-						if bestEP, _, _ := magicSock.GetActiveRoute(p.DeviceID); bestEP != "" {
-							targetEP = bestEP
-						}
-					}
-					if targetEP == "" {
-						targetEP = p.STUNAddr
-					}
-					if targetEP == "" {
-						targetEP = p.LocalAddr
-					}
-					if targetEP == "" && p.PublicIP != "" && p.WGPort > 0 {
-						targetEP = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
-					}
-
-					pmin := 0
-					pmax := 0
-					if p.AWG != nil {
-						pmin = p.AWG.Pmin
-						pmax = p.AWG.Pmax
-					}
-
-					if targetEP != "" && puncher != nil {
-						if err := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
-							sentDirect = true
-						}
-					}
-					// Релей через UDP Relay, WSS (порт 443) или сигнальный канал только если прямой UDP-сокет недоступен
-					if !sentDirect && udpRelay != nil && udpRelay.IsConnected() {
-						if err := udpRelay.SendPacket(p.DeviceID, pkt); err == nil {
-							sentDirect = true
-						}
-					}
-					if !sentDirect && wssClient != nil && wssClient.IsConnected() {
-						if err := wssClient.SendPacket(p.DeviceID, pkt); err == nil {
-							sentDirect = true
-						}
-					}
-					if !sentDirect && sigMgr != nil {
-						_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
-					}
-				}
-
-
 			}
 		}()
 	}
