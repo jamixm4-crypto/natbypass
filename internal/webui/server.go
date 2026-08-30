@@ -635,7 +635,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.127"
+		ver = "1.9.128"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -651,7 +651,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"uptime":          uptime,
 		"started_at":      s.state.StartedAt,
 		"current_channel": currentChannel,
-		"peers_count":     len(s.registry.List()),
+		"peers_count":     s.countRemotePeers(),
 	}
 	s.jsonResponse(w, http.StatusOK, status, "")
 }
@@ -1340,7 +1340,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	totalLatency := int64(0)
 	latencySamples := 0
 
+	myDevID := ""
+	if s.state != nil {
+		myDevID = s.state.DeviceID
+	}
+
 	for _, p := range peersList {
+		if p == nil || (myDevID != "" && p.DeviceID == myDevID) {
+			continue
+		}
 		if p.Online && time.Since(p.LastSeen) < 90*time.Second {
 			totalPeers++
 			if p.DirectP2P {
@@ -1411,7 +1419,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.127"
+		ver = "1.9.128"
 	}
 
 	vip := s.state.VirtualIP
@@ -3041,4 +3049,21 @@ func (s *Server) handleAWGSyncWithPeer(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"message": fmt.Sprintf("Параметры AWG 3.1 успешно синхронизированы: H1=%d, H2=%d, S1=%d, S2=%d, Jc=%d", act.H1, act.H2, act.S1, act.S2, act.Jc),
 	}, "")
+}
+
+func (s *Server) countRemotePeers() int {
+	if s.registry == nil {
+		return 0
+	}
+	myID := ""
+	if s.state != nil {
+		myID = s.state.DeviceID
+	}
+	count := 0
+	for _, p := range s.registry.List() {
+		if p != nil && (myID == "" || p.DeviceID != myID) {
+			count++
+		}
+	}
+	return count
 }

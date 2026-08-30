@@ -303,19 +303,37 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 		currentExe = strings.ToLower(filepath.Base(ep))
 	}
 
-	var candidates []string
 	if osName == "windows" {
 		if strings.Contains(currentExe, "gui") {
-			candidates = []string{"natbypass-gui.exe", "natbypass-gui"}
+			for _, a := range filtered {
+				if strings.EqualFold(a.Name, "NatBypass-GUI.exe") {
+					return a.BrowserDownloadURL, a.Name, a.Size
+				}
+			}
 		} else if strings.Contains(currentExe, "cli") {
-			candidates = []string{"natbypass-cli.exe", "natbypass-cli"}
+			for _, a := range filtered {
+				if strings.EqualFold(a.Name, "natbypass-cli.exe") {
+					return a.BrowserDownloadURL, a.Name, a.Size
+				}
+			}
 		} else if strings.Contains(currentExe, "diag") {
-			candidates = []string{"natbypass-diag.exe", "natbypass-diag"}
+			for _, a := range filtered {
+				if strings.EqualFold(a.Name, "NatBypass-Diag.exe") {
+					return a.BrowserDownloadURL, a.Name, a.Size
+				}
+			}
 		} else {
-			// Если запущен NatBypass.exe — строго обновляем NatBypass.exe
-			candidates = []string{"natbypass.exe", "natbypass-windows-amd64.exe"}
+			// Запущен NatBypass.exe — строго возвращаем NatBypass.exe
+			for _, a := range filtered {
+				if strings.EqualFold(a.Name, "NatBypass.exe") {
+					return a.BrowserDownloadURL, a.Name, a.Size
+				}
+			}
 		}
-	} else if osName == "linux" {
+	}
+
+	var candidates []string
+	if osName == "linux" {
 		if arch == "arm64" {
 			candidates = []string{"-linux-arm64", "linux-arm64", "arm64"}
 		} else if arch == "mipsle" {
