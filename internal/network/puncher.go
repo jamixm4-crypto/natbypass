@@ -541,6 +541,10 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 	pongMsg := fmt.Sprintf("%s%s:%s", constants.PongPrefix, p.myDevID, sentTs)
 	_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
 
+	// Send reverse PING probe so the other peer also registers our direct socket immediately
+	reversePing := fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, time.Now().UnixNano())
+	_, _ = p.conn.WriteToUDP([]byte(reversePing), remoteAddr)
+
 	// Real RTT calculation
 	var rtt time.Duration
 	if sentNano, err := strconv.ParseInt(sentTs, 10, 64); err == nil && sentNano > 0 {

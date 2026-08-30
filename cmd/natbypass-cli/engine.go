@@ -711,8 +711,15 @@ func publishLoop(
 		activeDPI := currentDPIPreset
 		mdarMu.Unlock()
 
+		localIP := network.GetLocalLANIP()
+		localAddr := ""
+		if puncher != nil && localIP != "" {
+			localAddr = fmt.Sprintf("%s:%d", localIP, puncher.LocalPort())
+		}
+
 		payload := &signaling.Payload{
 			DeviceID:        deviceID,
+			LocalAddr:       localAddr,
 			Nickname:        cfg.App.DeviceName,
 			DeviceName:      cfg.App.DeviceName,
 			PublicKey:       crypto.KeyToHex(pubKey),

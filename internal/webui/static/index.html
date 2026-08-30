@@ -893,7 +893,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.081</span>
+          <span id="topUpdateLabel">v1.9.082</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -904,7 +904,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.081</span>
+          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.082</span>
           <div class="online-dot"></div>
         </div>
 
@@ -2763,7 +2763,253 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           selExit.value = curVal;
         }
       }
+      renderMeshTopologyGraph(peers);
     }
+
+    // ── Interactive Mesh Topology Canvas ─────────────────────────────────────────
+    let meshNodes = [];
+    let meshDraggingNode = null;
+    let meshDragOffset = { x: 0, y: 0 };
+    let meshCanvasInitialized = false;
+
+    function initMeshCanvasEvents(canvas) {
+      if (meshCanvasInitialized) return;
+      meshCanvasInitialized = true;
+
+      const tooltip = document.getElementById('meshGraphTooltip');
+
+      canvas.addEventListener('mousedown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        for (let i = meshNodes.length - 1; i >= 0; i--) {
+          const n = meshNodes[i];
+          const dist = Math.hypot(n.x - mouseX, n.y - mouseY);
+          if (dist <= n.radius + 6) {
+            meshDraggingNode = n;
+            meshDragOffset.x = n.x - mouseX;
+            meshDragOffset.y = n.y - mouseY;
+            canvas.style.cursor = 'grabbing';
+            break;
+          }
+        }
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        if (meshDraggingNode) {
+          meshDraggingNode.x = Math.max(meshDraggingNode.radius, Math.min(rect.width - meshDraggingNode.radius, mouseX + meshDragOffset.x));
+          meshDraggingNode.y = Math.max(meshDraggingNode.radius, Math.min(rect.height - meshDraggingNode.radius, mouseY + meshDragOffset.y));
+          drawMeshTopology();
+          return;
+        }
+
+        if (tooltip) {
+          let hovered = null;
+          for (let i = meshNodes.length - 1; i >= 0; i--) {
+            const n = meshNodes[i];
+            const dist = Math.hypot(n.x - mouseX, n.y - mouseY);
+            if (dist <= n.radius + 6) {
+              hovered = n;
+              break;
+            }
+          }
+
+          if (hovered) {
+            canvas.style.cursor = 'grab';
+            tooltip.style.display = 'block';
+            tooltip.style.left = (e.clientX - rect.left + 15) + 'px';
+            tooltip.style.top = (e.clientY - rect.top - 10) + 'px';
+            tooltip.innerHTML = '<strong>' + hovered.name + '</strong><br><span style="color:#38bdf8">' + hovered.vip + '</span><br><span>' + (hovered.direct ? '⚡ Direct P2P (' + hovered.ping + 'ms)' : '🌐 Relay') + '</span><br><small style="color:#94a3b8">' + (hovered.endpoint || '') + '</small>';
+          } else {
+            canvas.style.cursor = 'default';
+            tooltip.style.display = 'none';
+          }
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (meshDraggingNode) {
+          meshDraggingNode = null;
+          canvas.style.cursor = 'default';
+        }
+      });
+    }
+
+    function renderMeshTopologyGraph(peers) {
+      const canvas = document.getElementById('meshTopologyCanvas');
+      if (!canvas) return;
+      initMeshCanvasEvents(canvas);
+
+      const pList = peers || cachedPeers || [];
+      const countEl = document.getElementById('badgeMeshNodesCount');
+      if (countEl) countEl.innerText = (pList.length + 1) + ' узлов';
+
+      const rect = canvas.getBoundingClientRect();
+      const clientW = (rect.width > 50) ? rect.width : (canvas.parentElement ? canvas.parentElement.clientWidth : 800) || 800;
+      const clientH = 260;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = clientW * dpr;
+      canvas.height = clientH * dpr;
+
+      const myName = (document.getElementById('userNameLabel') ? document.getElementById('userNameLabel').innerText : '') || 'Этот узел';
+      const myVip = (document.getElementById('topVipLabel') ? document.getElementById('topVipLabel').innerText : '') || '100.64.200.1';
+
+      const cx = clientW / 2;
+      const cy = clientH / 2;
+
+      const oldPositions = {};
+      meshNodes.forEach(n => { oldPositions[n.id] = { x: n.x, y: n.y }; });
+
+      meshNodes = [{
+        id: 'self',
+        name: myName,
+        vip: myVip,
+        x: (oldPositions['self'] ? oldPositions['self'].x : cx),
+        y: (oldPositions['self'] ? oldPositions['self'].y : cy),
+        isSelf: true,
+        online: true,
+        direct: true,
+        ping: 0,
+        radius: 22,
+        color: '#38bdf8',
+        exit: false
+      }];
+
+      const angleStep = (Math.PI * 2) / Math.max(1, pList.length);
+      const orbitR = Math.min(clientW, clientH) * 0.36;
+
+      pList.forEach((p, idx) => {
+        const angle = idx * angleStep - Math.PI / 2;
+        const isDirect = Boolean(p.direct_p2p && (p.active_endpoint || p.ping_ms > 0));
+        const color = !p.online ? '#ef4444' : (isDirect ? '#10b981' : '#c084fc');
+        const defaultX = cx + Math.cos(angle) * orbitR;
+        const defaultY = cy + Math.sin(angle) * orbitR;
+
+        meshNodes.push({
+          id: p.device_id,
+          name: p.nickname ? p.nickname : (p.device_name ? p.device_name : p.device_id.substring(0, 10)),
+          vip: p.virtual_ip || '—',
+          x: (oldPositions[p.device_id] ? oldPositions[p.device_id].x : defaultX),
+          y: (oldPositions[p.device_id] ? oldPositions[p.device_id].y : defaultY),
+          isSelf: false,
+          online: p.online,
+          direct: isDirect,
+          ping: p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0),
+          radius: p.is_exit_node ? 20 : 16,
+          color: color,
+          exit: p.is_exit_node,
+          endpoint: p.active_endpoint || p.stun_addr || p.public_ip || '—'
+        });
+      });
+
+      drawMeshTopology();
+    }
+
+    function drawMeshTopology() {
+      const canvas = document.getElementById('meshTopologyCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.width / dpr;
+      const h = canvas.height / dpr;
+
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      if (meshNodes.length === 0) {
+        ctx.restore();
+        return;
+      }
+      const center = meshNodes[0];
+
+      // Draw Connection Lines
+      for (let i = 1; i < meshNodes.length; i++) {
+        const node = meshNodes[i];
+        ctx.beginPath();
+        ctx.moveTo(center.x, center.y);
+        ctx.lineTo(node.x, node.y);
+
+        if (!node.online) {
+          ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
+          ctx.setLineDash([4, 4]);
+          ctx.lineWidth = 1;
+        } else if (node.direct) {
+          const pingColor = node.ping < 50 ? 'rgba(52, 211, 153, 0.85)' : (node.ping < 120 ? 'rgba(251, 191, 36, 0.85)' : 'rgba(248, 113, 113, 0.85)');
+          ctx.strokeStyle = pingColor;
+          ctx.setLineDash([]);
+          ctx.lineWidth = Math.max(2, 4 - node.ping / 50);
+        } else {
+          ctx.strokeStyle = 'rgba(192, 132, 252, 0.7)';
+          ctx.setLineDash([6, 6]);
+          ctx.lineWidth = 1.8;
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Latency Badge
+        if (node.online) {
+          const mx = (center.x + node.x) / 2;
+          const my = (center.y + node.y) / 2;
+          const label = node.direct ? (node.ping > 0 ? (node.ping + 'ms') : 'P2P') : 'Relay';
+
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(mx - 20, my - 10, 40, 20, 5);
+          } else {
+            ctx.rect(mx - 20, my - 10, 40, 20);
+          }
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+          ctx.stroke();
+
+          ctx.fillStyle = node.direct ? (node.ping < 50 ? '#34d399' : '#fbbf24') : '#c084fc';
+          ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, mx, my);
+        }
+      }
+
+      // Draw Node Circles
+      meshNodes.forEach(node => {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius + 5, 0, Math.PI * 2);
+        ctx.fillStyle = node.color + '25';
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#0f172a';
+        ctx.fill();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = node.color;
+        ctx.stroke();
+
+        ctx.fillStyle = node.color;
+        ctx.font = node.isSelf ? '15px sans-serif' : '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(node.exit ? '⭐' : (node.isSelf ? '🏠' : (node.direct ? '⚡' : '📡')), node.x, node.y);
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText(node.name, node.x, node.y + node.radius + 12);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '9px monospace';
+        ctx.fillText(node.vip, node.x, node.y + node.radius + 24);
+      });
+
+      ctx.restore();
+    }
+
 
     async function pingPeer(devId) {
       showToast(`⚡ Отправка UDP пинга к ${devId}...`);
