@@ -578,6 +578,17 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 				}
 				peerIndex++
 
+				// Проверка коллизии IP-адресов
+				p.IPConflict = false
+				curCfg, _ := config.Load(s.configPath)
+				if myVIP := config.ResolveVirtualIP(curCfg, s.state.DeviceID); myVIP != "" {
+					pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+					cleanMyVIP := strings.TrimSpace(strings.Split(myVIP, "/")[0])
+					if pVIP == cleanMyVIP && p.DeviceID != s.state.DeviceID {
+						p.IPConflict = true
+					}
+				}
+
 				// Проверка соответствия параметров AWG 3.1
 				p.AWGMismatch = false
 				if s.configPath != "" {
@@ -621,7 +632,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.109"
+		ver = "1.9.110"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1397,7 +1408,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.109"
+		ver = "1.9.110"
 	}
 
 vip := s.state.VirtualIP
@@ -1409,8 +1420,32 @@ vip := s.state.VirtualIP
 		}
 	}
 
+	hasIPConflict := false
+	conflictPeerName := ""
+	conflictIP := ""
+	if s.registry != nil {
+		cleanMyVIP := strings.TrimSpace(strings.Split(vip, "/")[0])
+		for _, p := range s.registry.List() {
+			if p.DeviceID != s.state.DeviceID && p.Online {
+				pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+				if pVIP == cleanMyVIP && pVIP != "" {
+					hasIPConflict = true
+					conflictPeerName = p.DeviceName
+					if conflictPeerName == "" {
+						conflictPeerName = p.DeviceID
+					}
+					conflictIP = pVIP
+					break
+				}
+			}
+		}
+	}
+
 	data := map[string]interface{}{
-		"version":           ver,
+		"version":            ver,
+		"ip_conflict":        hasIPConflict,
+		"conflict_peer_name": conflictPeerName,
+		"conflict_ip":        conflictIP,
 		"active_sessions":   totalPeers,
 		"total_peers":       totalPeers,
 		"p2p_active":        p2pActive,

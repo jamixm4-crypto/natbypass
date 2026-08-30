@@ -46,6 +46,7 @@ type Peer struct {
 	LastTelegramSeen time.Time            `json:"last_telegram_seen,omitempty"`
 	AWG              *signaling.AWGParams `json:"awg,omitempty"`
 	AWGMismatch      bool                 `json:"awg_mismatch,omitempty"`
+	IPConflict       bool                 `json:"ip_conflict,omitempty"`
 	CountryFlag      string               `json:"country_flag,omitempty"`
 	Candidates       []string             `json:"candidates,omitempty"`
 	NATBlocked       bool                 `json:"nat_blocked,omitempty"`

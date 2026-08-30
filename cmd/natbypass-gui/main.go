@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.109"
+	Version = "1.9.110"
 	Commit  = "release"
 )
 
@@ -4557,6 +4557,11 @@ func updateData() {
 					var extraTags []string
 					if p.AWG != nil || p.DirectP2P {
 						extraTags = append(extraTags, "[AWG 2.0]")
+					}
+					pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+					myCleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+					if p.Online && pVIP == myCleanVIP && p.DeviceID != myDevID {
+						extraTags = append(extraTags, "[⚠️ КОНФЛИКТ IP!]")
 					}
 					if p.IsExitNode {
 						extraTags = append(extraTags, "[Шлюз]")

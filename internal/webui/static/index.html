@@ -1006,7 +1006,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.109</span>
+          <span id="topUpdateLabel">v1.9.110</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1017,7 +1017,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.109</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.110</span>
           <div class="online-dot"></div>
         </div>
 
@@ -2923,6 +2923,18 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const totalPeers = d.total_peers || 0;
           const p2pActive = d.p2p_active || 0;
           const avgLat = d.avg_latency_ms || 0;
+        const bannerConflict = document.getElementById('bannerIPConflict');
+        if (bannerConflict) {
+          if (d.ip_conflict) {
+            bannerConflict.style.display = 'flex';
+            const nameEl = document.getElementById('conflictPeerName');
+            const ipEl = document.getElementById('conflictIPVal');
+            if (nameEl) nameEl.textContent = d.conflict_peer_name || 'Удаленный узел';
+            if (ipEl) ipEl.textContent = d.conflict_ip || 'IP';
+          } else {
+            bannerConflict.style.display = 'none';
+          }
+        }
 
           document.getElementById('statPeersCount').innerText = totalPeers;
 
@@ -3049,6 +3061,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         const hasAWG = Boolean(p.awg || p.wg_pubkey || p.wg_pub_key || (p.public_key && p.public_key.length > 20));
         const pAWGVer = (p.awg && p.awg.version) ? p.awg.version : '3.1';
         let p2pBadge = '';
+        let ipConflictBadge = '';
+        if (p.ip_conflict) {
+          ipConflictBadge = '<span class="badge" style="background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; font-size:0.72rem; margin-right:4px;">⚠️ Конфликт IP (совпадает!)</span>';
+        }
         if (p.awg_mismatch) {
           p2pBadge = '<span class="badge" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.6); color:#fca5a5; font-size:0.72rem; font-weight:700;" title="Параметры AWG (H1-H4, S1-S2, Jc) на этом узле не совпадают с вашими! Связь по WireGuard невозможна. Обновите профиль или синхронизируйте настройки">⚠️ AWG Различается (нет связи)</span>';
         } else if (isDirect) {
@@ -4038,7 +4054,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">' +
                 '<span style="font-weight:700; color:#ffffff; font-size:0.9rem;">' + escapeHtml(p.device_name || p.device_id) + '</span>' +
                 '<span class="mono" style="color:#38bdf8; font-size:0.8rem; background:rgba(56,189,248,0.1); padding:1px 6px; border-radius:6px;">' + escapeHtml(cleanVIP) + '</span>' +
-                exitBadge +
+                ipConflictBadge + exitBadge +
               '</div>' +
               '<div style="font-size:0.78rem; color:var(--text-muted);">' +
                 '<span style="color:var(--text-dim);">Локальные подсети (LAN):</span> <span class="mono" style="color:#e2e8f0; font-weight:600;">' + escapeHtml(routesStr) + '</span> • ' +
