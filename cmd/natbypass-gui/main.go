@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.098"
+	Version = "1.9.099"
 	Commit  = "release"
 )
 
@@ -2742,7 +2742,7 @@ func buildModernUI(hInstance uintptr) {
 	lblAwgDesc := createLabel(hInstance, "Поведенческая обфускация: Header Protection (ChaCha20), Random Trailers, Content Padding и джиттер таймеров.", cx, 48, cw, 20, hFontNormal)
 
 	hBtnAwgStd = createOwnerDrawButton(hInstance, "🛡️ AWG 2.0 Anti-TSPU", cx, 78, 190, 36, ID_BTN_AWG_STD, "normal")
-	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🔒 AWG 3.1 Strict (РФ)", cx+200, 78, 190, 36, ID_BTN_AWG_DPI, "primary")
+	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🔒 AWG 3.1 Strict (Макс. ТСПУ)", cx+200, 78, 190, 36, ID_BTN_AWG_DPI, "primary")
 	hBtnAwgStealth = createOwnerDrawButton(hInstance, "⚖️ AWG 3.1 Balanced", cx+400, 78, 190, 36, ID_BTN_AWG_STEALTH, "normal")
 	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайный 3.1", cx+600, 78, 190, 36, ID_BTN_RAND_AWG, "normal")
 

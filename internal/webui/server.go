@@ -571,6 +571,25 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 					p.VirtualIP = fmt.Sprintf("100.64.200.%d", peerIndex)
 				}
 				peerIndex++
+
+				// Проверка соответствия параметров AWG 3.1
+				p.AWGMismatch = false
+				if s.configPath != "" {
+					if curCfg, _ := config.Load(s.configPath); curCfg != nil {
+						loc := curCfg.GetAWGParams()
+						if p.AWG != nil && (p.AWG.H1 != "" || loc.H1 != 0) {
+							locH1 := fmt.Sprintf("%d", loc.H1)
+							locH2 := fmt.Sprintf("%d", loc.H2)
+							locH3 := fmt.Sprintf("%d", loc.H3)
+							locH4 := fmt.Sprintf("%d", loc.H4)
+							if p.AWG.H1 != locH1 || p.AWG.H2 != locH2 || p.AWG.H3 != locH3 || p.AWG.H4 != locH4 ||
+								p.AWG.S1 != loc.S1 || p.AWG.S2 != loc.S2 || p.AWG.Jc != loc.Jc {
+								p.AWGMismatch = true
+							}
+						}
+					}
+				}
+
 				activePeers = append(activePeers, p)
 			}
 		}
@@ -596,7 +615,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.098"
+		ver = "1.9.099"
 	}
 
 	status := map[string]interface{}{
@@ -1355,7 +1374,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.098"
+		ver = "1.9.099"
 	}
 
 	data := map[string]interface{}{

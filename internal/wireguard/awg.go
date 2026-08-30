@@ -158,7 +158,7 @@ func GenerateAWG31BalancedParams() AWGParams {
 	}
 }
 
-// GenerateAWG31StrictParams генерирует максимальную обфускацию для РФ/Китая
+// GenerateAWG31StrictParams генерирует максимальную обфускацию против ТСПУ / DPI
 func GenerateAWG31StrictParams() AWGParams {
 	params := GenerateAWG31BalancedParams()
 
@@ -252,7 +252,7 @@ func GenerateAWGConfig(cfg *AWGConfig) (string, error) {
 
 	buf.WriteString("# ============================================================\n")
 	if cfg.AWGParams.Version == AWGVersion31 {
-		buf.WriteString("# AmneziaWG 3.1 Mesh Configuration (Anti-DPI Russia/China)\n")
+		buf.WriteString("# AmneziaWG 3.1 Mesh Configuration (Advanced Anti-DPI / TSPU)\n")
 		buf.WriteString("# Behavioral obfuscation: Header Protection + Custom Timings\n")
 	} else {
 		buf.WriteString("# AmneziaWG 2.0 Mesh Configuration (Legacy Compatibility)\n")
