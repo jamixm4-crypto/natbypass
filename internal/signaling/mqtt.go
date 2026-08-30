@@ -12,6 +12,45 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// PacketDedup implements a memory-efficient sliding-window hash deduplicator.
+type PacketDedup struct {
+	mu      sync.Mutex
+	entries map[string]int64
+	ring    [1024]string
+	head    int
+	size    int
+}
+
+func NewPacketDedup() *PacketDedup {
+	return &PacketDedup{
+		entries: make(map[string]int64, 1024),
+	}
+}
+
+func (d *PacketDedup) IsDuplicate(hash string, maxAgeMs int64) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	now := time.Now().UnixMilli()
+	if last, exists := d.entries[hash]; exists {
+		if now-last < maxAgeMs {
+			return true
+		}
+	}
+
+	if d.size >= len(d.ring) {
+		oldestHash := d.ring[d.head]
+		delete(d.entries, oldestHash)
+	} else {
+		d.size++
+	}
+
+	d.ring[d.head] = hash
+	d.entries[hash] = now
+	d.head = (d.head + 1) % len(d.ring)
+	return false
+}
+
 type MQTTChannel struct {
 	client        mqtt.Client
 	topic         string
@@ -20,14 +59,13 @@ type MQTTChannel struct {
 	tunnelMu      sync.RWMutex
 	tunnelTopic   string
 	tunnelHandler func(pkt []byte)
-	dedupMu       sync.Mutex
-	dedupSeen     map[string]time.Time // deviceID -> last received time
+	dedup         *PacketDedup
 }
 
 func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTTChannel {
 	ch := &MQTTChannel{
 		topic:     topic,
-		dedupSeen: make(map[string]time.Time),
+		dedup:     NewPacketDedup(),
 	}
 
 	if brokerURL == "" {
@@ -96,23 +134,10 @@ func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 	if err := json.Unmarshal(msg.Payload(), &p); err != nil || p.DeviceID == "" {
 		return
 	}
-	// Дедупликация: пропускаем повторный маяк от того же устройства в течение 1 секунды
-	m.dedupMu.Lock()
-	if last, ok := m.dedupSeen[p.DeviceID]; ok && time.Since(last) < time.Second {
-		m.dedupMu.Unlock()
+	// Скоростная дедупликация: отсекаем повторные маяки за 1000 мс
+	if m.dedup != nil && m.dedup.IsDuplicate(p.DeviceID, 1000) {
 		return
 	}
-	m.dedupSeen[p.DeviceID] = time.Now()
-	// Очищаем старые записи раз в 100 маяков (не блокируем надолго)
-	if len(m.dedupSeen) > 200 {
-		cutoff := time.Now().Add(-10 * time.Second)
-		for k, v := range m.dedupSeen {
-			if v.Before(cutoff) {
-				delete(m.dedupSeen, k)
-			}
-		}
-	}
-	m.dedupMu.Unlock()
 
 	p.Channel = "mqtt"
 	m.outMu.RLock()

@@ -30,10 +30,11 @@ type AppConfig struct {
 
 // WebUIConfig — настройки встроенного Web UI
 type WebUIConfig struct {
-	Enabled  bool   `mapstructure:"enabled" yaml:"enabled"`
-	Port     int    `mapstructure:"port" yaml:"port"`
-	Username string `mapstructure:"username" yaml:"username,omitempty"`
-	Password string `mapstructure:"password" yaml:"password,omitempty"`
+	Enabled    bool     `mapstructure:"enabled" yaml:"enabled"`
+	Port       int      `mapstructure:"port" yaml:"port"`
+	Username   string   `mapstructure:"username" yaml:"username,omitempty"`
+	Password   string   `mapstructure:"password" yaml:"password,omitempty"`
+	AllowedIPs []string `mapstructure:"allowed_ips" yaml:"allowed_ips,omitempty"`
 }
 
 // NetworkConfig — сетевые настройки

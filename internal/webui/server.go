@@ -1,6 +1,7 @@
 package webui
 
 import (
+	cryptoRand "crypto/rand"
 	"crypto/subtle"
 	"context"
 	"embed"
@@ -31,6 +32,8 @@ import (
 	"github.com/skip2/go-qrcode"
 	"golang.org/x/net/proxy"
 )
+
+var cryptoRandReader = cryptoRand.Reader
 
 //go:embed static/*
 var staticFS embed.FS
@@ -72,6 +75,7 @@ type Server struct {
 	sigMgr     *signaling.FallbackManager
 	state      *AppState
 	srv        *http.Server
+	allowedIPs []string
 	events          []EventEntry
 	eventsMu        sync.Mutex
 	setupDone       bool
@@ -81,6 +85,58 @@ type Server struct {
 	onConfigChange  func()
 	readyCh         chan struct{}
 	readyOnce       sync.Once
+}
+
+// SetAllowedIPs sets the list of allowed IP/CIDR addresses for WebUI access.
+func (s *Server) SetAllowedIPs(ips []string) {
+	s.allowedIPs = ips
+}
+
+func (s *Server) isDefaultPassword() bool {
+	if IsKeeneticOS() {
+		return false
+	}
+	clean := strings.TrimSpace(s.password)
+	return clean == "changeme" || clean == "admin" || clean == ""
+}
+
+func (s *Server) checkIPWhitelist(r *http.Request) bool {
+	if len(s.allowedIPs) == 0 {
+		return true
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	clientIP := net.ParseIP(strings.TrimSpace(host))
+	if clientIP == nil {
+		return false
+	}
+
+	for _, allowed := range s.allowedIPs {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == "" {
+			continue
+		}
+		if strings.Contains(allowed, "/") {
+			if _, cidr, err := net.ParseCIDR(allowed); err == nil && cidr.Contains(clientIP) {
+				return true
+			}
+		} else if allowedIP := net.ParseIP(allowed); allowedIP != nil && allowedIP.Equal(clientIP) {
+			return true
+		}
+	}
+	return false
+}
+
+func generateCSRFToken() string {
+	b := make([]byte, 16)
+	_, _ = cryptoRandRead(b)
+	return fmt.Sprintf("%x", b)
+}
+
+func cryptoRandRead(b []byte) (int, error) {
+	return io.ReadFull(cryptoRandReader, b)
 }
 
 // SetCustomAuth устанавливает пользовательский обработчик авторизации (например, KeeneticOS)
@@ -278,7 +334,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/profiles/export", s.handleProfileExport)
 	mux.HandleFunc("/api/profiles/import", s.handleProfileImport)
 
-	handler := s.corsMiddleware(s.authMiddleware(mux))
+	handler := s.ipWhitelistMiddleware(s.corsMiddleware(s.csrfMiddleware(s.authMiddleware(mux))))
 
 	// Ищем свободный порт, начиная с s.port (до +20 портов)
 	var listener net.Listener
@@ -327,6 +383,62 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("ошибка Web UI сервера: %w", err)
 	}
 	return nil
+}
+
+// csrfMiddleware validates CSRF tokens on mutating requests (POST, PUT, DELETE).
+func (s *Server) csrfMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CSRF cookie on initial GET if missing
+		if r.Method == "GET" {
+			if _, err := r.Cookie("csrf_token"); err != nil {
+				token := generateCSRFToken()
+				http.SetCookie(w, &http.Cookie{
+					Name:     "csrf_token",
+					Value:    token,
+					Path:     "/",
+					SameSite: http.SameSiteLaxMode,
+					HttpOnly: false, // Accessible by JS frontend to send in header
+				})
+			}
+		}
+
+		if r.Method == "POST" || r.Method == "PUT" || r.Method == "DELETE" {
+			// Exempt authentication endpoints from CSRF
+			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/logout" || r.URL.Path == "/api/auth/check" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			csrfHeader := r.Header.Get("X-CSRF-Token")
+			cookie, err := r.Cookie("csrf_token")
+			if err != nil || cookie.Value == "" || csrfHeader == "" || subtle.ConstantTimeCompare([]byte(csrfHeader), []byte(cookie.Value)) != 1 {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"ok":    false,
+					"error": "CSRF token validation failed",
+				})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ipWhitelistMiddleware restricts WebUI access to configured allowed IP/CIDRs.
+func (s *Server) ipWhitelistMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.checkIPWhitelist(r) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok":    false,
+				"error": "Access forbidden: IP is not in WebUI whitelist",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // authMiddleware — защита сессией и Basic Auth
@@ -479,7 +591,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.077"
+		ver = "1.9.078"
 	}
 
 	status := map[string]interface{}{
@@ -1249,7 +1361,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.077"
+		ver = "1.9.078"
 	}
 
 	data := map[string]interface{}{

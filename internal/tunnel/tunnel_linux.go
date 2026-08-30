@@ -157,9 +157,10 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		_ = exec.CommandContext(ctx, "ip", "link", "set", d.AdapterName, "up").Run()
 	}
 
-	// 3. Установка MTU 1420
+	// 3. Установка MTU 1420 и MSS Clamping
 	_ = exec.CommandContext(ctx, "ip", "link", "set", "dev", d.AdapterName, "mtu", "1420").Run()
 	_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, "mtu", "1420").Run()
+	_ = EnableMSSClamping(d.AdapterName, 1420)
 
 	// 4. Маршрутизация 100.64.200.0/24 через адаптер
 	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName).Run()

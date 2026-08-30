@@ -15,6 +15,69 @@ import (
 	"github.com/pion/stun/v2"
 )
 
+// IPRateLimiter implements a per-IP Token Bucket rate limiter to protect against PING/PONG flood attacks.
+type IPRateLimiter struct {
+	mu          sync.Mutex
+	buckets     map[string]*tokenBucket
+	capacity    float64
+	refillRate  float64
+	lastCleanup time.Time
+}
+
+type tokenBucket struct {
+	tokens     float64
+	lastRefill time.Time
+}
+
+func NewIPRateLimiter(capacity, refillRate float64) *IPRateLimiter {
+	return &IPRateLimiter{
+		buckets:     make(map[string]*tokenBucket),
+		capacity:    capacity,
+		refillRate:  refillRate,
+		lastCleanup: time.Now(),
+	}
+}
+
+func (rl *IPRateLimiter) Allow(ip string) bool {
+	if ip == "" {
+		return true
+	}
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	if now.Sub(rl.lastCleanup) > 60*time.Second {
+		for k, b := range rl.buckets {
+			if now.Sub(b.lastRefill) > 60*time.Second {
+				delete(rl.buckets, k)
+			}
+		}
+		rl.lastCleanup = now
+	}
+
+	b, exists := rl.buckets[ip]
+	if !exists {
+		rl.buckets[ip] = &tokenBucket{
+			tokens:     rl.capacity - 1,
+			lastRefill: now,
+		}
+		return true
+	}
+
+	elapsed := now.Sub(b.lastRefill).Seconds()
+	b.tokens += elapsed * rl.refillRate
+	if b.tokens > rl.capacity {
+		b.tokens = rl.capacity
+	}
+	b.lastRefill = now
+
+	if b.tokens >= 1.0 {
+		b.tokens -= 1.0
+		return true
+	}
+	return false
+}
+
 type DirectPingCallback func(deviceID string, rtt time.Duration, fromAddr string)
 type DirectDataCallback func(srcAddr *net.UDPAddr, payload []byte)
 type DirectMTUCallback func(deviceID string, mtu int, fromAddr string)
@@ -46,6 +109,7 @@ type UDPPuncher struct {
 	probeMu          sync.Mutex
 	lastProbeMap     map[string]time.Time
 	lastCleanupTime  time.Time
+	pingRateLimiter  *IPRateLimiter
 }
 
 // NewUDPPuncher creates a new persistent UDP socket for STUN, hole punching, and data transfer.
@@ -93,6 +157,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		NATType:         NATTypeUnknown,
 		lastProbeMap:    make(map[string]time.Time),
 		lastCleanupTime: time.Now(),
+		pingRateLimiter:  NewIPRateLimiter(60.0, 15.0),
 	}
 
 	// Start packet processing loop
@@ -461,6 +526,9 @@ func (p *UDPPuncher) handleSTUNMessage(data []byte) {
 
 // handlePing processes incoming NAT hole punch PING probes.
 func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
+	if remoteAddr != nil && p.pingRateLimiter != nil && !p.pingRateLimiter.Allow(remoteAddr.IP.String()) {
+		return // Drop rate-limited PING flood
+	}
 	parts := strings.Split(data, ":")
 	if len(parts) < 4 {
 		return
@@ -490,6 +558,9 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 
 // handlePong processes incoming PONG responses and measures latency.
 func (p *UDPPuncher) handlePong(data string, remoteAddr *net.UDPAddr) {
+	if remoteAddr != nil && p.pingRateLimiter != nil && !p.pingRateLimiter.Allow(remoteAddr.IP.String()) {
+		return // Drop rate-limited PONG flood
+	}
 	parts := strings.Split(data, ":")
 	if len(parts) < 4 {
 		return

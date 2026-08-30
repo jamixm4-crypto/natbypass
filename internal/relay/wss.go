@@ -3,6 +3,7 @@
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -81,8 +82,17 @@ func (c *WSSRelayClient) connectionLoop() {
 			continue
 		}
 
+		sysCerts, _ := x509.SystemCertPool()
+		tlsConfig := &tls.Config{
+			RootCAs:    sysCerts,
+			ServerName: u.Hostname(),
+		}
+		if u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" {
+			tlsConfig.InsecureSkipVerify = true
+		}
+
 		dialer := websocket.Dialer{
-			TLSClientConfig:  &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig:  tlsConfig,
 			HandshakeTimeout: 10 * time.Second,
 			NetDial: func(network, addr string) (net.Conn, error) {
 				return net.DialTimeout(network, addr, 5*time.Second)
