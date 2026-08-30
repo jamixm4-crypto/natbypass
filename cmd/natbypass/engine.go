@@ -39,6 +39,7 @@ import (
 var (
 	magicSock        *network.MagicSock
 	wssClient        *relay.WSSRelayClient
+	udpRelay         *relay.UDPRelayClient
 	triggerPublishCh = make(chan struct{}, 10)
 )
 
@@ -115,6 +116,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	} else {
 		log.Info().Str("adapter", adapterName).Str("vip", myVirtualIP).Msg("TUN interface created and configured")
 		defer tunDev.Close()
+
+		if runtime.GOOS == "linux" {
+			if err := tunnel.EnableMSSClamping(adapterName, 1420); err != nil {
+				log.Warn().Err(err).Msg("Failed to enable MSS clamping")
+			}
+			defer tunnel.DisableMSSClamping(adapterName)
+		}
 
 		// Self-check and self-ping of Virtual IP
 		go func() {
@@ -284,7 +292,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							sentDirect = true
 						}
 					}
-					// Релей через WSS (порт 443) или сигнальный канал только если прямой UDP-сокет недоступен
+					// Релей через UDP Relay, WSS (порт 443) или сигнальный канал только если прямой UDP-сокет недоступен
+					if !sentDirect && udpRelay != nil && udpRelay.IsConnected() {
+						if err := udpRelay.SendPacket(p.DeviceID, pkt); err == nil {
+							sentDirect = true
+						}
+					}
 					if !sentDirect && wssClient != nil && wssClient.IsConnected() {
 						if err := wssClient.SendPacket(p.DeviceID, pkt); err == nil {
 							sentDirect = true

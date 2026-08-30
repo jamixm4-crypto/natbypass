@@ -14,73 +14,74 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-// UDPRelayClient provides a low-latency (30-80ms) encrypted UDP fallback relay.
+const (
+	udpRelayHeader    = "NATBYPASS:URELAY:"
+	udpRelayKeepAlive = "NATBYPASS:UKEEPALIVE"
+)
+
+// UDPRelayClient обеспечивает быструю ретрансляцию IP-пакетов через UDP
 type UDPRelayClient struct {
-	serverAddr string
-	myDeviceID string
+	serverAddr *net.UDPAddr
 	conn       *net.UDPConn
-	sessionKey [32]byte
-	mu         sync.Mutex
+	sessionKey []byte // 32 bytes для ChaCha20-Poly1305
+	myDeviceID string
+	mu         sync.RWMutex
+	connected  bool
+	onPacket   func(srcDeviceID string, payload []byte)
 	ctx        context.Context
 	cancel     context.CancelFunc
-	onPacket   func(srcDeviceID string, payload []byte)
-	connected  bool
 }
 
-// NewUDPRelayClient creates a new high-performance ChaCha20-Poly1305 UDP relay client.
-func NewUDPRelayClient(serverAddr, myDeviceID string, key [32]byte, onPacket func(srcDeviceID string, payload []byte)) (*UDPRelayClient, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	c := &UDPRelayClient{
-		serverAddr: serverAddr,
-		myDeviceID: myDeviceID,
-		sessionKey: key,
-		ctx:        ctx,
-		cancel:     cancel,
-		onPacket:   onPacket,
+// NewUDPRelayClient создаёт клиента с шифрованием пакетов
+func NewUDPRelayClient(serverAddr string, deviceID string, sessionKey []byte,
+	onPacket func(srcDeviceID string, payload []byte)) (*UDPRelayClient, error) {
+
+	if len(sessionKey) != 32 {
+		return nil, fmt.Errorf("session key must be exactly 32 bytes")
 	}
 
-	if serverAddr != "" {
-		if err := c.initConn(); err != nil {
-			cancel()
-			return nil, err
-		}
+	addr, err := net.ResolveUDPAddr("udp", serverAddr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid relay server address: %w", err)
 	}
+
+	conn, err := net.ListenUDP("udp", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to bind UDP socket: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c := &UDPRelayClient{
+		serverAddr: addr,
+		conn:       conn,
+		sessionKey: sessionKey,
+		myDeviceID: deviceID,
+		onPacket:   onPacket,
+		connected:  true,
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+
+	go c.readLoop()
+	go c.keepAliveLoop()
+
 	return c, nil
 }
 
-func (c *UDPRelayClient) initConn() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	rAddr, err := net.ResolveUDPAddr("udp", c.serverAddr)
-	if err != nil {
-		return err
-	}
-	conn, err := net.DialUDP("udp", nil, rAddr)
-	if err != nil {
-		return err
-	}
-	c.conn = conn
-	c.connected = true
-
-	go c.readLoop()
-	return nil
-}
-
-// SendPacket encrypts the tunnel payload with ChaCha20-Poly1305 and transmits via UDP relay.
+// SendPacket шифрует и отправляет IP-пакет через relay
+// Формат: NATBYPASS:URELAY:<srcDevID>:<dstDevID>:<nonce_b64>:<encrypted>
 func (c *UDPRelayClient) SendPacket(targetDeviceID string, payload []byte) error {
-	c.mu.Lock()
-	conn := c.conn
-	connected := c.connected
-	c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
-	if conn == nil || !connected {
-		return fmt.Errorf("udp relay not connected")
+	if !c.connected || c.conn == nil {
+		return fmt.Errorf("relay not connected")
 	}
 
-	aead, err := chacha20poly1305.New(c.sessionKey[:])
+	aead, err := chacha20poly1305.New(c.sessionKey)
 	if err != nil {
-		return fmt.Errorf("cipher init error: %w", err)
+		return err
 	}
 
 	nonce := make([]byte, aead.NonceSize())
@@ -88,12 +89,33 @@ func (c *UDPRelayClient) SendPacket(targetDeviceID string, payload []byte) error
 		return err
 	}
 
-	ciphertext := aead.Seal(nil, nonce, payload, []byte(targetDeviceID))
-	header := fmt.Sprintf("NATBYPASS:UDPRELAY:%s:%s:%s:", c.myDeviceID, targetDeviceID, base64.RawStdEncoding.EncodeToString(nonce))
-	fullPkt := append([]byte(header), ciphertext...)
+	encrypted := aead.Seal(nil, nonce, payload, []byte(targetDeviceID))
+	nonceB64 := base64.RawStdEncoding.EncodeToString(nonce)
 
-	_, err = conn.Write(fullPkt)
+	header := fmt.Sprintf("%s%s:%s:%s:", udpRelayHeader, c.myDeviceID, targetDeviceID, nonceB64)
+	packet := append([]byte(header), encrypted...)
+
+	_, err = c.conn.WriteToUDP(packet, c.serverAddr)
 	return err
+}
+
+// IsConnected возвращает статус соединения
+func (c *UDPRelayClient) IsConnected() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connected
+}
+
+// Close закрывает соединение
+func (c *UDPRelayClient) Close() error {
+	c.cancel()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.connected = false
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
 }
 
 func (c *UDPRelayClient) readLoop() {
@@ -105,79 +127,91 @@ func (c *UDPRelayClient) readLoop() {
 		default:
 		}
 
-		c.mu.Lock()
-		conn := c.conn
-		c.mu.Unlock()
-		if conn == nil {
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-
-		n, err := conn.Read(buf)
+		_ = c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		n, _, err := c.conn.ReadFromUDP(buf)
 		if err != nil {
 			if strings.Contains(err.Error(), "closed") {
 				return
 			}
-			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
-		if n < 30 {
+		if n <= 0 {
 			continue
 		}
 
-		msg := string(buf[:n])
-		if !strings.HasPrefix(msg, "NATBYPASS:UDPRELAY:") {
+		data := string(buf[:n])
+
+		// KeepAlive ответ
+		if strings.HasPrefix(data, udpRelayKeepAlive) {
+			c.mu.Lock()
+			c.connected = true
+			c.mu.Unlock()
 			continue
 		}
 
-		parts := strings.SplitN(msg, ":", 6)
-		if len(parts) < 6 {
-			continue
-		}
-
-		srcDevID := parts[2]
-		dstDevID := parts[3]
-		nonceB64 := parts[4]
-		cipherStart := len(parts[0]) + len(parts[1]) + len(parts[2]) + len(parts[3]) + len(parts[4]) + 5
-		if cipherStart >= n {
-			continue
-		}
-		ciphertext := buf[cipherStart:n]
-
-		if dstDevID != c.myDeviceID && dstDevID != "broadcast" {
-			continue
-		}
-
-		nonce, err := base64.RawStdEncoding.DecodeString(nonceB64)
-		if err != nil {
-			continue
-		}
-
-		aead, err := chacha20poly1305.New(c.sessionKey[:])
-		if err != nil {
-			continue
-		}
-
-		plaintext, err := aead.Open(nil, nonce, ciphertext, []byte(dstDevID))
-		if err != nil {
-			continue
-		}
-
-		if c.onPacket != nil {
-			c.onPacket(srcDevID, plaintext)
+		// Данные: NATBYPASS:URELAY:<src>:<dst>:<nonce_b64>:<encrypted>
+		if strings.HasPrefix(data, udpRelayHeader) {
+			c.handleRelayPacket(buf[:n])
 		}
 	}
 }
 
-// Close terminates the UDP relay client.
-func (c *UDPRelayClient) Close() {
-	c.cancel()
-	c.mu.Lock()
-	if c.conn != nil {
-		_ = c.conn.Close()
-		c.conn = nil
+func (c *UDPRelayClient) handleRelayPacket(data []byte) {
+	// Format: NATBYPASS:URELAY:<srcDevID>:<dstDevID>:<nonce_b64>:<encrypted>
+	parts := strings.SplitN(string(data), ":", 6)
+	if len(parts) < 6 {
+		return
 	}
-	c.connected = false
-	c.mu.Unlock()
+
+	srcDevID := parts[2]
+	dstDevID := parts[3]
+	nonceB64 := parts[4]
+
+	// Decode nonce
+	nonce, err := base64.RawStdEncoding.DecodeString(nonceB64)
+	if err != nil {
+		nonce, err = base64.StdEncoding.DecodeString(nonceB64)
+		if err != nil {
+			return
+		}
+	}
+
+	headerPrefix := fmt.Sprintf("%s%s:%s:%s:", udpRelayHeader, srcDevID, dstDevID, nonceB64)
+	if len(data) <= len(headerPrefix) {
+		return
+	}
+	encrypted := data[len(headerPrefix):]
+
+	aead, err := chacha20poly1305.New(c.sessionKey)
+	if err != nil {
+		return
+	}
+
+	plaintext, err := aead.Open(nil, nonce, encrypted, []byte(dstDevID))
+	if err != nil {
+		return
+	}
+
+	if c.onPacket != nil {
+		c.onPacket(srcDevID, plaintext)
+	}
+}
+
+func (c *UDPRelayClient) keepAliveLoop() {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			c.mu.RLock()
+			if c.conn != nil {
+				_, _ = c.conn.WriteToUDP([]byte(udpRelayKeepAlive), c.serverAddr)
+			}
+			c.mu.RUnlock()
+		}
+	}
 }

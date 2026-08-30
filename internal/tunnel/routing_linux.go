@@ -73,30 +73,38 @@ func FlushAllRouting(gatewayVIP string, subnets []string) {
 	}
 }
 
-// EnableMSSClamping sets TCP MSS clamping on the tunnel interface to prevent packet fragmentation.
+// EnableMSSClamping принудительно снижает MSS для TCP-соединений через TUN.
+// Предотвращает MTU Blackhole при инкапсуляции пакетов.
 func EnableMSSClamping(tunInterface string, mtu int) error {
 	if tunInterface == "" {
-		tunInterface = "nb0"
+		return fmt.Errorf("tun interface name is required")
 	}
-	if mtu <= 0 {
-		mtu = 1420
+	if mtu < 576 || mtu > 1500 {
+		mtu = 1420 // Default WireGuard MTU
 	}
-	mss := mtu - 60
-	_ = runLinuxCmd("iptables", "-t", "mangle", "-D", "POSTROUTING", "-o", tunInterface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", fmt.Sprintf("%d", mss))
-	return runLinuxCmd("iptables", "-t", "mangle", "-A", "POSTROUTING", "-o", tunInterface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", fmt.Sprintf("%d", mss))
+	mss := mtu - 60 // IP header (20) + TCP header (20) + overhead (20)
+
+	// Удаляем старое правило если есть (идемпотентность)
+	_ = runLinuxCmd("iptables", "-t", "mangle", "-D", "POSTROUTING",
+		"-o", tunInterface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN",
+		"-j", "TCPMSS", "--set-mss", fmt.Sprintf("%d", mss))
+
+	// Добавляем новое
+	return runLinuxCmd("iptables", "-t", "mangle", "-A", "POSTROUTING",
+		"-o", tunInterface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN",
+		"-j", "TCPMSS", "--set-mss", fmt.Sprintf("%d", mss))
 }
 
-// DisableMSSClamping removes TCP MSS clamping rule.
-func DisableMSSClamping(tunInterface string, mtu int) error {
+// DisableMSSClamping удаляет правило MSS clamping.
+func DisableMSSClamping(tunInterface string) error {
 	if tunInterface == "" {
 		tunInterface = "nb0"
 	}
-	if mtu <= 0 {
-		mtu = 1420
-	}
-	mss := mtu - 60
-	return runLinuxCmd("iptables", "-t", "mangle", "-D", "POSTROUTING", "-o", tunInterface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", fmt.Sprintf("%d", mss))
+	return runLinuxCmd("iptables", "-t", "mangle", "-D", "POSTROUTING",
+		"-o", tunInterface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN",
+		"-j", "TCPMSS")
 }
+
 
 // GetLocalSubnets returns a unique list of local IPv4 subnet CIDRs.
 func GetLocalSubnets() []string {

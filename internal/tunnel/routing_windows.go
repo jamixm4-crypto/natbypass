@@ -129,3 +129,13 @@ func FlushAllRouting(gatewayVIP string, subnets []string) {
 func GetLocalSubnets() []string {
 	return network.GetLocalSubnets()
 }
+
+// EnableMSSClamping is a cross-platform stub on Windows.
+func EnableMSSClamping(tunInterface string, mtu int) error {
+	return nil
+}
+
+// DisableMSSClamping is a cross-platform stub on Windows.
+func DisableMSSClamping(tunInterface string) error {
+	return nil
+}
