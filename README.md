@@ -15,7 +15,7 @@
 
 Полная документация и пошаговые инструкции доступны в нашей [**NatBypass Wiki**](https://github.com/jamixm4-crypto/natbypass/wiki):
 * 🚀 [**Быстрый старт за 5 минут**](https://github.com/jamixm4-crypto/natbypass/wiki/Quick-Start) — подключение первой P2P-пары устройств без консоли.
-* 🛡️ [**Обход блокировок (AmneziaWG 2.0)**](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass) — тюнинг параметров Jc, Jmin, Jmax, S1, S2, H1..H4 против ТСПУ / DPI.
+* 🛡️ [**Обход блокировок (AmneziaWG 3.1 & 2.0)**](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass) — тюнинг параметров Jc, Jmin, Jmax, S1, S2, H1..H4 против ТСПУ / DPI.
 * 🌐 [**Роутеры Keenetic (Entware)**](https://github.com/jamixm4-crypto/natbypass/wiki/Keenetic-Routers) & [**OpenWrt**](https://github.com/jamixm4-crypto/natbypass/wiki/OpenWrt-Routers) — установка в 1 команду и автозапуск.
 * 📱 [**Android-руководство**](https://github.com/jamixm4-crypto/natbypass/wiki/Android-Setup) — подключение по QR-коду, отображение QR на экране и системный VpnService.
 * 🪟 [**Windows-руководство**](https://github.com/jamixm4-crypto/natbypass/wiki/Windows-Guide) — нативный UI, трей, Wintun и серверный режим.
@@ -26,7 +26,7 @@
 ## ✨ Ключевые возможности
 
 - ⚡ **Pure P2P UDP Mesh:** Прямой датаграммный обмен между узлами через STUN Hole Punching без аренды VPS.
-- 🛡️ **AmneziaWG 2.0 & WireGuard:** Встроенная защита от Deep Packet Inspection (DPI / ТСПУ) с поддержкой кастомных заголовков (H1..H4), мусорных пакетов (Jc, Jmin, Jmax) и рандомизации паддинга (S1, S2).
+- 🛡️ **AmneziaWG 3.1 & 2.0:** Встроенная защита от Deep Packet Inspection (DPI / ТСПУ) с поддержкой кастомных заголовков (H1..H4), мусорных пакетов (Jc, Jmin, Jmax) и рандомизации паддинга (S1, S2).
 - 📡 **Мультиканальная сигнализация:** Обмен пирами и координатами через Telegram Bot API, MQTT, Cloudflare DNS TXT и HTTP Webhook с E2E-шифрованием NaCl/Box (X25519 + XSalsa20-Poly1305).
 - 🔄 **Отказоустойчивый транспорт:** Автоматический переход Direct P2P UDP ➔ AmneziaWG 2.0 ➔ MQTT Datagram Stream Relay при симметричном NAT или жесткой фильтрации.
 - 📱 **Android All-in-One:** Системный VpnService на чистом Go, сканирование и вывод интерактивного QR-кода на экран, Quick Settings Tile.
@@ -52,7 +52,7 @@
          └─────────────┬──────────┘                  └──────────┬─────────────┘
                        │                                        │
                        └─────────── Direct UDP Socket ──────────┘
-                                 (P2P Mesh / AWG 2.0)
+                                 (P2P Mesh / AWG 3.1)
 ```
 
 ---
@@ -86,6 +86,52 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/insta
 Панель управления будет доступна по адресу: `http://<IP_УСТРОЙСТВА>:8080`.
 
 ---
+
+
+---
+
+## 🛡️ AmneziaWG 3.1 (Anti-DPI Russia/China)
+
+NatBypass поддерживает **AmneziaWG 3.1** — передовой протокол с поведенческой обфускацией, разработанный в ответ на летние блокировки 2026 в России (ТСПУ Роскомнадзора). В отличие от версий 1.x/2.0, AWG 3.1 маскирует не только статические заголовки, но и статистические паттерны потока данных.
+
+### 🚀 Быстрый старт для РФ:
+
+```yaml
+wireguard:
+  enabled: true
+  awg_version: "3.1"
+  awg_preset: "awg31_strict"  # Максимальная обфускация против ТСПУ
+  listen_port: 443            # QUIC/HTTPS порт (не блокируется фильтрами)
+  header_protection_key: ""   # Автоматическая генерация 32-байтного ключа ChaCha20
+```
+
+### ⚙️ Доступные пресеты протокола
+
+| Пресет | Версия | Описание | Применение |
+|---|---|---|---|
+| **`awg31_strict`** | **AWG 3.1** | Header Protection + Random Trailers + Disable Cookies + Content Padding (0-100B) + CPS Packets + рандомизация таймеров | **РФ, Китай, Иран (ТСПУ / DPI)** |
+| **`awg31_balanced`** | **AWG 3.1** | Header Protection + Random Trailers + Cookies + Content Padding (0-50B) + стандартный джиттер | Рекомендуется для всех сетей по умолчанию |
+| **`anti_tspu`** | **AWG 2.0** | Нестандартный тюнинг параметров 2.0 (Jc=5, S2=100, случайные H1..H4) | Улучшенная совместимость |
+| **`awg20_legacy`** | **AWG 2.0** | Стандартный WireGuard + AWG 2.0 мусорные пакеты (Jc=4, S1=48, S2=32) | Старые клиенты |
+
+### 🔐 Ключевые механизмы защиты AWG 3.1
+
+1. **Header Protection (ChaCha20):** Полное шифрование незашифрованных служебных полей WireGuard (Init: 148B, Response: 92B, Cookie: 64B, Data: 16B). Сигнатурный DPI не видит типичных идентификаторов пакетов.
+2. **Content Padding:** Случайное добавление байтов к полезной нагрузке в пределах MTU для устранения корреляции размеров пакетов.
+3. **Custom Timings (Диапазоны таймеров):**
+   - RekeyAfterTime: 120–180 сек
+   - RekeyTimeout: 5–15 сек
+   - RejectAfterTime: 180–240 сек
+   - KeepaliveTimeout: 5–30 сек
+   - MaxHandshakeAttempts: 3–7
+4. **Random Trailers & Disable Cookies:** Добавление энтропии в хвост пакетов и отключение ответов на cookie для защиты от активного зондирования (active probing).
+
+### 🔄 Автоматическая миграция
+
+Для быстрого перехода существующего узла на AWG 3.1 выполните скрипт:
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/migrate_to_awg31.sh | bash
+```
 
 ## 🗺️ Дорожная карта (Roadmap)
 
