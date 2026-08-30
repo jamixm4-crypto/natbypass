@@ -593,7 +593,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.091"
+		ver = "1.9.092"
 	}
 
 	status := map[string]interface{}{
@@ -965,19 +965,8 @@ func (s *Server) handleAWGConfig(w http.ResponseWriter, r *http.Request) {
 
 	cfg, _ := config.Load(s.configPath)
 	awgParams := wireguard.DefaultAWGParams()
-	if cfg != nil && cfg.WireGuard.AWG.Enabled {
-		awgParams = wireguard.AWGParams{
-			Enabled: true,
-			Jc:      cfg.WireGuard.AWG.Jc,
-			Jmin:    cfg.WireGuard.AWG.Jmin,
-			Jmax:    cfg.WireGuard.AWG.Jmax,
-			S1:      cfg.WireGuard.AWG.S1,
-			S2:      cfg.WireGuard.AWG.S2,
-			H1:      cfg.WireGuard.AWG.H1,
-			H2:      cfg.WireGuard.AWG.H2,
-			H3:      cfg.WireGuard.AWG.H3,
-			H4:      cfg.WireGuard.AWG.H4,
-		}
+	if cfg != nil {
+		awgParams = cfg.GetAWGParams()
 	}
 
 	awgCfg := &wireguard.AWGConfig{
@@ -1363,7 +1352,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.091"
+		ver = "1.9.092"
 	}
 
 	data := map[string]interface{}{

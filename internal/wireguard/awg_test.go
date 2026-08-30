@@ -98,7 +98,7 @@ func TestAWGPresetsCompatibility(t *testing.T) {
 }
 
 func TestAWG20BackwardCompatibility(t *testing.T) {
-	params := DefaultAWGParams()
+	params := GenerateAWG20LegacyParams()
 	cfg := &AWGConfig{
 		WGConfig: WGConfig{
 			PrivateKey: "test-key",

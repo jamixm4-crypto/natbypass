@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.091"
+	Version = "1.9.092"
 	Commit  = "release"
 )
 
@@ -1330,15 +1330,14 @@ func handleCommand(id uint16) {
 		addLog("🛡️ Выбран пресет: 🟢 Стандартный WireGuard")
 
 	case ID_BTN_AWG_DPI:
-		setAWGPreset(wireguard.DefaultAWGParams())
+		setAWGPreset(wireguard.GenerateAWG31StrictParams())
 		setActiveAWGPresetButton(ID_BTN_AWG_DPI)
-		addLog("🛡️ Выбран пресет: 🟡 Обход DPI (AmneziaWG 2.0)")
+		addLog("🛡️ Выбран пресет: 🔒 AWG 3.1 Strict (Header Protection + Custom Timings)")
 
 	case ID_BTN_AWG_STEALTH:
-		randP := wireguard.GenerateRandomAWGParams()
-		setAWGPreset(randP)
+		setAWGPreset(wireguard.GenerateAWG31BalancedParams())
 		setActiveAWGPresetButton(ID_BTN_AWG_STEALTH)
-		addLog("🛡️ Выбран пресет: 🔴 Максимальная скрытность")
+		addLog("🛡️ Выбран пресет: ⚖️ AWG 3.1 Balanced")
 
 	case ID_BTN_RAND_AWG:
 		randP := wireguard.GenerateRandomAWGParams()

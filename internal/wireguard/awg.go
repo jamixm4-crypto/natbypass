@@ -75,8 +75,8 @@ type AWGConfig struct {
 	AWGParams
 }
 
-// DefaultAWGParams возвращает параметры совместимости с AWG 2.0
-func DefaultAWGParams() AWGParams {
+// GenerateAWG20LegacyParams возвращает параметры совместимости со старым AWG 2.0
+func GenerateAWG20LegacyParams() AWGParams {
 	return AWGParams{
 		Version: AWGVersion20,
 		Enabled: true,
@@ -92,6 +92,11 @@ func DefaultAWGParams() AWGParams {
 		H3:      857142857,
 		H4:      1122334455,
 	}
+}
+
+// DefaultAWGParams возвращает параметры по умолчанию для всей системы (AWG 3.1 Strict против блокировок ТСПУ)
+func DefaultAWGParams() AWGParams {
+	return GenerateAWG31StrictParams()
 }
 
 // GenerateAWG31BalancedParams генерирует сбалансированные параметры AWG 3.1
@@ -225,10 +230,10 @@ func GetAWGParamsByPreset(preset string) AWGParams {
 	case "awg31_balanced":
 		return GenerateAWG31BalancedParams()
 	case "awg20_legacy":
-		return DefaultAWGParams()
+		return GenerateAWG20LegacyParams()
 	case "anti_tspu":
 		// Anti-TSPU: AWG 2.0 с нетипичными параметрами
-		params := DefaultAWGParams()
+		params := GenerateAWG20LegacyParams()
 		params.Jc = 5
 		params.S2 = 100
 		params.H1 = randomUint32()
@@ -237,7 +242,7 @@ func GetAWGParamsByPreset(preset string) AWGParams {
 		params.H4 = randomUint32()
 		return params
 	default:
-		return GenerateAWG31BalancedParams()
+		return GenerateAWG31StrictParams()
 	}
 }
 

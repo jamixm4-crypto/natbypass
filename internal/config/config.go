@@ -130,7 +130,7 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 		preset = c.WireGuard.AWG.Preset
 	}
 	if preset == "" {
-		preset = "awg31_balanced" // Дефолт: 3.1 balanced
+		preset = "awg31_strict" // Дефолт: 3.1 Strict
 	}
 
 	params := wireguard.GetAWGParamsByPreset(preset)
@@ -222,8 +222,10 @@ func setDefaults(v *viper.Viper) {
 	})
 
 	v.SetDefault("wireguard.interface", "wg0")
-	v.SetDefault("wireguard.listen_port", 51820)
+	v.SetDefault("wireguard.listen_port", 443)
 	v.SetDefault("wireguard.mtu", 1420)
+	v.SetDefault("wireguard.awg_version", "3.1")
+	v.SetDefault("wireguard.awg_preset", "awg31_strict")
 
 	v.SetDefault("daemon.pid_file", "/var/run/natbypass.pid")
 	v.SetDefault("daemon.restart_delay", 5)
