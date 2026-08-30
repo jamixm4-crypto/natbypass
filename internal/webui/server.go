@@ -615,14 +615,24 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.101"
+		ver = "1.9.102"
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	vip := s.state.VirtualIP
+	if cfg != nil {
+		if act := cfg.GetActiveProfile(); act != nil && act.VirtualIP != "" {
+			vip = strings.TrimSpace(strings.Split(act.VirtualIP, "/")[0])
+		} else if cfg.Network.Address != "" {
+			vip = strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
+		}
 	}
 
 	status := map[string]interface{}{
 		"version":         ver,
 		"device_id":       s.state.DeviceID,
 		"device_name":     s.deviceName,
-		"virtual_ip":      s.state.VirtualIP,
+		"virtual_ip":      vip,
 		"public_ip":       s.state.PublicIP,
 		"stun_addr":       s.state.STUNAddr,
 		"uptime":          uptime,
@@ -1388,7 +1398,16 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.101"
+		ver = "1.9.102"
+	}
+
+vip := s.state.VirtualIP
+	if cfg != nil {
+		if act := cfg.GetActiveProfile(); act != nil && act.VirtualIP != "" {
+			vip = strings.TrimSpace(strings.Split(act.VirtualIP, "/")[0])
+		} else if cfg.Network.Address != "" {
+			vip = strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
+		}
 	}
 
 	data := map[string]interface{}{
@@ -1403,7 +1422,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"channel":           channelName,
 		"public_ip":         pubIP,
 		"stun_addr":         stunAddr,
-		"virtual_ip":        s.state.VirtualIP,
+		"virtual_ip":        vip,
 		"device_id":         devID,
 		"device_name":       s.deviceName,
 		"awg_active":        awgActive,
@@ -2104,6 +2123,10 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	_ = config.Save(cfg, s.configPath, false)
 
 	if req.AutoSwitch {
+		cfg.SyncSignalingWithProfile(saved)
+		if s.sigMgr != nil && saved.MQTTTopic != "" {
+			s.sigMgr.UpdateMQTTTopic(saved.MQTTTopic)
+		}
 		if s.onProfileSwitch != nil {
 			_ = s.onProfileSwitch(saved)
 		}
@@ -2280,6 +2303,10 @@ func (s *Server) handleProfileSwitch(w http.ResponseWriter, r *http.Request) {
 
 	_ = config.Save(cfg, s.configPath, false)
 
+	cfg.SyncSignalingWithProfile(active)
+	if s.sigMgr != nil && active.MQTTTopic != "" {
+		s.sigMgr.UpdateMQTTTopic(active.MQTTTopic)
+	}
 	if s.onProfileSwitch != nil {
 		_ = s.onProfileSwitch(active)
 	}
