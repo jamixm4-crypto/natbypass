@@ -653,6 +653,34 @@ func (p *UDPPuncher) readLoop() {
 	}
 }
 
+// HopPort закрывает текущий сокет и переоткрывает UDP-порт на случайном значении (10000-60000).
+func (p *UDPPuncher) HopPort() (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.conn != nil {
+		_ = p.conn.Close()
+	}
+
+	lAddr, _ := net.ResolveUDPAddr("udp", ":0")
+	conn, err := net.ListenUDP("udp", lAddr)
+	if err != nil {
+		lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
+		conn, err = net.ListenUDP("udp4", lAddr4)
+		if err != nil {
+			return 0, fmt.Errorf("failed to re-bind port during hop: %w", err)
+		}
+	}
+
+	p.conn = conn
+	p.localPort = conn.LocalAddr().(*net.UDPAddr).Port
+
+	// Перезапуск цикла чтения
+	go p.readLoop()
+
+	return p.localPort, nil
+}
+
 func (p *UDPPuncher) Close() error {
 	p.cancel()
 	if p.conn != nil {

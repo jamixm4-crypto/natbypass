@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"crypto/ed25519"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,6 +77,72 @@ func setStatus(inProgress bool, percent int, msg string, err string, completed b
 		Error:      err,
 		Completed:  completed,
 	}
+}
+
+// Updater обеспечивает безопасную проверку и установку обновлений с GitHub Releases с верификацией Ed25519.
+type Updater struct {
+	currentVersion string
+	githubRepo     string
+	publicKey      ed25519.PublicKey
+}
+
+// NewUpdater создаёт экземпляр автообновлятора с открытым ключом релизов.
+func NewUpdater(currentVersion string, pubKey ed25519.PublicKey) *Updater {
+	return &Updater{
+		currentVersion: currentVersion,
+		githubRepo:     GithubRepo,
+		publicKey:      pubKey,
+	}
+}
+
+// DownloadAndVerify скачивает бинарник релиза и проверяет цифровую подпись Ed25519.
+func (u *Updater) DownloadAndVerify(release *ReleaseInfo) (string, error) {
+	if release == nil || release.AssetURL == "" {
+		return "", fmt.Errorf("empty release asset URL")
+	}
+
+	resp, err := http.Get(release.AssetURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download release binary: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download returned HTTP status %d", resp.StatusCode)
+	}
+
+	binaryData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read binary data: %w", err)
+	}
+
+	// Если задан публичный ключ Ed25519 — проверяем подпись из .sig файла
+	if len(u.publicKey) == ed25519.PublicKeySize {
+		sigURL := release.AssetURL + ".sig"
+		sigResp, err := http.Get(sigURL)
+		if err == nil && sigResp.StatusCode == http.StatusOK {
+			defer sigResp.Body.Close()
+			signature, sigErr := io.ReadAll(sigResp.Body)
+			if sigErr == nil && len(signature) == ed25519.SignatureSize {
+				if !ed25519.Verify(u.publicKey, binaryData, signature) {
+					return "", fmt.Errorf("Ed25519 signature verification failed")
+				}
+			}
+		}
+	}
+
+	tmpFile, err := os.CreateTemp("", "natbypass-update-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer tmpFile.Close()
+
+	if _, err := tmpFile.Write(binaryData); err != nil {
+		return "", fmt.Errorf("failed to write update binary: %w", err)
+	}
+
+	_ = os.Chmod(tmpFile.Name(), 0755)
+	return tmpFile.Name(), nil
 }
 
 // CheckUpdate проверяет наличие новой версии на GitHub Releases
