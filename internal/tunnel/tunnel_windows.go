@@ -207,21 +207,30 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		_ = runNetsh("advfirewall", "firewall", "add", "rule",
 			"name=NatBypass Mesh Inbound",
 			"dir=in", "action=allow",
-			"remoteip=100.64.200.0/24",
+			"remoteip=any",
 		)
 
-		// 5. Явный маршрут 100.64.200.0/24 через адаптер
+		// 5. Явный маршрут для подсети виртуального IP и 100.64.200.0/24
+		cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
+		prefix := "100.64.200"
+		parts := strings.Split(cleanVIP, ".")
+		if len(parts) >= 3 {
+			prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
+		}
 		for i := 0; i < 3; i++ {
-			err := runNetsh("interface", "ipv4", "add", "route",
+			_ = runNetsh("interface", "ipv4", "add", "route",
+				prefix+".0/24",
+				fmt.Sprintf("name=%s", adapterName),
+				"0.0.0.0",
+				"metric=1",
+			)
+			_ = runNetsh("interface", "ipv4", "add", "route",
 				"100.64.200.0/24",
 				fmt.Sprintf("name=%s", adapterName),
 				"0.0.0.0",
 				"metric=1",
 			)
-			if err == nil {
-				break
-			}
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}()
 

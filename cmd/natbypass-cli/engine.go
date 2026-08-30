@@ -204,8 +204,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 
 				pkt, err := tunDev.ReadPacket()
-				if err != nil || len(pkt) < 20 {
-					time.Sleep(20 * time.Millisecond)
+				if err != nil {
+					time.Sleep(2 * time.Millisecond)
+					continue
+				}
+				if len(pkt) < 20 {
 					continue
 				}
 
@@ -244,6 +247,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					}
 					if targetEP == "" {
 						targetEP = p.STUNAddr
+					}
+					if targetEP == "" {
+						targetEP = p.LocalAddr
+					}
+					if targetEP == "" && p.PublicIP != "" && p.WGPort > 0 {
+						targetEP = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
 					}
 
 					pmin := 0
