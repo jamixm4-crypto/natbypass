@@ -627,18 +627,29 @@ func (p *UDPPuncher) handleTunnelPacket(payload []byte, remoteAddr *net.UDPAddr)
 	}
 }
 
+func (p *UDPPuncher) getConn() (*net.UDPConn, context.Context) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.conn, p.ctx
+}
+
 func (p *UDPPuncher) readLoop() {
 	buf := make([]byte, 65535) // MTU-safe buffer for IP packets up to 65535 bytes
 	for {
+		conn, ctx := p.getConn()
+		if conn == nil {
+			return
+		}
+
 		select {
-		case <-p.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
 
-		n, remoteAddr, err := p.conn.ReadFromUDP(buf)
+		n, remoteAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			if strings.Contains(err.Error(), "closed") || strings.Contains(err.Error(), "use of closed") {
+			if strings.Contains(err.Error(), "closed") || strings.Contains(err.Error(), "use of closed") || strings.Contains(err.Error(), "bad file descriptor") {
 				return
 			}
 			continue
@@ -708,7 +719,6 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	// 2. Закрываем старый сокет
 	if p.conn != nil {
 		_ = p.conn.Close()
-		p.conn = nil
 	}
 
 	// 3. Создаём новый контекст
