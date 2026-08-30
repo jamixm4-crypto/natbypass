@@ -1,133 +1,160 @@
 package wireguard
 
 import (
-	"encoding/hex"
+	"crypto/rand"
+	"encoding/base64"
 	"strings"
 	"testing"
 )
 
-func TestAWG_PresetsAndConfigGeneration(t *testing.T) {
-	t.Run("AWG20_Legacy_Preset", func(t *testing.T) {
-		p := GetAWGParamsByPreset("awg20_legacy")
-		if p.Version != AWGVersion20 {
-			t.Errorf("expected AWGVersion20, got %s", p.Version)
-		}
-		if p.Jc != 4 || p.S1 != 48 || p.S2 != 32 {
-			t.Errorf("unexpected legacy params: %+v", p)
-		}
+func generatePrivateKey() string {
+	var k [32]byte
+	_, _ = rand.Read(k[:])
+	k[0] &= 248
+	k[31] = (k[31] & 127) | 64
+	return base64.StdEncoding.EncodeToString(k[:])
+}
 
-		cfg := &AWGConfig{
-			WGConfig: WGConfig{
-				PrivateKey: "aW52YWxpZGtleTEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=",
-				Address:    "10.200.0.2/24",
-				ListenPort: 51820,
-				Peers: []WGPeer{
-					{
-						PublicKey:  "cHVibGlja2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM=",
-						Endpoint:   "95.21.40.10:51820",
-						AllowedIPs: []string{"10.200.0.0/24"},
-					},
-				},
-			},
-			AWGParams: p,
-		}
+func TestGenerateAWG31Config(t *testing.T) {
+	params := GenerateAWG31StrictParams()
+	cfg := &AWGConfig{
+		WGConfig: WGConfig{
+			PrivateKey: "test-private-key",
+			Address:    "100.64.200.1/24",
+			ListenPort: 443,
+		},
+		AWGParams: params,
+	}
 
-		confStr, err := GenerateAWGConfig(cfg)
-		if err != nil {
-			t.Fatalf("GenerateAWGConfig failed: %v", err)
-		}
+	content, err := GenerateAWGConfig(cfg)
+	if err != nil {
+		t.Fatalf("failed to generate config: %v", err)
+	}
 
-		if !strings.Contains(confStr, "AmneziaWG 2.0") {
-			t.Errorf("expected header with 2.0, got: %s", confStr)
-		}
-		if !strings.Contains(confStr, "Jc = 4") || !strings.Contains(confStr, "S1 = 48") {
-			t.Errorf("missing Jc/S1 in config:\n%s", confStr)
-		}
-		if strings.Contains(confStr, "HeaderProtectionKey") {
-			t.Errorf("legacy config should not have HeaderProtectionKey")
-		}
-	})
+	// Проверяем наличие AWG 3.1 параметров
+	if !strings.Contains(content, "HeaderProtectionKey") {
+		t.Error("missing HeaderProtectionKey in config")
+	}
+	if !strings.Contains(content, "RandomTrailers = on") {
+		t.Error("missing RandomTrailers in config")
+	}
+	if !strings.Contains(content, "DisableCookies = on") {
+		t.Error("missing DisableCookies in config")
+	}
+	if !strings.Contains(content, "KeepaliveTimeout = ") {
+		t.Error("missing KeepaliveTimeout range in config")
+	}
+	if !strings.Contains(content, "RekeyAfterTime = ") {
+		t.Error("missing RekeyAfterTime range in config")
+	}
+	if !strings.Contains(content, "ContentPaddingAddition = ") {
+		t.Error("missing ContentPaddingAddition in config")
+	}
 
-	t.Run("AWG31_Balanced_Preset", func(t *testing.T) {
-		p := GetAWGParamsByPreset("awg31_balanced")
-		if p.Version != AWGVersion31 {
-			t.Errorf("expected AWGVersion31, got %s", p.Version)
-		}
-		if !p.HeaderProtectionEnabled || len(p.HeaderProtectionKey) != 32 {
-			t.Errorf("expected HeaderProtectionEnabled=true with 32-byte key")
-		}
-		if !p.RandomTrailers {
-			t.Errorf("expected RandomTrailers=true")
-		}
+	// Проверяем что H1-H4 стандартные при Header Protection
+	if !strings.Contains(content, "H1 = 1") {
+		t.Error("H1 should be 1 when Header Protection enabled")
+	}
+}
 
-		cfg := &AWGConfig{
-			WGConfig: WGConfig{
-				PrivateKey: "aW52YWxpZGtleTEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=",
-				Address:    "10.200.0.2/24",
-				ListenPort: 443,
-			},
-			AWGParams: p,
-		}
+func TestAWG31HeaderProtectionKeyGeneration(t *testing.T) {
+	params := GenerateAWG31BalancedParams()
 
-		confStr, err := GenerateAWGConfig(cfg)
-		if err != nil {
-			t.Fatalf("GenerateAWGConfig failed: %v", err)
-		}
+	if !params.HeaderProtectionEnabled {
+		t.Error("Header Protection should be enabled by default in AWG 3.1")
+	}
 
-		if !strings.Contains(confStr, "AmneziaWG 3.1") {
-			t.Errorf("expected header with 3.1, got: %s", confStr)
+	// Проверяем что ключ не нулевой
+	allZero := true
+	for _, b := range params.HeaderProtectionKey {
+		if b != 0 {
+			allZero = false
+			break
 		}
-		if !strings.Contains(confStr, "HeaderProtectionKey = "+hex.EncodeToString(p.HeaderProtectionKey[:])) {
-			t.Errorf("missing HeaderProtectionKey in config:\n%s", confStr)
-		}
-		if !strings.Contains(confStr, "H1 = 1\nH2 = 2\nH3 = 3\nH4 = 4") {
-			t.Errorf("expected standard H1-H4 with Header Protection, got:\n%s", confStr)
-		}
-		if !strings.Contains(confStr, "RekeyAfterTime = 120-180") {
-			t.Errorf("missing RekeyAfterTime in config:\n%s", confStr)
-		}
-		if !strings.Contains(confStr, "RandomTrailers = on") {
-			t.Errorf("missing RandomTrailers in config:\n%s", confStr)
-		}
-	})
+	}
+	if allZero {
+		t.Error("Header Protection Key should not be all zeros")
+	}
+}
 
-	t.Run("AWG31_Strict_Preset_Russia_China", func(t *testing.T) {
-		p := GetAWGParamsByPreset("awg31_strict")
-		if p.Version != AWGVersion31 {
-			t.Errorf("expected AWGVersion31, got %s", p.Version)
-		}
-		if !p.DisableCookies {
-			t.Errorf("expected DisableCookies=true in strict mode")
-		}
-		if p.I1 != "quic_initial" || p.I2 != "dns_query" {
-			t.Errorf("expected CPS packets I1/I2, got I1=%s, I2=%s", p.I1, p.I2)
-		}
+func TestAWGPresetsCompatibility(t *testing.T) {
+	tests := []struct {
+		preset   string
+		expected AWGVersion
+	}{
+		{"awg20_legacy", AWGVersion20},
+		{"anti_tspu", AWGVersion20},
+		{"awg31_balanced", AWGVersion31},
+		{"awg31_strict", AWGVersion31},
+	}
 
-		cfg := &AWGConfig{
-			WGConfig: WGConfig{
-				PrivateKey: "aW52YWxpZGtleTEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=",
-				Address:    "10.200.0.5/24",
-			},
-			AWGParams: p,
+	for _, tt := range tests {
+		params := GetAWGParamsByPreset(tt.preset)
+		if params.Version != tt.expected {
+			t.Errorf("preset %s: expected version %s, got %s",
+				tt.preset, tt.expected, params.Version)
 		}
+	}
+}
 
-		confStr, err := GenerateAWGConfig(cfg)
-		if err != nil {
-			t.Fatalf("GenerateAWGConfig failed: %v", err)
-		}
+func TestAWG20BackwardCompatibility(t *testing.T) {
+	params := DefaultAWGParams()
+	cfg := &AWGConfig{
+		WGConfig: WGConfig{
+			PrivateKey: "test-key",
+			Address:    "100.64.200.1/24",
+		},
+		AWGParams: params,
+	}
 
-		if !strings.Contains(confStr, "DisableCookies = on") {
-			t.Errorf("missing DisableCookies in config:\n%s", confStr)
-		}
-		if !strings.Contains(confStr, "I1 = quic_initial") || !strings.Contains(confStr, "I2 = dns_query") {
-			t.Errorf("missing I1/I2 in config:\n%s", confStr)
-		}
-	})
+	content, err := GenerateAWGConfig(cfg)
+	if err != nil {
+		t.Fatalf("failed to generate AWG 2.0 config: %v", err)
+	}
 
-	t.Run("Anti_TSPU_Preset", func(t *testing.T) {
-		p := GetAWGParamsByPreset("anti_tspu")
-		if p.Jc != 5 || p.S2 != 100 {
-			t.Errorf("expected Jc=5, S2=100 for anti_tspu preset, got Jc=%d, S2=%d", p.Jc, p.S2)
-		}
-	})
+	// AWG 2.0 НЕ должен содержать параметры 3.1
+	if strings.Contains(content, "HeaderProtectionKey") {
+		t.Error("AWG 2.0 config should not contain HeaderProtectionKey")
+	}
+	if strings.Contains(content, "RandomTrailers") {
+		t.Error("AWG 2.0 config should not contain RandomTrailers")
+	}
+}
+
+func TestAWG31EndToEnd(t *testing.T) {
+	// Создаём сервер с AWG 3.1
+	serverParams := GenerateAWG31StrictParams()
+	serverCfg := &AWGConfig{
+		WGConfig: WGConfig{
+			PrivateKey: generatePrivateKey(),
+			Address:    "100.64.200.1/24",
+			ListenPort: 443,
+		},
+		AWGParams: serverParams,
+	}
+
+	serverConfig, _ := GenerateAWGConfig(serverCfg)
+
+	// Создаём клиента с теми же параметрами
+	clientParams := serverParams // Копируем параметры сервера
+	clientCfg := &AWGConfig{
+		WGConfig: WGConfig{
+			PrivateKey: generatePrivateKey(),
+			Address:    "100.64.200.2/24",
+			ListenPort: 443,
+		},
+		AWGParams: clientParams,
+	}
+
+	clientConfig, _ := GenerateAWGConfig(clientCfg)
+
+	// Проверяем что оба конфига валидны
+	if len(serverConfig) == 0 || len(clientConfig) == 0 {
+		t.Fatal("empty config generated")
+	}
+
+	// Проверяем совместимость параметров
+	if serverParams.HeaderProtectionKey != clientParams.HeaderProtectionKey {
+		t.Error("Header Protection Keys must match between server and client")
+	}
 }

@@ -289,6 +289,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/awg/config", s.handleAWGConfig)
 	mux.HandleFunc("/api/awg/params", s.handleAWGParams)
 	mux.HandleFunc("/api/awg/random-params", s.handleAWGRandomParams)
+	mux.HandleFunc("/api/awg/apply", s.handleAWGApply)
+	mux.HandleFunc("/api/geoip", s.handleGeoIP)
 
 	mux.HandleFunc("/api/restart", s.handleRestart)
 	// Тест подключений
@@ -591,7 +593,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.090"
+		ver = "1.9.091"
 	}
 
 	status := map[string]interface{}{
@@ -1361,7 +1363,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.090"
+		ver = "1.9.091"
 	}
 
 	data := map[string]interface{}{
@@ -2596,4 +2598,71 @@ func (s *Server) handleAdminPasswordChange(w http.ResponseWriter, r *http.Reques
 	s.jsonResponse(w, http.StatusOK, map[string]string{
 		"message": "Пароль успешно обновлен",
 	}, "")
+}
+
+func (s *Server) handleGeoIP(w http.ResponseWriter, r *http.Request) {
+	country := "RU"
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("https://ipapi.co/country/")
+	if err == nil && resp != nil {
+		defer resp.Body.Close()
+		if body, bErr := io.ReadAll(resp.Body); bErr == nil && len(body) >= 2 {
+			country = strings.TrimSpace(string(body))
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"country": country,
+	})
+}
+
+func (s *Server) handleAWGApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Preset           string `json:"preset"`
+		HeaderProtection bool   `json:"header_protection"`
+		RandomTrailers   bool   `json:"random_trailers"`
+		DisableCookies   bool   `json:"disable_cookies"`
+		KeepaliveMin     int    `json:"keepalive_min"`
+		KeepaliveMax     int    `json:"keepalive_max"`
+		ContentPadMin    int    `json:"content_pad_min"`
+		ContentPadMax    int    `json:"content_pad_max"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := config.Load(s.configPath)
+	if err != nil || cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	cfg.WireGuard.Enabled = true
+	if strings.HasPrefix(req.Preset, "awg31") {
+		cfg.WireGuard.AWGVersion = "3.1"
+		cfg.WireGuard.AWG.Version = "3.1"
+	} else {
+		cfg.WireGuard.AWGVersion = "2.0"
+		cfg.WireGuard.AWG.Version = "2.0"
+	}
+	cfg.WireGuard.AWGPreset = req.Preset
+	cfg.WireGuard.AWG.Preset = req.Preset
+	cfg.WireGuard.AWG.HeaderProtectionEnabled = req.HeaderProtection
+	cfg.WireGuard.AWG.RandomTrailers = req.RandomTrailers
+	cfg.WireGuard.AWG.DisableCookies = req.DisableCookies
+
+	_ = config.Save(cfg, s.configPath, false)
+	if s.onConfigChange != nil {
+		s.onConfigChange()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "Настройки AmneziaWG успешно применены",
+	})
 }

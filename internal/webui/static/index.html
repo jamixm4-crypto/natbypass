@@ -844,7 +844,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <li id="nav-routing" class="nav-item" data-tooltip="Шлюз и подсети" onclick="switchTab('routing')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" x2="22" y1="12" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
       </li>
-      <li id="nav-awg" class="nav-item" data-tooltip="AmneziaWG 2.0" onclick="switchTab('awg')">
+      <li id="nav-awg" class="nav-item" data-tooltip="AmneziaWG 3.1" onclick="switchTab('awg')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
       </li>
       <li id="nav-timeline" class="nav-item" data-tooltip="Журнал" onclick="switchTab('timeline')">
@@ -893,7 +893,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.090</span>
+          <span id="topUpdateLabel">v1.9.091</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -904,7 +904,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.090</span>
+          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.091</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1154,51 +1154,108 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
     </div>
 
-    <!-- TAB 5: AMNEZIAWG 2.0 -->
+    <!-- TAB 5: AMNEZIAWG 3.1 -->
     <div id="tab-awg" class="tab-pane">
       <div class="glass-card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
           <div>
-            <h2 style="font-size: 1.15rem; font-weight: 800;">🛡️ AmneziaWG 2.0 — Обход DPI & Пресеты</h2>
-            <p style="color: var(--text-muted); font-size: 0.8rem;">Параметры мусорных пакетов и заголовков против ТСПУ блокировок</p>
+            <h2 style="font-size: 1.15rem; font-weight: 800;">🛡️ AmneziaWG 3.1 — Поведенческая Anti-DPI Защита</h2>
+            <p style="color: var(--text-muted); font-size: 0.8rem;">Header Protection (ChaCha20), Random Trailers, Content Padding и диапазоны таймеров против AI-анализа ТСПУ</p>
           </div>
           <div style="display:flex; gap: 8px;">
-            <button onclick="applyAWGPreset('standard')" class="btn btn-glass">🟢 WireGuard</button>
-            <button onclick="applyAWGPreset('dpi')" class="btn btn-neon">🟡 Обход DPI</button>
-            <button onclick="applyAWGPreset('stealth')" class="btn btn-glass">🔴 Stealth</button>
-            <button onclick="generateRandomAWG()" class="btn btn-glass" title="Случайные крипто-параметры">🎲 Random</button>
+            <button onclick="selectAWGPreset('awg31_strict')" class="btn btn-neon">🔒 AWG 3.1 Strict</button>
+            <button onclick="selectAWGPreset('awg31_balanced')" class="btn btn-glass">⚖️ Balanced</button>
+            <button onclick="selectAWGPreset('anti_tspu')" class="btn btn-glass">🛡️ Anti-TSPU</button>
+            <button onclick="selectAWGPreset('awg20_legacy')" class="btn btn-glass">📜 Legacy 2.0</button>
           </div>
         </div>
 
-        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
           <div class="form-group">
-            <label class="form-label">Jc (Мусорные пакеты):</label>
-            <input type="number" id="awgJc" class="form-input mono" value="4" oninput="saveAWGParams()">
+            <label class="form-label" for="awgPreset">Пресет протокола (Protocol Preset):</label>
+            <select id="awgPreset" class="form-input mono" onchange="updateAWGSettings()" style="background: rgba(15,23,42,0.9); color: #fff;">
+              <option value="awg31_strict" selected>🔒 AWG 3.1 Strict (РФ / Китай / Иран — максимальная защита)</option>
+              <option value="awg31_balanced">⚖️ AWG 3.1 Balanced (рекомендуется для стабильных сетей)</option>
+              <option value="anti_tspu">🛡️ AWG 2.0 Anti-TSPU (тюнинг мусорных пакетов и S2=100)</option>
+              <option value="awg20_legacy">📜 AWG 2.0 Legacy (совместимость со старыми версиями)</option>
+            </select>
+            <small style="color: var(--text-muted); font-size: 0.76rem; display: block; margin-top: 4px;">
+              ⚠️ AWG 3.1 использует Header Protection и несовместим с AWG 2.0. Все узлы сети должны обновиться.
+            </small>
           </div>
-          <div class="form-group">
-            <label class="form-label">Jmin (Мин. размер):</label>
-            <input type="number" id="awgJmin" class="form-input mono" value="40" oninput="saveAWGParams()">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Jmax (Макс. размер):</label>
-            <input type="number" id="awgJmax" class="form-input mono" value="70" oninput="saveAWGParams()">
-          </div>
-          <div class="form-group">
-            <label class="form-label">S1 / S2 (Размеры):</label>
-            <div style="display:flex; gap: 6px;">
-              <input type="number" id="awgS1" class="form-input mono" value="48" oninput="saveAWGParams()">
-              <input type="number" id="awgS2" class="form-input mono" value="32" oninput="saveAWGParams()">
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+            <div class="form-group">
+              <label class="form-label">Jc (Мусор):</label>
+              <input type="number" id="awgJc" class="form-input mono" value="5" oninput="saveAWGParams()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Jmin:</label>
+              <input type="number" id="awgJmin" class="form-input mono" value="40" oninput="saveAWGParams()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Jmax:</label>
+              <input type="number" id="awgJmax" class="form-input mono" value="70" oninput="saveAWGParams()">
             </div>
           </div>
         </div>
 
+        <!-- AWG 3.1 Advanced Settings -->
+        <div id="awg31Advanced" style="background: rgba(10, 15, 30, 0.7); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 12px; padding: 14px; margin-bottom: 16px;">
+          <div style="font-weight: 700; font-size: 0.88rem; color: #93c5fd; margin-bottom: 10px;">⚙️ Расширенные механизмы AWG 3.1</div>
+          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.84rem;">
+              <input type="checkbox" id="headerProtection" checked>
+              <span>Header Protection (ChaCha20)</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.84rem;">
+              <input type="checkbox" id="randomTrailers" checked>
+              <span>Random Trailers</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.84rem;">
+              <input type="checkbox" id="disableCookies" checked>
+              <span>Disable Cookies (защита от probing)</span>
+            </label>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label">Keepalive Timeout (сек):</label>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <input type="number" id="keepaliveMin" class="form-input mono" value="5" min="1" max="60">
+                <span style="color: var(--text-muted);">—</span>
+                <input type="number" id="keepaliveMax" class="form-input mono" value="30" min="1" max="120">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Content Padding (байты):</label>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <input type="number" id="contentPadMin" class="form-input mono" value="0" min="0" max="200">
+                <span style="color: var(--text-muted);">—</span>
+                <input type="number" id="contentPadMax" class="form-input mono" value="100" min="0" max="500">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Предупреждение для РФ/РБ -->
+        <div id="russiaWarning" style="display: none; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;">
+          <strong style="color: #fbbf24;">⚠️ Обнаружена локация РФ/РБ (ТСПУ активен):</strong>
+          <p style="font-size: 0.82rem; color: #fde68a; margin: 4px 0 6px 0;">Для 100% стабильности соединения без блокировок рекомендуется:</p>
+          <ul style="font-size: 0.8rem; color: #fef3c7; margin: 0; padding-left: 20px;">
+            <li>Использовать порт <strong>443</strong> (QUIC/HTTPS трафик не подвергается выборочному сбросу)</li>
+            <li>Активировать пресет <strong>AWG 3.1 Strict</strong></li>
+            <li>Включить <strong>UDP Relay</strong> как резервный транспорт</li>
+          </ul>
+        </div>
+
         <div class="form-group">
-          <label class="form-label">Готовая конфигурация (.conf) для Windows / Android / Keenetic:</label>
+          <label class="form-label">Готовая конфигурация (.conf) AmneziaWG 3.1 для Windows / Android / Keenetic:</label>
           <textarea id="awgConfText" class="form-input mono" rows="7" readonly style="line-height:1.4; font-size:0.82rem;"></textarea>
         </div>
 
-        <div style="display:flex; gap: 12px;">
-          <button onclick="copyAwgConf()" class="btn btn-neon">📋 Скопировать конфиг</button>
+        <div style="display:flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+          <button onclick="applyAWGSettings()" class="btn btn-neon">💾 Применить и перезапустить</button>
+          <button onclick="copyAwgConf()" class="btn btn-glass">📋 Скопировать конфиг</button>
           <a href="/api/awg/config" download="natbypass.conf" class="btn btn-glass">💾 Скачать natbypass.conf</a>
           <button onclick="openQRModal('awg')" class="btn btn-glass" style="color:#c084fc; border-color:rgba(168,85,247,0.4);">📱 Показать QR для телефона</button>
         </div>
