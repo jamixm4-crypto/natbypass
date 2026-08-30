@@ -12,8 +12,8 @@ android {
         minSdk = 24
         targetSdk = 34
 
-        val vName = (project.findProperty("versionName") as? String)?.trim() ?: "1.9.089"
-        val vCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 10989
+        val vName = (project.findProperty("versionName") as? String)?.trim() ?: "1.9.090"
+        val vCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 10990
         versionCode = vCode
         versionName = vName
 

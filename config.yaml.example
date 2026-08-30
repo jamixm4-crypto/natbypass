@@ -107,19 +107,26 @@ signaling:
 
 # ── WireGuard mesh ────────────────────────────────────────────
 wireguard:
-  enabled: false
-  # Имя интерфейса (wg0 для Linux, Ethernet для Windows)
+  enabled: true
   interface: "wg0"
-  # Порт прослушивания
-  listen_port: 51820
+  listen_port: 443  # QUIC/HTTPS-friendly порт, обходит ограничения ТСПУ
+
+  # ═══ AmneziaWG 3.1 Protocol ═══
+  awg_version: "3.1"          # "2.0" (legacy) | "3.1" (рекомендуется для РФ/Китая)
+  awg_preset: "awg31_strict"  # Доступные пресеты:
+                              # - awg31_strict:    AWG 3.1 максимальная поведенческая обфускация (РФ/ТСПУ)
+                              # - awg31_balanced:  AWG 3.1 сбалансированная маскировка
+                              # - anti_tspu:       AWG 2.0 с нестандартными параметрами S2/H1-H4
+                              # - awg20_legacy:    AWG 2.0 совместимость со старыми клиентами
+
+  # Header Protection Key (32 байта, hex)
+  # Если оставить пустым — генерируется автоматически
+  header_protection_key: ""
+
   # Путь к файлу приватного ключа WG
-  # (генерируется автоматически при первом запуске)
   private_key_file: "/etc/natbypass/wg-private.key"
-  # Адрес этого устройства в WG-сети (CIDR)
   address: "10.200.0.1/24"
-  # DNS для туннеля (опционально)
   dns: ""
-  # MTU (0 = авто)
   mtu: 0
 
 # ── Шифрование NaCl/Box ───────────────────────────────────────

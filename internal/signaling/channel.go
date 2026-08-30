@@ -10,17 +10,24 @@ import (
 )
 
 type AWGParams struct {
-	Jc   int    `json:"jc"`
-	Jmin int    `json:"jmin"`
-	Jmax int    `json:"jmax"`
-	S1   int    `json:"s1"`
-	S2   int    `json:"s2"`
-	H1   string `json:"h1"`
-	H2   string `json:"h2"`
-	H3   string `json:"h3"`
-	H4   string `json:"h4"`
-	Pmin int    `json:"pmin,omitempty"` // Amnezia 3.x Min Random Data Packet Padding
-	Pmax int    `json:"pmax,omitempty"` // Amnezia 3.x Max Random Data Packet Padding
+	Jc                      int    `json:"jc"`
+	Jmin                    int    `json:"jmin"`
+	Jmax                    int    `json:"jmax"`
+	S1                      int    `json:"s1"`
+	S2                      int    `json:"s2"`
+	S3                      int    `json:"s3,omitempty"`
+	S4                      int    `json:"s4,omitempty"`
+	H1                      string `json:"h1"`
+	H2                      string `json:"h2"`
+	H3                      string `json:"h3"`
+	H4                      string `json:"h4"`
+	Pmin                    int    `json:"pmin,omitempty"` // Amnezia 3.x Min Random Data Packet Padding
+	Pmax                    int    `json:"pmax,omitempty"` // Amnezia 3.x Max Random Data Packet Padding
+	Version                 string `json:"version,omitempty"`
+	Preset                  string `json:"preset,omitempty"`
+	HeaderProtectionEnabled bool   `json:"header_protection_enabled,omitempty"`
+	RandomTrailers          bool   `json:"random_trailers,omitempty"`
+	DisableCookies          bool   `json:"disable_cookies,omitempty"`
 }
 
 func (a *AWGParams) UnmarshalJSON(data []byte) error {

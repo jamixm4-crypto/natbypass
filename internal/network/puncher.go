@@ -82,7 +82,13 @@ type DirectPingCallback func(deviceID string, rtt time.Duration, fromAddr string
 type DirectDataCallback func(srcAddr *net.UDPAddr, payload []byte)
 type DirectMTUCallback func(deviceID string, mtu int, fromAddr string)
 
+type AWGPacketHandler interface {
+	HandlePacket(payload []byte, remoteAddr *net.UDPAddr)
+}
+
 type UDPPuncher struct {
+	awgVersion     string
+	awgHandler     AWGPacketHandler
 	trafficShaper   *TrafficShaper
 	conn         *net.UDPConn
 	localPort    int
@@ -658,12 +664,33 @@ func (p *UDPPuncher) readLoop() {
 			}
 		case n > constants.TunHeaderSize && string(buf[:constants.TunHeaderSize]) == constants.TunHeader:
 			p.handleTunnelPacket(buf[constants.TunHeaderSize:n], remoteAddr)
+		default:
+			p.mu.Lock()
+			handler := p.awgHandler
+			p.mu.Unlock()
+			if handler != nil {
+				handler.HandlePacket(buf[:n], remoteAddr)
+			}
 		}
 	}
 }
 
 // HopPort закрывает текущий сокет и переоткрывает UDP-порт на случайном значении без race condition.
 // SetTrafficShaper подключает шейпер для маскировки UDP-пакетов под видеопотоки.
+// SetAWGHandler registers a handler for unencapsulated WireGuard / AWG 3.1 packets.
+func (p *UDPPuncher) SetAWGHandler(handler AWGPacketHandler) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.awgHandler = handler
+}
+
+// SetAWGVersion sets the active AmneziaWG protocol version string.
+func (p *UDPPuncher) SetAWGVersion(version string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.awgVersion = version
+}
+
 func (p *UDPPuncher) SetTrafficShaper(shaper *TrafficShaper) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

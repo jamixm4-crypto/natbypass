@@ -1,6 +1,8 @@
 package config
 
 import (
+	"github.com/natbypass/natbypass/internal/wireguard"
+	"encoding/hex"
 	"bytes"
 	"fmt"
 	"os"
@@ -83,31 +85,76 @@ type WGPeerConfig struct {
 	AllowedIP []string `mapstructure:"allowed_ips" yaml:"allowed_ips,omitempty"`
 }
 
-// AWGConfig — параметры обфускации AmneziaWG 2.0
+// AWGConfig — параметры обфускации AmneziaWG 2.0 / 3.1
 type AWGConfig struct {
-	Enabled bool   `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
-	Jc      int    `mapstructure:"jc" json:"jc" yaml:"jc,omitempty"`
-	Jmin    int    `mapstructure:"jmin" json:"jmin" yaml:"jmin,omitempty"`
-	Jmax    int    `mapstructure:"jmax" json:"jmax" yaml:"jmax,omitempty"`
-	S1      int    `mapstructure:"s1" json:"s1" yaml:"s1,omitempty"`
-	S2      int    `mapstructure:"s2" json:"s2" yaml:"s2,omitempty"`
-	H1      uint32 `mapstructure:"h1" json:"h1" yaml:"h1,omitempty"`
-	H2      uint32 `mapstructure:"h2" json:"h2" yaml:"h2,omitempty"`
-	H3      uint32 `mapstructure:"h3" json:"h3" yaml:"h3,omitempty"`
-	H4      uint32 `mapstructure:"h4" json:"h4" yaml:"h4,omitempty"`
+	Enabled                 bool   `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	Version                 string `mapstructure:"version" json:"version" yaml:"version,omitempty"` // "2.0" | "3.1"
+	Preset                  string `mapstructure:"preset" json:"preset" yaml:"preset,omitempty"`   // "awg20_legacy" | "awg31_balanced" | "awg31_strict" | "anti_tspu"
+	Jc                      int    `mapstructure:"jc" json:"jc" yaml:"jc,omitempty"`
+	Jmin                    int    `mapstructure:"jmin" json:"jmin" yaml:"jmin,omitempty"`
+	Jmax                    int    `mapstructure:"jmax" json:"jmax" yaml:"jmax,omitempty"`
+	S1                      int    `mapstructure:"s1" json:"s1" yaml:"s1,omitempty"`
+	S2                      int    `mapstructure:"s2" json:"s2" yaml:"s2,omitempty"`
+	S3                      int    `mapstructure:"s3" json:"s3" yaml:"s3,omitempty"`
+	S4                      int    `mapstructure:"s4" json:"s4" yaml:"s4,omitempty"`
+	H1                      uint32 `mapstructure:"h1" json:"h1" yaml:"h1,omitempty"`
+	H2                      uint32 `mapstructure:"h2" json:"h2" yaml:"h2,omitempty"`
+	H3                      uint32 `mapstructure:"h3" json:"h3" yaml:"h3,omitempty"`
+	H4                      uint32 `mapstructure:"h4" json:"h4" yaml:"h4,omitempty"`
+	HeaderProtectionKey     string `mapstructure:"header_protection_key" json:"header_protection_key" yaml:"header_protection_key,omitempty"`
+	HeaderProtectionEnabled bool   `mapstructure:"header_protection_enabled" json:"header_protection_enabled" yaml:"header_protection_enabled,omitempty"`
+	RandomTrailers          bool   `mapstructure:"random_trailers" json:"random_trailers" yaml:"random_trailers,omitempty"`
+	DisableCookies          bool   `mapstructure:"disable_cookies" json:"disable_cookies" yaml:"disable_cookies,omitempty"`
 }
 
-// WireGuardConfig — настройки WireGuard и AmneziaWG 2.0
+// WireGuardConfig — настройки WireGuard и AmneziaWG 2.0 / 3.1
 type WireGuardConfig struct {
-	Enabled        bool           `mapstructure:"enabled" yaml:"enabled"`
-	Interface      string         `mapstructure:"interface" yaml:"interface,omitempty"`
-	ListenPort     int            `mapstructure:"listen_port" yaml:"listen_port,omitempty"`
-	PrivateKeyFile string         `mapstructure:"private_key_file" yaml:"private_key_file,omitempty"`
-	Address        string         `mapstructure:"address" yaml:"address,omitempty"`
-	DNS            string         `mapstructure:"dns" yaml:"dns,omitempty"`
-	MTU            int            `mapstructure:"mtu" yaml:"mtu,omitempty"`
-	AWG            AWGConfig      `mapstructure:"awg" yaml:"awg,omitempty"`
-	Peers          []WGPeerConfig `mapstructure:"peers" yaml:"peers,omitempty"`
+	Enabled             bool           `mapstructure:"enabled" yaml:"enabled"`
+	Interface           string         `mapstructure:"interface" yaml:"interface,omitempty"`
+	ListenPort          int            `mapstructure:"listen_port" yaml:"listen_port,omitempty"`
+	PrivateKeyFile      string         `mapstructure:"private_key_file" yaml:"private_key_file,omitempty"`
+	Address             string         `mapstructure:"address" yaml:"address,omitempty"`
+	DNS                 string         `mapstructure:"dns" yaml:"dns,omitempty"`
+	MTU                 int            `mapstructure:"mtu" yaml:"mtu,omitempty"`
+	AWGVersion          string         `mapstructure:"awg_version" yaml:"awg_version,omitempty"` // "2.0" | "3.1"
+	AWGPreset           string         `mapstructure:"awg_preset" yaml:"awg_preset,omitempty"`   // "awg20_legacy" | "awg31_balanced" | "awg31_strict" | "anti_tspu"
+	HeaderProtectionKey string         `mapstructure:"header_protection_key" yaml:"header_protection_key,omitempty"`
+	AWG                 AWGConfig      `mapstructure:"awg" yaml:"awg,omitempty"`
+	Peers               []WGPeerConfig `mapstructure:"peers" yaml:"peers,omitempty"`
+}
+
+// GetAWGParams возвращает параметры на основе конфигурации AmneziaWG
+func (c *Config) GetAWGParams() wireguard.AWGParams {
+	preset := c.WireGuard.AWGPreset
+	if preset == "" {
+		preset = c.WireGuard.AWG.Preset
+	}
+	if preset == "" {
+		preset = "awg31_balanced" // Дефолт: 3.1 balanced
+	}
+
+	params := wireguard.GetAWGParamsByPreset(preset)
+
+	// Override Header Protection Key если задан в конфиге
+	hpKey := c.WireGuard.HeaderProtectionKey
+	if hpKey == "" {
+		hpKey = c.WireGuard.AWG.HeaderProtectionKey
+	}
+	if hpKey != "" {
+		keyBytes, err := hex.DecodeString(hpKey)
+		if err == nil && len(keyBytes) == 32 {
+			copy(params.HeaderProtectionKey[:], keyBytes)
+			params.HeaderProtectionEnabled = true
+		}
+	}
+
+	if c.WireGuard.AWGVersion == "2.0" || c.WireGuard.AWG.Version == "2.0" {
+		params.Version = wireguard.AWGVersion20
+	} else if c.WireGuard.AWGVersion == "3.1" || c.WireGuard.AWG.Version == "3.1" {
+		params.Version = wireguard.AWGVersion31
+	}
+
+	return params
 }
 
 // CryptoConfig — настройки шифрования NaCl

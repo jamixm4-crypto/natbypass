@@ -105,6 +105,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	if puncher != nil {
 		defer puncher.Close()
 	}
+
+	awgParams := cfg.GetAWGParams()
+	if puncher != nil {
+		puncher.SetAWGVersion(string(awgParams.Version))
+	}
+	log.Info().
+		Str("version", string(awgParams.Version)).
+		Str("preset", cfg.WireGuard.AWGPreset).
+		Bool("header_protection", awgParams.HeaderProtectionEnabled).
+		Bool("random_trailers", awgParams.RandomTrailers).
+		Bool("disable_cookies", awgParams.DisableCookies).
+		Msg("AmneziaWG configuration loaded")
+
 	wgPubKey, wgPort := initWireGuard(cfg)
 
 	// Unconditional Wintun / TUN adapter creation with VirtualIP
@@ -611,17 +624,27 @@ func publishLoop(
 		ip, _ := ipDisc.GetPublicIPCached(ctx, publishInterval/2)
 
 		var awgParams *signaling.AWGParams
-		if cfg.WireGuard.AWG.Enabled {
+		if cfg.WireGuard.AWG.Enabled || cfg.WireGuard.Enabled {
+			awgP := cfg.GetAWGParams()
 			awgParams = &signaling.AWGParams{
-				Jc:   cfg.WireGuard.AWG.Jc,
-				Jmin: cfg.WireGuard.AWG.Jmin,
-				Jmax: cfg.WireGuard.AWG.Jmax,
-				S1:   cfg.WireGuard.AWG.S1,
-				S2:   cfg.WireGuard.AWG.S2,
-				H1:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H1),
-				H2:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H2),
-				H3:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H3),
-				H4:   fmt.Sprintf("%d", cfg.WireGuard.AWG.H4),
+				Jc:                      awgP.Jc,
+				Jmin:                    awgP.Jmin,
+				Jmax:                    awgP.Jmax,
+				S1:                      awgP.S1,
+				S2:                      awgP.S2,
+				S3:                      awgP.S3,
+				S4:                      awgP.S4,
+				H1:                      fmt.Sprintf("%d", awgP.H1),
+				H2:                      fmt.Sprintf("%d", awgP.H2),
+				H3:                      fmt.Sprintf("%d", awgP.H3),
+				H4:                      fmt.Sprintf("%d", awgP.H4),
+				Pmin:                    awgP.ContentPaddingAdditionMin,
+				Pmax:                    awgP.ContentPaddingAdditionMax,
+				Version:                 string(awgP.Version),
+				Preset:                  cfg.WireGuard.AWGPreset,
+				HeaderProtectionEnabled: awgP.HeaderProtectionEnabled,
+				RandomTrailers:          awgP.RandomTrailers,
+				DisableCookies:          awgP.DisableCookies,
 			}
 		}
 
