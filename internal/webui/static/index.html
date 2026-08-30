@@ -1006,7 +1006,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.133</span>
+          <span id="topUpdateLabel">v1.9.134</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1017,7 +1017,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.133</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.134</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1103,12 +1103,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             </div>
           </div>
 
-          <!-- Dynamic Wave Chart with Real Latency History -->
-          <div style="height: 90px; width: 100%; margin: 8px 0;">
-            <svg id="svgLatencyWave" width="100%" height="100%" viewBox="0 0 380 120" preserveAspectRatio="none">
-              <path id="pathLatencyArea" d="M0,90 Q50,30 100,75 T200,40 T300,60 T380,25 L380,120 L0,120 Z" fill="url(#waveGrad2)" />
-              <path id="pathLatencyLine" d="M0,90 Q50,30 100,75 T200,40 T300,60 T380,25" fill="none" stroke="#38bdf8" stroke-width="3"  />
-            </svg>
+          <!-- Dynamic Smooth 60fps Canvas for Real-Time Latency -->
+          <div class="wave-container" style="height:90px; margin:8px 0; border-radius:8px; overflow:hidden; background:rgba(15,23,42,0.6); border:1px solid rgba(51,65,85,0.4);">
+            <canvas id="canvasLatency" style="width:100%; height:100%; display:block;"></canvas>
           </div>
 
           <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -2589,6 +2586,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           gridColor: 'rgba(51, 65, 85, 0.35)',
           minMax: 40,
           unit: 'ms',
+          lineWidth: 2.5,
           scrollSpeed: 45 // pixels per second
         }, options);
 
@@ -2645,11 +2643,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             this.points[i].x -= dx;
           }
 
-          // Add new point on right if needed
+          // Add new point on right with subtle organic fluid waveform
           const lastP = this.points[this.points.length - 1];
           if (!lastP || lastP.x < this.width + 12) {
             const newX = lastP ? lastP.x + 8 : this.width;
-            this.points.push({ x: newX, yVal: this.currentValue });
+            let valToPush = this.currentValue;
+            if (this.targetValue > 0) {
+              const ripple = Math.sin(now * 0.0032) * (this.currentValue * 0.04) + Math.cos(now * 0.0068) * (this.currentValue * 0.025);
+              valToPush = Math.max(1, this.currentValue + ripple);
+            }
+            this.points.push({ x: newX, yVal: valToPush });
           }
 
           // Remove points that scrolled past left boundary

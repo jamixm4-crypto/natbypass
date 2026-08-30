@@ -635,7 +635,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.133"
+		ver = "1.9.134"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1357,8 +1357,12 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			if p.IsExitNode {
 				exitNodesCount++
 			}
-			if p.Latency > 0 {
-				totalLatency += p.Latency.Milliseconds()
+			lat := p.Latency.Milliseconds()
+			if lat <= 0 && p.PingMs > 0 {
+				lat = p.PingMs
+			}
+			if lat > 0 {
+				totalLatency += lat
 				latencySamples++
 			}
 		}
@@ -1419,7 +1423,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.133"
+		ver = "1.9.134"
 	}
 
 	vip := s.state.VirtualIP
