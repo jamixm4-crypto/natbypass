@@ -483,8 +483,10 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		if p, ok := registry.Get(remoteDevID); ok && p != nil {
 			oldEP := p.ActiveEndpoint
 			p.DirectP2P = true
-			p.Latency = rtt
-			p.PingMs = rtt.Milliseconds()
+			if rtt > 0 {
+				p.Latency = rtt
+				p.PingMs = rtt.Milliseconds()
+			}
 			p.ActiveEndpoint = fromAddr
 			p.NATBlocked = false
 			registry.Upsert(p)
