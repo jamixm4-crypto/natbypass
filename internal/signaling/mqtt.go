@@ -232,7 +232,6 @@ func (m *MQTTChannel) PublishTunnelData(targetDevID string, pkt []byte) error {
 	}
 	topic := fmt.Sprintf("%s/tunnel/%s", m.topic, targetDevID)
 	tok := m.client.Publish(topic, 0, false, pkt)
-	_ = tok.WaitTimeout(1 * time.Second)
 	return tok.Error()
 }
 

@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.134"
+	Version = "1.9.135"
 	Commit  = "release"
 )
 
@@ -3320,7 +3320,6 @@ func startEngineFromConfig(c *config.Config) {
 							}
 
 							if targetPeer != nil {
-								sentDirect := false
 								targetEP := targetPeer.ActiveEndpoint
 								if guiMagicSock != nil {
 									if bestEP, _, _ := guiMagicSock.GetActiveRoute(targetPeer.DeviceID); bestEP != "" {
@@ -3341,13 +3340,12 @@ func startEngineFromConfig(c *config.Config) {
 									pmax = targetPeer.AWG.Pmax
 								}
 
-								if targetPeer.DirectP2P && udpPuncher != nil && targetEP != "" {
-									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
-										sentDirect = true
-									}
+								// 1. Прямая отправка пакета в UDP сокет (работает как данные и пробитие NAT)
+								if udpPuncher != nil && targetEP != "" {
+									_ = udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax)
 								}
-								// Мгновенный релей через сигнальный канал если прямой P2P сокет еще не пробит
-								if !sentDirect && activeMQTT != nil {
+								// 2. Мгновенный релей через сигнальный канал если прямой P2P сокет еще не подтвержден
+								if !targetPeer.DirectP2P && activeMQTT != nil {
 									_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, packet)
 								}
 								atomic.AddUint64(&packetsSentCount, 1)

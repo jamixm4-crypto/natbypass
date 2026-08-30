@@ -306,38 +306,43 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 					}
 					if found && p != nil {
-						sentDirect := false
 						targetEP := p.ActiveEndpoint
 						if magicSock != nil {
 							if bestEP, _, _ := magicSock.GetActiveRoute(p.DeviceID); bestEP != "" {
 								targetEP = bestEP
 							}
 						}
+						if targetEP == "" {
+							targetEP = p.STUNAddr
+						}
+						if targetEP == "" {
+							targetEP = p.LocalAddr
+						}
+						if targetEP == "" && p.PublicIP != "" && p.WGPort > 0 {
+							targetEP = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
+						}
+
 						pmin := 0
 						pmax := 0
 						if p.AWG != nil {
 							pmin = p.AWG.Pmin
 							pmax = p.AWG.Pmax
 						}
-						// Direct P2P transmission is used if active endpoint is confirmed and reachable
-						if p.DirectP2P && targetEP != "" && puncher != nil {
-							if err3 := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err3 == nil {
-								sentDirect = true
-							}
+
+						// 1. Direct UDP socket send (acts as live data + continuous NAT hole maintenance)
+						if targetEP != "" && puncher != nil {
+							_ = puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
 						}
-						// Immediate seamless relay fallback while direct P2P is punching or behind symmetric NAT
-						if !sentDirect && udpRelay != nil && udpRelay.IsConnected() {
-							if err3 := udpRelay.SendPacket(p.DeviceID, pkt); err3 == nil {
-								sentDirect = true
+
+						// 2. Seamless Relay fallback if direct P2P is not yet confirmed
+						if !p.DirectP2P {
+							if udpRelay != nil && udpRelay.IsConnected() {
+								_ = udpRelay.SendPacket(p.DeviceID, pkt)
+							} else if wssClient != nil && wssClient.IsConnected() {
+								_ = wssClient.SendPacket(p.DeviceID, pkt)
+							} else if sigMgr != nil {
+								_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 							}
-						}
-						if !sentDirect && wssClient != nil && wssClient.IsConnected() {
-							if err3 := wssClient.SendPacket(p.DeviceID, pkt); err3 == nil {
-								sentDirect = true
-							}
-						}
-						if !sentDirect && sigMgr != nil {
-							_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 						}
 					}
 				}
