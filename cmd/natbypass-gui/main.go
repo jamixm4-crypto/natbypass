@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	Version = "1.9.114"
+	Version = "1.9.115"
 	Commit  = "release"
 )
 
@@ -3120,20 +3120,18 @@ func startEngineFromConfig(c *config.Config) {
 		writeDebug(fmt.Sprintf("UDPPuncher слушает локальный UDP порт :%d", puncher.LocalPort()))
 
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
-				puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			if len(payload) < 20 {
 				return
 			}
 			srcIP := tunnel.GetSrcIP(payload)
-			if srcIP != nil && srcIP.String() == myVirtualIP {
+			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+			if srcIP != nil && srcIP.String() == cleanVIP {
 				return // Защита от петель
 			}
-			//   (TCP, UDP, ICMP  .)   Wintun 
-			// Windows OS сама обрабатывает TCP handshake, UDP сокеты, ICMP Reply
 			if tunDev != nil {
 				_ = tunDev.WritePacket(payload)
 				atomic.AddUint64(&packetsRecvCount, 1)
-				writeDebug(fmt.Sprintf("📥 TUN RX: %d bytes from %s", len(payload), srcAddr))
 			}
 		})
 	} else {
@@ -3149,105 +3147,128 @@ func startEngineFromConfig(c *config.Config) {
 			addLog(msg)
 			writeDebug(msg)
 
-			// Фоновый поток чтения исходящих IP-пакетов из сетевого стека Windows и отправка пирам
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					packet, readErr := tunDev.ReadPacket()
-					if readErr != nil {
+			// Буферизированный конвейер отправки исходящих IP-пакетов из сетевого стека Windows
+			pktCh := make(chan []byte, 256)
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
 						return
-					}
-					srcIP := tunnel.GetSrcIP(packet)
-					destIP := tunnel.GetDestIP(packet)
-					if srcIP == nil || destIP == nil {
-						continue
-					}
-					destStr := destIP.String()
-					writeDebug(fmt.Sprintf("📤 Wintun TX: %d bytes to %s", len(packet), destStr))
-
-					// Игнорируем мультикаст Windows (224.0.0.x, 239.255.x.x, 255.255.255.255) и петли
-					if destIP.IsMulticast() || destIP.IsUnspecified() || destStr == "255.255.255.255" || destStr == myVirtualIP || destStr == "100.64.200.255" || destStr == "100.64.200.0" {
-						continue
-					}
-
-					if registry != nil {
-						peers := registry.List()
-						var targetPeer *peer.Peer
-
-						for _, p := range peers {
-							pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-							if p.DeviceID != myDevID && (p.VirtualIP == destStr || pVIP == destStr) {
-								targetPeer = p
-								break
-							}
+					default:
+						packet, readErr := tunDev.ReadPacket()
+						if readErr != nil {
+							time.Sleep(1 * time.Millisecond)
+							continue
 						}
-
-
-						// 2. Маршрут к подсети пира (например, 192.168.1.0/24 или 10.0.0.0/8)
-						if targetPeer == nil {
-							for _, p := range peers {
-								if p.DeviceID == myDevID {
-									continue
-								}
-								for _, route := range p.AdvertisedRoutes {
-									if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
-										targetPeer = p
-										break
-									}
-								}
-								if targetPeer != nil {
-									break
-								}
-							}
+						if len(packet) < 20 {
+							continue
 						}
-
-						// 3. Маршрутизация через Exit Node
-						if targetPeer == nil && activeExitNodeID != "" {
-							if ep, ok := registry.Get(activeExitNodeID); ok && ep.Online {
-								targetPeer = ep
-							}
-						}
-
-
-
-						if targetPeer != nil {
-							sentDirect := false
-							targetEP := targetPeer.ActiveEndpoint
-							if guiMagicSock != nil {
-								if bestEP, _, _ := guiMagicSock.GetActiveRoute(targetPeer.DeviceID); bestEP != "" {
-									targetEP = bestEP
-								}
-							}
-							if targetEP == "" {
-								targetEP = targetPeer.STUNAddr
-							}
-							if targetEP == "" {
-								targetEP = targetPeer.LocalAddr
-							}
-
-							pmin := 0
-							pmax := 0
-							if targetPeer.AWG != nil {
-								pmin = targetPeer.AWG.Pmin
-								pmax = targetPeer.AWG.Pmax
-							}
-
-							if udpPuncher != nil && targetEP != "" {
-								if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
-									sentDirect = true
-								}
-							}
-							// Релей через MQTT используется ИСКЛЮЧИТЕЛЬНО если прямой UDP-сокет недоступен
-							if !sentDirect && activeMQTT != nil {
-								_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, packet)
-							}
-							atomic.AddUint64(&packetsSentCount, 1)
+						pktCopy := make([]byte, len(packet))
+						copy(pktCopy, packet)
+						select {
+						case pktCh <- pktCopy:
+						default:
 						}
 					}
 				}
-			}
+			}()
+
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case packet, ok := <-pktCh:
+						if !ok {
+							return
+						}
+						srcIP := tunnel.GetSrcIP(packet)
+						destIP := tunnel.GetDestIP(packet)
+						if srcIP == nil || destIP == nil {
+							continue
+						}
+						destStr := destIP.String()
+
+						// Игнорируем мультикаст Windows (224.0.0.x, 239.255.x.x, 255.255.255.255) и петли
+						cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+						if destIP.IsMulticast() || destIP.IsUnspecified() || destStr == "255.255.255.255" || destStr == cleanVIP || destStr == "100.64.200.255" || destStr == "100.64.200.0" {
+							continue
+						}
+
+						if registry != nil {
+							peers := registry.List()
+							var targetPeer *peer.Peer
+
+							for _, p := range peers {
+								pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+								if p.DeviceID != myDevID && (p.VirtualIP == destStr || pVIP == destStr) {
+									targetPeer = p
+									break
+								}
+							}
+
+							// 2. Маршрут к подсети пира (например, 192.168.1.0/24 или 10.0.0.0/8)
+							if targetPeer == nil {
+								for _, p := range peers {
+									if p.DeviceID == myDevID {
+										continue
+									}
+									for _, route := range p.AdvertisedRoutes {
+										if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
+											targetPeer = p
+											break
+										}
+									}
+									if targetPeer != nil {
+										break
+									}
+								}
+							}
+
+							// 3. Маршрутизация через Exit Node
+							if targetPeer == nil && activeExitNodeID != "" {
+								if ep, ok := registry.Get(activeExitNodeID); ok && ep.Online {
+									targetPeer = ep
+								}
+							}
+
+							if targetPeer != nil {
+								sentDirect := false
+								targetEP := targetPeer.ActiveEndpoint
+								if guiMagicSock != nil {
+									if bestEP, _, _ := guiMagicSock.GetActiveRoute(targetPeer.DeviceID); bestEP != "" {
+										targetEP = bestEP
+									}
+								}
+								if targetEP == "" {
+									targetEP = targetPeer.STUNAddr
+								}
+								if targetEP == "" {
+									targetEP = targetPeer.LocalAddr
+								}
+
+								pmin := 0
+								pmax := 0
+								if targetPeer.AWG != nil {
+									pmin = targetPeer.AWG.Pmin
+									pmax = targetPeer.AWG.Pmax
+								}
+
+								if udpPuncher != nil && targetEP != "" {
+									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
+										sentDirect = true
+									}
+								}
+								// Релей через MQTT используется ИСКЛЮЧИТЕЛЬНО если прямой UDP-сокет недоступен
+								if !sentDirect && activeMQTT != nil {
+									_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, packet)
+								}
+								atomic.AddUint64(&packetsSentCount, 1)
+							}
+						}
+					}
+				}
+			}()
 		} else {
 			warnMsg := fmt.Sprintf("⚠️ Wintun адаптер: %s (Для полного ping запустите от Администратора)", tErr.Error())
 			addLog(warnMsg)
