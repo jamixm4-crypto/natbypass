@@ -120,7 +120,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	wgPubKey, wgPort := initWireGuard(cfg)
 
 	// Unconditional Wintun / TUN adapter creation with VirtualIP
-	adapterName := "NatBypass"
+	adapterName := "nb0"
+	if runtime.GOOS == "windows" {
+		adapterName = "NatBypass"
+	}
 	tunDev, tunErr := tunnel.CreateAdapter(adapterName, myVirtualIP)
 
 	if tunErr != nil {

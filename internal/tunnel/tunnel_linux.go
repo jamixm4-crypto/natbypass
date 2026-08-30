@@ -46,7 +46,7 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 	// 1. Поиск и открытие /dev/net/tun или /dev/tun
 	var file *os.File
 	var err error
-	tunPaths := []string{"/dev/net/tun", "/dev/tun"}
+	tunPaths := []string{"/dev/net/tun", "/dev/tun", "/opt/dev/net/tun"}
 	for _, p := range tunPaths {
 		file, err = os.OpenFile(p, os.O_RDWR, 0)
 		if err == nil {
