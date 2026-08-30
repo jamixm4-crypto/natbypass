@@ -329,6 +329,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/update/status", s.handleUpdateStatus)
 	// Профили сети (Multi-Profile Mesh Networks)
 	mux.HandleFunc("/api/profiles", s.handleProfilesList)
+	mux.HandleFunc("/api/awg/generate-random", s.handleAWGGenerateRandom)
 	mux.HandleFunc("/api/profiles/create", s.handleProfileCreate)
 	mux.HandleFunc("/api/profiles/update", s.handleProfileUpdate)
 	mux.HandleFunc("/api/profiles/switch", s.handleProfileSwitch)
@@ -595,7 +596,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.096"
+		ver = "1.9.097"
 	}
 
 	status := map[string]interface{}{
@@ -1354,7 +1355,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.096"
+		ver = "1.9.097"
 	}
 
 	data := map[string]interface{}{
@@ -1957,6 +1958,25 @@ func (s *Server) handleProfilesList(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
+// handleAWGGenerateRandom — GET /api/awg/generate-random — генерация свежего набора уникальных параметров AWG 3.1
+func (s *Server) handleAWGGenerateRandom(w http.ResponseWriter, r *http.Request) {
+	jc, jmin, jmax, s1, s2, h1, h2, h3, h4, hpKey := config.GenerateRandomAWGProfileParams()
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"jc":                    jc,
+		"jmin":                  jmin,
+		"jmax":                  jmax,
+		"s1":                    s1,
+		"s2":                    s2,
+		"h1":                    h1,
+		"h2":                    h2,
+		"h3":                    h3,
+		"h4":                    h4,
+		"header_protection_key": hpKey,
+		"random_trailers":      true,
+		"disable_cookies":      true,
+	}, "")
+}
+
 // handleProfileCreate — POST /api/profiles/create — создание нового профиля сети
 func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1964,17 +1984,29 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name       string `json:"name"`
-		MQTTBroker string `json:"mqtt_broker"`
-		MQTTTopic  string `json:"mqtt_topic"`
-		MQTTUser   string `json:"mqtt_user"`
-		MQTTPass   string `json:"mqtt_pass"`
-		TGToken    string `json:"tg_token"`
-		TGChatID   int64  `json:"tg_chat_id"`
-		VirtualIP  string `json:"virtual_ip"`
-		TGProxy    string `json:"tg_proxy"`
-		AWGPreset  string `json:"awg_preset"`
-		AutoSwitch bool   `json:"auto_switch"`
+		Name                string `json:"name"`
+		MQTTBroker          string `json:"mqtt_broker"`
+		MQTTTopic           string `json:"mqtt_topic"`
+		MQTTUser            string `json:"mqtt_user"`
+		MQTTPass            string `json:"mqtt_pass"`
+		TGToken             string `json:"tg_token"`
+		TGChatID            int64  `json:"tg_chat_id"`
+		VirtualIP           string `json:"virtual_ip"`
+		TGProxy             string `json:"tg_proxy"`
+		AWGPreset           string `json:"awg_preset"`
+		Jc                  int    `json:"jc"`
+		Jmin                int    `json:"jmin"`
+		Jmax                int    `json:"jmax"`
+		S1                  int    `json:"s1"`
+		S2                  int    `json:"s2"`
+		H1                  uint32 `json:"h1"`
+		H2                  uint32 `json:"h2"`
+		H3                  uint32 `json:"h3"`
+		H4                  uint32 `json:"h4"`
+		HeaderProtectionKey string `json:"header_protection_key"`
+		RandomTrailers      bool   `json:"random_trailers"`
+		DisableCookies      bool   `json:"disable_cookies"`
+		AutoSwitch          bool   `json:"auto_switch"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
@@ -1999,21 +2031,38 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		req.AWGPreset = "awg31_strict"
 	}
 
+	jc, jmin, jmax, s1, s2, h1, h2, h3, h4, hpKey := req.Jc, req.Jmin, req.Jmax, req.S1, req.S2, req.H1, req.H2, req.H3, req.H4, req.HeaderProtectionKey
+	if h1 == 0 {
+		jc, jmin, jmax, s1, s2, h1, h2, h3, h4, hpKey = config.GenerateRandomAWGProfileParams()
+	}
+
 	newProf := config.Profile{
-		ID:         "p-" + config.GenerateRandomHex(4),
-		Name:       req.Name,
-		NetworkKey: config.GenerateRandomHex(16),
-		MQTTBroker: req.MQTTBroker,
-		MQTTTopic:  req.MQTTTopic,
-		MQTTUser:   req.MQTTUser,
-		MQTTPass:   req.MQTTPass,
-		TGToken:    req.TGToken,
-		TGChatID:   req.TGChatID,
-		TGProxy:    req.TGProxy,
-		VirtualIP:  req.VirtualIP,
-		AWGPreset:  req.AWGPreset,
-		IsActive:   req.AutoSwitch || len(cfg.Profiles) == 0,
-		CreatedAt:  time.Now(),
+		ID:                  "p-" + config.GenerateRandomHex(4),
+		Name:                req.Name,
+		NetworkKey:          config.GenerateRandomHex(16),
+		MQTTBroker:          req.MQTTBroker,
+		MQTTTopic:           req.MQTTTopic,
+		MQTTUser:            req.MQTTUser,
+		MQTTPass:            req.MQTTPass,
+		TGToken:             req.TGToken,
+		TGChatID:            req.TGChatID,
+		TGProxy:             req.TGProxy,
+		VirtualIP:           req.VirtualIP,
+		AWGPreset:           req.AWGPreset,
+		Jc:                  jc,
+		Jmin:                jmin,
+		Jmax:                jmax,
+		S1:                  s1,
+		S2:                  s2,
+		H1:                  h1,
+		H2:                  h2,
+		H3:                  h3,
+		H4:                  h4,
+		HeaderProtectionKey: hpKey,
+		RandomTrailers:      req.RandomTrailers || true,
+		DisableCookies:      req.DisableCookies || true,
+		IsActive:            req.AutoSwitch || len(cfg.Profiles) == 0,
+		CreatedAt:           time.Now(),
 	}
 
 	saved := cfg.AddOrUpdateProfile(newProf)
@@ -2051,17 +2100,29 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		MQTTBroker string `json:"mqtt_broker"`
-		MQTTTopic  string `json:"mqtt_topic"`
-		MQTTUser   string `json:"mqtt_user"`
-		MQTTPass   string `json:"mqtt_pass"`
-		TGToken    string `json:"tg_token"`
-		TGChatID   int64  `json:"tg_chat_id"`
-		VirtualIP  string `json:"virtual_ip"`
-		TGProxy    string `json:"tg_proxy"`
-		AWGPreset  string `json:"awg_preset"`
+		ID                  string `json:"id"`
+		Name                string `json:"name"`
+		MQTTBroker          string `json:"mqtt_broker"`
+		MQTTTopic           string `json:"mqtt_topic"`
+		MQTTUser            string `json:"mqtt_user"`
+		MQTTPass            string `json:"mqtt_pass"`
+		TGToken             string `json:"tg_token"`
+		TGChatID            int64  `json:"tg_chat_id"`
+		VirtualIP           string `json:"virtual_ip"`
+		TGProxy             string `json:"tg_proxy"`
+		AWGPreset           string `json:"awg_preset"`
+		Jc                  int    `json:"jc"`
+		Jmin                int    `json:"jmin"`
+		Jmax                int    `json:"jmax"`
+		S1                  int    `json:"s1"`
+		S2                  int    `json:"s2"`
+		H1                  uint32 `json:"h1"`
+		H2                  uint32 `json:"h2"`
+		H3                  uint32 `json:"h3"`
+		H4                  uint32 `json:"h4"`
+		HeaderProtectionKey string `json:"header_protection_key"`
+		RandomTrailers      bool   `json:"random_trailers"`
+		DisableCookies      bool   `json:"disable_cookies"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка JSON: "+err.Error())

@@ -15,20 +15,32 @@ import (
 
 // Profile — изолированный профиль mesh-сети с собственным топиком, ключами и настройками каналов
 type Profile struct {
-	ID          string    `json:"id" mapstructure:"id" yaml:"id"`
-	Name        string    `json:"name" mapstructure:"name" yaml:"name"`
-	NetworkKey  string    `json:"network_key,omitempty" mapstructure:"network_key" yaml:"network_key,omitempty"`
-	VirtualIP   string    `json:"virtual_ip,omitempty" mapstructure:"virtual_ip" yaml:"virtual_ip,omitempty"`
-	MQTTBroker  string    `json:"mqtt_broker" mapstructure:"mqtt_broker" yaml:"mqtt_broker"`
-	MQTTTopic   string    `json:"mqtt_topic" mapstructure:"mqtt_topic" yaml:"mqtt_topic"`
-	MQTTUser    string    `json:"mqtt_user,omitempty" mapstructure:"mqtt_user" yaml:"mqtt_user,omitempty"`
-	MQTTPass    string    `json:"mqtt_pass,omitempty" mapstructure:"mqtt_pass" yaml:"mqtt_pass,omitempty"`
-	TGToken     string    `json:"tg_token,omitempty" mapstructure:"tg_token" yaml:"tg_token,omitempty"`
-	TGChatID    int64     `json:"tg_chat_id,omitempty" mapstructure:"tg_chat_id" yaml:"tg_chat_id,omitempty"`
-	TGProxy     string    `json:"tg_proxy,omitempty" mapstructure:"tg_proxy" yaml:"tg_proxy,omitempty"`
-	AWGPreset   string    `json:"awg_preset" mapstructure:"awg_preset" yaml:"awg_preset"`
-	IsActive    bool      `json:"is_active" mapstructure:"is_active" yaml:"is_active"`
-	CreatedAt   time.Time `json:"created_at" mapstructure:"created_at" yaml:"created_at"`
+	ID                  string    `json:"id" mapstructure:"id" yaml:"id"`
+	Name                string    `json:"name" mapstructure:"name" yaml:"name"`
+	NetworkKey          string    `json:"network_key,omitempty" mapstructure:"network_key" yaml:"network_key,omitempty"`
+	VirtualIP           string    `json:"virtual_ip,omitempty" mapstructure:"virtual_ip" yaml:"virtual_ip,omitempty"`
+	MQTTBroker          string    `json:"mqtt_broker" mapstructure:"mqtt_broker" yaml:"mqtt_broker"`
+	MQTTTopic           string    `json:"mqtt_topic" mapstructure:"mqtt_topic" yaml:"mqtt_topic"`
+	MQTTUser            string    `json:"mqtt_user,omitempty" mapstructure:"mqtt_user" yaml:"mqtt_user,omitempty"`
+	MQTTPass            string    `json:"mqtt_pass,omitempty" mapstructure:"mqtt_pass" yaml:"mqtt_pass,omitempty"`
+	TGToken             string    `json:"tg_token,omitempty" mapstructure:"tg_token" yaml:"tg_token,omitempty"`
+	TGChatID            int64     `json:"tg_chat_id,omitempty" mapstructure:"tg_chat_id" yaml:"tg_chat_id,omitempty"`
+	TGProxy             string    `json:"tg_proxy,omitempty" mapstructure:"tg_proxy" yaml:"tg_proxy,omitempty"`
+	AWGPreset           string    `json:"awg_preset" mapstructure:"awg_preset" yaml:"awg_preset"`
+	Jc                  int       `json:"jc,omitempty" mapstructure:"jc" yaml:"jc,omitempty"`
+	Jmin                int       `json:"jmin,omitempty" mapstructure:"jmin" yaml:"jmin,omitempty"`
+	Jmax                int       `json:"jmax,omitempty" mapstructure:"jmax" yaml:"jmax,omitempty"`
+	S1                  int       `json:"s1,omitempty" mapstructure:"s1" yaml:"s1,omitempty"`
+	S2                  int       `json:"s2,omitempty" mapstructure:"s2" yaml:"s2,omitempty"`
+	H1                  uint32    `json:"h1,omitempty" mapstructure:"h1" yaml:"h1,omitempty"`
+	H2                  uint32    `json:"h2,omitempty" mapstructure:"h2" yaml:"h2,omitempty"`
+	H3                  uint32    `json:"h3,omitempty" mapstructure:"h3" yaml:"h3,omitempty"`
+	H4                  uint32    `json:"h4,omitempty" mapstructure:"h4" yaml:"h4,omitempty"`
+	HeaderProtectionKey string    `json:"header_protection_key,omitempty" mapstructure:"header_protection_key" yaml:"header_protection_key,omitempty"`
+	RandomTrailers      bool      `json:"random_trailers,omitempty" mapstructure:"random_trailers" yaml:"random_trailers,omitempty"`
+	DisableCookies      bool      `json:"disable_cookies,omitempty" mapstructure:"disable_cookies" yaml:"disable_cookies,omitempty"`
+	IsActive            bool      `json:"is_active" mapstructure:"is_active" yaml:"is_active"`
+	CreatedAt           time.Time `json:"created_at" mapstructure:"created_at" yaml:"created_at"`
 }
 
 // GenerateRandomHex возвращает криптостойкую случайную hex-строку
@@ -39,20 +51,58 @@ func GenerateRandomHex(n int) string {
 }
 
 // GenerateDefaultProfile создает новый профиль с уникальным случайным топиком и сетевым ключом
+
+// GenerateRandomAWGProfileParams генерирует полностью уникальный набор параметров AWG 3.1 для новой сети
+func GenerateRandomAWGProfileParams() (jc, jmin, jmax, s1, s2 int, h1, h2, h3, h4 uint32, hpKey string) {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	h1 = uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	h2 = uint32(b[4])<<24 | uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7])
+	h3 = uint32(b[8])<<24 | uint32(b[9])<<16 | uint32(b[10])<<8 | uint32(b[11])
+	h4 = uint32(b[12])<<24 | uint32(b[13])<<16 | uint32(b[14])<<8 | uint32(b[15])
+	if h1 < 1000000 { h1 += 1000000 }
+	if h2 < 1000000 { h2 += 1000000 }
+	if h3 < 1000000 { h3 += 1000000 }
+	if h4 < 1000000 { h4 += 1000000 }
+
+	var r [4]byte
+	_, _ = rand.Read(r[:])
+	jc = 3 + int(r[0]%4)
+	jmin = 25 + int(r[1]%25)
+	jmax = jmin + 30 + int(r[2]%35)
+	s1 = 20 + int(r[3]%45)
+	s2 = 20 + int(r[0]%45)
+	hpKey = GenerateRandomHex(32)
+	return
+}
+
 func GenerateDefaultProfile(name string) Profile {
 	if name == "" {
 		name = "Основная сеть"
 	}
 	topicID := GenerateRandomHex(8)
+	jc, jmin, jmax, s1, s2, h1, h2, h3, h4, hpKey := GenerateRandomAWGProfileParams()
 	return Profile{
-		ID:         "p-" + GenerateRandomHex(4),
-		Name:       name,
-		NetworkKey: GenerateRandomHex(16),
-		MQTTBroker: "tcp://broker.emqx.io:1883",
-		MQTTTopic:  "natbypass/mesh/" + topicID,
-		AWGPreset:  "awg31_strict",
-		IsActive:   true,
-		CreatedAt:  time.Now(),
+		ID:                  "p-" + GenerateRandomHex(4),
+		Name:                name,
+		NetworkKey:          GenerateRandomHex(16),
+		MQTTBroker:          "tcp://broker.emqx.io:1883",
+		MQTTTopic:           "natbypass/mesh/" + topicID,
+		AWGPreset:           "custom",
+		Jc:                  jc,
+		Jmin:                jmin,
+		Jmax:                jmax,
+		S1:                  s1,
+		S2:                  s2,
+		H1:                  h1,
+		H2:                  h2,
+		H3:                  h3,
+		H4:                  h4,
+		HeaderProtectionKey: hpKey,
+		RandomTrailers:      true,
+		DisableCookies:      true,
+		IsActive:            true,
+		CreatedAt:           time.Now(),
 	}
 }
 
@@ -202,6 +252,22 @@ func (c *Config) SyncSignalingWithProfile(p *Profile) {
 		c.WireGuard.AWGPreset = p.AWGPreset
 		c.WireGuard.AWG.Preset = p.AWGPreset
 	}
+	if p.H1 != 0 && p.H2 != 0 {
+		c.WireGuard.AWG.H1 = p.H1
+		c.WireGuard.AWG.H2 = p.H2
+		c.WireGuard.AWG.H3 = p.H3
+		c.WireGuard.AWG.H4 = p.H4
+		c.WireGuard.AWG.S1 = p.S1
+		c.WireGuard.AWG.S2 = p.S2
+		c.WireGuard.AWG.Jc = p.Jc
+		c.WireGuard.AWG.Jmin = p.Jmin
+		c.WireGuard.AWG.Jmax = p.Jmax
+		c.WireGuard.AWG.HeaderProtectionKey = p.HeaderProtectionKey
+		c.WireGuard.AWG.RandomTrailers = p.RandomTrailers
+		c.WireGuard.AWG.DisableCookies = p.DisableCookies
+		c.WireGuard.AWG.Enabled = true
+		c.WireGuard.AWG.Version = "3.1"
+	}
 	c.Signaling.Channels = newChannels
 }
 
@@ -319,6 +385,22 @@ func ExportProfileURI(p Profile) string {
 	if p.AWGPreset != "" {
 		q.Set("awg", p.AWGPreset)
 	}
+	if p.H1 != 0 {
+		q.Set("h1", fmt.Sprintf("%d", p.H1))
+		q.Set("h2", fmt.Sprintf("%d", p.H2))
+		q.Set("h3", fmt.Sprintf("%d", p.H3))
+		q.Set("h4", fmt.Sprintf("%d", p.H4))
+		q.Set("s1", fmt.Sprintf("%d", p.S1))
+		q.Set("s2", fmt.Sprintf("%d", p.S2))
+		q.Set("jc", fmt.Sprintf("%d", p.Jc))
+		q.Set("jmin", fmt.Sprintf("%d", p.Jmin))
+		q.Set("jmax", fmt.Sprintf("%d", p.Jmax))
+		if p.HeaderProtectionKey != "" {
+			q.Set("hpk", p.HeaderProtectionKey)
+		}
+		q.Set("rt", fmt.Sprintf("%t", p.RandomTrailers))
+		q.Set("dc", fmt.Sprintf("%t", p.DisableCookies))
+	}
 
 	return "natbypass://profile?" + q.Encode()
 }
@@ -370,6 +452,20 @@ func ImportProfileURI(raw string) (*Profile, error) {
 				AWGPreset:  q.Get("awg"),
 				IsActive:   true,
 				CreatedAt:  time.Now(),
+			}
+			if h1Str := q.Get("h1"); h1Str != "" {
+				if v, err := strconv.ParseUint(h1Str, 10, 32); err == nil { p.H1 = uint32(v) }
+				if v, err := strconv.ParseUint(q.Get("h2"), 10, 32); err == nil { p.H2 = uint32(v) }
+				if v, err := strconv.ParseUint(q.Get("h3"), 10, 32); err == nil { p.H3 = uint32(v) }
+				if v, err := strconv.ParseUint(q.Get("h4"), 10, 32); err == nil { p.H4 = uint32(v) }
+				if v, err := strconv.Atoi(q.Get("s1")); err == nil { p.S1 = v }
+				if v, err := strconv.Atoi(q.Get("s2")); err == nil { p.S2 = v }
+				if v, err := strconv.Atoi(q.Get("jc")); err == nil { p.Jc = v }
+				if v, err := strconv.Atoi(q.Get("jmin")); err == nil { p.Jmin = v }
+				if v, err := strconv.Atoi(q.Get("jmax")); err == nil { p.Jmax = v }
+				p.HeaderProtectionKey = q.Get("hpk")
+				p.RandomTrailers = q.Get("rt") == "true"
+				p.DisableCookies = q.Get("dc") == "true"
 			}
 			if p.AWGPreset == "" {
 				p.AWGPreset = "dpi"

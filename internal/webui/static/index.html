@@ -852,6 +852,30 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
     }
 
+
+    async function generateRandomAWGParamsForModal(prefix) {
+      try {
+        const res = await fetch('/api/awg/generate-random');
+        const json = await res.json();
+        if (json.ok && json.data) {
+          const d = json.data;
+          const setV = (id, val) => { const el = document.getElementById(prefix + id); if (el) el.value = val; };
+          setV('H1', d.h1);
+          setV('H2', d.h2);
+          setV('H3', d.h3);
+          setV('H4', d.h4);
+          setV('S1', d.s1);
+          setV('S2', d.s2);
+          setV('Jc', d.jc);
+          setV('Jmin', d.jmin);
+          setV('Jmax', d.jmax);
+          setV('HPKey', d.header_protection_key);
+          const rt = document.getElementById(prefix + 'RT'); if (rt) rt.checked = Boolean(d.random_trailers);
+          const dc = document.getElementById(prefix + 'DC'); if (dc) dc.checked = Boolean(d.disable_cookies);
+        }
+      } catch(e) {}
+    }
+
 </script>
 </head>
 
@@ -982,7 +1006,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.096</span>
+          <span id="topUpdateLabel">v1.9.097</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #c084fc; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -993,7 +1017,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.096</span>
+          <span id="userVersionBadge" class="badge badge-purple mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.097</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1743,10 +1767,40 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <label class="form-label">MQTT Топик (оставьте пустым для безопасной автогенерации):</label>
         <input type="text" id="newProfTopic" class="form-input mono" placeholder="Задайте уникальный секретный топик для вашей сети">
       </div>
-      <div class="form-group" style="margin-bottom:16px;">
+      <div class="form-group" style="margin-bottom:14px;">
         <label class="form-label">MQTT Брокер:</label>
         <input type="text" id="newProfBroker" class="form-input mono" value="tcp://broker.emqx.io:1883">
       </div>
+
+      <!-- Unique AWG 3.1 Network Parameters -->
+      <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 12px; padding: 12px; margin-bottom: 16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <span style="font-weight:700; font-size:0.84rem; color:#38bdf8;">🛡️ Уникальная конфигурация AmneziaWG 3.1</span>
+          <button type="button" onclick="generateRandomAWGParamsForModal('newProf')" class="btn-pill" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; font-size:0.72rem; padding:3px 8px; cursor:pointer;">🎲 Сгенерировать новые</button>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px;">
+          <div><label class="form-label" style="font-size:0.7rem;">H1 (Init):</label><input type="number" id="newProfH1" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">H2 (Resp):</label><input type="number" id="newProfH2" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">H3 (Cookie):</label><input type="number" id="newProfH3" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">H4 (Data):</label><input type="number" id="newProfH4" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 8px;">
+          <div><label class="form-label" style="font-size:0.7rem;">S1:</label><input type="number" id="newProfS1" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">S2:</label><input type="number" id="newProfS2" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">Jc:</label><input type="number" id="newProfJc" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">Jmin:</label><input type="number" id="newProfJmin" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">Jmax:</label><input type="number" id="newProfJmax" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+        </div>
+        <div style="margin-bottom:6px;">
+          <label class="form-label" style="font-size:0.7rem;">Header Protection Key (ChaCha20 Hex):</label>
+          <input type="text" id="newProfHPKey" class="form-input mono" style="font-size:0.7rem; padding:4px 6px;">
+        </div>
+        <div style="display:flex; gap:12px; font-size:0.74rem;">
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="newProfRT" checked> Random Trailers</label>
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="newProfDC" checked> Disable Cookies</label>
+        </div>
+      </div>
+
       <div style="display:flex; justify-content:flex-end; gap:10px;">
         <button onclick="closeCreateProfileModal()" class="btn btn-glass">Отмена</button>
         <button onclick="submitCreateProfile()" class="btn btn-neon">Создать и переключиться</button>
@@ -1774,10 +1828,40 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <label class="form-label">MQTT Топик (секрет сети):</label>
         <input type="text" id="editProfTopic" class="form-input mono" placeholder="natbypass/mesh/...">
       </div>
-      <div class="form-group" style="margin-bottom:16px;">
+      <div class="form-group" style="margin-bottom:14px;">
         <label class="form-label">MQTT Брокер:</label>
         <input type="text" id="editProfBroker" class="form-input mono" value="tcp://broker.emqx.io:1883">
       </div>
+
+      <!-- Unique AWG 3.1 Network Parameters -->
+      <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 12px; padding: 12px; margin-bottom: 16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <span style="font-weight:700; font-size:0.84rem; color:#38bdf8;">🛡️ Уникальная конфигурация AmneziaWG 3.1</span>
+          <button type="button" onclick="generateRandomAWGParamsForModal('editProf')" class="btn-pill" style="background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; font-size:0.72rem; padding:3px 8px; cursor:pointer;">🎲 Сгенерировать новые</button>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px;">
+          <div><label class="form-label" style="font-size:0.7rem;">H1 (Init):</label><input type="number" id="editProfH1" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">H2 (Resp):</label><input type="number" id="editProfH2" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">H3 (Cookie):</label><input type="number" id="editProfH3" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">H4 (Data):</label><input type="number" id="editProfH4" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 8px;">
+          <div><label class="form-label" style="font-size:0.7rem;">S1:</label><input type="number" id="editProfS1" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">S2:</label><input type="number" id="editProfS2" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">Jc:</label><input type="number" id="editProfJc" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">Jmin:</label><input type="number" id="editProfJmin" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+          <div><label class="form-label" style="font-size:0.7rem;">Jmax:</label><input type="number" id="editProfJmax" class="form-input mono" style="font-size:0.72rem; padding:4px 6px;"></div>
+        </div>
+        <div style="margin-bottom:6px;">
+          <label class="form-label" style="font-size:0.7rem;">Header Protection Key (ChaCha20 Hex):</label>
+          <input type="text" id="editProfHPKey" class="form-input mono" style="font-size:0.7rem; padding:4px 6px;">
+        </div>
+        <div style="display:flex; gap:12px; font-size:0.74rem;">
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="editProfRT" checked> Random Trailers</label>
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="checkbox" id="editProfDC" checked> Disable Cookies</label>
+        </div>
+      </div>
+
       <div style="display:flex; justify-content:flex-end; gap:10px;">
         <button onclick="closeEditProfileModal()" class="btn btn-glass">Отмена</button>
         <button onclick="submitEditProfile()" class="btn btn-neon">Сохранить изменения</button>
@@ -4109,14 +4193,39 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     async function submitCreateProfile() {
       const name = document.getElementById('newProfName').value.trim();
+      const virtual_ip = document.getElementById('newProfVIP') ? document.getElementById('newProfVIP').value.trim() : '';
       const mqtt_topic = document.getElementById('newProfTopic').value.trim();
       const mqtt_broker = document.getElementById('newProfBroker').value.trim();
+
+      const getNum = (id) => { const el = document.getElementById(id); return el && el.value ? parseInt(el.value, 10) : 0; };
+      const getStr = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+      const getBool = (id) => { const el = document.getElementById(id); return el ? el.checked : true; };
+
+      const bodyData = {
+        name,
+        virtual_ip,
+        mqtt_topic,
+        mqtt_broker,
+        h1: getNum('newProfH1'),
+        h2: getNum('newProfH2'),
+        h3: getNum('newProfH3'),
+        h4: getNum('newProfH4'),
+        s1: getNum('newProfS1'),
+        s2: getNum('newProfS2'),
+        jc: getNum('newProfJc'),
+        jmin: getNum('newProfJmin'),
+        jmax: getNum('newProfJmax'),
+        header_protection_key: getStr('newProfHPKey'),
+        random_trailers: getBool('newProfRT'),
+        disable_cookies: getBool('newProfDC'),
+        auto_switch: true
+      };
 
       try {
         const res = await fetch('/api/profiles/create', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({name, mqtt_topic, mqtt_broker, auto_switch: true})
+          body: JSON.stringify(bodyData)
         });
         const json = await res.json();
         if (json.ok) {
