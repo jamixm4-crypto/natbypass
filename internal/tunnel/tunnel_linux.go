@@ -162,7 +162,13 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, "mtu", "1420").Run()
 	_ = EnableMSSClamping(d.AdapterName, 1420)
 
-	// 4. Маршрутизация 100.64.200.0/24 через адаптер
+	// 4. Маршрутизация подсети через адаптер
+	prefix := "100.64.200"
+	parts := strings.Split(cleanVIP, ".")
+	if len(parts) >= 3 {
+		prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
+	}
+	_ = exec.CommandContext(ctx, "ip", "route", "add", prefix+".0/24", "dev", d.AdapterName).Run()
 	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName).Run()
 
 	// 5. Отключение фильтрации обратного пути (rp_filter) и разрешение транзита в ядре Linux / Keenetic

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -300,6 +301,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/dashboard", s.handleDashboard)
 	mux.HandleFunc("/api/analytics", s.handleAnalytics)
 	mux.HandleFunc("/api/diagnose", s.handleDiagnose)
+	mux.HandleFunc("/api/diagnostics/ping", s.handleDiagnosticsPing)
+	mux.HandleFunc("/api/diagnostics/traceroute", s.handleDiagnosticsTraceroute)
+	mux.HandleFunc("/api/diagnostics/peer-routes", s.handleDiagnosticsPeerRoutes)
+	mux.HandleFunc("/api/diagnostics/check-internet", s.handleDiagnosticsCheckInternet)
 	mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
 	mux.HandleFunc("/api/setup/complete", s.handleSetupComplete)
 	mux.HandleFunc("/api/events", s.handleEvents)
@@ -615,7 +620,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.104"
+		ver = "1.9.105"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1391,7 +1396,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.104"
+		ver = "1.9.105"
 	}
 
 vip := s.state.VirtualIP
@@ -2788,4 +2793,151 @@ func (s *Server) handleAWGApply(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"message": "Настройки AmneziaWG успешно применены",
 	})
+}
+
+// handleDiagnosticsPing — POST /api/diagnostics/ping — выполнение ping целевого узла
+func (s *Server) handleDiagnosticsPing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		Target string `json:"target"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Target == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан целевой IP или хост")
+		return
+	}
+
+	target := strings.TrimSpace(req.Target)
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "ping", "-n", "4", "-w", "1000", target)
+		setHideWindow(cmd)
+	} else {
+		cmd = exec.CommandContext(ctx, "ping", "-c", "4", "-W", "2", target)
+	}
+
+	out, err := cmd.CombinedOutput()
+	rawOut := string(out)
+
+	success := (err == nil)
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":         true,
+		"target":     target,
+		"success":    success,
+		"raw_output": strings.TrimSpace(rawOut),
+	}, "")
+}
+
+// handleDiagnosticsTraceroute — POST /api/diagnostics/traceroute — трассировка маршрута
+func (s *Server) handleDiagnosticsTraceroute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		Target string `json:"target"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Target == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан целевой IP или хост")
+		return
+	}
+
+	target := strings.TrimSpace(req.Target)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "tracert", "-d", "-h", "8", "-w", "600", target)
+		setHideWindow(cmd)
+	} else {
+		cmd = exec.CommandContext(ctx, "traceroute", "-n", "-m", "8", "-w", "2", target)
+	}
+
+	out, _ := cmd.CombinedOutput()
+	rawOut := string(out)
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":         true,
+		"target":     target,
+		"raw_output": strings.TrimSpace(rawOut),
+	}, "")
+}
+
+// handleDiagnosticsPeerRoutes — GET /api/diagnostics/peer-routes — расшаренные подсети и статус выхода в интернет
+func (s *Server) handleDiagnosticsPeerRoutes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	type PeerRouteInfo struct {
+		DeviceID         string   `json:"device_id"`
+		DeviceName       string   `json:"device_name"`
+		VirtualIP        string   `json:"virtual_ip"`
+		DirectP2P        bool     `json:"direct_p2p"`
+		LatencyMs        float64  `json:"latency_ms"`
+		IsExitNode       bool     `json:"is_exit_node"`
+		AdvertisedRoutes []string `json:"advertised_routes"`
+		OS               string   `json:"os"`
+		Arch             string   `json:"arch"`
+		Version          string   `json:"version"`
+		LastSeenSeconds  int      `json:"last_seen_seconds"`
+	}
+
+	var list []PeerRouteInfo
+	if s.registry != nil {
+		for _, p := range s.registry.List() {
+			list = append(list, PeerRouteInfo{
+				DeviceID:         p.DeviceID,
+				DeviceName:       p.DeviceName,
+				VirtualIP:        p.VirtualIP,
+				DirectP2P:        p.DirectP2P,
+				LatencyMs:        float64(p.Latency.Milliseconds()),
+				IsExitNode:       p.IsExitNode,
+				AdvertisedRoutes: p.AdvertisedRoutes,
+				OS:               p.OS,
+				Arch:             p.Arch,
+				Version:          p.Version,
+				LastSeenSeconds:  int(time.Since(p.LastSeen).Seconds()),
+			})
+		}
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"peers": list,
+	}, "")
+}
+
+// handleDiagnosticsCheckInternet — POST /api/diagnostics/check-internet — проверка доступа в интернет
+func (s *Server) handleDiagnosticsCheckInternet(w http.ResponseWriter, r *http.Request) {
+	testEndpoints := []string{
+		"1.1.1.1:53",
+		"8.8.8.8:53",
+		"77.88.8.8:53",
+	}
+
+	ok := false
+	var latencyMs float64
+	for _, ep := range testEndpoints {
+		start := time.Now()
+		conn, err := net.DialTimeout("tcp", ep, 2*time.Second)
+		if err == nil {
+			latencyMs = float64(time.Since(start).Milliseconds())
+			conn.Close()
+			ok = true
+			break
+		}
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":                 true,
+		"internet_available": ok,
+		"latency_ms":         latencyMs,
+	}, "")
 }

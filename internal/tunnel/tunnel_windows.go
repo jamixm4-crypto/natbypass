@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -279,22 +280,34 @@ func (d *Device) WritePacket(packet []byte) error {
 	return nil
 }
 
-// SetVirtualIP обновляет IP адрес интерфейса
+// SetVirtualIP обновляет IP адрес интерфейса и маршрут подсети
 func (d *Device) SetVirtualIP(virtualIP string) error {
-	d.VirtualIP = virtualIP
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
+	d.VirtualIP = cleanVIP
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
+
 	cmd := exec.CommandContext(ctx, "netsh", "interface", "ipv4", "set", "address",
 		fmt.Sprintf("name=%s", d.AdapterName),
 		"source=static",
-		fmt.Sprintf("address=%s", virtualIP),
+		fmt.Sprintf("address=%s", cleanVIP),
 		"mask=255.255.255.0",
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: 0x08000000,
 	}
-	return cmd.Run()
+	err := cmd.Run()
+
+	// Extract subnet prefix and install subnet route
+	prefix := "100.64.200"
+	parts := strings.Split(cleanVIP, ".")
+	if len(parts) >= 3 {
+		prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
+	}
+	_ = exec.CommandContext(ctx, "route", "add", prefix+".0", "mask", "255.255.255.0", cleanVIP, "metric", "10").Run()
+
+	return err
 }
 
 // SetMTU динамически обновляет MTU на интерфейсе Windows

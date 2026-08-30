@@ -1006,7 +1006,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.104</span>
+          <span id="topUpdateLabel">v1.9.105</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1017,7 +1017,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.104</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.105</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1394,6 +1394,52 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     <!-- TAB 7: DIAGNOSTICS -->
     <div id="tab-diagnostics" class="tab-pane">
+      <!-- 1. Ping & Traceroute Network Tools -->
+      <div class="glass-card" style="margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+          <div>
+            <h2 style="font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+              <span style="color:#38bdf8;">🛠️</span> Сетевые утилиты: Ping и Traceroute с интерфейса
+            </h2>
+            <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Прямая проверка времени отклика, трассировки маршрута и доступности виртуальных IP узлов</p>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px;">
+          <input type="text" id="diagTargetIP" class="form-input mono" placeholder="Целевой IP (например, 10.10.77.2 или 1.1.1.1)" style="flex:1; min-width:220px; font-size:0.9rem;">
+          <button onclick="runPingTool()" class="btn btn-neon" style="padding:9px 18px; font-size:0.84rem;">⚡ Запустить Ping</button>
+          <button onclick="runTracerouteTool()" class="btn btn-glass" style="padding:9px 18px; font-size:0.84rem; color:#38bdf8; border-color:rgba(56,189,248,0.4);">🌐 Traceroute</button>
+          <button onclick="checkInternetAccessTool()" class="btn btn-glass" style="padding:9px 16px; font-size:0.84rem; color:#4ade80; border-color:rgba(74,222,128,0.4);">🌍 Проверить Интернет</button>
+        </div>
+
+        <div style="display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;">
+          <span style="font-size:0.75rem; color:var(--text-dim); align-self:center;">Быстрый выбор цели:</span>
+          <button type="button" onclick="setDiagTarget('1.1.1.1')" class="btn-pill" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-muted); padding:3px 8px; font-size:0.75rem; cursor:pointer;">Cloudflare (1.1.1.1)</button>
+          <button type="button" onclick="setDiagTarget('8.8.8.8')" class="btn-pill" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-muted); padding:3px 8px; font-size:0.75rem; cursor:pointer;">Google DNS (8.8.8.8)</button>
+          <button type="button" onclick="fillFirstPeerTarget()" class="btn-pill" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; padding:3px 8px; font-size:0.75rem; cursor:pointer;">🎯 Первый пир в сети</button>
+        </div>
+
+        <pre id="netToolOutput" class="mono" style="background:#090d16; border:1px solid rgba(51,65,85,0.6); border-radius:10px; padding:14px; font-size:0.82rem; line-height:1.6; min-height:100px; max-height:260px; overflow-y:auto; color:#94a3b8; white-space:pre-wrap;">Готов к запуску. Введите IP адрес узла и нажмите «⚡ Запустить Ping» или «🌐 Traceroute».</pre>
+      </div>
+
+      <!-- 2. Subnet Routes & Exit Node Access Overview -->
+      <div class="glass-card" style="margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+          <div>
+            <h2 style="font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+              <span style="color:#10b981;">🗺️</span> Расшаренные подсети & Доступ в интернет через узлы
+            </h2>
+            <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Список локальных LAN-сетей (Subnets) и шлюзов, анонсированных участниками сети</p>
+          </div>
+          <button onclick="loadPeerRoutesDiag()" class="btn btn-glass" style="padding:6px 12px; font-size:0.8rem;">🔄 Обновить</button>
+        </div>
+
+        <div id="peerRoutesContainer" style="display:flex; flex-direction:column; gap:10px;">
+          <div style="color:var(--text-dim); font-size:0.82rem; font-style:italic;">Загрузка данных о подсетях участников...</div>
+        </div>
+      </div>
+
+      <!-- 3. General System Connectivity Report -->
       <div class="glass-card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
           <div>
@@ -3871,6 +3917,136 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     // Diagnostics
     let lastDiagReport = '';
+    
+    function setDiagTarget(ip) {
+      const el = document.getElementById('diagTargetIP');
+      if (el) el.value = ip;
+    }
+
+    function fillFirstPeerTarget() {
+      if (currentPeersList && currentPeersList.length > 0) {
+        const first = currentPeersList[0];
+        const vip = (first.virtual_ip || '').split('/')[0].trim();
+        if (vip) setDiagTarget(vip);
+      } else {
+        showToast('⚠️ В сети пока нет других активных пиров');
+      }
+    }
+
+    async function runPingTool() {
+      const target = (document.getElementById('diagTargetIP').value || '').trim();
+      if (!target) {
+        showToast('⚠️ Введите целевой IP адрес');
+        return;
+      }
+      const outEl = document.getElementById('netToolOutput');
+      outEl.textContent = '🚀 Отправка ICMP Ping к ' + target + ' через виртуальный интерфейс...\nПодождите несколько секунд...';
+      try {
+        const res = await fetch('/api/diagnostics/ping', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({target})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          outEl.textContent = json.raw_output || ('✓ Ответ от ' + target + ' получен успешно!');
+        } else {
+          outEl.textContent = '❌ Ошибка: ' + (json.error || 'Не удалось выполнить ping');
+        }
+      } catch(e) {
+        outEl.textContent = '❌ Ошибка выполнения запроса: ' + e.message;
+      }
+    }
+
+    async function runTracerouteTool() {
+      const target = (document.getElementById('diagTargetIP').value || '').trim();
+      if (!target) {
+        showToast('⚠️ Введите целевой IP адрес');
+        return;
+      }
+      const outEl = document.getElementById('netToolOutput');
+      outEl.textContent = '🌐 Запуск трассировки маршрута к ' + target + ' (до 8 хопов)...\nПодождите завершения...';
+      try {
+        const res = await fetch('/api/diagnostics/traceroute', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({target})
+        });
+        const json = await res.json();
+        if (json.ok) {
+          outEl.textContent = json.raw_output || '✓ Трассировка завершена.';
+        } else {
+          outEl.textContent = '❌ Ошибка трассировки: ' + (json.error || 'Сбой');
+        }
+      } catch(e) {
+        outEl.textContent = '❌ Ошибка выполнения: ' + e.message;
+      }
+    }
+
+    async function checkInternetAccessTool() {
+      const outEl = document.getElementById('netToolOutput');
+      outEl.textContent = '🌍 Проверка выхода в интернет через DNS и HTTP endpoints...\n';
+      try {
+        const res = await fetch('/api/diagnostics/check-internet', {
+          method: 'POST'
+        });
+        const json = await res.json();
+        if (json.ok) {
+          if (json.internet_available) {
+            outEl.textContent = '✅ ДОСТУП В ИНТЕРНЕТ АКТИВЕН!\nПинг до контрольных DNS/HTTPS серверов: ' + json.latency_ms + ' ms\nКанал чистый, пакеты передаются без потерь.';
+          } else {
+            outEl.textContent = '❌ НЕТ ДОСТУПА В ИНТЕРНЕТ через текущий маршрут.\nПроверьте настройки шлюза или профиль сети.';
+          }
+        }
+      } catch(e) {
+        outEl.textContent = '❌ Ошибка проверки: ' + e.message;
+      }
+    }
+
+    async function loadPeerRoutesDiag() {
+      const container = document.getElementById('peerRoutesContainer');
+      if (!container) return;
+      try {
+        const res = await fetch('/api/diagnostics/peer-routes');
+        const json = await res.json();
+        if (json.ok && json.peers) {
+          if (json.peers.length === 0) {
+            container.innerHTML = '<div style="color:var(--text-dim); font-size:0.82rem; font-style:italic; padding:8px 0;">Другие узлы пока не обнаружены в сети.</div>';
+            return;
+          }
+          container.innerHTML = '';
+          json.peers.forEach(p => {
+            const card = document.createElement('div');
+            card.style = 'background:rgba(255,255,255,0.03); border:1px solid rgba(51,65,85,0.6); border-radius:10px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;';
+            const cleanVIP = (p.virtual_ip || '').split('/')[0];
+            const hasRoutes = p.advertised_routes && p.advertised_routes.length > 0;
+            const routesStr = hasRoutes ? p.advertised_routes.join(', ') : 'Не расшарены (только узел)';
+            const exitBadge = p.is_exit_node 
+              ? '<span class="badge" style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#4ade80;">🌐 Шлюз в интернет (Exit Node)</span>'
+              : '<span class="badge" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:var(--text-dim);">Стандартный узел</span>';
+
+            card.innerHTML = '<div>' +
+              '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">' +
+                '<span style="font-weight:700; color:#ffffff; font-size:0.9rem;">' + escapeHtml(p.device_name || p.device_id) + '</span>' +
+                '<span class="mono" style="color:#38bdf8; font-size:0.8rem; background:rgba(56,189,248,0.1); padding:1px 6px; border-radius:6px;">' + escapeHtml(cleanVIP) + '</span>' +
+                exitBadge +
+              '</div>' +
+              '<div style="font-size:0.78rem; color:var(--text-muted);">' +
+                '<span style="color:var(--text-dim);">Локальные подсети (LAN):</span> <span class="mono" style="color:#e2e8f0; font-weight:600;">' + escapeHtml(routesStr) + '</span> • ' +
+                '<span>ОС: ' + escapeHtml(p.os || 'Linux') + ' (' + escapeHtml(p.arch || 'amd64') + ')</span> • ' +
+                '<span>Связь: ' + (p.direct_p2p ? '⚡ Direct P2P (' + p.latency_ms + 'ms)' : '📡 Relay') + '</span>' +
+              '</div>' +
+            '</div>' +
+            '<div style="display:flex; gap:6px;">' +
+              '<button onclick="setDiagTarget(\'' + escapeHtml(cleanVIP) + '\'); runPingTool();" class="btn-pill" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); color:#38bdf8; padding:4px 10px; font-size:0.76rem; border-radius:8px; cursor:pointer;">⚡ Ping</button>' +
+              '<button onclick="setDiagTarget(\'' + escapeHtml(cleanVIP) + '\'); runTracerouteTool();" class="btn-pill" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); color:#cbd5e1; padding:4px 10px; font-size:0.76rem; border-radius:8px; cursor:pointer;">🌐 Traceroute</button>' +
+            '</div>';
+            container.appendChild(card);
+          });
+        }
+      } catch(e) {}
+    }
+
     async function runDiag() {
       const b = document.getElementById('diagBox');
       b.innerText = '⏳ Запуск комплексной диагностики сети...';
