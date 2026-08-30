@@ -205,7 +205,7 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 			"protocol=any",
 			"remoteip=any",
 		)
-		psFW := fmt.Sprintf(`New-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -Direction Inbound -Protocol ICMPv4 -IcmpType 8 -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue; New-NetFirewallRule -DisplayName "NatBypass Adapter All" -Direction Inbound -InterfaceAlias "%s" -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue`, adapterName)
+		psFW := fmt.Sprintf(`New-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -Direction Inbound -Protocol ICMPv4 -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue; New-NetFirewallRule -DisplayName "NatBypass Adapter All" -Direction Inbound -InterfaceAlias "%s" -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue`, adapterName)
 		_ = runHiddenPS(psFW)
 
 		// 5. Явный маршрут для подсети виртуального IP и 100.64.200.0/24

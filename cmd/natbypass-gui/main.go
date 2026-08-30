@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.130"
+	Version = "1.9.131"
 	Commit  = "release"
 )
 
@@ -3326,12 +3326,12 @@ func startEngineFromConfig(c *config.Config) {
 									pmax = targetPeer.AWG.Pmax
 								}
 
-								if udpPuncher != nil && targetEP != "" {
+								if targetPeer.DirectP2P && udpPuncher != nil && targetEP != "" {
 									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
 										sentDirect = true
 									}
 								}
-								// Релей через MQTT используется ИСКЛЮЧИТЕЛЬНО если прямой UDP-сокет недоступен
+								// Мгновенный релей через сигнальный канал если прямой P2P сокет еще не пробит
 								if !sentDirect && activeMQTT != nil {
 									_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, packet)
 								}

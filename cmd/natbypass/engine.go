@@ -288,26 +288,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								targetEP = bestEP
 							}
 						}
-						if targetEP == "" {
-							targetEP = p.STUNAddr
-						}
-						if targetEP == "" {
-							targetEP = p.LocalAddr
-						}
-						if targetEP == "" && p.PublicIP != "" && p.WGPort > 0 {
-							targetEP = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
-						}
 						pmin := 0
 						pmax := 0
 						if p.AWG != nil {
 							pmin = p.AWG.Pmin
 							pmax = p.AWG.Pmax
 						}
-						if targetEP != "" && puncher != nil {
+						// Direct P2P transmission is used if active endpoint is confirmed and reachable
+						if p.DirectP2P && targetEP != "" && puncher != nil {
 							if err3 := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err3 == nil {
 								sentDirect = true
 							}
 						}
+						// Immediate seamless relay fallback while direct P2P is punching or behind symmetric NAT
 						if !sentDirect && udpRelay != nil && udpRelay.IsConnected() {
 							if err3 := udpRelay.SendPacket(p.DeviceID, pkt); err3 == nil {
 								sentDirect = true
