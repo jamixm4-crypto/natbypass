@@ -147,6 +147,24 @@ func (c *Config) EnsureActiveProfile() *Profile {
 	}
 
 
+	for i := range c.Profiles {
+		if c.Profiles[i].H1 == 0 {
+			jc, jmin, jmax, s1, s2, h1, h2, h3, h4, hpKey := GenerateRandomAWGProfileParams()
+			c.Profiles[i].Jc = jc
+			c.Profiles[i].Jmin = jmin
+			c.Profiles[i].Jmax = jmax
+			c.Profiles[i].S1 = s1
+			c.Profiles[i].S2 = s2
+			c.Profiles[i].H1 = h1
+			c.Profiles[i].H2 = h2
+			c.Profiles[i].H3 = h3
+			c.Profiles[i].H4 = h4
+			c.Profiles[i].HeaderProtectionKey = hpKey
+			c.Profiles[i].RandomTrailers = true
+			c.Profiles[i].DisableCookies = true
+		}
+	}
+
 	var active *Profile
 	for i := range c.Profiles {
 		if c.Profiles[i].ID == c.ActiveProfileID {

@@ -135,6 +135,29 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 
 	params := wireguard.GetAWGParamsByPreset(preset)
 
+	// Override custom AWG header and junk params if present in active profile / config
+	if c.WireGuard.AWG.H1 != 0 {
+		params.H1 = c.WireGuard.AWG.H1
+		params.H2 = c.WireGuard.AWG.H2
+		params.H3 = c.WireGuard.AWG.H3
+		params.H4 = c.WireGuard.AWG.H4
+	}
+	if c.WireGuard.AWG.S1 != 0 {
+		params.S1 = c.WireGuard.AWG.S1
+	}
+	if c.WireGuard.AWG.S2 != 0 {
+		params.S2 = c.WireGuard.AWG.S2
+	}
+	if c.WireGuard.AWG.Jc != 0 {
+		params.Jc = c.WireGuard.AWG.Jc
+	}
+	if c.WireGuard.AWG.Jmin != 0 {
+		params.Jmin = c.WireGuard.AWG.Jmin
+	}
+	if c.WireGuard.AWG.Jmax != 0 {
+		params.Jmax = c.WireGuard.AWG.Jmax
+	}
+
 	// Override Header Protection Key если задан в конфиге
 	hpKey := c.WireGuard.HeaderProtectionKey
 	if hpKey == "" {
