@@ -305,6 +305,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/diagnostics/traceroute", s.handleDiagnosticsTraceroute)
 	mux.HandleFunc("/api/diagnostics/peer-routes", s.handleDiagnosticsPeerRoutes)
 	mux.HandleFunc("/api/diagnostics/check-internet", s.handleDiagnosticsCheckInternet)
+	mux.HandleFunc("/api/awg/sync-with-peer", s.handleAWGSyncWithPeer)
 	mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
 	mux.HandleFunc("/api/setup/complete", s.handleSetupComplete)
 	mux.HandleFunc("/api/events", s.handleEvents)
@@ -620,7 +621,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.107"
+		ver = "1.9.108"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1396,7 +1397,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.107"
+		ver = "1.9.108"
 	}
 
 vip := s.state.VirtualIP
@@ -2939,5 +2940,71 @@ func (s *Server) handleDiagnosticsCheckInternet(w http.ResponseWriter, r *http.R
 		"ok":                 true,
 		"internet_available": ok,
 		"latency_ms":         latencyMs,
+	}, "")
+}
+
+// handleAWGSyncWithPeer — POST /api/awg/sync-with-peer — автоматическая синхронизация параметров AWG с удаленным пиром
+func (s *Server) handleAWGSyncWithPeer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		DeviceID string `json:"device_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	var targetAWG *signaling.AWGParams
+	if s.registry != nil {
+		if req.DeviceID != "" {
+			if p, ok := s.registry.Get(req.DeviceID); ok && p.AWG != nil {
+				targetAWG = p.AWG
+			}
+		}
+		if targetAWG == nil {
+			for _, p := range s.registry.List() {
+				if p.AWG != nil && (p.AWG.H1 != "" || p.AWG.Jc > 0) {
+					targetAWG = p.AWG
+					break
+				}
+			}
+		}
+	}
+
+	if targetAWG == nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "в сети не найдено узлов с активными параметрами AWG")
+		return
+	}
+
+	cfg, err := config.Load(s.configPath)
+	if err != nil || cfg == nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка загрузки конфигурации")
+		return
+	}
+
+	act := cfg.EnsureActiveProfile()
+	if act == nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "активный профиль не найден")
+		return
+	}
+
+	if h1, err := strconv.ParseUint(strings.TrimSpace(targetAWG.H1), 10, 32); err == nil { act.H1 = uint32(h1) }
+	if h2, err := strconv.ParseUint(strings.TrimSpace(targetAWG.H2), 10, 32); err == nil { act.H2 = uint32(h2) }
+	if h3, err := strconv.ParseUint(strings.TrimSpace(targetAWG.H3), 10, 32); err == nil { act.H3 = uint32(h3) }
+	if h4, err := strconv.ParseUint(strings.TrimSpace(targetAWG.H4), 10, 32); err == nil { act.H4 = uint32(h4) }
+	act.S1 = targetAWG.S1
+	act.S2 = targetAWG.S2
+	act.Jc = targetAWG.Jc
+	act.Jmin = targetAWG.Jmin
+	act.Jmax = targetAWG.Jmax
+	act.RandomTrailers = targetAWG.RandomTrailers
+	act.DisableCookies = targetAWG.DisableCookies
+
+	_ = cfg.AddOrUpdateProfile(*act)
+	_ = config.Save(cfg, s.configPath, false)
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":      true,
+		"message": fmt.Sprintf("Параметры AWG 3.1 успешно синхронизированы: H1=%d, H2=%d, S1=%d, S2=%d, Jc=%d", act.H1, act.H2, act.S1, act.S2, act.Jc),
 	}, "")
 }
