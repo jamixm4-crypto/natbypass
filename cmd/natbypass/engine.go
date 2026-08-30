@@ -184,6 +184,31 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if totalLen >= 20 && totalLen <= len(payload) {
 				payload = payload[:totalLen]
 			}
+
+			// If direct UDP data packet arrived, immediately lock and promote direct P2P path
+			if directAddr != nil && registry != nil {
+				if p, ok := registry.GetByVirtualIP(srcIP); ok && p != nil {
+					fromAddrStr := directAddr.String()
+					if !p.DirectP2P || p.ActiveEndpoint != fromAddrStr {
+						oldEP := p.ActiveEndpoint
+						p.DirectP2P = true
+						p.ActiveEndpoint = fromAddrStr
+						p.Online = true
+						p.LastSeen = time.Now()
+						registry.Upsert(p)
+						if magicSock != nil {
+							magicSock.RecordProbeSuccess(p.DeviceID, fromAddrStr, 0)
+						}
+						if puncher != nil {
+							if oldEP != "" && oldEP != fromAddrStr {
+								puncher.RemoveKeepAliveTarget(oldEP)
+							}
+							puncher.AddKeepAliveTarget(fromAddrStr)
+						}
+					}
+				}
+			}
+
 			if tunDev != nil {
 				_ = tunDev.WritePacket(payload)
 			}
@@ -323,7 +348,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	// Dedicated rapid 2.5s keepalive & probe loop for maintaining carrier CGNAT mappings
 	if puncher != nil {
 		go func() {
-			kaTicker := time.NewTicker(4 * time.Second)
+			kaTicker := time.NewTicker(2 * time.Second)
 			defer kaTicker.Stop()
 			for {
 				select {

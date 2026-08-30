@@ -407,7 +407,8 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
 
-	// Send 1 probe packet
+	// Send dual burst probes for high resilience against packet loss
+	_, _ = p.conn.WriteToUDP(probeData, rAddr)
 	_, _ = p.conn.WriteToUDP(probeData, rAddr)
 
 	// Targeted probing for Symmetric NAT

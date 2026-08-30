@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.132"
+	Version = "1.9.133"
 	Commit  = "release"
 )
 
@@ -3197,6 +3197,24 @@ func startEngineFromConfig(c *config.Config) {
 			if srcIP != nil && srcIP.String() == cleanVIP {
 				return // Защита от петель
 			}
+			if srcIP != nil && registry != nil && srcAddr != nil {
+				if p, ok := registry.GetByVirtualIP(srcIP.String()); ok && p != nil {
+					fromAddrStr := srcAddr.String()
+					if !p.DirectP2P || p.ActiveEndpoint != fromAddrStr {
+						p.DirectP2P = true
+						p.ActiveEndpoint = fromAddrStr
+						p.Online = true
+						p.LastSeen = time.Now()
+						registry.Upsert(p)
+						if guiMagicSock != nil {
+							guiMagicSock.RecordProbeSuccess(p.DeviceID, fromAddrStr, 0)
+						}
+						if udpPuncher != nil {
+							udpPuncher.AddKeepAliveTarget(fromAddrStr)
+						}
+					}
+				}
+			}
 			if tunDev != nil {
 				_ = tunDev.WritePacket(payload)
 				atomic.AddUint64(&packetsRecvCount, 1)
@@ -3442,7 +3460,7 @@ func startEngineFromConfig(c *config.Config) {
 
 	// Фоновый цикл прямой отправки UDP Hole Punch пакетов (каждые 12 секунд для удержания CGNAT маппингов)
 	go func() {
-		probeTicker := time.NewTicker(12 * time.Second)
+		probeTicker := time.NewTicker(2 * time.Second)
 		defer probeTicker.Stop()
 		for {
 			select {
