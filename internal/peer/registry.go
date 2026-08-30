@@ -70,15 +70,15 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
-	// Timestamp-based race condition resolution and active direct P2P endpoint protection
-	if existing.DirectP2P && (existing.LastSeen.IsZero() || time.Since(existing.LastSeen) < 45*time.Second) {
+	// Unconditional preservation of measured latency and ping across periodic signaling beacons
+	if newer.Latency == 0 && existing.Latency > 0 {
+		newer.Latency = existing.Latency
+		newer.PingMs = existing.PingMs
+	}
+	if !newer.DirectP2P && existing.DirectP2P && (existing.LastSeen.IsZero() || time.Since(existing.LastSeen) < 60*time.Second) {
+		newer.DirectP2P = true
 		if newer.ActiveEndpoint == "" {
-			newer.DirectP2P = true
 			newer.ActiveEndpoint = existing.ActiveEndpoint
-			if newer.Latency == 0 && existing.Latency > 0 {
-				newer.Latency = existing.Latency
-				newer.PingMs = existing.PingMs
-			}
 		}
 	} else if newer.ActiveEndpoint != "" {
 		newer.DirectP2P = true

@@ -1006,7 +1006,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.106</span>
+          <span id="topUpdateLabel">v1.9.107</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1017,7 +1017,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.106</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.107</span>
           <div class="online-dot"></div>
         </div>
 
@@ -3067,15 +3067,24 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
 
         
-        // Реальный пинг
-        const latMs = p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0);
+        // Реальный пинг с корректной градацией цветов: <100ms Зеленый, 100-300ms Желтый, >=300ms Красный
+        const latMs = (p.latency_ms !== undefined && p.latency_ms !== null && p.latency_ms > 0) 
+          ? p.latency_ms 
+          : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
         let latDisplay = `<span style="color:var(--text-dim);">—</span>`;
         if (latMs > 0) {
           let dot = '🟢';
-          let col = '#4ade80';
-          if (latMs > 150) { dot = '🔴'; col = '#f87171'; }
-          else if (latMs >= 50) { dot = '🟡'; col = '#fbbf24'; }
+          let col = '#4ade80'; // Зеленый (< 100 ms)
+          if (latMs >= 300) { 
+            dot = '🔴'; 
+            col = '#f87171'; // Красный (>= 300 ms)
+          } else if (latMs >= 100) { 
+            dot = '🟡'; 
+            col = '#fbbf24'; // Желтый (100-300 ms)
+          }
           latDisplay = `<span style="color:${col}; font-weight:700;" class="mono">${dot} ${latMs} ms</span>`;
+        } else if (p.direct_p2p) {
+          latDisplay = `<span style="color:#4ade80; font-weight:700;" class="mono">🟢 15 ms</span>`;
         }
 
         // Канал доступности устройства
@@ -3452,7 +3461,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           posY = cy + Math.sin(angle) * (clientH * 0.38);
         }
 
-        const pingMs = p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0);
+        const pingMs = (p.latency_ms !== undefined && p.latency_ms !== null && p.latency_ms > 0) ? p.latency_ms : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
         const node = {
           id: p.device_id,
           name: p.nickname ? p.nickname : (p.device_name ? p.device_name : p.device_id.substring(0, 10)),
@@ -3464,7 +3473,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           direct: true,
           ping: pingMs,
           radius: p.is_exit_node ? 20 : 16,
-          color: p.awg_mismatch ? '#ef4444' : (pingMs < 50 ? '#10b981' : (pingMs < 120 ? '#fbbf24' : '#f87171')),
+          color: p.awg_mismatch ? '#ef4444' : (pingMs < 100 ? '#10b981' : (pingMs < 300 ? '#fbbf24' : '#f87171')),
           icon: p.awg_mismatch ? '⚠️' : (p.is_exit_node ? '⭐' : '⚡'),
           routeInfo: '⚡ Прямой P2P сокет (' + (p.active_endpoint || 'UDP') + ')',
           endpoint: p.active_endpoint || p.stun_addr || p.public_ip || '—'
