@@ -178,12 +178,14 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.conf.all.accept_local=1").Run()
 	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.icmp_echo_ignore_all=0").Run()
 	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.icmp_echo_ignore_broadcasts=0").Run()
+	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.ip_forward=1").Run()
 
 	// 6. Разрешение входящего и транзитного трафика в iptables (Keenetic / OpenWrt / Linux / Entware)
 	iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
 	for _, ipt := range iptablesPaths {
 		_ = exec.CommandContext(ctx, ipt, "-I", "INPUT", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
 		_ = exec.CommandContext(ctx, ipt, "-I", "INPUT", "1", "-p", "icmp", "-j", "ACCEPT").Run()
+		_ = exec.CommandContext(ctx, ipt, "-I", "INPUT", "1", "-p", "udp", "--dport", "47832", "-j", "ACCEPT").Run()
 		_ = exec.CommandContext(ctx, ipt, "-I", "FORWARD", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
 		_ = exec.CommandContext(ctx, ipt, "-I", "FORWARD", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
 	}
