@@ -118,23 +118,50 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 	}
 
 	// 5. ICMP Ping Test
-	fmt.Printf("\n\033[1;34m▶ 5. СКВОЗНОЙ ТЕСТ ICMP PING ДО УЗЛОВ СЕТИ\033[0m\n")
-	targets := []string{"10.123.111.1", "10.123.111.2", "10.123.111.110"}
-	if targetIP != "" {
-		targets = []string{targetIP}
+	fmt.Printf("\n\033[1;34m▶ 5. СКВОЗНОЙ ТЕСТ ICMP PING ДО ВСЕХ ОБНАРУЖЕННЫХ ПИРОВ\033[0m\n")
+	type pingTarget struct {
+		name string
+		ip   string
 	}
-	for _, tIP := range targets {
+	var targets []pingTarget
+	cleanLocalVIP := strings.TrimSpace(strings.Split(st.VirtualIP, "/")[0])
+	if targetIP != "" {
+		targets = append(targets, pingTarget{name: "Указанный IP", ip: targetIP})
+	} else {
+		if cleanLocalVIP != "" && cleanLocalVIP != "0.0.0.0" {
+			targets = append(targets, pingTarget{name: "Локальный узел (Self)", ip: cleanLocalVIP})
+		}
+		for _, p := range peers {
+			cleanIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			if cleanIP != "" && cleanIP != "0.0.0.0" && cleanIP != cleanLocalVIP {
+				pName := p.DeviceName
+				if pName == "" {
+					pName = p.DeviceID
+				}
+				targets = append(targets, pingTarget{name: pName, ip: cleanIP})
+			}
+		}
+		if len(targets) == 0 || (len(targets) == 1 && cleanLocalVIP != "") {
+			for _, fb := range []string{"10.123.111.1", "10.123.111.2", "10.123.111.110", "100.64.200.1"} {
+				if fb != cleanLocalVIP {
+					targets = append(targets, pingTarget{name: "Mesh узел (Fallback)", ip: fb})
+				}
+			}
+		}
+	}
+	for _, t := range targets {
+		cleanIP := strings.TrimSpace(strings.Split(t.ip, "/")[0])
 		var cmd *exec.Cmd
 		if runtime.GOOS == "windows" {
-			cmd = exec.Command("ping", tIP, "-n", "2", "-w", "1500")
+			cmd = exec.Command("ping", cleanIP, "-n", "2", "-w", "1500")
 		} else {
-			cmd = exec.Command("ping", "-c", "2", "-W", "2", tIP)
+			cmd = exec.Command("ping", "-c", "2", "-W", "2", cleanIP)
 		}
 		out, pErr := cmd.CombinedOutput()
 		if pErr == nil && !strings.Contains(string(out), "100%") && (strings.Contains(string(out), "TTL=") || strings.Contains(string(out), "ttl=")) {
-			fmt.Printf("  \033[1;32m[✓]\033[0m Ping до %s: УСПЕШНО!\n", tIP)
+			fmt.Printf("  \033[1;32m[✓]\033[0m Ping до %s (%s): УСПЕШНО!\n", t.name, cleanIP)
 		} else {
-			fmt.Printf("  \033[1;31m[✗]\033[0m Ping до %s: ПРЕВЫШЕН ИНТЕРВАЛ ОЖИДАНИЯ (100%% потерь)\n", tIP)
+			fmt.Printf("  \033[1;31m[✗]\033[0m Ping до %s (%s): ПРЕВЫШЕН ИНТЕРВАЛ ОЖИДАНИЯ (100%% потерь)\n", t.name, cleanIP)
 		}
 	}
 

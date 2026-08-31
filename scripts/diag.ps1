@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # NatBypass Universal Diagnostic Script for Windows 10 / 11 / Server
 # ==============================================================================
 # Usage:
@@ -121,21 +121,48 @@ try {
 }
 
 # 7. ICMP Ping Test
-Log-Section "8. СКВОЗНОЙ ТЕСТ ICMP PING ДО УЗЛОВ"
+Log-Section "8. СКВОЗНОЙ ТЕСТ ICMP PING ДО ВСЕХ ОБНАРУЖЕННЫХ ПИРОВ"
 function Test-PeerPing($ip, $name) {
-    $res = Test-Connection -ComputerName $ip -Count 3 -Quiet -ErrorAction SilentlyContinue
+    $cleanIp = ($ip -split '/')[0].Trim()
+    if ([string]::IsNullOrWhiteSpace($cleanIp) -or $cleanIp -eq "0.0.0.0" -or $cleanIp -eq "<nil>") {
+        return
+    }
+    $res = Test-Connection -ComputerName $cleanIp -Count 2 -Quiet -ErrorAction SilentlyContinue
     if ($res) {
-        Log-Ok "Ping до $name ($ip): УСПЕШНО (0% потерь)"
-        $script:lines += "Ping $ip ($name): SUCCESS"
+        Log-Ok "Ping до $name ($cleanIp): УСПЕШНО (0% потерь)"
+        $script:lines += "Ping $cleanIp ($name): SUCCESS"
     } else {
-        Log-Fail "Ping до $name ($ip): ПРЕВЫШЕН ИНТЕРВАЛ ОЖИДАНИЯ (100% потерь)"
-        $script:lines += "Ping $ip ($name): FAIL"
+        Log-Fail "Ping до $name ($cleanIp): ПРЕВЫШЕН ИНТЕРВАЛ ОЖИДАНИЯ (100% потерь)"
+        $script:lines += "Ping $cleanIp ($name): FAIL"
     }
 }
 
-Test-PeerPing "10.123.111.1" "Keenetic (Router)"
-Test-PeerPing "10.123.111.2" "Linux (Nextcloud)"
-Test-PeerPing "10.123.111.110" "Windows (Local)"
+# 1. Пинг собственного локального Virtual IP
+if ($status -and $status.virtual_ip) {
+    Test-PeerPing $status.virtual_ip "Локальный узел (Self / Wintun)"
+}
+
+# 2. Динамический пинг всех подключенных пиров
+$pingedAny = $false
+if ($peers -and $peers.data) {
+    foreach ($p in $peers.data) {
+        if ($p.virtual_ip -and $p.virtual_ip -ne $status.virtual_ip) {
+            $pName = if ($p.device_name) { $p.device_name } else { $p.device_id }
+            Test-PeerPing $p.virtual_ip $pName
+            $pingedAny = $true
+        }
+    }
+}
+
+# Fallback: если пиров в API пока нет
+if (-not $pingedAny) {
+    $fallbacks = @("10.123.111.1", "10.123.111.2", "10.123.111.110", "100.64.200.1")
+    foreach ($fb in $fallbacks) {
+        if ($fb -ne ($status.virtual_ip -split '/')[0]) {
+            Test-PeerPing $fb "Mesh узел (Fallback)"
+        }
+    }
+}
 
 $lines | Out-File -FilePath $reportFile -Encoding UTF8
 Write-Host "`n======================================================================" -ForegroundColor Green

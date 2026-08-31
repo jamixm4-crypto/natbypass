@@ -202,24 +202,59 @@ else
     log_warn "Локальный API http://127.0.0.1:8080 недоступен"
 fi
 
-# 8. Сквозной ICMP Ping тест
-log_section "9. СКВОЗНОЙ ТЕСТ ICMP PING ДО ПИРОВ"
+# 8. Сквозной ICMP Ping тест ко всем обнаруженным пирам
+log_section "9. СКВОЗНОЙ ТЕСТ ICMP PING ДО ВСЕХ ОБНАРУЖЕННЫХ ПИРОВ"
 
 test_ping() {
     TARGET_IP="$1"
     NAME="$2"
-    if ping -c 2 -W 2 "$TARGET_IP" >/dev/null 2>&1; then
-        log_ok "Ping до $NAME ($TARGET_IP) УСПЕШЕН!"
-        echo "Ping $TARGET_IP: SUCCESS" >> "$REPORT_FILE"
+    CLEAN_IP="$(echo "$TARGET_IP" | awk -F'/' '{print $1}' | tr -d ' ')"
+    if [ -z "$CLEAN_IP" ] || [ "$CLEAN_IP" = "0.0.0.0" ] || [ "$CLEAN_IP" = "<nil>" ]; then
+        return
+    fi
+    if ping -c 2 -W 2 "$CLEAN_IP" >/dev/null 2>&1; then
+        log_ok "Ping до $NAME ($CLEAN_IP): УСПЕШЕН!"
+        echo "Ping $CLEAN_IP ($NAME): SUCCESS" >> "$REPORT_FILE"
     else
-        log_fail "Ping до $NAME ($TARGET_IP) НЕ ПРОХОДИТ (100% потерь)!"
-        echo "Ping $TARGET_IP: FAIL" >> "$REPORT_FILE"
+        log_fail "Ping до $NAME ($CLEAN_IP): НЕ ПРОХОДИТ (100% потерь)!"
+        echo "Ping $CLEAN_IP ($NAME): FAIL" >> "$REPORT_FILE"
     fi
 }
 
-test_ping "10.123.111.1" "Keenetic (Router)"
-test_ping "10.123.111.2" "Linux (Nextcloud)"
-test_ping "10.123.111.110" "Windows (PC/Radio)"
+# 1. Пинг локального виртуального IP (проверка стека TUN)
+if [ -n "$IP_ADDR" ]; then
+    test_ping "$IP_ADDR" "Локальный узел (Self / nb0)"
+fi
+
+# 2. Динамический пинг всех пиров из API
+PING_COUNT=0
+if [ -n "$PEERS_JSON" ]; then
+    # Извлекаем пары virtual_ip и device_name / device_id
+    PEER_ENTRIES="$(echo "$PEERS_JSON" | grep -o '{"device_id":[^}]*' || echo '')"
+    if [ -n "$PEER_ENTRIES" ]; then
+        echo "$PEERS_JSON" | tr '}' '\n' | while read -r p_line; do
+            VIP="$(echo "$p_line" | grep -o '"virtual_ip":"[^"]*' | cut -d'"' -f4)"
+            DEV_NAME="$(echo "$p_line" | grep -o '"device_name":"[^"]*' | cut -d'"' -f4)"
+            DEV_ID="$(echo "$p_line" | grep -o '"device_id":"[^"]*' | cut -d'"' -f4)"
+            if [ -z "$DEV_NAME" ]; then
+                DEV_NAME="$DEV_ID"
+            fi
+            if [ -n "$VIP" ] && [ "$VIP" != "$IP_ADDR" ]; then
+                test_ping "$VIP" "$DEV_NAME"
+            fi
+        done
+        PING_COUNT=1
+    fi
+fi
+
+# Fallback: если пиров в API пока нет, проверяем стандартные тестовые узлы
+if [ "$PING_COUNT" -eq 0 ]; then
+    for fallback_ip in "10.123.111.1" "10.123.111.2" "10.123.111.110" "100.64.200.1"; do
+        if [ "$fallback_ip" != "$IP_ADDR" ]; then
+            test_ping "$fallback_ip" "Mesh узел (Fallback)"
+        fi
+    done
+fi
 
 printf "\n%b======================================================================%b\n" "$C_GREEN$C_BOLD" "$C_RESET"
 printf "✓ Диагностический отчет сохранен в: %s\n" "$REPORT_FILE"
