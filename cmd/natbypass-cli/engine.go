@@ -364,23 +364,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 					}
 
-					// 3. Fallback routing for point-to-point mesh: match direct active peer or sole peer
-					if !found || p == nil {
-						for _, item := range registry.List() {
-							if item.DirectP2P && item.ActiveEndpoint != "" {
-								p = item
-								found = true
-								break
-							}
-						}
-						if !found || p == nil {
-							pList := registry.List()
-							if len(pList) == 1 {
-								p = pList[0]
-								found = true
-							}
-						}
-					}
 					if found && p != nil {
 						targetEP := p.ActiveEndpoint
 						if magicSock != nil {

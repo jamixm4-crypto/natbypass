@@ -279,9 +279,14 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 		}
 	}
 
-	// 2. Public IP + localPort
+	// 2. Public IP + localPort (only if mappedPort matches localPort or mappedPort is not yet discovered)
+	p.mu.Lock()
+	curMappedPort := p.mappedPort
+	p.mu.Unlock()
 	if publicIP != "" && publicIP != "0.0.0.0" && publicIP != "<nil>" {
-		candidateSet[fmt.Sprintf("%s:%d", publicIP, localPort)] = struct{}{}
+		if curMappedPort == 0 || curMappedPort == localPort {
+			candidateSet[fmt.Sprintf("%s:%d", publicIP, localPort)] = struct{}{}
+		}
 	}
 
 	// 3. Local LAN addresses (only physical Ethernet/Wi-Fi interfaces, skip TUN/TAP/Mesh/Docker/VPN)
