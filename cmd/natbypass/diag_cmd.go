@@ -68,6 +68,7 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 	// 3. Local Daemon Query
 	fmt.Printf("\n\033[1;34m▶ 3. ЛОКАЛЬНЫЙ ДЕМОН NATBYPASS (HTTP 127.0.0.1:8080)\033[0m\n")
 	daemonRunning := false
+	localVIP := ""
 	var peers []*peer.Peer
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get("http://127.0.0.1:8080/api/status")
@@ -83,6 +84,7 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&st)
 		_ = resp.Body.Close()
+		localVIP = st.VirtualIP
 		fmt.Printf("  \033[1;32m[✓]\033[0m Демон активен: DeviceID=%s | VirtualIP=%s | Port=%d | Peers=%d (Direct=%d)\n",
 			st.DeviceID, st.VirtualIP, st.WGPort, st.Peers, st.DirectP2P)
 
@@ -124,7 +126,7 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 		ip   string
 	}
 	var targets []pingTarget
-	cleanLocalVIP := strings.TrimSpace(strings.Split(st.VirtualIP, "/")[0])
+	cleanLocalVIP := strings.TrimSpace(strings.Split(localVIP, "/")[0])
 	if targetIP != "" {
 		targets = append(targets, pingTarget{name: "Указанный IP", ip: targetIP})
 	} else {
