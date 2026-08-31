@@ -318,8 +318,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					dstIP := dstNetIP.String()
 					cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 
-					// Ignore multicast, broadcast, loopback
-					if dstNetIP.IsMulticast() || dstNetIP.IsUnspecified() || dstIP == "255.255.255.255" || dstIP == cleanVIP || strings.HasSuffix(dstIP, ".255") {
+					// Self-loopback: reflect local virtual IP packets directly back to TUN
+					if dstIP == cleanVIP {
+						if tunDev != nil {
+							_ = tunDev.WritePacket(pkt)
+						}
+						continue
+					}
+
+					// Ignore multicast, broadcast
+					if dstNetIP.IsMulticast() || dstNetIP.IsUnspecified() || dstIP == "255.255.255.255" || strings.HasSuffix(dstIP, ".255") {
 						continue
 					}
 
