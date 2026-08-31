@@ -244,6 +244,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 
 			if tunDev != nil {
+				// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
+				if len(payload) >= 20 && payload[0]>>4 == 4 {
+					ihl := int(payload[0]&0x0F) * 4
+					if ihl >= 20 && ihl <= len(payload) {
+						payload[10] = 0
+						payload[11] = 0
+						var sum uint32
+						for i := 0; i < ihl; i += 2 {
+							sum += uint32(binary.BigEndian.Uint16(payload[i : i+2]))
+						}
+						for sum > 0xFFFF {
+							sum = (sum & 0xFFFF) + (sum >> 16)
+						}
+						binary.BigEndian.PutUint16(payload[10:12], ^uint16(sum))
+					}
+				}
 				_ = tunDev.WritePacket(payload)
 			}
 		}
@@ -333,6 +349,24 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										found = true
 									}
 								}
+							}
+						}
+					}
+
+					// 3. Fallback routing for point-to-point mesh: match direct active peer or sole peer
+					if !found || p == nil {
+						for _, item := range registry.List() {
+							if item.DirectP2P && item.ActiveEndpoint != "" {
+								p = item
+								found = true
+								break
+							}
+						}
+						if !found || p == nil {
+							pList := registry.List()
+							if len(pList) == 1 {
+								p = pList[0]
+								found = true
 							}
 						}
 					}
