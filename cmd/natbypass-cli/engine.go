@@ -262,7 +262,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				inSrcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
 				inDstIP := net.IPv4(payload[16], payload[17], payload[18], payload[19]).String()
-				log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
+				log.Info().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 				_ = tunDev.WritePacket(payload)
 			}
 		}
