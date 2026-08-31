@@ -24,11 +24,12 @@ jobs:
 
 
 
-      - name: Install go-winres
-        run: go install github.com/tc-hib/go-winres@latest
-
       - name: Compile Windows PE resources
+        continue-on-error: true
+        env:
+          GOPROXY: "https://proxy.golang.org,direct"
         run: |
+          go install github.com/tc-hib/go-winres@latest
           go-winres make --in winres/winres.json --out cmd/natbypass/rsrc
           go-winres make --in winres/winres.json --out cmd/natbypass-cli/rsrc
           go-winres make --in winres/winres.json --out cmd/natbypass-gui/rsrc
