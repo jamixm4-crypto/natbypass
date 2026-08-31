@@ -25,6 +25,8 @@ var embeddedWintunDLL []byte
 var (
 	modkernel32                    = windows.NewLazySystemDLL("kernel32.dll")
 	procRtlMoveMemory              = modkernel32.NewProc("RtlMoveMemory")
+	modiphlpapi                    = windows.NewLazySystemDLL("iphlpapi.dll")
+	procConvertInterfaceLuidToIndex = modiphlpapi.NewProc("ConvertInterfaceLuidToIndex")
 	wintunDLL                      *windows.LazyDLL
 	procWintunCreateAdapter        *windows.LazyProc
 	procWintunOpenAdapter          *windows.LazyProc
@@ -147,17 +149,29 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		hReadEvent:  windows.Handle(hEvent),
 	}
 
-	// 3. Асинхронная настройка IP-адреса и правил брандмауэра в фоне (никогда не блокирует GUI!)
-	go func() {
-		cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
-		prefix := "100.64.200"
-		parts := strings.Split(cleanVIP, ".")
-		if len(parts) >= 3 {
-			prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
-		}
+	// 3. Прямая привязка IP и маршрутов к InterfaceIndex созданного Wintun адаптера
+	var luid uint64
+	var ifIndex uint32
+	procWintunGetAdapterLUID.Call(hAdapter, uintptr(unsafe.Pointer(&luid)))
+	procConvertInterfaceLuidToIndex.Call(uintptr(unsafe.Pointer(&luid)), uintptr(unsafe.Pointer(&ifIndex)))
 
-		// 1. Привязка IP, метрики, профиля и маршрутов напрямую через InterfaceIndex Wintun адаптера
-		psInit := fmt.Sprintf(`$w = Get-NetAdapter | Where-Object { ($_.Status -eq "Up") -and ($_.InterfaceDescription -like "*NatBypass*" -or $_.InterfaceDescription -like "*Wintun*" -or $_.Name -like "*NatBypass*") } | Select-Object -First 1; if (-not $w) { $w = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*NatBypass*" -or $_.InterfaceDescription -like "*Wintun*" -or $_.Name -like "*NatBypass*" } | Select-Object -First 1 }; if ($w) { netsh interface ipv4 set address name=$($w.InterfaceIndex) source=static address="%s" mask=255.255.255.0; Set-NetIPInterface -InterfaceIndex $w.InterfaceIndex -DadTransmits 0 -InterfaceMetric 1 -RouterDiscovery Disabled -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex $w.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "%s.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "100.64.200.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; netsh advfirewall firewall add rule name="NatBypass Adapter All" dir=in action=allow interface=$($w.Name) enable=yes profile=any; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue }`, cleanVIP, prefix)
+	cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
+	prefix := "100.64.200"
+	parts := strings.Split(cleanVIP, ".")
+	if len(parts) >= 3 {
+		prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
+	}
+
+	var psInit string
+	if ifIndex > 0 {
+		psInit = fmt.Sprintf(`netsh interface ipv4 set address name=%d source=static address="%s" mask=255.255.255.0; Set-NetIPInterface -InterfaceIndex %d -DadTransmits 0 -InterfaceMetric 1 -RouterDiscovery Disabled -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex %d -NetworkCategory Private -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex %d -DestinationPrefix "%s.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex %d -DestinationPrefix "100.64.200.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; netsh advfirewall firewall add rule name="NatBypass ICMPv4 In" dir=in action=allow protocol=ICMPv4 enable=yes; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue`, ifIndex, cleanVIP, ifIndex, ifIndex, ifIndex, prefix, ifIndex)
+	} else {
+		psInit = fmt.Sprintf(`$w = Get-NetAdapter | Where-Object { ($_.Status -eq "Up") -and ($_.InterfaceDescription -like "*NatBypass*" -or $_.InterfaceDescription -like "*Wintun*" -or $_.Name -like "*NatBypass*") } | Select-Object -First 1; if (-not $w) { $w = Get-NetAdapter | Where-Object { $_.InterfaceDescription -like "*NatBypass*" -or $_.InterfaceDescription -like "*Wintun*" -or $_.Name -like "*NatBypass*" } | Select-Object -First 1 }; if ($w) { netsh interface ipv4 set address name=$($w.InterfaceIndex) source=static address="%s" mask=255.255.255.0; Set-NetIPInterface -InterfaceIndex $w.InterfaceIndex -DadTransmits 0 -InterfaceMetric 1 -RouterDiscovery Disabled -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex $w.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "%s.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "100.64.200.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; netsh advfirewall firewall add rule name="NatBypass Adapter All" dir=in action=allow interface=$($w.Name) enable=yes profile=any; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue }`, cleanVIP, prefix)
+	}
+	_ = runHiddenPS(psInit)
+
+	go func() {
+		time.Sleep(1 * time.Second)
 		_ = runHiddenPS(psInit)
 	}()
 

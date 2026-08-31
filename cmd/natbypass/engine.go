@@ -260,6 +260,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						binary.BigEndian.PutUint16(payload[10:12], ^uint16(sum))
 					}
 				}
+				inSrcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
+				inDstIP := net.IPv4(payload[16], payload[17], payload[18], payload[19]).String()
+				log.Info().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 				_ = tunDev.WritePacket(payload)
 			}
 		}
@@ -396,7 +399,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 						// 1. Pure P2P Direct UDP packet transmission
 						if targetEP != "" && puncher != nil {
-							_ = puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
+							srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
+							log.Info().Str("src", srcIP).Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Int("len", len(pkt)).Msg("📤 TUN→UDP outbound")
+							err := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
+							if err != nil {
+								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
+							}
+						} else {
+							log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no endpoint or puncher")
 						}
 
 						// 1b. Reactive instant hole punching if direct P2P is not yet confirmed
