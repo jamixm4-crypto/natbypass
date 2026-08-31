@@ -1,4 +1,4 @@
-plugins {
+п»їplugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
@@ -74,7 +74,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 
-    // Jetpack Compose BOM — единая версия для всех compose-артефактов
+    // Jetpack Compose BOM пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ compose-пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
     val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
@@ -93,7 +93,7 @@ dependencies {
     // Navigation Compose
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
-    // Legacy Material (только для QRScannerActivity)
+    // Legacy Material (пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ QRScannerActivity)
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 

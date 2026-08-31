@@ -1,4 +1,4 @@
-package mobile
+﻿package mobile
 
 import (
 	"context"
@@ -24,7 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.145"
+const Version = "1.9.146"
 
 
 
@@ -384,7 +384,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             "arm64",
-					Version:          "1.9.145",
+					Version:          "1.9.146",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}

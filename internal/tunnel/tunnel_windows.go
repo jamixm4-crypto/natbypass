@@ -105,26 +105,36 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 	poolName, _ := windows.UTF16PtrFromString(adapterName)
 	adapterType, _ := windows.UTF16PtrFromString("NatBypass")
 
-	// 1. Попытка открыть уже существующий или создать новый
-	hAdapter, _, _ := procWintunOpenAdapter.Call(uintptr(unsafe.Pointer(poolName)), uintptr(unsafe.Pointer(poolName)))
+	// 1. Попытка открыть уже существующий или создать новый с гарантированным запуском сессии
+	var hAdapter uintptr
+	var hSession uintptr
+
+	hAdapter, _, _ = procWintunOpenAdapter.Call(uintptr(unsafe.Pointer(poolName)), uintptr(unsafe.Pointer(poolName)))
+	if hAdapter != 0 {
+		hSession, _, _ = procWintunStartSession.Call(hAdapter, 0x400000)
+		if hSession == 0 {
+			// Предыдущая сессия адаптера зависла. Закрываем и пересоздаем адаптер заново
+			procWintunCloseAdapter.Call(hAdapter)
+			hAdapter = 0
+		}
+	}
+
 	if hAdapter == 0 {
 		hAdapter, _, _ = procWintunCreateAdapter.Call(
 			uintptr(unsafe.Pointer(poolName)),
 			uintptr(unsafe.Pointer(adapterType)),
 			0,
 		)
+		if hAdapter != 0 {
+			hSession, _, _ = procWintunStartSession.Call(hAdapter, 0x400000)
+		}
 	}
 
-	if hAdapter == 0 {
-		return nil, fmt.Errorf("не удалось создать виртуальный Wintun адаптер (требуются права Администратора)")
-	}
-
-	// 2. Настройка статического IP адреса интерфейса через netsh (совместимо с Win7 - Win11)
-	// 2. Запуск сессии Wintun с кольцевым буфером 4 MB
-	hSession, _, _ := procWintunStartSession.Call(hAdapter, 0x400000)
-	if hSession == 0 {
-		procWintunCloseAdapter.Call(hAdapter)
-		return nil, fmt.Errorf("не удалось запустить сессию Wintun (StartSession вернул 0)")
+	if hAdapter == 0 || hSession == 0 {
+		if hAdapter != 0 {
+			procWintunCloseAdapter.Call(hAdapter)
+		}
+		return nil, fmt.Errorf("не удалось инициализировать Wintun адаптер и сессию (требуются права Администратора)")
 	}
 
 	hEvent, _, _ := procWintunGetReadWaitEvent.Call(hSession)
@@ -139,97 +149,16 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 
 	// 3. Асинхронная настройка IP-адреса и правил брандмауэра в фоне (никогда не блокирует GUI!)
 	go func() {
-		runNetsh := func(args ...string) error {
-			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-			defer cancel()
-			c := exec.CommandContext(ctx, "netsh", args...)
-			c.SysProcAttr = &syscall.SysProcAttr{
-				HideWindow:    true,
-				CreationFlags: 0x08000000,
-			}
-			return c.Run()
-		}
-
 		cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
 		prefix := "100.64.200"
 		parts := strings.Split(cleanVIP, ".")
 		if len(parts) >= 3 {
 			prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
 		}
-		// 1. Привязка IP, профиля и маршрутов напрямую через InterfaceIndex Wintun адаптера
-		psInit := fmt.Sprintf(`$w = Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*Wintun*" -or $_.Name -eq "%s"}; if ($w) { New-NetIPAddress -InterfaceIndex $w.InterfaceIndex -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetIPAddress -InterfaceIndex $w.InterfaceIndex -IPAddress "%s" -PrefixLength 24 -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex $w.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "%s.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "100.64.200.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue }`, adapterName, cleanVIP, cleanVIP, prefix)
+
+		// 1. Привязка IP, метрики, профиля и маршрутов напрямую через InterfaceIndex Wintun адаптера
+		psInit := fmt.Sprintf(`$w = Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*Wintun*" -or $_.Name -eq "%s"}; if ($w) { Set-NetIPInterface -InterfaceIndex $w.InterfaceIndex -DadTransmits 0 -InterfaceMetric 1 -RouterDiscovery Disabled -ErrorAction SilentlyContinue; Remove-NetIPAddress -InterfaceIndex $w.InterfaceIndex -Confirm:$false -ErrorAction SilentlyContinue; New-NetIPAddress -InterfaceIndex $w.InterfaceIndex -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex $w.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "%s.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "100.64.200.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; New-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -Direction Inbound -Protocol ICMPv4 -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue; New-NetFirewallRule -DisplayName "NatBypass Adapter All" -Direction Inbound -InterfaceIndex $w.InterfaceIndex -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue }`, adapterName, cleanVIP, prefix)
 		_ = runHiddenPS(psInit)
-
-		// 2. Дополнительная установка через netsh
-		for i := 0; i < 6; i++ {
-			err := runNetsh("interface", "ipv4", "set", "address",
-				fmt.Sprintf("name=%s", adapterName),
-				"source=static",
-				fmt.Sprintf("address=%s", cleanVIP),
-				"mask=255.255.255.0",
-			)
-			if err == nil {
-				break
-			}
-			time.Sleep(250 * time.Millisecond)
-		}
-
-		// 2. Переводим профиль сети адаптера в Private (критично для разрешения ICMP Ping на Windows 10/11 и Windows Server)
-		psProfile := fmt.Sprintf(`Set-NetConnectionProfile -InterfaceAlias "%s" -NetworkCategory Private -ErrorAction SilentlyContinue`, adapterName)
-		_ = runHiddenPS(psProfile)
-
-		// 3. Выставляем метрику и MTU 1420 для защиты от фрагментации пакетов
-		_ = runNetsh("interface", "ipv4", "set", "interface",
-			fmt.Sprintf("name=%s", adapterName),
-			"metric=100",
-		)
-		_ = runNetsh("interface", "ipv4", "set", "subinterface",
-			fmt.Sprintf("name=%s", adapterName),
-			"mtu=1420",
-			"store=persistent",
-		)
-
-
-		// 4. Правила брандмауэра Windows для интерфейса NatBypass (ICMP, TCP, UDP)
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass ICMP In")
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass All In")
-		_ = runNetsh("advfirewall", "firewall", "delete", "rule", "name=NatBypass Mesh Inbound")
-
-		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass ICMP In",
-			"dir=in", "action=allow",
-			"protocol=icmpv4",
-		)
-		_ = runNetsh("advfirewall", "firewall", "add", "rule",
-			"name=NatBypass All In",
-			"dir=in", "action=allow",
-			"protocol=any",
-			"remoteip=any",
-		)
-		psFW := fmt.Sprintf(`New-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -Direction Inbound -Protocol ICMPv4 -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue; New-NetFirewallRule -DisplayName "NatBypass Adapter All" -Direction Inbound -InterfaceAlias "%s" -Action Allow -Profile Any -Enabled True -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue`, adapterName)
-		_ = runHiddenPS(psFW)
-
-		// 5. Явный маршрут для подсети виртуального IP и 100.64.200.0/24
-		prefix = "100.64.200"
-		parts = strings.Split(cleanVIP, ".")
-		if len(parts) >= 3 {
-			prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
-		}
-		for i := 0; i < 3; i++ {
-			_ = runNetsh("interface", "ipv4", "add", "route",
-				prefix+".0/24",
-				fmt.Sprintf("name=%s", adapterName),
-				"0.0.0.0",
-				"metric=1",
-			)
-			_ = runNetsh("interface", "ipv4", "add", "route",
-				"100.64.200.0/24",
-				fmt.Sprintf("name=%s", adapterName),
-				"0.0.0.0",
-				"metric=1",
-			)
-			time.Sleep(100 * time.Millisecond)
-		}
 	}()
 
 	return dev, nil

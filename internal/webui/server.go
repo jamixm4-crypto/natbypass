@@ -1,4 +1,4 @@
-package webui
+﻿package webui
 
 import (
 	cryptoRand "crypto/rand"
@@ -635,7 +635,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.145"
+		ver = "1.9.146"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1423,7 +1423,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.145"
+		ver = "1.9.146"
 	}
 
 	vip := s.state.VirtualIP
