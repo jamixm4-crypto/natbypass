@@ -151,9 +151,12 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		}
 
 		cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
-		// 1. Ожидаем готовности интерфейса в NDIS и устанавливаем статический IP через netsh
-		ipAssigned := false
-		for i := 0; i < 10; i++ {
+		// 1. Поиск и переименование адаптера Wintun в NatBypass по InterfaceDescription + привязка IP по индексу
+		psInit := fmt.Sprintf(`$w = Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*Wintun*" -or $_.Name -eq "%s"}; if ($w) { if ($w.Name -ne "%s") { Rename-NetAdapter -Name $w.Name -NewName "%s" -ErrorAction SilentlyContinue }; New-NetIPAddress -InterfaceIndex $w.InterfaceIndex -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetIPAddress -InterfaceIndex $w.InterfaceIndex -IPAddress "%s" -PrefixLength 24 -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex $w.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue }`, adapterName, adapterName, adapterName, cleanVIP, cleanVIP)
+		_ = runHiddenPS(psInit)
+
+		// 2. Дополнительная установка через netsh
+		for i := 0; i < 6; i++ {
 			err := runNetsh("interface", "ipv4", "set", "address",
 				fmt.Sprintf("name=%s", adapterName),
 				"source=static",
@@ -161,16 +164,9 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 				"mask=255.255.255.0",
 			)
 			if err == nil {
-				ipAssigned = true
 				break
 			}
 			time.Sleep(250 * time.Millisecond)
-		}
-
-		// PowerShell fallback if netsh was blocked
-		if !ipAssigned {
-			psCmd := fmt.Sprintf(`New-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetIPAddress -InterfaceAlias "%s" -IPAddress "%s" -PrefixLength 24 -ErrorAction SilentlyContinue`, adapterName, cleanVIP, adapterName, cleanVIP)
-			_ = runHiddenPS(psCmd)
 		}
 
 		// 2. Переводим профиль сети адаптера в Private (критично для разрешения ICMP Ping на Windows 10/11 и Windows Server)
