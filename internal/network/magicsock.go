@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,7 +22,13 @@ func isLocalSubnet(targetIP net.IP) bool {
 		return false
 	}
 	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagPointToPoint != 0 {
+			continue
+		}
+		nameLower := strings.ToLower(iface.Name)
+		if strings.HasPrefix(nameLower, "nb") || strings.Contains(nameLower, "natbypass") || strings.Contains(nameLower, "wintun") ||
+			strings.HasPrefix(nameLower, "tun") || strings.HasPrefix(nameLower, "tap") || strings.HasPrefix(nameLower, "nwg") ||
+			strings.HasPrefix(nameLower, "wg") || strings.HasPrefix(nameLower, "docker") || strings.HasPrefix(nameLower, "veth") {
 			continue
 		}
 		addrs, err := iface.Addrs()

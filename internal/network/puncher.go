@@ -284,10 +284,16 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 		candidateSet[fmt.Sprintf("%s:%d", publicIP, localPort)] = struct{}{}
 	}
 
-	// 3. Local LAN addresses
+	// 3. Local LAN addresses (only physical Ethernet/Wi-Fi interfaces, skip TUN/TAP/Mesh/Docker/VPN)
 	if ifaces, err := net.Interfaces(); err == nil {
 		for _, iface := range ifaces {
-			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagPointToPoint != 0 {
+				continue
+			}
+			nameLower := strings.ToLower(iface.Name)
+			if strings.HasPrefix(nameLower, "nb") || strings.Contains(nameLower, "natbypass") || strings.Contains(nameLower, "wintun") ||
+				strings.HasPrefix(nameLower, "tun") || strings.HasPrefix(nameLower, "tap") || strings.HasPrefix(nameLower, "nwg") ||
+				strings.HasPrefix(nameLower, "wg") || strings.HasPrefix(nameLower, "docker") || strings.HasPrefix(nameLower, "veth") {
 				continue
 			}
 			addrs, err := iface.Addrs()
@@ -306,6 +312,10 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 					continue
 				}
 				if ip4 := ip.To4(); ip4 != nil {
+					// Exclude default CGNAT mesh range 100.64.0.0/10 from candidate discovery
+					if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+						continue
+					}
 					candidateSet[fmt.Sprintf("%s:%d", ip4.String(), localPort)] = struct{}{}
 				}
 			}
