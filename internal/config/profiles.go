@@ -586,7 +586,7 @@ func (p *Profile) GetDeterministicVIP(deviceID string) string {
 			return clean
 		}
 	}
-	prefix := "10.123.111"
+	prefix := "100.64.200"
 	if p.Subnet != "" {
 		prefix = ExtractSubnetPrefix(p.Subnet)
 	} else if p.VirtualIP != "" {
@@ -599,7 +599,7 @@ func (p *Profile) GetDeterministicVIP(deviceID string) string {
 func ExtractSubnetPrefix(vipOrSubnet string) string {
 	raw := strings.TrimSpace(vipOrSubnet)
 	if raw == "" {
-		return "10.123.111"
+		return "100.64.200"
 	}
 	if idx := strings.Index(raw, "/"); idx != -1 {
 		raw = raw[:idx]
@@ -608,13 +608,13 @@ func ExtractSubnetPrefix(vipOrSubnet string) string {
 	if len(parts) >= 3 {
 		return fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
 	}
-	return "10.123.111"
+	return "100.64.200"
 }
 
 // GenerateSubnetIP генерирует детерминированный уникальный IP-адрес в подсети для указанного deviceID
 func GenerateSubnetIP(prefix string, deviceID string) string {
 	if prefix == "" {
-		prefix = "10.123.111"
+		prefix = "100.64.200"
 	}
 	h := sha256.Sum256([]byte(deviceID))
 	// Диапазон октетов 2..254 (избегая 1 как дефолтный шлюз/создатель и 0/255)
@@ -628,7 +628,7 @@ func GenerateSubnetIP(prefix string, deviceID string) string {
 // ResolveVirtualIP возвращает актуальный уникальный Virtual IP узла в подсети активного профиля
 func ResolveVirtualIP(cfg *Config, deviceID string) string {
 	if cfg == nil {
-		return GenerateSubnetIP("10.123.111", deviceID)
+		return GenerateSubnetIP("100.64.200", deviceID)
 	}
 	// 1. Приоритет прямому Network.Address в конфигурации
 	if cfg.Network.Address != "" {
@@ -653,9 +653,11 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 			return GenerateSubnetIP(prefix, deviceID)
 		}
 	}
+	// 3. Network.Address как подсеть (если оканчивается на .0)
 	if cfg.Network.Address != "" {
 		prefix := ExtractSubnetPrefix(cfg.Network.Address)
 		return GenerateSubnetIP(prefix, deviceID)
 	}
-	return GenerateSubnetIP("10.123.111", deviceID)
+	// 4. Дефолтный fallback (только если нигде ничего не задано)
+	return GenerateSubnetIP("100.64.200", deviceID)
 }
