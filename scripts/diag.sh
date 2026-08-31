@@ -1,9 +1,5 @@
-﻿#!/bin/sh
-# ==============================================================================
 # NatBypass Universal Diagnostic Script for Linux / KeeneticOS / OpenWrt / Routers
-# ==============================================================================
-
-set -u
+# Usage: curl -sSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.sh | sh
 
 C_RESET='\033[0m'
 C_RED='\033[1;31m'
@@ -13,11 +9,9 @@ C_BLUE='\033[1;34m'
 C_CYAN='\033[1;36m'
 C_BOLD='\033[1m'
 
-echo "${C_CYAN}${C_BOLD}"
-echo "======================================================================"
-echo "          🔍 NatBypass Universal Network & L3 Diagnostic Tool        "
-echo "======================================================================"
-echo "${C_RESET}"
+printf "\n%b======================================================================%b\n" "$C_CYAN$C_BOLD" "$C_RESET"
+printf "          🔍 NatBypass Universal Network & L3 Diagnostic Tool        \n"
+printf "%b======================================================================%b\n\n" "$C_CYAN$C_BOLD" "$C_RESET"
 
 REPORT_FILE="/tmp/natbypass_diag_$(date +%s).log"
 echo "=== NatBypass Diagnostic Report ===" > "$REPORT_FILE"

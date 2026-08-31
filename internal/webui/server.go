@@ -477,6 +477,19 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// 0. Разрешить локальный read-only опрос статуса и пиров (localhost 127.0.0.1 / ::1) для diag/CLI
+		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers") && r.Method == http.MethodGet {
+			host, _, _ := net.SplitHostPort(r.RemoteAddr)
+			if host == "" {
+				host = r.RemoteAddr
+			}
+			ip := net.ParseIP(strings.TrimSpace(host))
+			if ip != nil && ip.IsLoopback() {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
 		// 1. Проверка сессионной cookie (nb_session)
 		if cookie, err := r.Cookie("nb_session"); err == nil && isValidSession(cookie.Value) {
 			next.ServeHTTP(w, r)
@@ -635,7 +648,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.169"
+		ver = "1.9.170"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1442,7 +1455,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.169"
+		ver = "1.9.170"
 	}
 
 	vip := s.state.VirtualIP
