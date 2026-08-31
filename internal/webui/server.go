@@ -635,7 +635,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.147"
+		ver = "1.9.148"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -997,13 +997,32 @@ func (s *Server) handleAWGConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	myVIP := "10.123.111.1"
+	if s.state.VirtualIP != "" {
+		myVIP = strings.TrimSpace(strings.Split(s.state.VirtualIP, "/")[0])
+	}
+
 	var wgPeers []wireguard.WGPeer
 	for i, p := range s.registry.List() {
 		if p.WGPubKey != "" {
+			peerVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			if peerVIP == "" {
+				peerVIP = fmt.Sprintf("10.123.111.%d", i+2)
+			}
+			allowed := []string{peerVIP + "/32"}
+			for _, route := range p.AdvertisedRoutes {
+				if strings.TrimSpace(route) != "" {
+					allowed = append(allowed, strings.TrimSpace(route))
+				}
+			}
+			endpoint := p.ActiveEndpoint
+			if endpoint == "" {
+				endpoint = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
+			}
 			wgPeers = append(wgPeers, wireguard.WGPeer{
 				PublicKey:  p.WGPubKey,
-				Endpoint:   fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort),
-				AllowedIPs: []string{fmt.Sprintf("100.64.200.%d/32", i+2)},
+				Endpoint:   endpoint,
+				AllowedIPs: allowed,
 			})
 		}
 	}
@@ -1018,7 +1037,7 @@ func (s *Server) handleAWGConfig(w http.ResponseWriter, r *http.Request) {
 		WGConfig: wireguard.WGConfig{
 			InterfaceName: "awg0",
 			PrivateKey:    kp.PrivateKey,
-			Address:       "100.64.200.1/24",
+			Address:       fmt.Sprintf("%s/24", myVIP),
 			ListenPort:    51820,
 			MTU:           1420,
 			Peers:         wgPeers,
@@ -1423,7 +1442,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.147"
+		ver = "1.9.148"
 	}
 
 	vip := s.state.VirtualIP

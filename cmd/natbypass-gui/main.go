@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.147"
+	Version = "1.9.148"
 	Commit  = "release"
 )
 
@@ -4840,13 +4840,19 @@ func renderAWGTextFromUI() {
 				if ep == "" {
 					ep = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
 				}
-				peerVIP := p.VirtualIP
+				peerVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 				if peerVIP == "" {
-					peerVIP = "100.64.200.2"
+					peerVIP = "10.123.111.2"
+				}
+				allowed := []string{peerVIP + "/32"}
+				for _, route := range p.AdvertisedRoutes {
+					if strings.TrimSpace(route) != "" {
+						allowed = append(allowed, strings.TrimSpace(route))
+					}
 				}
 				wgPeers = append(wgPeers, wireguard.WGPeer{
 					PublicKey:  p.WGPubKey,
-					AllowedIPs: []string{peerVIP + "/32"},
+					AllowedIPs: allowed,
 					Endpoint:   ep,
 				})
 			}
