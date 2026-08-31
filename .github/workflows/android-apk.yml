@@ -30,7 +30,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
+          go-version: '1.24.x'
           cache: true
 
       - name: Set up JDK 17
@@ -66,13 +66,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
 
       - name: Build Go Mobile Core (AAR)
-        env:
-          GOTOOLCHAIN: local
-          GOPROXY: "https://proxy.golang.org,direct"
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
-          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20240112003514-8391977d2593
-          go install golang.org/x/mobile/cmd/gobind@v0.0.0-20240112003514-8391977d2593
+          export GOPROXY="https://proxy.golang.org,direct"
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
           export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$NDK_PATH}"
           export NDK_HOME="${ANDROID_NDK_HOME}"
           gomobile init
