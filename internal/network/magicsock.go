@@ -2,10 +2,58 @@ package network
 
 import (
 	"context"
-	"strings"
+	"net"
 	"sync"
 	"time"
 )
+
+func isLocalSubnet(targetIP net.IP) bool {
+	if targetIP == nil {
+		return false
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				if ipNet.Contains(targetIP) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func classifyAddress(addrStr string) (PathType, int) {
+	host := addrStr
+	if h, _, err := net.SplitHostPort(addrStr); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return PathTypeWAN, 3
+	}
+	if ip.To4() == nil {
+		return PathTypeIPv6, 2
+	}
+	if isLocalSubnet(ip) {
+		return PathTypeLAN, 1
+	}
+	if ip.IsPrivate() {
+		return PathTypeRelay, 4
+	}
+	return PathTypeWAN, 2
+}
 
 // PathType represents the classification of a network transport candidate.
 type PathType string
@@ -77,49 +125,25 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
 
-	// 1. LAN candidate
-	if localAddr != "" {
-		if _, exists := pr.Candidates[localAddr]; !exists {
-			pr.Candidates[localAddr] = &EndpointCandidate{
-				Address:  localAddr,
-				Type:     PathTypeLAN,
-				Priority: 1,
+	addCandidate := func(addr string) {
+		if addr == "" {
+			return
+		}
+		if _, exists := pr.Candidates[addr]; !exists {
+			pType, priority := classifyAddress(addr)
+			pr.Candidates[addr] = &EndpointCandidate{
+				Address:  addr,
+				Type:     pType,
+				Priority: priority,
 			}
 		}
 	}
 
-	// 2. IPv6 candidate
-	if ipv6Addr != "" {
-		if _, exists := pr.Candidates[ipv6Addr]; !exists {
-			pr.Candidates[ipv6Addr] = &EndpointCandidate{
-				Address:  ipv6Addr,
-				Type:     PathTypeIPv6,
-				Priority: 2,
-			}
-		}
-	}
-
-	// 3. STUN WAN candidate
-	if stunAddr != "" {
-		if _, exists := pr.Candidates[stunAddr]; !exists {
-			pr.Candidates[stunAddr] = &EndpointCandidate{
-				Address:  stunAddr,
-				Type:     PathTypeWAN,
-				Priority: 3,
-			}
-		}
-	}
-
+	addCandidate(localAddr)
+	addCandidate(ipv6Addr)
+	addCandidate(stunAddr)
 	for _, cand := range extraCandidates {
-		if cand != "" {
-			if _, exists := pr.Candidates[cand]; !exists {
-				pr.Candidates[cand] = &EndpointCandidate{
-					Address:  cand,
-					Type:     PathTypeWAN,
-					Priority: 3,
-				}
-			}
-		}
+		addCandidate(cand)
 	}
 
 	if pr.ActiveEndpoint == "" {
@@ -127,8 +151,9 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 			pr.ActiveEndpoint = stunAddr
 			pr.ActiveType = PathTypeWAN
 		} else if localAddr != "" {
+			pType, _ := classifyAddress(localAddr)
 			pr.ActiveEndpoint = localAddr
-			pr.ActiveType = PathTypeLAN
+			pr.ActiveType = pType
 		}
 	}
 }
@@ -147,16 +172,11 @@ func (ms *MagicSock) RecordProbeSuccess(deviceID, fromAddr string, rtt time.Dura
 
 	cand, ok := pr.Candidates[fromAddr]
 	if !ok {
-		pType := PathTypeWAN
-		if strings.HasPrefix(fromAddr, "192.168.") || strings.HasPrefix(fromAddr, "10.") || strings.HasPrefix(fromAddr, "172.") {
-			pType = PathTypeLAN
-		} else if strings.Contains(fromAddr, "[") {
-			pType = PathTypeIPv6
-		}
+		pType, priority := classifyAddress(fromAddr)
 		cand = &EndpointCandidate{
 			Address:  fromAddr,
 			Type:     pType,
-			Priority: 3,
+			Priority: priority,
 		}
 		pr.Candidates[fromAddr] = cand
 	}

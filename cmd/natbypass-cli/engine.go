@@ -631,14 +631,22 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 				p.Latency = rtt
 				p.PingMs = rtt.Milliseconds()
 			}
-			p.ActiveEndpoint = fromAddr
+			if magicSock != nil {
+				if bestEP, _, _ := magicSock.GetActiveRoute(remoteDevID); bestEP != "" {
+					p.ActiveEndpoint = bestEP
+				} else {
+					p.ActiveEndpoint = fromAddr
+				}
+			} else {
+				p.ActiveEndpoint = fromAddr
+			}
 			p.NATBlocked = false
 			registry.Upsert(p)
-			if oldEP != "" && oldEP != fromAddr && puncher != nil {
+			if oldEP != "" && oldEP != p.ActiveEndpoint && puncher != nil {
 				puncher.RemoveKeepAliveTarget(oldEP)
 			}
-			if puncher != nil {
-				puncher.AddKeepAliveTarget(fromAddr)
+			if puncher != nil && p.ActiveEndpoint != "" {
+				puncher.AddKeepAliveTarget(p.ActiveEndpoint)
 			}
 		}
 	})
@@ -649,6 +657,17 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		puncher.StartKeepAliveLoop()
 		magicSock = network.NewMagicSock(puncher, func(devID, oldPath, newPath string, pType network.PathType) {
 			log.Info().Str("peer", devID).Str("old", oldPath).Str("new", newPath).Str("type", string(pType)).Msg("🔀 MagicSock: Path switched")
+			if p, ok := registry.Get(devID); ok && p != nil {
+				p.ActiveEndpoint = newPath
+				p.DirectP2P = true
+				registry.Upsert(p)
+				if oldPath != "" && oldPath != newPath && puncher != nil {
+					puncher.RemoveKeepAliveTarget(oldPath)
+				}
+				if puncher != nil && newPath != "" {
+					puncher.AddKeepAliveTarget(newPath)
+				}
+			}
 		})
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDP puncher active on persistent socket with MagicSock and KeepAlive")
 	}
