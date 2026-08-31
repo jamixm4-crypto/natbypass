@@ -979,31 +979,26 @@ func receiveLoop(
 			existingPeer, peerFound := registry.Get(p.DeviceID)
 			needsFastReply := !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
 
-			// При наличии стабильного прямого P2P сокета — не сбиваем его зондированием чужих локальных подсетей
 			if puncher != nil {
-				if existingPeer != nil && existingPeer.DirectP2P && existingPeer.ActiveEndpoint != "" {
-					_ = puncher.SendKeepAlive(existingPeer.ActiveEndpoint)
-				} else {
-					if p.ActiveEndpoint != "" {
-						_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+				if p.ActiveEndpoint != "" {
+					_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+				}
+				if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+					_ = puncher.SendHolePunchProbe(p.STUNAddr)
+				}
+				if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
+					_ = puncher.SendHolePunchProbe(p.LocalAddr)
+				}
+				if p.IPv6Addr != "" {
+					_ = puncher.SendHolePunchProbe(p.IPv6Addr)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr && cand != p.ActiveEndpoint {
+						_ = puncher.SendHolePunchProbe(cand)
 					}
-					if p.STUNAddr != "" {
-						_ = puncher.SendHolePunchProbe(p.STUNAddr)
-					}
-					if p.LocalAddr != "" {
-						_ = puncher.SendHolePunchProbe(p.LocalAddr)
-					}
-					if p.IPv6Addr != "" {
-						_ = puncher.SendHolePunchProbe(p.IPv6Addr)
-					}
-					for _, cand := range p.Candidates {
-						if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
-							_ = puncher.SendHolePunchProbe(cand)
-						}
-					}
-					if p.PublicIP != "" && p.WGPort > 0 {
-						_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
-					}
+				}
+				if p.PublicIP != "" && p.WGPort > 0 {
+					_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
 				}
 			}
 			if magicSock != nil {
