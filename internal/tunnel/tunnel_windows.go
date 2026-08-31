@@ -151,8 +151,13 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		}
 
 		cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
-		// 1. Поиск и переименование адаптера Wintun в NatBypass по InterfaceDescription + привязка IP по индексу
-		psInit := fmt.Sprintf(`$w = Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*Wintun*" -or $_.Name -eq "%s"}; if ($w) { if ($w.Name -ne "%s") { Rename-NetAdapter -Name $w.Name -NewName "%s" -ErrorAction SilentlyContinue }; New-NetIPAddress -InterfaceIndex $w.InterfaceIndex -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetIPAddress -InterfaceIndex $w.InterfaceIndex -IPAddress "%s" -PrefixLength 24 -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex $w.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue }`, adapterName, adapterName, adapterName, cleanVIP, cleanVIP)
+		prefix := "100.64.200"
+		parts := strings.Split(cleanVIP, ".")
+		if len(parts) >= 3 {
+			prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
+		}
+		// 1. Привязка IP, профиля и маршрутов напрямую через InterfaceIndex Wintun адаптера
+		psInit := fmt.Sprintf(`$w = Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*Wintun*" -or $_.Name -eq "%s"}; if ($w) { New-NetIPAddress -InterfaceIndex $w.InterfaceIndex -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue; Set-NetIPAddress -InterfaceIndex $w.InterfaceIndex -IPAddress "%s" -PrefixLength 24 -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex $w.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "%s.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex $w.InterfaceIndex -DestinationPrefix "100.64.200.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue }`, adapterName, cleanVIP, cleanVIP, prefix)
 		_ = runHiddenPS(psInit)
 
 		// 2. Дополнительная установка через netsh
@@ -205,8 +210,8 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		_ = runHiddenPS(psFW)
 
 		// 5. Явный маршрут для подсети виртуального IP и 100.64.200.0/24
-		prefix := "100.64.200"
-		parts := strings.Split(cleanVIP, ".")
+		prefix = "100.64.200"
+		parts = strings.Split(cleanVIP, ".")
 		if len(parts) >= 3 {
 			prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
 		}
