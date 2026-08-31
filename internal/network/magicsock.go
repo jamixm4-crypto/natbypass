@@ -62,7 +62,7 @@ func NewMagicSock(puncher *UDPPuncher, onSwitch func(deviceID string, oldPath, n
 }
 
 // RegisterPeerEndpoints updates all candidate endpoints for a peer.
-func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Addr string) {
+func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Addr string, extraCandidates ...string) {
 	ms.mu.Lock()
 	pr, ok := ms.peerRoutes[deviceID]
 	if !ok {
@@ -106,6 +106,18 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 				Address:  stunAddr,
 				Type:     PathTypeWAN,
 				Priority: 3,
+			}
+		}
+	}
+
+	for _, cand := range extraCandidates {
+		if cand != "" {
+			if _, exists := pr.Candidates[cand]; !exists {
+				pr.Candidates[cand] = &EndpointCandidate{
+					Address:  cand,
+					Type:     PathTypeWAN,
+					Priority: 3,
+				}
 			}
 		}
 	}

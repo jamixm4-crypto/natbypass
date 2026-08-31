@@ -340,6 +340,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 
+						// 1b. Reactive instant hole punching on outbound demand if peer is not yet direct P2P
+						if !p.DirectP2P && puncher != nil {
+							if p.STUNAddr != "" && p.STUNAddr != targetEP {
+								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							}
+							for _, cand := range p.Candidates {
+								if cand != "" && cand != targetEP && cand != p.STUNAddr {
+									_ = puncher.SendHolePunchProbe(cand)
+								}
+							}
+						}
+
 						// 2. Seamless Relay fallback if direct endpoint is not available or P2P not yet confirmed
 						if (!p.DirectP2P || !sentUDP) && (!sentUDP || targetEP == "") {
 							if udpRelay != nil && udpRelay.IsConnected() {
@@ -947,7 +959,7 @@ func receiveLoop(
 				}
 			}
 			if magicSock != nil {
-				magicSock.RegisterPeerEndpoints(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr)
+				magicSock.RegisterPeerEndpoints(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr, p.Candidates...)
 			}
 
 			preservedEP := ""

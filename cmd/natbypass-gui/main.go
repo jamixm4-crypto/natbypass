@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.138"
+	Version = "1.9.139"
 	Commit  = "release"
 )
 
@@ -3345,6 +3345,17 @@ func startEngineFromConfig(c *config.Config) {
 								if udpPuncher != nil && targetEP != "" {
 									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
 										sentUDP = true
+									}
+								}
+								// 1b. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
+								if !targetPeer.DirectP2P && udpPuncher != nil {
+									if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+										_ = udpPuncher.SendHolePunchProbe(targetPeer.STUNAddr)
+									}
+									for _, cand := range targetPeer.Candidates {
+										if cand != "" && cand != targetEP && cand != targetPeer.STUNAddr {
+											_ = udpPuncher.SendHolePunchProbe(cand)
+										}
 									}
 								}
 								// 2. Мгновенный релей через сигнальный канал если прямой сокет не доступен
