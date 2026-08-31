@@ -189,21 +189,25 @@ func (ms *MagicSock) RecordProbeSuccess(deviceID, fromAddr string, rtt time.Dura
 		cand.Latency = rtt
 	}
 
-	// Auto-promote candidate if it has lower priority number or significantly lower latency
+	// Auto-promote candidate if it has strictly better priority (lower number) or lower latency within same priority
 	shouldSwitch := false
 	if pr.ActiveEndpoint == "" || pr.ActiveEndpoint == fromAddr {
 		shouldSwitch = true
 	} else if activeCand, hasActive := pr.Candidates[pr.ActiveEndpoint]; hasActive {
-		// LAN always wins if reachable
-		if cand.Type == PathTypeLAN && activeCand.Type != PathTypeLAN {
+		if cand.Priority < activeCand.Priority {
+			// Better priority path (e.g. LAN over WAN, or WAN over Relay/remote private IP) always wins
 			shouldSwitch = true
-		} else if cand.Priority <= activeCand.Priority && cand.Latency < activeCand.Latency {
-			shouldSwitch = true
-		} else if time.Since(activeCand.LastSuccess) > 5*time.Second {
-			shouldSwitch = true
-		} else if cand.Latency > 0 && activeCand.Latency > 0 && cand.Latency < activeCand.Latency/2 {
-			// Switch if new path is 2x faster
-			shouldSwitch = true
+		} else if cand.Priority == activeCand.Priority {
+			if cand.Latency > 0 && (activeCand.Latency == 0 || cand.Latency < activeCand.Latency) {
+				shouldSwitch = true
+			} else if time.Since(activeCand.LastSuccess) > 5*time.Second {
+				shouldSwitch = true
+			}
+		} else if cand.Priority > activeCand.Priority {
+			// Lower priority path (e.g. remote private IP over STUN WAN) ONLY switches if STUN WAN is DEAD!
+			if time.Since(activeCand.LastSuccess) > 10*time.Second {
+				shouldSwitch = true
+			}
 		}
 	} else {
 		shouldSwitch = true
