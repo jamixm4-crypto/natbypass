@@ -7,9 +7,14 @@ import (
 	"time"
 )
 
+var isLocalSubnetHook func(net.IP) bool
+
 func isLocalSubnet(targetIP net.IP) bool {
 	if targetIP == nil {
 		return false
+	}
+	if isLocalSubnetHook != nil {
+		return isLocalSubnetHook(targetIP)
 	}
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -125,50 +130,25 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
 
-	// 1. LAN candidate
-	if localAddr != "" {
-		if _, exists := pr.Candidates[localAddr]; !exists {
-			pr.Candidates[localAddr] = &EndpointCandidate{
-				Address:  localAddr,
-				Type:     PathTypeLAN,
-				Priority: 1,
+	addCandidate := func(addr string) {
+		if addr == "" {
+			return
+		}
+		if _, exists := pr.Candidates[addr]; !exists {
+			pType, priority := classifyAddress(addr)
+			pr.Candidates[addr] = &EndpointCandidate{
+				Address:  addr,
+				Type:     pType,
+				Priority: priority,
 			}
 		}
 	}
 
-	// 2. IPv6 candidate
-	if ipv6Addr != "" {
-		if _, exists := pr.Candidates[ipv6Addr]; !exists {
-			pr.Candidates[ipv6Addr] = &EndpointCandidate{
-				Address:  ipv6Addr,
-				Type:     PathTypeIPv6,
-				Priority: 2,
-			}
-		}
-	}
-
-	// 3. STUN WAN candidate
-	if stunAddr != "" {
-		if _, exists := pr.Candidates[stunAddr]; !exists {
-			pr.Candidates[stunAddr] = &EndpointCandidate{
-				Address:  stunAddr,
-				Type:     PathTypeWAN,
-				Priority: 2,
-			}
-		}
-	}
-
+	addCandidate(localAddr)
+	addCandidate(ipv6Addr)
+	addCandidate(stunAddr)
 	for _, cand := range extraCandidates {
-		if cand != "" {
-			if _, exists := pr.Candidates[cand]; !exists {
-				pType, priority := classifyAddress(cand)
-				pr.Candidates[cand] = &EndpointCandidate{
-					Address:  cand,
-					Type:     pType,
-					Priority: priority,
-				}
-			}
-		}
+		addCandidate(cand)
 	}
 
 	if pr.ActiveEndpoint == "" {
@@ -176,8 +156,9 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 			pr.ActiveEndpoint = stunAddr
 			pr.ActiveType = PathTypeWAN
 		} else if localAddr != "" {
+			pType, _ := classifyAddress(localAddr)
 			pr.ActiveEndpoint = localAddr
-			pr.ActiveType = PathTypeLAN
+			pr.ActiveType = pType
 		}
 	}
 }

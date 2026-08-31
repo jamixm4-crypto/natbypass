@@ -15,7 +15,7 @@ import (
 
 
 var (
-	Version   = "1.9.168"
+	Version   = "1.9.169"
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
@@ -113,6 +113,7 @@ Supported platforms: Windows, Linux (amd64/arm64/mips/mipsle), Android, iOS.`, V
 		newServiceCmd(),
 		newStopCmd(),
 		newStatusCmd(),
+		newDiagCmd(),
 		newKeygenCmd(),
 		newWGCmd(),
 		newInstallCmd(),

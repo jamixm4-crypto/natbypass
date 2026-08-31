@@ -1,4 +1,4 @@
-﻿package network
+package network
 
 import (
 	"testing"
@@ -6,6 +6,11 @@ import (
 )
 
 func TestMagicSock_CandidateSwitching(t *testing.T) {
+	isLocalSubnetHook = func(ip net.IP) bool {
+		return ip.String() == "192.168.1.50"
+	}
+	defer func() { isLocalSubnetHook = nil }()
+
 	ms := NewMagicSock(nil, func(deviceID, oldPath, newPath string, pType PathType) {
 		t.Logf("Path switched for %s: %s -> %s (%s)", deviceID, oldPath, newPath, pType)
 	})
