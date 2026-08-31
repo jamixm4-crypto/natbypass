@@ -223,11 +223,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			})
 		}
 
-		if sigMgr != nil {
-			sigMgr.SubscribeTunnelData(deviceID, func(pkt []byte) {
-				onInboundPacket(pkt, nil)
-			})
-		}
+		// Signaling is strictly for control plane / peer discovery.
+		// All data plane traffic flows strictly peer-to-peer over direct UDP.
 
 
 		// L3 Data-plane: Outbound packets from TUN -> Dispatch to peer over UDP Direct or MQTT Relay
@@ -332,15 +329,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							pmax = p.AWG.Pmax
 						}
 
-						// 1. Direct UDP socket send (acts as live data + continuous NAT hole maintenance)
-						sentUDP := false
+						// 1. Pure P2P Direct UDP packet transmission
 						if targetEP != "" && puncher != nil {
-							if err3 := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err3 == nil {
-								sentUDP = true
-							}
+							_ = puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
 						}
 
-						// 1b. Reactive instant hole punching on outbound demand if peer is not yet direct P2P
+						// 1b. Reactive instant hole punching if direct P2P is not yet confirmed
 						if !p.DirectP2P && puncher != nil {
 							if p.STUNAddr != "" && p.STUNAddr != targetEP {
 								_ = puncher.SendHolePunchProbe(p.STUNAddr)
@@ -349,17 +343,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								if cand != "" && cand != targetEP && cand != p.STUNAddr {
 									_ = puncher.SendHolePunchProbe(cand)
 								}
-							}
-						}
-
-						// 2. Seamless Relay fallback if direct endpoint is not available or P2P not yet confirmed
-						if (!p.DirectP2P || !sentUDP) && (!sentUDP || targetEP == "") {
-							if udpRelay != nil && udpRelay.IsConnected() {
-								_ = udpRelay.SendPacket(p.DeviceID, pkt)
-							} else if wssClient != nil && wssClient.IsConnected() {
-								_ = wssClient.SendPacket(p.DeviceID, pkt)
-							} else if sigMgr != nil {
-								_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 							}
 						}
 					}

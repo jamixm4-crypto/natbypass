@@ -24,7 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.139"
+const Version = "1.9.140"
 
 
 
@@ -384,7 +384,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             "arm64",
-					Version:          "1.9.139",
+					Version:          "1.9.140",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -682,9 +682,7 @@ func attachTUN(tunFd int) {
 									_ = globalPuncher.SendDataPacket(targetPeer.STUNAddr, pkt)
 								}
 							}
-							if globalSigMgr != nil {
-								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, pkt)
-							}
+							// Data plane is strictly pure P2P direct UDP
 							logger.Debug().
 								Str("dst", destIP.String()).
 								Str("peer", targetPeer.DeviceID).
