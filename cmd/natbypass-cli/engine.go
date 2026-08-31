@@ -188,26 +188,57 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				payload = payload[:totalLen]
 			}
 
-			// If direct UDP data packet arrived, immediately lock and promote direct P2P path
+			// If direct UDP data packet arrived, immediately lock and promote direct P2P path with Dynamic IP Auto-Learning
 			if directAddr != nil && registry != nil {
+				fromAddrStr := directAddr.String()
+				var targetPeer *peer.Peer
+				// 1. Match by Virtual IP
 				if p, ok := registry.GetByVirtualIP(srcIP); ok && p != nil {
-					fromAddrStr := directAddr.String()
-					if !p.DirectP2P || p.ActiveEndpoint != fromAddrStr {
-						oldEP := p.ActiveEndpoint
-						p.DirectP2P = true
-						p.ActiveEndpoint = fromAddrStr
-						p.Online = true
-						p.LastSeen = time.Now()
-						registry.Upsert(p)
-						if magicSock != nil {
-							magicSock.RecordProbeSuccess(p.DeviceID, fromAddrStr, 0)
+					targetPeer = p
+				} else {
+					// 2. Dynamic Auto-learning: Match peer by sender socket address (STUNAddr, ActiveEndpoint, Candidates, LocalAddr)
+					for _, item := range registry.List() {
+						if item.ActiveEndpoint == fromAddrStr || item.STUNAddr == fromAddrStr || item.LocalAddr == fromAddrStr {
+							targetPeer = item
+							targetPeer.VirtualIP = srcIP
+							break
 						}
-						if puncher != nil {
-							if oldEP != "" && oldEP != fromAddrStr {
-								puncher.RemoveKeepAliveTarget(oldEP)
+						for _, c := range item.Candidates {
+							if c == fromAddrStr {
+								targetPeer = item
+								targetPeer.VirtualIP = srcIP
+								break
 							}
-							puncher.AddKeepAliveTarget(fromAddrStr)
 						}
+						if targetPeer != nil {
+							break
+						}
+					}
+					// 3. Fallback: if only 1 peer is connected in mesh, map srcIP directly
+					if targetPeer == nil {
+						pList := registry.List()
+						if len(pList) == 1 {
+							targetPeer = pList[0]
+							targetPeer.VirtualIP = srcIP
+						}
+					}
+				}
+
+				if targetPeer != nil {
+					oldEP := targetPeer.ActiveEndpoint
+					targetPeer.DirectP2P = true
+					targetPeer.ActiveEndpoint = fromAddrStr
+					targetPeer.Online = true
+					targetPeer.LastSeen = time.Now()
+					registry.Upsert(targetPeer)
+					if magicSock != nil {
+						magicSock.RecordProbeSuccess(targetPeer.DeviceID, fromAddrStr, 0)
+					}
+					if puncher != nil {
+						if oldEP != "" && oldEP != fromAddrStr {
+							puncher.RemoveKeepAliveTarget(oldEP)
+						}
+						puncher.AddKeepAliveTarget(fromAddrStr)
 					}
 				}
 			}

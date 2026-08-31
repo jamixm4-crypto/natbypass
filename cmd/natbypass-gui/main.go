@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.141"
+	Version = "1.9.142"
 	Commit  = "release"
 )
 
@@ -3198,20 +3198,50 @@ func startEngineFromConfig(c *config.Config) {
 				return // Защита от петель
 			}
 			if srcIP != nil && registry != nil && srcAddr != nil {
-				if p, ok := registry.GetByVirtualIP(srcIP.String()); ok && p != nil {
-					fromAddrStr := srcAddr.String()
-					if !p.DirectP2P || p.ActiveEndpoint != fromAddrStr {
-						p.DirectP2P = true
-						p.ActiveEndpoint = fromAddrStr
-						p.Online = true
-						p.LastSeen = time.Now()
-						registry.Upsert(p)
-						if guiMagicSock != nil {
-							guiMagicSock.RecordProbeSuccess(p.DeviceID, fromAddrStr, 0)
+				fromAddrStr := srcAddr.String()
+				var targetPeer *peer.Peer
+				srcIPStr := srcIP.String()
+
+				if p, ok := registry.GetByVirtualIP(srcIPStr); ok && p != nil {
+					targetPeer = p
+				} else {
+					for _, item := range registry.List() {
+						if item.ActiveEndpoint == fromAddrStr || item.STUNAddr == fromAddrStr || item.LocalAddr == fromAddrStr {
+							targetPeer = item
+							targetPeer.VirtualIP = srcIPStr
+							break
 						}
-						if udpPuncher != nil {
-							udpPuncher.AddKeepAliveTarget(fromAddrStr)
+						for _, c := range item.Candidates {
+							if c == fromAddrStr {
+								targetPeer = item
+								targetPeer.VirtualIP = srcIPStr
+								break
+							}
 						}
+						if targetPeer != nil {
+							break
+						}
+					}
+					if targetPeer == nil {
+						pList := registry.List()
+						if len(pList) == 1 {
+							targetPeer = pList[0]
+							targetPeer.VirtualIP = srcIPStr
+						}
+					}
+				}
+
+				if targetPeer != nil {
+					targetPeer.DirectP2P = true
+					targetPeer.ActiveEndpoint = fromAddrStr
+					targetPeer.Online = true
+					targetPeer.LastSeen = time.Now()
+					registry.Upsert(targetPeer)
+					if guiMagicSock != nil {
+						guiMagicSock.RecordProbeSuccess(targetPeer.DeviceID, fromAddrStr, 0)
+					}
+					if udpPuncher != nil {
+						udpPuncher.AddKeepAliveTarget(fromAddrStr)
 					}
 				}
 			}
