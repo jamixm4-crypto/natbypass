@@ -1,4 +1,4 @@
-﻿//go:build windows
+//go:build windows
 
 package main
 
@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.148"
+	Version = "1.9.149"
 	Commit  = "release"
 )
 
@@ -3305,9 +3305,9 @@ func startEngineFromConfig(c *config.Config) {
 						}
 						destStr := destIP.String()
 
-						// Игнорируем мультикаст Windows (224.0.0.x, 239.255.x.x, 255.255.255.255) и петли
+						// Игнорируем мультикаст Windows (224.0.0.x, 239.255.x.x, 255.255.255.255), бродкаст и петли
 						cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-						if destIP.IsMulticast() || destIP.IsUnspecified() || destStr == "255.255.255.255" || destStr == cleanVIP || destStr == "100.64.200.255" || destStr == "100.64.200.0" {
+						if destIP.IsMulticast() || destIP.IsUnspecified() || destStr == "255.255.255.255" || destStr == cleanVIP || strings.HasSuffix(destStr, ".255") || strings.HasSuffix(destStr, ".0") {
 							continue
 						}
 
@@ -4178,27 +4178,18 @@ func unusedOldICMP(payload []byte) {
 		return
 	}
 
+	cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+	destStr := destIP.String()
+
 	// Защита от петель: игнорируем пакеты от собственного адреса
-	if srcIP.String() == myVirtualIP {
+	if srcIP.String() == cleanVIP || srcIP.String() == myVirtualIP {
 		return
 	}
 
-	// Принимаем только пакеты, адресованные на наш текущий VIP или базовый 100.64.200.1
-	if destIP.String() != myVirtualIP && destIP.String() != "100.64.200.1" {
-		return
-	}
-
-	// Если пакет был адресован 100.64.200.1 до динамического пересогласования адресов,
-	// корректируем Destination IP на актуальный myVirtualIP и пересчитываем IPv4 контрольную сумму
-	if destIP.String() != myVirtualIP {
-		myIPBytes := net.ParseIP(myVirtualIP).To4()
-		if myIPBytes != nil {
-			copy(payload[16:20], myIPBytes)
-			payload[10] = 0
-			payload[11] = 0
-			ipCS := tunnel.CalculateChecksum(payload[:ihl])
-			payload[10] = byte(ipCS >> 8)
-			payload[11] = byte(ipCS)
+	// Принимаем пакеты, адресованные на наш текущий VIP или шлюз
+	if destStr != cleanVIP && destStr != myVirtualIP {
+		if !allowExitNode {
+			return
 		}
 	}
 

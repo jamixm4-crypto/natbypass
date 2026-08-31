@@ -580,21 +580,26 @@ func (p *Profile) GetNetworkKeyBytes() [32]byte {
 
 // GetDeterministicVIP возвращает постоянный фиксированный IP-адрес узла в данной сети
 func (p *Profile) GetDeterministicVIP(deviceID string) string {
-	if p.VirtualIP != "" && strings.HasPrefix(p.VirtualIP, "100.64.200.") {
-		return p.VirtualIP
+	if p.VirtualIP != "" {
+		clean := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		if !strings.HasSuffix(clean, ".0") && clean != "" {
+			return clean
+		}
 	}
-	h := sha256.Sum256([]byte(deviceID + ":" + p.ID + ":" + p.MQTTTopic))
-	octet := int(h[0])%240 + 10 // Диапазон 100.64.200.10 - 100.64.200.249
-	vip := fmt.Sprintf("100.64.200.%d", octet)
-	p.VirtualIP = vip
-	return vip
+	prefix := "10.123.111"
+	if p.Subnet != "" {
+		prefix = ExtractSubnetPrefix(p.Subnet)
+	} else if p.VirtualIP != "" {
+		prefix = ExtractSubnetPrefix(p.VirtualIP)
+	}
+	return GenerateSubnetIP(prefix, deviceID)
 }
 
-// ExtractSubnetPrefix извлекает подсеть вида "10.10.77" из "10.10.77.1/24", "10.10.77.0" или "10.10.77.1"
+// ExtractSubnetPrefix извлекает подсеть вида "10.123.111" из "10.123.111.1/24", "10.123.111.0" или "10.123.111.1"
 func ExtractSubnetPrefix(vipOrSubnet string) string {
 	raw := strings.TrimSpace(vipOrSubnet)
 	if raw == "" {
-		return "100.64.200"
+		return "10.123.111"
 	}
 	if idx := strings.Index(raw, "/"); idx != -1 {
 		raw = raw[:idx]
@@ -603,13 +608,13 @@ func ExtractSubnetPrefix(vipOrSubnet string) string {
 	if len(parts) >= 3 {
 		return fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
 	}
-	return "100.64.200"
+	return "10.123.111"
 }
 
 // GenerateSubnetIP генерирует детерминированный уникальный IP-адрес в подсети для указанного deviceID
 func GenerateSubnetIP(prefix string, deviceID string) string {
 	if prefix == "" {
-		prefix = "100.64.200"
+		prefix = "10.123.111"
 	}
 	h := sha256.Sum256([]byte(deviceID))
 	// Диапазон октетов 2..254 (избегая 1 как дефолтный шлюз/создатель и 0/255)
@@ -623,13 +628,21 @@ func GenerateSubnetIP(prefix string, deviceID string) string {
 // ResolveVirtualIP возвращает актуальный уникальный Virtual IP узла в подсети активного профиля
 func ResolveVirtualIP(cfg *Config, deviceID string) string {
 	if cfg == nil {
-		return GenerateSubnetIP("100.64.200", deviceID)
+		return GenerateSubnetIP("10.123.111", deviceID)
 	}
+	// 1. Приоритет прямому Network.Address в конфигурации
+	if cfg.Network.Address != "" {
+		clean := strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
+		if !strings.HasSuffix(clean, ".0") && clean != "" {
+			return clean
+		}
+	}
+	// 2. Активный профиль
 	activeProf := cfg.EnsureActiveProfile()
 	if activeProf != nil {
 		if activeProf.VirtualIP != "" {
 			clean := strings.TrimSpace(strings.Split(activeProf.VirtualIP, "/")[0])
-			if !strings.HasSuffix(clean, ".0") {
+			if !strings.HasSuffix(clean, ".0") && clean != "" {
 				return clean
 			}
 			prefix := ExtractSubnetPrefix(activeProf.VirtualIP)
@@ -640,5 +653,9 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 			return GenerateSubnetIP(prefix, deviceID)
 		}
 	}
-	return GenerateSubnetIP("100.64.200", deviceID)
+	if cfg.Network.Address != "" {
+		prefix := ExtractSubnetPrefix(cfg.Network.Address)
+		return GenerateSubnetIP(prefix, deviceID)
+	}
+	return GenerateSubnetIP("10.123.111", deviceID)
 }
