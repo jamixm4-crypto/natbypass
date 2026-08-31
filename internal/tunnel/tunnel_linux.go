@@ -171,24 +171,57 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	_ = exec.CommandContext(ctx, "ip", "route", "add", prefix+".0/24", "dev", d.AdapterName).Run()
 	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName).Run()
 
-	// 5. Отключение фильтрации обратного пути (rp_filter) и разрешение транзита в ядре Linux / Keenetic
-	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.conf.all.rp_filter=0").Run()
-	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.conf.default.rp_filter=0").Run()
-	_ = exec.CommandContext(ctx, "sysctl", "-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=0", d.AdapterName)).Run()
-	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.conf.all.accept_local=1").Run()
-	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.icmp_echo_ignore_all=0").Run()
-	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.icmp_echo_ignore_broadcasts=0").Run()
-	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.ip_forward=1").Run()
+	// 5. Прямая запись в /proc/sys/net/ipv4 (100% совместимо со всеми Linux/Keenetic даже без утилиты sysctl)
+	_ = os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/ipv4/conf/all/rp_filter", []byte("0\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/ipv4/conf/default/rp_filter", []byte("0\n"), 0644)
+	_ = os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/rp_filter", d.AdapterName), []byte("0\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/ipv4/conf/all/accept_local", []byte("1\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/ipv4/icmp_echo_ignore_all", []byte("0\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/ipv4/icmp_echo_ignore_broadcasts", []byte("0\n"), 0644)
 
-	// 6. Разрешение входящего и транзитного трафика в iptables (Keenetic / OpenWrt / Linux / Entware)
-	iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
-	for _, ipt := range iptablesPaths {
-		_ = exec.CommandContext(ctx, ipt, "-I", "INPUT", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
-		_ = exec.CommandContext(ctx, ipt, "-I", "INPUT", "1", "-p", "icmp", "-j", "ACCEPT").Run()
-		_ = exec.CommandContext(ctx, ipt, "-I", "INPUT", "1", "-p", "udp", "--dport", "47832", "-j", "ACCEPT").Run()
-		_ = exec.CommandContext(ctx, ipt, "-I", "FORWARD", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
-		_ = exec.CommandContext(ctx, ipt, "-I", "FORWARD", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
+	// Также дублируем через sysctl если доступен
+	sysctlPaths := []string{"sysctl", "/sbin/sysctl", "/usr/sbin/sysctl", "/opt/sbin/sysctl"}
+	for _, sc := range sysctlPaths {
+		_ = exec.CommandContext(ctx, sc, "-w", "net.ipv4.ip_forward=1").Run()
+		_ = exec.CommandContext(ctx, sc, "-w", "net.ipv4.conf.all.rp_filter=0").Run()
+		_ = exec.CommandContext(ctx, sc, "-w", "net.ipv4.conf.default.rp_filter=0").Run()
+		_ = exec.CommandContext(ctx, sc, "-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=0", d.AdapterName)).Run()
+		_ = exec.CommandContext(ctx, sc, "-w", "net.ipv4.icmp_echo_ignore_all=0").Run()
 	}
+
+	// 6. Разрешение входящего и транзитного трафика в iptables (Keenetic NDM / OpenWrt / Linux / Entware)
+	applyFirewallRules := func() {
+		iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
+		for _, ipt := range iptablesPaths {
+			_ = exec.Command(ipt, "-I", "INPUT", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "-I", "INPUT", "1", "-p", "icmp", "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "-I", "INPUT", "1", "-p", "udp", "--dport", "47832", "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "-I", "FORWARD", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "-I", "FORWARD", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
+
+			// Специальные цепочки KeeneticOS (NDM)
+			_ = exec.Command(ipt, "-I", "_NDM_INPUT", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "-I", "_NDM_INPUT", "1", "-p", "icmp", "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "-I", "_NDM_INPUT", "1", "-p", "udp", "--dport", "47832", "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "_NDM_FORWARD", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+		}
+	}
+	applyFirewallRules()
+
+	// Фоновый сторожевой таймер: Keenetic ndm периодически пересоздает цепочки правил при смене сети.
+	// Поддерживаем правила в актуальном состоянии каждые 8 секунд.
+	go func() {
+		ticker := time.NewTicker(8 * time.Second)
+		defer ticker.Stop()
+		for {
+			if atomic.LoadInt32(&d.isClosed) == 1 {
+				return
+			}
+			<-ticker.C
+			applyFirewallRules()
+		}
+	}()
 
 	return nil
 
