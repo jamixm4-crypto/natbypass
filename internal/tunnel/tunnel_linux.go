@@ -169,7 +169,14 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
 	}
 	_ = exec.CommandContext(ctx, "ip", "route", "add", prefix+".0/24", "dev", d.AdapterName).Run()
+	_ = exec.CommandContext(ctx, "ip", "route", "add", prefix+".0/24", "dev", d.AdapterName, "table", "main").Run()
 	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName).Run()
+	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName, "table", "main").Run()
+
+	// Приоритетные правила маршрутизации для KeeneticOS (обход blackhole таблиц 4096-4101)
+	_ = exec.CommandContext(ctx, "ip", "rule", "add", "pref", "50", "to", prefix+".0/24", "lookup", "main").Run()
+	_ = exec.CommandContext(ctx, "ip", "rule", "add", "pref", "50", "from", prefix+".0/24", "lookup", "main").Run()
+	_ = exec.CommandContext(ctx, "ip", "rule", "add", "pref", "50", "iif", d.AdapterName, "lookup", "main").Run()
 
 	// 5. Прямая запись в /proc/sys/net/ipv4 (100% совместимо со всеми Linux/Keenetic даже без утилиты sysctl)
 	_ = os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1\n"), 0644)
@@ -204,7 +211,8 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 			_ = exec.Command(ipt, "-I", "_NDM_INPUT", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
 			_ = exec.Command(ipt, "-I", "_NDM_INPUT", "1", "-p", "icmp", "-j", "ACCEPT").Run()
 			_ = exec.Command(ipt, "-I", "_NDM_INPUT", "1", "-p", "udp", "--dport", "47832", "-j", "ACCEPT").Run()
-			_ = exec.Command(ipt, "_NDM_FORWARD", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "-I", "_NDM_FORWARD", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "-I", "_NDM_FORWARD", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
 		}
 	}
 	applyFirewallRules()
