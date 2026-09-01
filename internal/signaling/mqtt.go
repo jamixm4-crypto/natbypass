@@ -63,6 +63,7 @@ type MQTTChannel struct {
 	client        mqtt.Client
 	topicMu       sync.RWMutex
 	topic         string
+	myDevID       string
 	outMu         sync.RWMutex
 	outChans      []chan *Payload
 	tunnelMu      sync.RWMutex
@@ -210,6 +211,20 @@ func (m *MQTTChannel) UpdateTopic(newTopic string) {
 			}
 		}
 	}
+
+	m.tunnelMu.Lock()
+	if m.tunnelHandler != nil && m.myDevID != "" {
+		newTunnelTopic := fmt.Sprintf("%s/tunnel/%s", newTopic, m.myDevID)
+		m.tunnelTopic = newTunnelTopic
+		if m.client != nil && m.client.IsConnected() {
+			m.client.Subscribe(newTunnelTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				if len(msg.Payload()) >= 20 && m.tunnelHandler != nil {
+					m.tunnelHandler(msg.Payload())
+				}
+			})
+		}
+	}
+	m.tunnelMu.Unlock()
 }
 
 func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
@@ -280,6 +295,7 @@ func (m *MQTTChannel) PublishTunnelData(targetDevID string, pkt []byte) error {
 func (m *MQTTChannel) SubscribeTunnelData(myDevID string, onPkt func(pkt []byte)) {
 	topic := fmt.Sprintf("%s/tunnel/%s", m.topic, myDevID)
 	m.tunnelMu.Lock()
+	m.myDevID = myDevID
 	m.tunnelTopic = topic
 	m.tunnelHandler = onPkt
 	m.tunnelMu.Unlock()

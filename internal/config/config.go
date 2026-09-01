@@ -1,14 +1,15 @@
 package config
 
 import (
-	"github.com/natbypass/natbypass/internal/wireguard"
-	"encoding/hex"
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
+	"github.com/natbypass/natbypass/internal/wireguard"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
@@ -344,12 +345,40 @@ func Save(cfg *Config, path string, encrypt bool) error {
 	return nil
 }
 
+// Manager управляет потокобезопасным доступом к конфигурации через атомарный указатель
+type Manager struct {
+	cfg atomic.Pointer[Config]
+}
+
+// NewManager создает новый менеджер конфигурации
+func NewManager(initial *Config) *Manager {
+	m := &Manager{}
+	if initial != nil {
+		m.cfg.Store(initial)
+	}
+	return m
+}
+
+// Get возвращает актуальный снимок конфигурации
+func (m *Manager) Get() *Config {
+	return m.cfg.Load()
+}
+
+// Reload обновляет указатель на новую конфигурацию
+func (m *Manager) Reload(newCfg *Config) {
+	if newCfg != nil {
+		m.cfg.Store(newCfg)
+	}
+}
+
 // Reload перезагружает конфиг (вызывается по SIGHUP)
 func Reload(cfg *Config, path string) error {
 	newCfg, err := Load(path)
 	if err != nil {
 		return err
 	}
-	*cfg = *newCfg
+	if cfg != nil && newCfg != nil {
+		*cfg = *newCfg
+	}
 	return nil
 }

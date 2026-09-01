@@ -104,6 +104,7 @@ type UDPPuncher struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mu           sync.Mutex
+	connID       uint64
 
 	// NATType is detected asynchronously after construction.
 	NATType   NATType
@@ -676,16 +677,16 @@ func (p *UDPPuncher) handleTunnelPacket(payload []byte, remoteAddr *net.UDPAddr)
 	}
 }
 
-func (p *UDPPuncher) getConn() (*net.UDPConn, context.Context) {
+func (p *UDPPuncher) getConn() (*net.UDPConn, context.Context, uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.conn, p.ctx
+	return p.conn, p.ctx, p.connID
 }
 
 func (p *UDPPuncher) readLoop() {
 	buf := make([]byte, 65535) // MTU-safe buffer for IP packets up to 65535 bytes
 	for {
-		conn, ctx := p.getConn()
+		conn, ctx, currentID := p.getConn()
 		if conn == nil {
 			return
 		}
@@ -696,8 +697,20 @@ func (p *UDPPuncher) readLoop() {
 		default:
 		}
 
+		// Проверка поколения: если HopPort вызван, старый readLoop должен немедленно выйти
+		_, _, latestID := p.getConn()
+		if latestID != currentID {
+			return
+		}
+
+		// Гарантированный выход при закрытии контекста
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
 		n, remoteAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue
+			}
 			if strings.Contains(err.Error(), "closed") || strings.Contains(err.Error(), "use of closed") || strings.Contains(err.Error(), "bad file descriptor") {
 				return
 			}
@@ -732,7 +745,10 @@ func (p *UDPPuncher) readLoop() {
 			handler := p.awgHandler
 			p.mu.Unlock()
 			if handler != nil {
-				handler.HandlePacket(buf[:n], remoteAddr)
+				// ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Копируем буфер перед передачей
+				pktCopy := make([]byte, n)
+				copy(pktCopy, buf[:n])
+				handler.HandlePacket(pktCopy, remoteAddr)
 			}
 		}
 	}
@@ -763,20 +779,23 @@ func (p *UDPPuncher) SetTrafficShaper(shaper *TrafficShaper) {
 func (p *UDPPuncher) HopPort() (int, error) {
 	p.mu.Lock()
 
-	// 1. Останавливаем старый readLoop через cancel
+	// 1. Инкремент поколения сокета для завершения старого readLoop
+	p.connID++
+
+	// 2. Останавливаем старый readLoop через cancel
 	if p.cancel != nil {
 		p.cancel()
 	}
 
-	// 2. Закрываем старый сокет
+	// 3. Закрываем старый сокет
 	if p.conn != nil {
 		_ = p.conn.Close()
 	}
 
-	// 3. Создаём новый контекст
+	// 4. Создаём новый контекст
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
-	// 4. Открываем новый сокет
+	// 5. Открываем новый сокет
 	lAddr, _ := net.ResolveUDPAddr("udp", ":0")
 	conn, err := net.ListenUDP("udp", lAddr)
 	if err != nil {
@@ -793,7 +812,7 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	p.localPort = conn.LocalAddr().(*net.UDPAddr).Port
 	p.mu.Unlock()
 
-	// 5. Перезапуск цикла чтения
+	// 6. Перезапуск цикла чтения
 	go p.readLoop()
 
 	// 6. Обновляем STUN mapping

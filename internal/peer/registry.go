@@ -237,15 +237,15 @@ func (r *Registry) Upsert(p *Peer) {
 	}
 	if existing, ok := r.peers[p.DeviceID]; ok {
 		existing.MergeFrom(p)
+		r.peers[p.DeviceID] = p // ✅ Сохраняем обогащенный объект
 	} else {
 		if p.Latency > 0 {
 			p.PingMs = p.Latency.Milliseconds()
 		}
 		p.Online = true
 		p.LastSeen = now
+		r.peers[p.DeviceID] = p
 	}
-
-	r.peers[p.DeviceID] = p
 }
 
 // List returns a list of all peers, sorted by DeviceID.

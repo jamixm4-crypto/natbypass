@@ -106,6 +106,7 @@ func (m *FallbackManager) sendWithRetry(ctx context.Context, ch SignalingChannel
 
 func (m *FallbackManager) Receive(ctx context.Context) (<-chan *Payload, error) {
 	out := make(chan *Payload, 128)
+	var wg sync.WaitGroup
 
 	for _, ch := range m.channels {
 		in, err := ch.Receive(ctx)
@@ -113,14 +114,15 @@ func (m *FallbackManager) Receive(ctx context.Context) (<-chan *Payload, error) 
 			log.Error().Str("channel", ch.Name()).Err(err).Msg("Failed to initialize receiver")
 			continue
 		}
+		wg.Add(1)
 		go func(c <-chan *Payload, name string) {
+			defer wg.Done()
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				case p, ok := <-c:
 					if !ok {
-						log.Warn().Str("channel", name).Msg("Receiver channel closed")
 						return
 					}
 					select {
@@ -132,6 +134,11 @@ func (m *FallbackManager) Receive(ctx context.Context) (<-chan *Payload, error) 
 			}
 		}(in, ch.Name())
 	}
+
+	go func() {
+		wg.Wait()
+		close(out) // ✅ Гарантированное закрытие канала
+	}()
 
 	return out, nil
 }

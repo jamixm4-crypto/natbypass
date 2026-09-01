@@ -1,4 +1,4 @@
-﻿#!/bin/sh /etc/rc.common
+#!/bin/sh /etc/rc.common
 # ============================================================
 # NatBypass — procd-скрипт для OpenWrt
 # Путь: /etc/init.d/natbypass
@@ -9,7 +9,7 @@ START=99
 STOP=10
 USE_PROCD=1
 
-PROG=/usr/sbin/natbypass
+PROG=/usr/bin/natbypass
 CONFIG=/etc/natbypass/config.yaml
 PIDFILE=/var/run/natbypass.pid
 

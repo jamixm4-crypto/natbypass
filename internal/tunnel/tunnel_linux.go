@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,11 +31,15 @@ type ifreq struct {
 
 // Device представляет созданный виртуальный сетевой интерфейс Linux (TUN)
 type Device struct {
-	AdapterName string
-	VirtualIP   string
-	file        *os.File
-	isClosed    int32
-	mu          sync.Mutex
+	AdapterName  string
+	VirtualIP    string
+	MTU          int
+	file         *os.File
+	isClosed     int32
+	mu           sync.Mutex
+	stopCh       chan struct{}
+	stopOnce     sync.Once
+	watchdogOnce sync.Once
 }
 
 // CreateAdapter создает виртуальный TUN интерфейс nb0 в Linux / Keenetic / OpenWrt
@@ -104,6 +109,7 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		AdapterName: adapterName,
 		VirtualIP:   virtualIP,
 		file:        file,
+		stopCh:      make(chan struct{}),
 	}
 
 	// 3. Назначение IP-адреса и включение интерфейса
@@ -157,10 +163,17 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		_ = exec.CommandContext(ctx, "ip", "link", "set", d.AdapterName, "up").Run()
 	}
 
-	// 3. Установка MTU 1420 и MSS Clamping
-	_ = exec.CommandContext(ctx, "ip", "link", "set", "dev", d.AdapterName, "mtu", "1420").Run()
-	_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, "mtu", "1420").Run()
-	_ = EnableMSSClamping(d.AdapterName, 1420)
+	// 3. Установка MTU и MSS Clamping
+	mtu := 1420
+	d.mu.Lock()
+	if d.MTU > 0 {
+		mtu = d.MTU
+	}
+	d.mu.Unlock()
+	mtuStr := strconv.Itoa(mtu)
+	_ = exec.CommandContext(ctx, "ip", "link", "set", "dev", d.AdapterName, "mtu", mtuStr).Run()
+	_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, "mtu", mtuStr).Run()
+	_ = EnableMSSClamping(d.AdapterName, mtu)
 
 	// 4. Маршрутизация подсети через адаптер
 	prefix := "100.64.200"
@@ -218,18 +231,24 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	applyFirewallRules()
 
 	// Фоновый сторожевой таймер: Keenetic ndm периодически пересоздает цепочки правил при смене сети.
-	// Поддерживаем правила в актуальном состоянии каждые 8 секунд.
-	go func() {
-		ticker := time.NewTicker(8 * time.Second)
-		defer ticker.Stop()
-		for {
-			if atomic.LoadInt32(&d.isClosed) == 1 {
-				return
+	// Поддерживаем правила в актуальном состоянии каждые 8 секунд (защищено от повторного запуска).
+	d.watchdogOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(8 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-d.stopCh:
+					return
+				case <-ticker.C:
+					if atomic.LoadInt32(&d.isClosed) == 1 {
+						return
+					}
+					applyFirewallRules()
+				}
 			}
-			<-ticker.C
-			applyFirewallRules()
-		}
-	}()
+		}()
+	})
 
 	return nil
 
@@ -240,16 +259,25 @@ func (d *Device) SetMTU(mtu int) error {
 	if mtu < 1280 || mtu > 1500 {
 		return fmt.Errorf("недопустимый MTU: %d (допустимо 1280..1500)", mtu)
 	}
+	d.mu.Lock()
+	d.MTU = mtu
+	d.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_ = exec.CommandContext(ctx, "ip", "link", "set", "dev", d.AdapterName, "mtu", fmt.Sprintf("%d", mtu)).Run()
-	_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, "mtu", fmt.Sprintf("%d", mtu)).Run()
+	mtuStr := strconv.Itoa(mtu)
+	_ = exec.CommandContext(ctx, "ip", "link", "set", "dev", d.AdapterName, "mtu", mtuStr).Run()
+	_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, "mtu", mtuStr).Run()
 	return nil
 }
 
 func (d *Device) Close() error {
 
 	if atomic.CompareAndSwapInt32(&d.isClosed, 0, 1) {
+		d.stopOnce.Do(func() {
+			if d.stopCh != nil {
+				close(d.stopCh)
+			}
+		})
 		if d.file != nil {
 			return d.file.Close()
 		}

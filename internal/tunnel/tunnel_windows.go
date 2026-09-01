@@ -182,12 +182,24 @@ func (d *Device) ReadPacket() ([]byte, error) {
 	}
 
 	for {
+		if atomic.LoadInt32(&d.isClosed) == 1 {
+			return nil, fmt.Errorf("адаптер закрыт")
+		}
+
+		d.mu.Lock()
+		hSession := d.hSession
+		d.mu.Unlock()
+
+		if hSession == 0 {
+			return nil, fmt.Errorf("адаптер закрыт")
+		}
+
 		var size uint32
-		ptr, _, _ := procWintunReceivePacket.Call(d.hSession, uintptr(unsafe.Pointer(&size)))
+		ptr, _, _ := procWintunReceivePacket.Call(hSession, uintptr(unsafe.Pointer(&size)))
 		if ptr != 0 && size > 0 {
 			packet := make([]byte, size)
 			procRtlMoveMemory.Call(uintptr(unsafe.Pointer(&packet[0])), ptr, uintptr(size))
-			procWintunReleaseReceivePacket.Call(d.hSession, ptr)
+			procWintunReleaseReceivePacket.Call(hSession, ptr)
 			return packet, nil
 		}
 
@@ -214,15 +226,20 @@ func (d *Device) WritePacket(packet []byte) error {
 	}
 
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	hSession := d.hSession
+	d.mu.Unlock()
 
-	ptr, _, _ := procWintunAllocateSendPacket.Call(d.hSession, uintptr(len(packet)))
+	if hSession == 0 {
+		return fmt.Errorf("адаптер закрыт")
+	}
+
+	ptr, _, _ := procWintunAllocateSendPacket.Call(hSession, uintptr(len(packet)))
 	if ptr == 0 {
 		return fmt.Errorf("wintun: переполнение буфера отправки")
 	}
 
 	procRtlMoveMemory.Call(ptr, uintptr(unsafe.Pointer(&packet[0])), uintptr(len(packet)))
-	procWintunSendPacket.Call(d.hSession, ptr)
+	procWintunSendPacket.Call(hSession, ptr)
 	return nil
 }
 
@@ -276,22 +293,31 @@ func (d *Device) SetMTU(mtu int) error {
 }
 
 // Close корректно завершает работу адаптера
-
 func (d *Device) Close() error {
 	if !atomic.CompareAndSwapInt32(&d.isClosed, 0, 1) {
 		return nil
 	}
 
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	hSession := d.hSession
+	hAdapter := d.hAdapter
+	d.hSession = 0
+	d.hAdapter = 0
+	d.mu.Unlock()
 
-	if d.hSession != 0 {
-		procWintunEndSession.Call(d.hSession)
-		d.hSession = 0
+	// ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Пробуждаем ждущий ReadPacket
+	if d.hReadEvent != 0 {
+		_ = windows.SetEvent(d.hReadEvent)
 	}
-	if d.hAdapter != 0 {
-		procWintunCloseAdapter.Call(d.hAdapter)
-		d.hAdapter = 0
+
+	// Дать ReadPacket выйти
+	time.Sleep(5 * time.Millisecond)
+
+	if hSession != 0 {
+		procWintunEndSession.Call(hSession)
+	}
+	if hAdapter != 0 {
+		procWintunCloseAdapter.Call(hAdapter)
 	}
 
 	return nil

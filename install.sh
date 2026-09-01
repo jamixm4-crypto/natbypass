@@ -185,6 +185,11 @@ https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
 
     print_green "✓ Исполняемый файл успешно установлен и проверен."
 
+    # Генерация уникального ID и топика (работает в BusyBox, Debian, macOS)
+    RAND_HEX=$(dd if=/dev/urandom bs=4 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n' || echo "$$")
+    HOST_NAME="${ROUTER_NAME:-$(uname -n 2>/dev/null || echo "Router")}"
+    RAND_TOPIC="natbypass/mesh/${RAND_HEX}"
+
     # 6. Generate Clean config.yaml if not exists
     CONFIG_FILE="${CONFIG_DIR}/config.yaml"
     if [ ! -f "${CONFIG_FILE}" ]; then
