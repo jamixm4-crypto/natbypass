@@ -1,6 +1,8 @@
-# NatBypass
+﻿# NatBypass
 
 **P2P Mesh VPN & DPI Bypass** — прямое сокет-в-сокет соединение компьютеров, серверов, телефонов и роутеров через любые виды NAT/CGNAT без выделенных серверов.
+
+[🇷🇺 Русский](README.md) | [🇬🇧 English](README_EN.md)
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![Release](https://img.shields.io/github/v/release/jamixm4-crypto/natbypass?style=flat&logo=github&color=8b5cf6)](https://github.com/jamixm4-crypto/natbypass/releases/latest)
@@ -19,7 +21,7 @@
 * 🌐 [**Роутеры Keenetic (Entware)**](https://github.com/jamixm4-crypto/natbypass/wiki/Keenetic-Routers) & [**OpenWrt**](https://github.com/jamixm4-crypto/natbypass/wiki/OpenWrt-Routers) — установка в 1 команду и автозапуск.
 * 📱 [**Android-руководство**](https://github.com/jamixm4-crypto/natbypass/wiki/Android-Setup) — подключение по QR-коду, отображение QR на экране и системный VpnService.
 * 🪟 [**Windows-руководство**](https://github.com/jamixm4-crypto/natbypass/wiki/Windows-Guide) — нативный UI, трей, Wintun и серверный режим.
-* 🔧 [**Диагностика и устранение неполадок**](https://github.com/jamixm4-crypto/natbypass/wiki/Troubleshooting-and-Diagnostics) — расшифровка NAT-типов и проверка связности.
+* 🔧 [**Диагностика и устранение неполадок**](https://github.com/jamixm4-crypto/natbypass/wiki/Troubleshooting-and-Diagnostics) — универсальные скрипты диагностики и сквозной проверки пинга.
 
 ---
 
@@ -28,10 +30,36 @@
 - ⚡ **Pure P2P UDP Mesh:** Прямой датаграммный обмен между узлами через STUN Hole Punching без аренды VPS.
 - 🛡️ **AmneziaWG 3.1 & 2.0:** Встроенная защита от Deep Packet Inspection (DPI / ТСПУ) с поддержкой кастомных заголовков (H1..H4), мусорных пакетов (Jc, Jmin, Jmax) и рандомизации паддинга (S1, S2).
 - 📡 **Мультиканальная сигнализация:** Обмен пирами и координатами через Telegram Bot API, MQTT, Cloudflare DNS TXT и HTTP Webhook с E2E-шифрованием NaCl/Box (X25519 + XSalsa20-Poly1305).
-- 🔄 **Отказоустойчивый транспорт:** Автоматический переход Direct P2P UDP ➔ AmneziaWG 2.0 ➔ MQTT Datagram Stream Relay при симметричном NAT или жесткой фильтрации.
+- 🔄 **Горячая динамическая конфигурация:** Мгновенная смена комнат/топиков, AWG-профилей и виртуальных IP без перезапуска демона.
+- 🔍 **Автоматическая диагностика:** Встроенный инструмент динамического обнаружения пиров и L3 ICMP тестирования на всех платформах.
 - 📱 **Android All-in-One:** Системный VpnService на чистом Go, сканирование и вывод интерактивного QR-кода на экран, Quick Settings Tile.
 - 🪟 **Нативный Windows GUI:** Легковесный интерфейс без CGO, интеграция с системным треем, поддержка Windows Desktop и Server.
 - 🔐 **Изолированные профили сетей:** Управление независимыми Mesh-сетями («Дом», «Офис», «Серверы») с переключением на лету.
+
+---
+
+## 🔍 Универсальные утилиты диагностики
+
+В проект встроена полностью **динамическая система диагностики**, которая опрашивает локальный демон, автоматически находит всех подключенных участников меш-сети и поочередно тестирует сквозной L3 ICMP Ping до каждого пира, а также проверяет сетевой стек, STUN-эндпоинты, тип NAT и системные маршруты.
+
+### 🐧 Linux / KeeneticOS / OpenWrt
+Запуск в одну команду (не требует установки зависимостей):
+```bash
+wget -qO- https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.sh | sh
+```
+*(или через curl: `curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.sh | sh`)*
+
+Если у вас уже установлен бинарник `natbypass`:
+```bash
+natbypass diag
+```
+
+### 🪟 Windows (PowerShell)
+Запуск диагностического скрипта от имени Администратора:
+```powershell
+irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.ps1 | iex
+```
+*(или через CLI: `.\NatBypass.exe diag`)*
 
 ---
 
@@ -87,15 +115,9 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/insta
 
 ---
 
+## 🛡️ AmneziaWG 3.1 & 2.0 (Защита от ТСПУ / DPI)
 
----
-
-## 🛡️ AmneziaWG 3.1 (Максимальное пробитие ТСПУ / DPI)
-
-NatBypass поддерживает **AmneziaWG 3.1** — передовой протокол с поведенческой обфускацией, разработанный для противодействия активным системам ТСПУ и DPI. В отличие от версий 1.x/2.0, AWG 3.1 маскирует не только статические заголовки, но и статистические паттерны потока данных.
-
-### 🚀 Работа из коробки (По умолчанию):
-**Вам не требуется вручную настраивать конфиг** — максимальная защита от ТСПУ (**AmneziaWG 3.1 Strict**, порт **443**, **Header Protection ChaCha20**, **Random Trailers** и **Content Padding**) уже активирована по умолчанию для всех новых подключений и сетей. Каждое устройство автоматически генерирует уникальные криптографические ключи и заголовки обфускации.
+NatBypass поддерживает **AmneziaWG 3.1** — протокол с поведенческой обфускацией, разработанный для противодействия активным системам ТСПУ и DPI. 
 
 ### ⚙️ Доступные пресеты протокола
 
@@ -106,29 +128,12 @@ NatBypass поддерживает **AmneziaWG 3.1** — передовой пр
 | **`anti_tspu`** | **AWG 2.0** | Нестандартный тюнинг параметров 2.0 (Jc=5, S2=100, случайные H1..H4) | Улучшенная совместимость |
 | **`awg20_legacy`** | **AWG 2.0** | Стандартный WireGuard + AWG 2.0 мусорные пакеты (Jc=4, S1=48, S2=32) | Старые клиенты |
 
-### 🔐 Ключевые механизмы защиты AWG 3.1
-
-1. **Header Protection (ChaCha20):** Полное шифрование незашифрованных служебных полей WireGuard (Init: 148B, Response: 92B, Cookie: 64B, Data: 16B). Сигнатурный DPI не видит типичных идентификаторов пакетов.
-2. **Content Padding:** Случайное добавление байтов к полезной нагрузке в пределах MTU для устранения корреляции размеров пакетов.
-3. **Custom Timings (Диапазоны таймеров):**
-   - RekeyAfterTime: 120–180 сек
-   - RekeyTimeout: 5–15 сек
-   - RejectAfterTime: 180–240 сек
-   - KeepaliveTimeout: 5–30 сек
-   - MaxHandshakeAttempts: 3–7
-4. **Random Trailers & Disable Cookies:** Добавление энтропии в хвост пакетов и отключение ответов на cookie для защиты от активного зондирования (active probing).
-
-### 🔄 Автоматическая миграция
-
-Для быстрого перехода существующего узла на AWG 3.1 выполните скрипт:
-```bash
-curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/migrate_to_awg31.sh | bash
-```
+---
 
 ## 🗺️ Дорожная карта (Roadmap)
 
-- 🚀 **Hysteria 2 / QUIC Congestion Control:** Внедрение легковесного UDP-транспорта на базе протоколов QUIC / Hysteria 2 с алгоритмом Brutal Congestion Control для достижения максимальной скорости на нестабильных каналах с высоким процентом потерь пакетов (lossy networks).
-- 🧩 **Динамический выбор транспорта:** Автоматическое бесшовное переключение между Direct UDP, AWG 2.0 и QUIC-транспортом на основе метрик RTT, jitter и packet loss.
+- 🧪 **Исследование и бенчмаркинг резервных протоколов:** В настоящее время ведется тестирование и выбор наиболее стабильных и устойчивых к блокировкам протоколов резервного транспорта (fallback relay) на случай полной изоляции прямого UDP-трафика со стороны провайдеров.
+- 🧩 **Адаптивный транспортный менеджер:** Бесшовное авто-переключение между Direct P2P UDP, AmneziaWG и резервными туннелями на основе телеметрии RTT, джиттера и процента потерь пакетов.
 
 ---
 
