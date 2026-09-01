@@ -17,7 +17,7 @@
 
 Comprehensive documentation and step-by-step guides are available in our [**NatBypass Wiki**](https://github.com/jamixm4-crypto/natbypass/wiki):
 * 🚀 [**Quick Start in 5 minutes**](https://github.com/jamixm4-crypto/natbypass/wiki/Quick-Start) — connect your first P2P pair of devices without console commands.
-* 🛡️ [**Censorship Bypass (AmneziaWG 3.1 & 2.0)**](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass) — tuning Jc, Jmin, Jmax, S1, S2, H1..H4 parameters against deep packet inspection (DPI / TSPU).
+* 🛡️ [**Censorship Bypass (AmneziaWG)**](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass) — tuning Jc, Jmin, Jmax, S1, S2, H1..H4 parameters against deep packet inspection (DPI / TSPU).
 * 🌐 [**Keenetic Routers (Entware)**](https://github.com/jamixm4-crypto/natbypass/wiki/Keenetic-Routers) & [**OpenWrt**](https://github.com/jamixm4-crypto/natbypass/wiki/OpenWrt-Routers) — 1-command installation and daemon service setup.
 * 📱 [**Android Guide**](https://github.com/jamixm4-crypto/natbypass/wiki/Android-Setup) — connect via QR code, interactive on-screen QR display, and native VpnService.
 * 🪟 [**Windows Guide**](https://github.com/jamixm4-crypto/natbypass/wiki/Windows-Guide) — native GUI, system tray, Wintun driver, and server background mode.
@@ -28,9 +28,9 @@ Comprehensive documentation and step-by-step guides are available in our [**NatB
 ## ✨ Key Features
 
 - ⚡ **Pure P2P UDP Mesh:** Direct datagram communication between peers via STUN UDP Hole Punching without renting VPS servers.
-- 🛡️ **AmneziaWG 3.1 & 2.0:** Built-in Deep Packet Inspection (DPI) protection with custom obfuscated headers (H1..H4), junk packets (Jc, Jmin, Jmax), and content padding randomization (S1, S2).
+- 🛡️ **AmneziaWG Obfuscation:** Built-in Deep Packet Inspection (DPI) protection with custom obfuscated headers (H1..H4), junk packets (Jc, Jmin, Jmax), header protection, and content padding randomization (S1, S2).
 - 📡 **Multi-Channel Signaling:** Peer discovery and endpoint exchange via Telegram Bot API, MQTT, Cloudflare DNS TXT, and HTTP Webhooks with NaCl/Box E2E encryption (X25519 + XSalsa20-Poly1305).
-- 🔄 **Hot Dynamic Configuration:** Instant room/topic switching, AWG profile reload, and Virtual IP updates without restarting the daemon.
+- 🔄 **Hot Dynamic Configuration:** Instant room/topic switching, obfuscation profile reload, and Virtual IP updates without restarting the daemon.
 - 🔍 **Automated Diagnostic Suite:** Built-in dynamic peer discovery and L3 ICMP testing across all platforms.
 - 📱 **Android All-in-One:** Native VpnService in pure Go, on-screen interactive QR sharing, and Quick Settings Tile.
 - 🪟 **Native Windows GUI:** Ultra-lightweight non-CGO interface, system tray integration, supporting Windows 10/11 and Server editions.
@@ -80,7 +80,7 @@ irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag
          └─────────────┬──────────┘                  └──────────┬─────────────┘
                        │                                        │
                        └─────────── Direct UDP Socket ──────────┘
-                                 (P2P Mesh / AWG 3.1)
+                                 (P2P Mesh / AmneziaWG)
 ```
 
 ---
@@ -115,18 +115,18 @@ Web Management UI will be accessible at: `http://<DEVICE_IP>:8080`.
 
 ---
 
-## 🛡️ AmneziaWG 3.1 & 2.0 (DPI Obfuscation)
+## 🛡️ AmneziaWG (DPI Obfuscation)
 
-NatBypass features **AmneziaWG 3.1** — advanced WireGuard protocol obfuscation designed to bypass Deep Packet Inspection (DPI / TSPU) censorship systems.
+NatBypass features **AmneziaWG** — WireGuard protocol obfuscation designed to bypass Deep Packet Inspection (DPI / TSPU) censorship systems.
 
 ### ⚙️ Available Protocol Presets
 
-| Preset | Version | Description | Target Use Case |
-|---|---|---|---|
-| **`awg31_strict`** | **AWG 3.1** | Header Protection + Random Trailers + Disable Cookies + Content Padding (0-100B) + CPS Packets + Random Timers | **Maximum DPI / TSPU Censorship Bypass** |
-| **`awg31_balanced`** | **AWG 3.1** | Header Protection + Random Trailers + Cookies + Content Padding (0-50B) + Standard Jitter | Default recommended for all networks |
-| **`anti_tspu`** | **AWG 2.0** | Custom 2.0 parameter tuning (Jc=5, S2=100, randomized H1..H4) | Enhanced compatibility |
-| **`awg20_legacy`** | **AWG 2.0** | Standard WireGuard + AWG 2.0 junk packets (Jc=4, S1=48, S2=32) | Legacy clients |
+| Preset | Description | Target Use Case |
+|---|---|---|
+| **`Strict`** | Header Protection + Random Trailers + Disable Cookies + Content Padding + CPS Packets + Random Timers | **Maximum DPI / TSPU Censorship Bypass** |
+| **`Balanced`** | Header Protection + Random Trailers + Cookies + Content Padding + Standard Jitter | Default recommended for all networks |
+| **`Anti-TSPU`** | Custom parameter tuning (Jc=5, S2=100, randomized H1..H4) | Enhanced compatibility |
+| **`Legacy`** | Standard WireGuard + junk packets (Jc=4, S1=48, S2=32) | Legacy clients |
 
 ---
 
