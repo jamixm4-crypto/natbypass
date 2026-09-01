@@ -51,8 +51,17 @@ func (d *PacketDedup) IsDuplicate(hash string, maxAgeMs int64) bool {
 	return false
 }
 
+func (d *PacketDedup) Clear() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.entries = make(map[string]int64, 1024)
+	d.head = 0
+	d.size = 0
+}
+
 type MQTTChannel struct {
 	client        mqtt.Client
+	topicMu       sync.RWMutex
 	topic         string
 	outMu         sync.RWMutex
 	outChans      []chan *Payload
@@ -64,8 +73,8 @@ type MQTTChannel struct {
 
 func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTTChannel {
 	ch := &MQTTChannel{
-		topic:     topic,
-		dedup:     NewPacketDedup(),
+		topic: topic,
+		dedup: NewPacketDedup(),
 	}
 
 	if brokerURL == "" {
@@ -96,10 +105,13 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 		SetResumeSubs(true)
 
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
-		log.Info().Str("broker", brokerURL).Str("topic", topic).Msg("MQTT подключен, подписка на топики...")
-		c.Subscribe(topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-			ch.handleIncoming(msg)
-		})
+		currentTopic := ch.GetTopic()
+		log.Info().Str("broker", brokerURL).Str("topic", currentTopic).Msg("MQTT подключен, подписка на топики...")
+		if currentTopic != "" {
+			c.Subscribe(currentTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				ch.handleIncoming(msg)
+			})
+		}
 		ch.tunnelMu.RLock()
 		tTopic := ch.tunnelTopic
 		tHandler := ch.tunnelHandler
@@ -127,6 +139,12 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 	}()
 
 	return ch
+}
+
+func (m *MQTTChannel) GetTopic() string {
+	m.topicMu.RLock()
+	defer m.topicMu.RUnlock()
+	return m.topic
 }
 
 func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
@@ -157,18 +175,40 @@ func (m *MQTTChannel) Name() string {
 
 // UpdateTopic динамически меняет топик без разрыва соединения
 func (m *MQTTChannel) UpdateTopic(newTopic string) {
-	if newTopic == "" || newTopic == m.topic {
+	if newTopic == "" {
+		return
+	}
+	m.topicMu.Lock()
+	if newTopic == m.topic {
+		m.topicMu.Unlock()
 		return
 	}
 	oldTopic := m.topic
 	m.topic = newTopic
+	m.topicMu.Unlock()
 
-	if m.client != nil && m.client.IsConnected() {
-		m.client.Unsubscribe(oldTopic)
-		m.client.Subscribe(newTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-			m.handleIncoming(msg)
-		})
-		log.Info().Str("old_topic", oldTopic).Str("new_topic", newTopic).Msg("MQTT топик динамически обновлен")
+	if m.dedup != nil {
+		m.dedup.Clear()
+	}
+
+	if m.client != nil {
+		if m.client.IsConnected() {
+			if oldTopic != "" {
+				m.client.Unsubscribe(oldTopic)
+			}
+			m.client.Subscribe(newTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				m.handleIncoming(msg)
+			})
+			log.Info().Str("old_topic", oldTopic).Str("new_topic", newTopic).Msg("MQTT топик динамически обновлен")
+		} else {
+			tok := m.client.Connect()
+			if tok.WaitTimeout(3 * time.Second) && tok.Error() == nil {
+				m.client.Subscribe(newTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+					m.handleIncoming(msg)
+				})
+				log.Info().Str("new_topic", newTopic).Msg("MQTT переподключен и подписан на новый топик")
+			}
+		}
 	}
 }
 
@@ -185,7 +225,8 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 		}
 	}
 
-	token := m.client.Publish(m.topic, 0, false, data)
+	targetTopic := m.GetTopic()
+	token := m.client.Publish(targetTopic, 0, false, data)
 	if !token.WaitTimeout(4 * time.Second) {
 		return fmt.Errorf("MQTT publish timeout")
 	}

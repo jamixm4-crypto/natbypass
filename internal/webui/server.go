@@ -648,7 +648,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.175"
+		ver = "1.9.176"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1455,7 +1455,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.175"
+		ver = "1.9.176"
 	}
 
 	vip := s.state.VirtualIP
@@ -2329,6 +2329,9 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if target.ID == cfg.ActiveProfileID {
 		cfg.SyncSignalingWithProfile(target)
+		if s.sigMgr != nil && target.MQTTTopic != "" {
+			s.sigMgr.UpdateMQTTTopic(target.MQTTTopic)
+		}
 		if target.VirtualIP != "" {
 			s.SetVirtualIP(strings.TrimSpace(strings.Split(target.VirtualIP, "/")[0]))
 		}

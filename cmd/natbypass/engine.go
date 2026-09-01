@@ -139,6 +139,47 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			defer tunnel.DisableMSSClamping(adapterName)
 		}
 
+		if uiServer != nil {
+			onCfgReload := func() {
+				if configFile != "" {
+					if reloaded, rErr := config.Load(configFile); rErr == nil && reloaded != nil {
+						*cfg = *reloaded
+					}
+				}
+				activeProf := cfg.EnsureActiveProfile()
+				if activeProf != nil {
+					cfg.SyncSignalingWithProfile(activeProf)
+				}
+				targetTopic := ""
+				if activeProf != nil && activeProf.MQTTTopic != "" {
+					targetTopic = activeProf.MQTTTopic
+				}
+				if targetTopic == "" {
+					for _, ch := range cfg.Signaling.Channels {
+						if ch.Type == "mqtt" && ch.Params["topic"] != "" {
+							targetTopic = ch.Params["topic"]
+							break
+						}
+					}
+				}
+				if targetTopic != "" && sigMgr != nil {
+					sigMgr.UpdateMQTTTopic(targetTopic)
+				}
+				if registry != nil {
+					registry.ClearAll()
+				}
+				newVIP := resolveVirtualIP(cfg, deviceID)
+				if newVIP != "" {
+					if tunDev != nil {
+						_ = tunDev.SetVirtualIP(newVIP)
+					}
+					uiServer.SetVirtualIP(newVIP)
+				}
+				triggerPublish()
+			}
+			uiServer.SetOnConfigChange(onCfgReload)
+		}
+
 		// Self-check and self-ping of Virtual IP
 		go func() {
 			time.Sleep(2 * time.Second)
@@ -721,12 +762,31 @@ func publishLoop(
 	lastVIP := virtualIP
 
 	publishOnce := func() {
-		// Dynamic reload of current config & Virtual IP
+		// Dynamic reload of current config & Virtual IP & MQTT topic
 		currentVIP := virtualIP
 		if configFile != "" {
 			if reloaded, rErr := config.Load(configFile); rErr == nil && reloaded != nil {
 				*cfg = *reloaded
 			}
+		}
+		activeProf := cfg.EnsureActiveProfile()
+		if activeProf != nil {
+			cfg.SyncSignalingWithProfile(activeProf)
+		}
+		targetTopic := ""
+		if activeProf != nil && activeProf.MQTTTopic != "" {
+			targetTopic = activeProf.MQTTTopic
+		}
+		if targetTopic == "" {
+			for _, ch := range cfg.Signaling.Channels {
+				if ch.Type == "mqtt" && ch.Params["topic"] != "" {
+					targetTopic = ch.Params["topic"]
+					break
+				}
+			}
+		}
+		if targetTopic != "" && sigMgr != nil {
+			sigMgr.UpdateMQTTTopic(targetTopic)
 		}
 		currentVIP = resolveVirtualIP(cfg, deviceID)
 		if currentVIP != "" && currentVIP != lastVIP {
@@ -869,7 +929,7 @@ func publishLoop(
 			localAddr = fmt.Sprintf("%s:%d", localIP, puncher.LocalPort())
 		}
 
-		activeProf := cfg.EnsureActiveProfile()
+		activeProf = cfg.EnsureActiveProfile()
 		activeKey := ""
 		activeTopic := ""
 		if activeProf != nil {
