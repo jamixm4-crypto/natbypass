@@ -161,13 +161,11 @@ func activateExistingWindow() {
 		return
 	}
 
-	// Fallback to default browser
 	port := lastWebUIPort
 	if port <= 0 {
 		port = 8080
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
-	_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
+	openAppWindow(port)
 }
 
 // subclassWebViewWindow intercepts WM_CLOSE to minimize to tray instead of exiting
@@ -212,6 +210,12 @@ func launchNativeWebView(url string, port int) bool {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	modole32 := windows.NewLazySystemDLL("ole32.dll")
+	procOleInitialize := modole32.NewProc("OleInitialize")
+	if procOleInitialize.Find() == nil {
+		_, _, _ = procOleInitialize.Call(0)
+	}
+
 	screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0)
 	screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1)
 
@@ -230,6 +234,9 @@ func launchNativeWebView(url string, port int) bool {
 		_, _, _ = procSetProcessDpiAwarenessContext.Call(^uintptr(3))
 	}
 
+	userDataDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "NatBypass", "webview2")
+	_ = os.MkdirAll(userDataDir, 0755)
+
 	var w webview2.WebView
 	var initErr error
 	func() {
@@ -241,6 +248,7 @@ func launchNativeWebView(url string, port int) bool {
 		w = webview2.NewWithOptions(webview2.WebViewOptions{
 			Debug:     false,
 			AutoFocus: true,
+			DataPath:  userDataDir,
 			WindowOptions: webview2.WindowOptions{
 				Title:  "NatBypass — P2P Mesh Network",
 				Width:  uint(winWidth),
@@ -299,7 +307,7 @@ func launchNativeWebView(url string, port int) bool {
 // openAppWindow launches the WebUI window using Native-First strategy:
 // 1. If uiMode == "browser" -> opens default browser immediately.
 // 2. Otherwise (auto / native) -> ALWAYS tries native WebView2 first.
-// 3. If native fails (e.g. Server without runtime) -> checks auto-install or falls back to default browser.
+// 3. If native fails (e.g. Server without runtime) -> checks auto-install or falls back to dedicated App window.
 func openAppWindow(port int) {
 	if port <= 0 {
 		port = 8080
@@ -345,15 +353,17 @@ func openAppWindow(port int) {
 		}
 
 		// Tier 2: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
-		// This runs on Windows Server 2012-2025 where Edge, Chrome or Brave is present,
-		// opening a dedicated frameless app window without IE ESC security warnings.
+		// This runs on Windows 10/11 and Windows Server, opening a dedicated frameless app window without browser tabs or address bar.
 		if browserPath := findChromiumAppBrowser(); browserPath != "" {
 			fmt.Printf("Launching NatBypass in dedicated app window (%s)...\n", filepath.Base(browserPath))
+			userDataDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "NatBypass", "edge-profile")
+			_ = os.MkdirAll(userDataDir, 0755)
 			appArgs := []string{
 				fmt.Sprintf("--app=%s", url),
+				fmt.Sprintf("--user-data-dir=%s", userDataDir),
 				"--new-window",
 				"--disable-features=Translate",
-				"--app-id=NatBypass.MeshNetwork",
+				"--window-size=1220,780",
 			}
 			cmd := exec.Command(browserPath, appArgs...)
 			if err := cmd.Start(); err == nil {
@@ -622,18 +632,37 @@ func diagnoseWebUI(port int) {
 // findChromiumAppBrowser returns the path to an installed Chromium browser
 // (Edge, Chrome, Brave) suitable for launching dedicated standalone App windows.
 func findChromiumAppBrowser() string {
+	// 1. Check Registry App Paths for msedge.exe and chrome.exe
+	for _, appName := range []string{"msedge.exe", "chrome.exe", "brave.exe"} {
+		if k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\`+appName, registry.QUERY_VALUE); err == nil {
+			val, _, err2 := k.GetStringValue("")
+			k.Close()
+			if err2 == nil && val != "" {
+				if _, statErr := os.Stat(val); statErr == nil {
+					return val
+				}
+			}
+		}
+		if k2, err := registry.OpenKey(registry.CURRENT_USER, `SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\`+appName, registry.QUERY_VALUE); err == nil {
+			val, _, err2 := k2.GetStringValue("")
+			k2.Close()
+			if err2 == nil && val != "" {
+				if _, statErr := os.Stat(val); statErr == nil {
+					return val
+				}
+			}
+		}
+	}
+
 	candidates := []string{
-		// Microsoft Edge
-		os.Getenv("ProgramFiles(x86)") + `\Microsoft\Edge\Application\msedge.exe`,
-		os.Getenv("ProgramFiles") + `\Microsoft\Edge\Application\msedge.exe`,
-		os.Getenv("LOCALAPPDATA") + `\Microsoft\Edge\Application\msedge.exe`,
-		// Google Chrome
-		os.Getenv("ProgramFiles") + `\Google\Chrome\Application\chrome.exe`,
-		os.Getenv("ProgramFiles(x86)") + `\Google\Chrome\Application\chrome.exe`,
-		os.Getenv("LOCALAPPDATA") + `\Google\Chrome\Application\chrome.exe`,
-		// Brave
-		os.Getenv("ProgramFiles") + `\BraveSoftware\Brave-Browser\Application\brave.exe`,
-		os.Getenv("LOCALAPPDATA") + `\BraveSoftware\Brave-Browser\Application\brave.exe`,
+		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+		filepath.Join(os.Getenv("LOCALAPPDATA"), `Microsoft\Edge\Application\msedge.exe`),
+		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
+		filepath.Join(os.Getenv("LOCALAPPDATA"), `Google\Chrome\Application\chrome.exe`),
+		`C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`,
+		filepath.Join(os.Getenv("LOCALAPPDATA"), `BraveSoftware\Brave-Browser\Application\brave.exe`),
 	}
 	for _, p := range candidates {
 		if p != "" {
