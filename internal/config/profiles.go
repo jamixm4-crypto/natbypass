@@ -630,14 +630,8 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 	if cfg == nil {
 		return GenerateSubnetIP("100.64.200", deviceID)
 	}
-	// 1. Приоритет прямому Network.Address в конфигурации
-	if cfg.Network.Address != "" {
-		clean := strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
-		if !strings.HasSuffix(clean, ".0") && clean != "" {
-			return clean
-		}
-	}
-	// 2. Активный профиль
+
+	// 1. Активный профиль имеет наивысший приоритет
 	activeProf := cfg.EnsureActiveProfile()
 	if activeProf != nil {
 		if activeProf.VirtualIP != "" {
@@ -653,11 +647,18 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 			return GenerateSubnetIP(prefix, deviceID)
 		}
 	}
-	// 3. Network.Address как подсеть (если оканчивается на .0)
+
+	// 2. Прямой Network.Address в конфигурации (если в профиле не задана своя подсеть)
 	if cfg.Network.Address != "" {
+		clean := strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
+		if !strings.HasSuffix(clean, ".0") && clean != "" {
+			return clean
+		}
 		prefix := ExtractSubnetPrefix(cfg.Network.Address)
 		return GenerateSubnetIP(prefix, deviceID)
 	}
-	// 4. Дефолтный fallback (только если нигде ничего не задано)
+
+	// 3. Дефолтный fallback (только если нигде ничего не задано)
 	return GenerateSubnetIP("100.64.200", deviceID)
 }
+

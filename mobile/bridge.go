@@ -26,7 +26,7 @@ import (
 )
 
 
-const Version = "1.9.191"
+const Version = "1.9.192"
 
 
 
@@ -399,7 +399,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             runtime.GOARCH,
-					Version:          "1.9.191",
+					Version:          "1.9.192",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -1672,6 +1672,9 @@ func SwitchProfile(profileID string) bool {
 		return false
 	}
 
+	globalVirtualIP = config.ResolveVirtualIP(globalConfig, globalDevID)
+	globalConfig.Network.Address = globalVirtualIP
+
 	if globalRegistry != nil {
 		globalRegistry.ClearAll()
 	}
@@ -1743,6 +1746,8 @@ func ImportProfileURI(rawURI string) string {
 
 	parsed.IsActive = true
 	saved := globalConfig.AddOrUpdateProfile(*parsed)
+	globalVirtualIP = config.ResolveVirtualIP(globalConfig, globalDevID)
+	globalConfig.Network.Address = globalVirtualIP
 	rebuildSignalingInternal(saved)
 	engineMu.Unlock()
 
@@ -1774,8 +1779,10 @@ func rebuildSignalingInternal(p *config.Profile) {
 
 	if globalConfig != nil && globalDevID != "" {
 		globalVirtualIP = config.ResolveVirtualIP(globalConfig, globalDevID)
+		globalConfig.Network.Address = globalVirtualIP
 	}
 }
+
 
 
 // PingPeer активно отправляет UDP зонд пиру и возвращает реальный RTT в миллисекундах (-1 при отсутствии ответа)
