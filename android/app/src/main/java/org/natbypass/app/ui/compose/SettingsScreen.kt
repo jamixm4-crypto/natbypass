@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui.compose
+package org.natbypass.app.ui.compose
 
 import android.content.Context
 import android.os.Build
@@ -112,6 +112,20 @@ fun SettingsScreen(
         } catch (_: Exception) {}
     }
 
+    // Custom AWG parameters
+    var awgJc   by remember { mutableStateOf(prefs.getString("awg_jc", "4") ?: "4") }
+    var awgJmin by remember { mutableStateOf(prefs.getString("awg_jmin", "40") ?: "40") }
+    var awgJmax by remember { mutableStateOf(prefs.getString("awg_jmax", "70") ?: "70") }
+    var awgS1   by remember { mutableStateOf(prefs.getString("awg_s1", "48") ?: "48") }
+    var awgS2   by remember { mutableStateOf(prefs.getString("awg_s2", "32") ?: "32") }
+    var awgH1   by remember { mutableStateOf(prefs.getString("awg_h1", "1428571428") ?: "1428571428") }
+    var awgH2   by remember { mutableStateOf(prefs.getString("awg_h2", "2147483647") ?: "2147483647") }
+    var awgH3   by remember { mutableStateOf(prefs.getString("awg_h3", "857142857") ?: "857142857") }
+    var awgH4   by remember { mutableStateOf(prefs.getString("awg_h4", "1122334455") ?: "1122334455") }
+
+    var showImportBackupDialog by remember { mutableStateOf(false) }
+    var backupImportText by remember { mutableStateOf("") }
+
     fun save() {
         prefs.edit().apply {
             putString("device_name", deviceName.trim())
@@ -122,6 +136,15 @@ fun SettingsScreen(
             putBoolean("allow_exit_node", allowExitNode)
             putString("adv_subnets", advSubnets.trim())
             putString("awg_preset", awgPreset)
+            putString("awg_jc", awgJc.trim())
+            putString("awg_jmin", awgJmin.trim())
+            putString("awg_jmax", awgJmax.trim())
+            putString("awg_s1", awgS1.trim())
+            putString("awg_s2", awgS2.trim())
+            putString("awg_h1", awgH1.trim())
+            putString("awg_h2", awgH2.trim())
+            putString("awg_h3", awgH3.trim())
+            putString("awg_h4", awgH4.trim())
             putString("mqtt_broker", mqttBroker.trim())
             putString("mqtt_topic", mqttTopic.trim())
             putString("mqtt_user", mqttUser.trim())
@@ -153,7 +176,18 @@ fun SettingsScreen(
             )
         }
 
-        MobileBridge.setAWGPreset(awgPreset)
+        if (awgPreset == "custom") {
+            MobileBridge.setAWGCustom(
+                awgJc.toIntOrNull() ?: 4,
+                awgJmin.toIntOrNull() ?: 40,
+                awgJmax.toIntOrNull() ?: 70,
+                awgS1.toIntOrNull() ?: 48,
+                awgS2.toIntOrNull() ?: 32,
+                awgH1.trim(), awgH2.trim(), awgH3.trim(), awgH4.trim()
+            )
+        } else {
+            MobileBridge.setAWGPreset(awgPreset)
+        }
 
         try {
             val yaml = MobileBridge.getConfigYAML()
@@ -164,6 +198,7 @@ fun SettingsScreen(
 
         Toast.makeText(context, "✓ Настройки сохранены", Toast.LENGTH_SHORT).show()
     }
+
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -391,17 +426,105 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(6.dp))
-                val presets = listOf("standard" to "Стандарт", "dpi" to "Обход DPI", "stealth" to "Скрытность")
+                val presets = listOf(
+                    "standard" to "Стандарт",
+                    "dpi"      to "Обход DPI",
+                    "stealth"  to "Скрытность",
+                    "custom"   to "Кастомный"
+                )
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     presets.forEachIndexed { idx, (key, label) ->
                         SegmentedButton(
                             selected = awgPreset == key,
                             onClick  = { awgPreset = key },
                             shape = SegmentedButtonDefaults.itemShape(index = idx, count = presets.size),
-                        ) { Text(label) }
+                        ) { Text(label, fontSize = 11.sp) }
+                    }
+                }
+
+                if (awgPreset == "custom") {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Параметры обфускации (Junk & Headers)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = awgJc,
+                            onValueChange = { awgJc = it },
+                            label = { Text("Jc (пакеты)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = awgJmin,
+                            onValueChange = { awgJmin = it },
+                            label = { Text("Jmin (байт)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = awgJmax,
+                            onValueChange = { awgJmax = it },
+                            label = { Text("Jmax (байт)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = awgS1,
+                            onValueChange = { awgS1 = it },
+                            label = { Text("S1 (Init magic)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = awgS2,
+                            onValueChange = { awgS2 = it },
+                            label = { Text("S2 (Resp magic)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = awgH1,
+                            onValueChange = { awgH1 = it },
+                            label = { Text("H1 (Handshake)") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = awgH2,
+                            onValueChange = { awgH2 = it },
+                            label = { Text("H2 (Response)") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
+
 
             // ── MQTT ──────────────────────────────────────────────────────
             SettingsSection(title = "MQTT Брокер ($activeProfileName)", icon = Icons.Outlined.Cloud) {
@@ -493,6 +616,52 @@ fun SettingsScreen(
                 )
             }
 
+            // ── Backup & Restore ──────────────────────────────────────────
+            SettingsSection(title = "Резервные копии сетей", icon = Icons.Outlined.Backup) {
+                Text(
+                    text = "Экспорт и импорт всех настроенных профилей и ключей",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val jsonBackup = MobileBridge.exportAllProfilesJSON()
+                            if (jsonBackup.isNotEmpty() && jsonBackup != "[]") {
+                                val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "NatBypass Profiles Backup")
+                                    putExtra(android.content.Intent.EXTRA_TEXT, jsonBackup)
+                                }
+                                context.startActivity(android.content.Intent.createChooser(sendIntent, "Экспорт профилей"))
+                            } else {
+                                Toast.makeText(context, "Нет сохраненных сетей для экспорта", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Outlined.FileDownload, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Экспорт (JSON)", fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = { showImportBackupDialog = true },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Outlined.FileUpload, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Импорт", fontSize = 12.sp)
+                    }
+                }
+            }
+
             // ── App info & Updates ─────────────────────────────────────────
             SettingsSection(title = "О приложении и обновления", icon = Icons.Outlined.Info) {
                 val versionName = try {
@@ -523,8 +692,60 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(40.dp))
         }
+
+        if (showImportBackupDialog) {
+            AlertDialog(
+                onDismissRequest = { showImportBackupDialog = false },
+                title = { Text("Импорт сетей из Backup JSON") },
+                text = {
+                    Column {
+                        Text(
+                            text = "Вставьте скопированный JSON бэкапа профилей:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = backupImportText,
+                            onValueChange = { backupImportText = it },
+                            placeholder = { Text("[{\"id\":\"p-1\",\"name\":\"Сеть 1\"...}]") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(140.dp),
+                            maxLines = 6
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val res = MobileBridge.importAllProfilesJSON(backupImportText.trim())
+                            if (res == "OK") {
+                                try {
+                                    val yaml = MobileBridge.getConfigYAML()
+                                    if (yaml.isNotEmpty()) File(context.filesDir, "config.yaml").writeText(yaml)
+                                } catch (_: Exception) {}
+                                Toast.makeText(context, "✓ Профили успешно импортированы!", Toast.LENGTH_SHORT).show()
+                                showImportBackupDialog = false
+                                backupImportText = ""
+                            } else {
+                                Toast.makeText(context, res, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    ) {
+                        Text("Импортировать")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showImportBackupDialog = false }) {
+                        Text("Отмена")
+                    }
+                }
+            )
+        }
     }
 }
+
 
 // ── Settings section container ─────────────────────────────────────────────────
 @Composable

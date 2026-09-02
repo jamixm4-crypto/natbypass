@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,7 +25,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.187"
+
+const Version = "1.9.188"
 
 
 
@@ -383,8 +385,8 @@ func StartEngine(configYAML string, tunFd int) string {
 					NetworkKey:       activeKey,
 					OS:               "android",
 					Platform:         "Android",
-					Arch:             "arm64",
-					Version:          "1.9.187",
+					Arch:             runtime.GOARCH,
+					Version:          "1.9.188",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -1132,7 +1134,30 @@ func GetRandomAWGParamsJSON() string {
 	return string(data)
 }
 
+var globalAWGCustom *signaling.AWGParams
+
+// SetAWGCustom устанавливает пользовательские параметры AmneziaWG
+func SetAWGCustom(jc, jmin, jmax, s1, s2 int, h1, h2, h3, h4 string) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	globalAWGCustom = &signaling.AWGParams{
+		Jc:   jc,
+		Jmin: jmin,
+		Jmax: jmax,
+		S1:   s1,
+		S2:   s2,
+		H1:   h1,
+		H2:   h2,
+		H3:   h3,
+		H4:   h4,
+	}
+	globalAWGPreset = "custom"
+}
+
 func getAWGParamsFromPreset(preset string) *signaling.AWGParams {
+	if preset == "custom" && globalAWGCustom != nil {
+		return globalAWGCustom
+	}
 	switch preset {
 	case "standard":
 		return &signaling.AWGParams{
@@ -1167,6 +1192,51 @@ func getAWGParamsFromPreset(preset string) *signaling.AWGParams {
 		}
 	}
 }
+
+// GetTrafficStats возвращает текущую статистику переданных и принятых байт
+func GetTrafficStats() string {
+	res := map[string]interface{}{
+		"tx_bytes": atomic.LoadUint64(&globalTxBytes),
+		"rx_bytes": atomic.LoadUint64(&globalRxBytes),
+	}
+	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+// ExportAllProfilesJSON экспортирует все профили в JSON
+func ExportAllProfilesJSON() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalConfig == nil {
+		return "[]"
+	}
+	data, err := json.Marshal(globalConfig.Profiles)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+// ImportAllProfilesJSON импортирует профили из JSON строки
+func ImportAllProfilesJSON(jsonStr string) string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalConfig == nil {
+		globalConfig = &config.Config{}
+	}
+	var profs []config.Profile
+	if err := json.Unmarshal([]byte(jsonStr), &profs); err != nil {
+		return fmt.Sprintf("Ошибка парсинга JSON: %v", err)
+	}
+	for _, p := range profs {
+		if p.ID == "" {
+			p.ID = "p-" + config.GenerateRandomHex(4)
+		}
+		globalConfig.AddOrUpdateProfile(p)
+	}
+	return "OK"
+}
+
 
 // GetFullTelemetryJSON возвращает детальные телеметрические метрики
 func GetFullTelemetryJSON() string {
@@ -1338,6 +1408,16 @@ func ClearPeers() {
 		globalRegistry.ClearAll()
 	}
 }
+
+// DeletePeer удаляет одного конкретного узла из реестра по DeviceID
+func DeletePeer(deviceID string) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalRegistry != nil && deviceID != "" {
+		globalRegistry.Delete(deviceID)
+	}
+}
+
 
 // GenerateInviteQRText возвращает строку QR-кода приглашения
 func GenerateInviteQRText() string {

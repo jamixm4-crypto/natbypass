@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.util
+package org.natbypass.app.util
 
 import android.content.Context
 import android.content.Intent
@@ -56,7 +56,14 @@ object AppUpdateManager {
                 val response = conn.inputStream.bufferedReader().use { it.readText() }
                 val releaseObj = JSONObject(response)
                 val tagName = releaseObj.optString("tag_name", "").removePrefix("v")
-                val releaseBody = releaseObj.optString("body", "Улучшена стабильность и производительность.")
+                // GitHub API может прислать "body": null (JSON null), в этом случае
+                // optString вернёт строку "null" — проверяем явно через isNull()
+                val releaseBody = if (releaseObj.isNull("body")) {
+                    "Улучшена стабильность и производительность."
+                } else {
+                    releaseObj.optString("body", "").takeIf { it.isNotBlank() }
+                        ?: "Улучшена стабильность и производительность."
+                }
 
                 var apkDownloadUrl = ""
                 var apkSize = 0L

@@ -62,6 +62,10 @@ data class MainUiState(
     val activeChannel: String = "",
     val natType: String = "",
     val avgRttMs: Long = 0L,
+    val txBytes: Long = 0L,
+    val rxBytes: Long = 0L,
+    val txSpeedBps: Long = 0L,
+    val rxSpeedBps: Long = 0L,
     val peers: List<PeerUiModel> = emptyList(),
     val onlinePeers: Int = 0,
     val totalPeers: Int = 0,
@@ -71,12 +75,18 @@ data class MainUiState(
     val isRefreshing: Boolean = false,
 )
 
-// в”Ђв”Ђ ViewModel в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+// ── ViewModel ─────────────────────────────────────────────────────────────
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+
+    private var lastTxBytes = 0L
+    private var lastRxBytes = 0L
+    private var lastStatsTimestamp = 0L
+    private var lastTxSpeedBps = 0L
+    private var lastRxSpeedBps = 0L
 
     private val prefs get() = getApplication<Application>()
         .getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
@@ -102,10 +112,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (isActive) {
                 refreshStatus()
-                delay(2000)
+                val isVpnActive = NatBypassVpnService.isRunning
+                delay(if (isVpnActive) 2000L else 5000L)
             }
         }
     }
+
 
     private suspend fun refreshStatus() = withContext(Dispatchers.IO) {
         try {
@@ -124,6 +136,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         var activeChannel = ""
         var natType = ""
         var isEngineRunning = false
+        var txBytes = 0L
+        var rxBytes = 0L
         try {
             val obj = JSONObject(statusJson)
             isEngineRunning = obj.optBoolean("running", false)
@@ -132,7 +146,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             virtualIp  = obj.optString("virtual_ip", virtualIp)
             activeChannel = obj.optString("channel", "")
             natType    = obj.optString("nat_type", "")
+            txBytes    = obj.optLong("tx_bytes", 0L)
+            rxBytes    = obj.optLong("rx_bytes", 0L)
+
+            val now = System.currentTimeMillis()
+            val dt = if (lastStatsTimestamp > 0) (now - lastStatsTimestamp) / 1000f else 0f
+            if (dt >= 1.0f) {
+                lastTxSpeedBps = if (txBytes >= lastTxBytes) ((txBytes - lastTxBytes) / dt).toLong() else 0L
+                lastRxSpeedBps = if (rxBytes >= lastRxBytes) ((rxBytes - lastRxBytes) / dt).toLong() else 0L
+                lastTxBytes = txBytes
+                lastRxBytes = rxBytes
+                lastStatsTimestamp = now
+            }
         } catch (_: Exception) {}
+
 
         val vpnActive = NatBypassVpnService.isRunning
 
@@ -267,6 +294,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 activeChannel     = activeChannel,
                 natType           = natType,
                 avgRttMs          = avgRtt,
+                txBytes           = txBytes,
+                rxBytes           = rxBytes,
+                txSpeedBps        = lastTxSpeedBps,
+                rxSpeedBps        = lastRxSpeedBps,
                 peers             = peers,
                 onlinePeers       = onlineCount,
                 totalPeers        = peers.size,
@@ -275,6 +306,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
     }
+
 
     // в”Ђв”Ђ VPN control в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
@@ -376,9 +408,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deletePeer(peerId: String) {
-        MobileBridge.clearPeers()
+        MobileBridge.deletePeer(peerId)
         viewModelScope.launch { refreshStatus() }
     }
+
 
     fun setPeerNickname(peerId: String, nick: String) {
         prefs.edit().putString("nick_$peerId", nick).apply()
@@ -442,7 +475,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun exportProfileUri(profileId: String): String = MobileBridge.exportProfileURI(profileId)
 
+    fun exportAllProfiles(): String = MobileBridge.exportAllProfilesJSON()
+
+    fun importAllProfiles(context: Context, jsonStr: String): Boolean {
+        val res = MobileBridge.importAllProfilesJSON(jsonStr)
+        if (res == "OK") {
+            saveConfigToDisk(context)
+            viewModelScope.launch { refreshStatus() }
+            return true
+        }
+        return false
+    }
+
     fun setAWGPreset(preset: String) = MobileBridge.setAWGPreset(preset)
+
+    fun setAWGCustom(jc: Int, jmin: Int, jmax: Int, s1: Int, s2: Int, h1: String, h2: String, h3: String, h4: String) {
+        MobileBridge.setAWGCustom(jc, jmin, jmax, s1, s2, h1, h2, h3, h4)
+    }
+
 
     fun clearPeers(context: Context) {
         MobileBridge.clearPeers()

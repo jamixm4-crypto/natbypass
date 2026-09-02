@@ -28,6 +28,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Locale
 import org.natbypass.app.ui.ConnectionState
 import org.natbypass.app.ui.MainUiState
 import org.natbypass.app.ui.PeerUiModel
@@ -78,7 +79,7 @@ fun MainScreen(
                             letterSpacing = (-0.5).sp,
                             maxLines = 1,
                         )
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
@@ -92,8 +93,35 @@ fun MainScreen(
                                 maxLines = 1,
                             )
                         }
+                        Spacer(Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                            modifier = Modifier.clickable { onOpenProfiles() }
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.GroupWork,
+                                    contentDescription = "Профиль",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = uiState.activeProfileName.ifEmpty { "Основная" },
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
                     }
                 },
+
                 actions = {
                     IconButton(onClick = onOpenDiagnostics) {
                         Icon(Icons.Outlined.Analytics, contentDescription = "Диагностика")
@@ -158,7 +186,7 @@ fun MainScreen(
                 )
             }
 
-            // ── My Device Card (VIP + STUN) ──────────────────────────────────
+            // ── My Device Card (VIP + STUN + Traffic) ────────────────────────
             item {
                 MyDeviceInfoCard(
                     virtualIp = uiState.virtualIp,
@@ -166,9 +194,14 @@ fun MainScreen(
                     publicIp = uiState.publicIp,
                     natType = uiState.natType,
                     activeChannel = uiState.activeChannel,
+                    txBytes = uiState.txBytes,
+                    rxBytes = uiState.rxBytes,
+                    txSpeedBps = uiState.txSpeedBps,
+                    rxSpeedBps = uiState.rxSpeedBps,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
+
 
             // ── Network profile card ─────────────────────────────────────────
             item {
@@ -381,6 +414,10 @@ private fun MyDeviceInfoCard(
     publicIp: String,
     natType: String,
     activeChannel: String,
+    txBytes: Long = 0L,
+    rxBytes: Long = 0L,
+    txSpeedBps: Long = 0L,
+    rxSpeedBps: Long = 0L,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -522,6 +559,55 @@ private fun MyDeviceInfoCard(
                 )
             }
 
+            // Row 3: Трафик и скорость (TX / RX)
+            if (txBytes > 0L || rxBytes > 0L) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val txMb = txBytes / (1024f * 1024f)
+                    val rxMb = rxBytes / (1024f * 1024f)
+                    val txSpd = if (txSpeedBps >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", txSpeedBps / (1024f * 1024f)) else String.format(Locale.US, "%d KB/s", txSpeedBps / 1024)
+                    val rxSpd = if (rxSpeedBps >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", rxSpeedBps / (1024f * 1024f)) else String.format(Locale.US, "%d KB/s", rxSpeedBps / 1024)
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.NorthEast,
+                            contentDescription = "Передача",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "TX: ${String.format(Locale.US, "%.1f", txMb)} MB (↑$txSpd)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.SouthWest,
+                            contentDescription = "Приём",
+                            tint = MaterialTheme.natColors.success,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "RX: ${String.format(Locale.US, "%.1f", rxMb)} MB (↓$rxSpd)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
             // Дополнительная строка: Публичный IP или NAT тип (если есть)
             if (publicIp.isNotEmpty() || natType.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
@@ -550,6 +636,7 @@ private fun MyDeviceInfoCard(
         }
     }
 }
+
 
 // ── Network profile card ──────────────────────────────────────────────────────
 @Composable

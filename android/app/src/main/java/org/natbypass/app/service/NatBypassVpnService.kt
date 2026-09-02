@@ -22,7 +22,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import org.json.JSONObject
+import java.util.Locale
 import org.natbypass.app.R
 import org.natbypass.app.ui.MainActivity
 import java.io.File
@@ -31,7 +34,8 @@ class NatBypassVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var serviceJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Default)
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -204,15 +208,43 @@ class NatBypassVpnService : VpnService() {
 
             isRunning = true
 
-            scope.launch {
+            serviceScope.launch {
                 delay(500)
                 org.natbypass.app.util.MobileBridge.refreshPublicIP()
             }
 
-            serviceJob = scope.launch {
-                while (isActive) {
+            serviceJob = serviceScope.launch {
+                var lastTx = 0L
+                var lastRx = 0L
+                var lastTs = System.currentTimeMillis()
+                while (isActive && isRunning) {
                     delay(3000)
                     if (!isRunning) break
+                    try {
+                        val statJson = org.natbypass.app.util.MobileBridge.getTrafficStats()
+                        val obj = JSONObject(statJson)
+                        val tx = obj.optLong("tx_bytes", 0L)
+                        val rx = obj.optLong("rx_bytes", 0L)
+                        val now = System.currentTimeMillis()
+                        val dt = (now - lastTs) / 1000f
+                        val txSpeed = if (dt >= 1.0f && tx >= lastTx) ((tx - lastTx) / dt) else 0f
+                        val rxSpeed = if (dt >= 1.0f && rx >= lastRx) ((rx - lastRx) / dt) else 0f
+                        lastTx = tx
+                        lastRx = rx
+                        lastTs = now
+
+                        val txMb = tx / (1024f * 1024f)
+                        val rxMb = rx / (1024f * 1024f)
+                        val txSpeedStr = if (txSpeed >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", txSpeed / (1024 * 1024)) else String.format(Locale.US, "%.0f KB/s", txSpeed / 1024)
+                        val rxSpeedStr = if (rxSpeed >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", rxSpeed / (1024 * 1024)) else String.format(Locale.US, "%.0f KB/s", rxSpeed / 1024)
+
+                        val updatedNotif = buildNotification(
+                            "VIP: $currentVip • ↑$txSpeedStr ↓$rxSpeedStr (Σ ${String.format(Locale.US, "%.1f", txMb + rxMb)} MB)",
+                            showDisconnect = true
+                        )
+                        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        nm.notify(NOTIFICATION_ID, updatedNotif)
+                    } catch (_: Exception) {}
                 }
             }
         } catch (e: Exception) {
@@ -271,7 +303,7 @@ class NatBypassVpnService : VpnService() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                     try { setUnderlyingNetworks(arrayOf(network)) } catch (_: Exception) {}
                 }
-                scope.launch {
+                serviceScope.launch {
                     delay(800)
                     org.natbypass.app.util.MobileBridge.refreshPublicIP()
                 }
@@ -292,8 +324,10 @@ class NatBypassVpnService : VpnService() {
 
     override fun onDestroy() {
         disconnect()
+        serviceScope.cancel()
         super.onDestroy()
     }
+
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

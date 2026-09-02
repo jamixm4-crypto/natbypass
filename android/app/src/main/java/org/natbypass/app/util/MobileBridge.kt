@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.util
+package org.natbypass.app.util
 
 import java.lang.reflect.Method
 
@@ -303,6 +303,54 @@ object MobileBridge {
             "[]"
         }
     }
+
+    /** Удалить конкретный узел из реестра (не удаляет все) */
+    fun deletePeer(deviceId: String) {
+        val method = getMethod("deletePeer") ?: return
+        try {
+            method.invoke(null, deviceId)
+        } catch (e: Exception) {}
+    }
+
+    /** Получить статистику трафика: {"tx_bytes":…,"rx_bytes":…,"tx_speed_bps":…,"rx_speed_bps":…} */
+    fun getTrafficStats(): String {
+        val method = getMethod("getTrafficStats") ?: return "{}"
+        return try {
+            method.invoke(null) as? String ?: "{}"
+        } catch (e: Exception) {
+            "{}"
+        }
+    }
+
+    /** Установить кастомные параметры AmneziaWG (Jc, Jmin, Jmax, S1, S2, H1, H2, H3, H4) */
+    fun setAWGCustom(jc: Int, jmin: Int, jmax: Int, s1: Int, s2: Int, h1: String, h2: String, h3: String, h4: String) {
+        val method = getMethod("setAWGCustom") ?: return
+        try {
+            method.invoke(null, jc, jmin, jmax, s1, s2, h1, h2, h3, h4)
+        } catch (e: Exception) {}
+    }
+
+    /** Экспорт всех профилей в JSON */
+    fun exportAllProfilesJSON(): String {
+        val method = getMethod("exportAllProfilesJSON") ?: return "[]"
+        return try {
+            method.invoke(null) as? String ?: "[]"
+        } catch (e: Exception) {
+            "[]"
+        }
+    }
+
+    /** Импорт профилей из JSON */
+    fun importAllProfilesJSON(jsonStr: String): String {
+        val method = getMethod("importAllProfilesJSON") ?: return "OK"
+        return try {
+            method.invoke(null, jsonStr) as? String ?: "OK"
+        } catch (e: Exception) {
+            "Ошибка: ${e.message}"
+        }
+    }
 }
+
+
 
 

@@ -210,6 +210,9 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(16.dp))
 
             // ── Logs ─────────────────────────────────────────────────────────
+            var logSearch by remember { mutableStateOf("") }
+            var selectedLogLevel by remember { mutableStateOf("ALL") }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -218,25 +221,79 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
                 SectionTitle("Журнал ядра")
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     AssistChip(
+                        onClick = {
+                            MobileBridge.clearLogs()
+                            logsText = ""
+                            Toast.makeText(context, "🧹 Журнал очищен", Toast.LENGTH_SHORT).show()
+                        },
+                        label = { Text("Очистить", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, modifier = Modifier.size(14.dp)) }
+                    )
+                    AssistChip(
                         onClick = ::copyToClipboard,
                         label = { Text("Копировать", fontSize = 12.sp) },
                         leadingIcon = { Icon(Icons.Outlined.ContentCopy, null, modifier = Modifier.size(14.dp)) }
                     )
-                    AssistChip(
-                        onClick = ::shareReport,
-                        label = { Text("Поделиться", fontSize = 12.sp) },
-                        leadingIcon = { Icon(Icons.Outlined.Share, null, modifier = Modifier.size(14.dp)) }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Search filter
+            OutlinedTextField(
+                value = logSearch,
+                onValueChange = { logSearch = it },
+                placeholder = { Text("Поиск в логах...") },
+                leadingIcon = { Icon(Icons.Outlined.Search, null, modifier = Modifier.size(18.dp)) },
+                trailingIcon = {
+                    if (logSearch.isNotEmpty()) {
+                        IconButton(onClick = { logSearch = "" }) {
+                            Icon(Icons.Outlined.Close, null, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            // Level filter chips
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("ALL" to "Все", "ERROR" to "Ошибки", "WARN" to "Предупр.", "INFO" to "Инфо").forEach { (lvl, label) ->
+                    FilterChip(
+                        selected = selectedLogLevel == lvl,
+                        onClick = { selectedLogLevel = lvl },
+                        label = { Text(label, fontSize = 11.sp) }
                     )
                 }
             }
-            Spacer(Modifier.height(6.dp))
+
+            Spacer(Modifier.height(8.dp))
+
+            val filteredLogs = remember(logsText, logSearch, selectedLogLevel) {
+                if (logsText.isEmpty()) return@remember "Логи пусты"
+                val lines = logsText.lines()
+                val matched = lines.filter { line ->
+                    val matchesSearch = logSearch.isBlank() || line.contains(logSearch, ignoreCase = true)
+                    val matchesLevel = when (selectedLogLevel) {
+                        "ERROR" -> line.contains("ERROR", ignoreCase = true) || line.contains("ERR", ignoreCase = true)
+                        "WARN"  -> line.contains("WARN", ignoreCase = true)
+                        "INFO"  -> line.contains("INFO", ignoreCase = true)
+                        else    -> true
+                    }
+                    matchesSearch && matchesLevel
+                }
+                if (matched.isEmpty()) "Ничего не найдено по фильтру" else matched.joinToString("\n")
+            }
+
             Surface(
                 shape  = RoundedCornerShape(12.dp),
                 color  = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    text  = logsText.ifEmpty { "Логи пусты" },
+                    text  = filteredLogs,
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontFamily  = FontFamily.Monospace,
                         fontSize    = 11.sp,
@@ -248,6 +305,7 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.height(32.dp))
         }
+
     }
 }
 

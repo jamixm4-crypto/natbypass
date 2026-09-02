@@ -1,5 +1,7 @@
-﻿package org.natbypass.app.ui.compose
+package org.natbypass.app.ui.compose
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,6 +24,7 @@ fun UpdateDialog(
     onCancelDownload: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+
     when (state) {
         is UpdateState.Idle -> {}
 
@@ -75,13 +78,28 @@ fun UpdateDialog(
                             )
                             Spacer(Modifier.height(8.dp))
                         }
-                        Text(
-                            text = state.changelog,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(10.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                Text(
+                                    text = state.changelog,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 },
+
                 confirmButton = {
                     Button(
                         onClick = { onDownload(state.version, state.apkUrl, state.sizeBytes) },
