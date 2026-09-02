@@ -127,7 +127,7 @@ func (d *Device) ReadPacket() ([]byte, error) {
 	if atomic.LoadInt32(&d.isClosed) == 1 {
 		return nil, fmt.Errorf("интерфейс закрыт")
 	}
-	buf := make([]byte, 2048)
+	buf := make([]byte, 65535) // Максимальный размер IP пакета
 	n, err := d.file.Read(buf)
 	if err != nil {
 		return nil, err
@@ -210,7 +210,7 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		_ = exec.CommandContext(ctx, sc, "-w", "net.ipv4.icmp_echo_ignore_all=0").Run()
 	}
 
-	// 6. Разрешение входящего и транзитного трафика в iptables (Keenetic NDM / OpenWrt / Linux / Entware)
+	// 6. Разрешение входящего и транзитного трафика в iptables / nftables / ufw
 	applyFirewallRules := func() {
 		// Поиск доступных бинарников iptables
 		var iptCandidates []string
@@ -259,6 +259,23 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 			// 4. Разрешение входящих UDP-пакетов
 			runIpt(ipt, "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
 			runIpt(ipt, "_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+		}
+
+		// 5. nftables (Ubuntu 22.04+, Debian 12+): добавляем разрешение для nb0 через nft напрямую
+		if nft, err := exec.LookPath("nft"); err == nil {
+			// Разрешаем весь трафик через TUN интерфейс в nftables (если таблица inet filter существует)
+			_ = exec.Command(nft, "add", "rule", "inet", "filter", "input", "iifname", d.AdapterName, "accept").Run()
+			_ = exec.Command(nft, "add", "rule", "inet", "filter", "forward", "iifname", d.AdapterName, "accept").Run()
+			_ = exec.Command(nft, "add", "rule", "inet", "filter", "forward", "oifname", d.AdapterName, "accept").Run()
+			_ = exec.Command(nft, "add", "rule", "inet", "filter", "output", "oifname", d.AdapterName, "accept").Run()
+			// Разрешение ICMP глобально
+			_ = exec.Command(nft, "add", "rule", "inet", "filter", "input", "ip", "protocol", "icmp", "accept").Run()
+		}
+
+		// 6. ufw (Ubuntu): разрешение через профиль ufw если доступен
+		if ufw, err := exec.LookPath("ufw"); err == nil {
+			_ = exec.Command(ufw, "allow", "in", "on", d.AdapterName).Run()
+			_ = exec.Command(ufw, "allow", "out", "on", d.AdapterName).Run()
 		}
 	}
 	applyFirewallRules()

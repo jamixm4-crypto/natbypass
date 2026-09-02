@@ -21,24 +21,69 @@ func ensureAdminOnWindows() {
 		log.Warn().Msg("⚠️ Запущено без прав администратора. Виртуальный сетевой интерфейс (TUN) требует прав администратора. Остальные функции (WebUI, MQTT, P2P) работают в обычном режиме.")
 		return
 	}
-	// Если запущен с правами администратора — тихо создаем правило брандмауэра для UDP hole-punch (порт 47832)
-	go ensureFirewallRule()
+	// При запуске с правами администратора: очищаем накопленные дублирующиеся правила,
+	// затем создаём ровно один набор нужных правил.
+	go func() {
+		cleanupFirewallDuplicates()
+		ensureFirewallRule()
+	}()
 }
 
-// ensureFirewallRule создаёт правило Windows Firewall для входящего UDP на порту 47832 (без дубликатов)
-func ensureFirewallRule() {
-	const ruleName = "NatBypass UDP P2P (47832)"
-	checkCmd := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+ruleName)
-	checkCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-	if err := checkCmd.Run(); err == nil {
-		return // Правило уже существует
-	}
-	cmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-		"name="+ruleName, "dir=in", "action=allow", "protocol=UDP", "localport=47832",
-		"description=NatBypass UDP hole-punch P2P port", "enable=yes", "profile=any")
+// cleanupFirewallDuplicates удаляет все накопившиеся дублирующиеся правила NatBypass
+// (созданные предыдущими версиями программы) через PowerShell.
+func cleanupFirewallDuplicates() {
+	psScript := `
+$names = @('NatBypass-ICMPv4','NatBypass ICMP Allow','NatBypass ICMP Reply Allow',
+           'NatBypass ICMPv4 In','NatBypass Adapter All','NatBypass All In',
+           'NatBypass ICMP In','NatBypass Mesh Outbound','NatBypass TCP Mesh',
+           'NatBypass UDP Mesh','NatBypass','NatBypass ICMPv4')
+foreach ($n in $names) { Remove-NetFirewallRule -DisplayName $n -ErrorAction SilentlyContinue }
+`
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-	if err := cmd.Run(); err == nil {
-		log.Info().Msg("✅ Правило Windows Firewall для UDP 47832 (P2P Direct) создано")
+	_ = cmd.Run()
+	log.Info().Msg("🧹 Старые дублирующиеся правила NatBypass Firewall очищены")
+}
+
+// ensureFirewallRule создаёт правила Windows Firewall для NatBypass (без дубликатов):
+// входящий UDP 47832, входящий ICMPv4, и разрешение всего трафика через адаптер.
+func ensureFirewallRule() {
+	rules := []struct {
+		name    string
+		netshArgs []string
+		psNew   string
+	}{
+		{
+			name: "NatBypass UDP P2P (47832)",
+			netshArgs: []string{"dir=in", "action=allow", "protocol=UDP", "localport=47832", "enable=yes", "profile=any"},
+		},
+		{
+			name: "NatBypass ICMPv4 In",
+			psNew: `New-NetFirewallRule -DisplayName 'NatBypass ICMPv4 In' -Name 'NatBypass ICMPv4 In' -Direction Inbound -Action Allow -Protocol ICMPv4 -ErrorAction SilentlyContinue`,
+		},
+		{
+			name: "NatBypass Adapter All",
+			psNew: `New-NetFirewallRule -DisplayName 'NatBypass Adapter All' -Name 'NatBypass Adapter All' -Direction Inbound -Action Allow -InterfaceAlias 'NatBypass' -ErrorAction SilentlyContinue`,
+		},
+	}
+
+	for _, r := range rules {
+		checkCmd := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+r.name)
+		checkCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+		if checkCmd.Run() == nil {
+			continue // уже существует
+		}
+		if r.psNew != "" {
+			cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", r.psNew)
+			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+			_ = cmd.Run()
+		} else {
+			args := append([]string{"advfirewall", "firewall", "add", "rule", "name=" + r.name}, r.netshArgs...)
+			cmd := exec.Command("netsh", args...)
+			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+			_ = cmd.Run()
+		}
+		log.Info().Str("rule", r.name).Msg("✅ Правило Windows Firewall создано")
 	}
 }
 
