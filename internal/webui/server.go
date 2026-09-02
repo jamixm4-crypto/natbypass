@@ -177,6 +177,11 @@ func (s *Server) SetConfigPath(path string) {
 	}
 }
 
+// SetSignalingManager обновляет менеджер сигнальных каналов
+func (s *Server) SetSignalingManager(mgr *signaling.FallbackManager) {
+	s.sigMgr = mgr
+}
+
 // SetAppState обновляет состояние приложения (вызывается из main)
 func (s *Server) SetAppState(deviceID, publicIP, stunAddr string, virtualIP ...string) {
 	if s.state != nil {
@@ -648,7 +653,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.182"
+		ver = "1.9.183"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1455,7 +1460,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.182"
+		ver = "1.9.183"
 	}
 
 	vip := s.state.VirtualIP

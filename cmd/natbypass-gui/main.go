@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.182"
+	Version = "1.9.183"
 	Commit  = "release"
 )
 
@@ -713,7 +713,8 @@ func cleanStaleInstances() {
 	var stalePIDs []uint32
 	for {
 		name := windows.UTF16ToString(entry.ExeFile[:])
-		if (strings.EqualFold(name, "NatBypass.exe") || strings.EqualFold(name, "natbypass-gui.exe")) && entry.ProcessID != myPID {
+		lowerName := strings.ToLower(name)
+		if strings.Contains(lowerName, "natbypass") && !strings.Contains(lowerName, "diag") && entry.ProcessID != myPID {
 			stalePIDs = append(stalePIDs, entry.ProcessID)
 		}
 		if err := windows.Process32Next(snapshot, &entry); err != nil {
@@ -781,8 +782,8 @@ func main() {
 
 	// 1. Инициализация единого экземпляра (Single Instance Protection)
 	mutName, _ := windows.UTF16PtrFromString("Global\\NatBypass_SingleInstance_Mutex_App")
-	hMut, _, _ := procCreateMutexW.Call(0, 1, uintptr(unsafe.Pointer(mutName)))
-	if windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
+	hMut, _, err := procCreateMutexW.Call(0, 1, uintptr(unsafe.Pointer(mutName)))
+	if err == windows.ERROR_ALREADY_EXISTS || err == syscall.ERROR_ALREADY_EXISTS || windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
 		clsName, _ := windows.UTF16PtrFromString("NatBypassModernAppClass")
 		hExisting, _, _ := procFindWindowW.Call(uintptr(unsafe.Pointer(clsName)), 0)
 		if hExisting != 0 {
@@ -3166,9 +3167,28 @@ func buildModernUI(hInstance uintptr) {
 	hBtnModeMQTT = createOwnerDrawButton(hInstance, "⚡ Только MQTT", cx+475, 72, 175, 32, ID_BTN_MODE_MQTT, "normal")
 	hBtnModeTG = createOwnerDrawButton(hInstance, "💬 Только Telegram", cx+660, 72, 180, 32, ID_BTN_MODE_TG, "normal")
 
+	initBroker := "tcp://broker.emqx.io:1883"
+	initTopic := "natbypass/mesh/default"
+	initTgToken := ""
+	initTgChat := ""
+	if cfg != nil {
+		if act := cfg.EnsureActiveProfile(); act != nil {
+			if act.MQTTBroker != "" {
+				initBroker = act.MQTTBroker
+			}
+			if act.MQTTTopic != "" {
+				initTopic = act.MQTTTopic
+			}
+			if act.TGToken != "" {
+				initTgToken = act.TGToken
+				initTgChat = fmt.Sprintf("%d", act.TGChatID)
+			}
+		}
+	}
+
 	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", cx, 114, cw, 22, hFontHeader)
 	lblMqBr := createLabel(hInstance, "URL Брокера:", cx, 140, 200, 20, hFontNormal)
-	hEditMqttBr = createEdit(hInstance, "tcp://broker.emqx.io:1883", cx+210, 136, 440, 28, false, false, hFontNormal)
+	hEditMqttBr = createEdit(hInstance, initBroker, cx+210, 136, 440, 28, false, false, hFontNormal)
 	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+660, 134, 180, 32, ID_BTN_TEST_MQTT, "normal")
 
 	lblMqPresets := createLabel(hInstance, "Пресеты:", cx+210, 170, 75, 18, hFontNormal)
@@ -3178,16 +3198,16 @@ func buildModernUI(hInstance uintptr) {
 	hBtnMqEcl := createOwnerDrawButton(hInstance, "⚡ Eclipse", cx+640, 168, 100, 24, ID_BTN_MQ_ECL, "normal")
 
 	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 202, 200, 20, hFontNormal)
-	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 198, 630, 28, false, false, hFontNormal)
-	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: mynet/supersecret/2029", cx+210, 228, 630, 18, hFontNormal)
+	hEditMqttTp = createEdit(hInstance, initTopic, cx+210, 198, 630, 28, false, false, hFontNormal)
+	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: natbypass/mesh/default", cx+210, 228, 630, 18, hFontNormal)
 
 	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 256, cw, 22, hFontHeader)
 	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 282, 200, 20, hFontNormal)
-	hEditTgToken = createEdit(hInstance, "", cx+210, 278, 440, 28, false, false, hFontNormal)
+	hEditTgToken = createEdit(hInstance, initTgToken, cx+210, 278, 440, 28, false, false, hFontNormal)
 	hBtnTestTg = createOwnerDrawButton(hInstance, "🧪 Проверить бот", cx+660, 276, 180, 32, ID_BTN_TEST_TG, "normal")
 
 	lblTgChat := createLabel(hInstance, "Chat ID (ЛС или Группа):", cx, 316, 200, 20, hFontNormal)
-	hEditTgChat = createEdit(hInstance, "", cx+210, 312, 630, 28, false, false, hFontNormal)
+	hEditTgChat = createEdit(hInstance, initTgChat, cx+210, 312, 630, 28, false, false, hFontNormal)
 	lblTgHint := createLabel(hInstance, "💡 1) Создайте бота в @BotFather  2) Узнайте Chat ID через @userinfobot  3) Добавьте ботов всех ПК в одну группу!", cx, 344, cw, 18, hFontNormal)
 
 	hBtnSaveChannels = createOwnerDrawButton(hInstance, "💾 Применить и сохранить настройки каналов", cx+160, 380, 520, 42, ID_BTN_SAVE_CHANNELS, "primary")
@@ -3406,10 +3426,32 @@ func toggleVPNManual() {
 	procInvalidateRect.Call(hBtnVpn, 0, 1)
 }
 
+func loadOrGenerateKeys(cfg *config.Config) ([32]byte, [32]byte, error) {
+	if cfg.Crypto.PublicKey != "" && cfg.Crypto.PrivateKey != "" {
+		pub, err := crypto.HexToKey(cfg.Crypto.PublicKey)
+		if err == nil {
+			priv, err := crypto.HexToKey(cfg.Crypto.PrivateKey)
+			if err == nil {
+				return pub, priv, nil
+			}
+		}
+	}
+
+	pub, priv, err := crypto.GenerateKeyPair()
+	if err != nil {
+		return [32]byte{}, [32]byte{}, fmt.Errorf("failed to generate encryption keys: %w", err)
+	}
+
+	cfg.Crypto.PublicKey = crypto.KeyToHex(pub)
+	cfg.Crypto.PrivateKey = crypto.KeyToHex(priv)
+	_ = config.Save(cfg, configPath, false)
+	return pub, priv, nil
+}
+
 func startEngineFromConfig(c *config.Config) {
 	defer func() {
 		if r := recover(); r != nil {
-			writeDebug(fmt.Sprintf("вќЊ CRITICAL PANIC in startEngine: %v\r\n%s", r, string(debug.Stack())))
+			writeDebug(fmt.Sprintf("❌ CRITICAL PANIC in startEngine: %v\r\n%s", r, string(debug.Stack())))
 		}
 	}()
 
@@ -3421,10 +3463,9 @@ func startEngineFromConfig(c *config.Config) {
 	engineCtx = ctx
 	engineCancel = cancel
 	triggerPublishCh = make(chan struct{}, 10)
-	myVirtualIP = config.ResolveVirtualIP(c, myDevID)
 
 	var err error
-	myPubKey, myPrivKey, err = crypto.GenerateKeyPair()
+	myPubKey, myPrivKey, err = loadOrGenerateKeys(c)
 	if err != nil {
 		addLog("⚠️ Ошибка генерации ключей: " + err.Error())
 	}
@@ -3442,6 +3483,9 @@ func startEngineFromConfig(c *config.Config) {
 	}
 	writeDebug("Идентификатор устройства: " + myDevID)
 
+	myVirtualIP = config.ResolveVirtualIP(c, myDevID)
+	writeDebug("Локальный Virtual IP: " + myVirtualIP)
+
 	if wgKP, wgErr := wireguard.GenerateKeyPair(); wgErr == nil {
 		myWGPubKey = wgKP.PublicKey
 		myWGPrivKey = wgKP.PrivateKey
@@ -3458,6 +3502,8 @@ func startEngineFromConfig(c *config.Config) {
 	uiServer = webui.NewServer(webPort, c.WebUI.Username, c.WebUI.Password, registry, nil)
 	uiServer.SetDeviceName(myNick)
 	uiServer.SetVersion(Version)
+	uiServer.SetVirtualIP(myVirtualIP)
+	uiServer.SetAppState(myDevID, myPublicIP, mySTUNAddr, myVirtualIP)
 	uiServer.SetConfigPath(configPath)
 	uiServer.SetOnConfigChange(triggerPublish)
 	go func() {
@@ -3746,7 +3792,7 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}
 	for _, ch := range c.Signaling.Channels {
-		if ch.Type == "telegram" && ch.Params != nil {
+		if ch.Type == "telegram" && ch.Params != nil && tgToken == "" {
 			if ch.Params["token"] != "" {
 				tgToken = ch.Params["token"]
 			}
@@ -3754,7 +3800,7 @@ func startEngineFromConfig(c *config.Config) {
 				tgChat = ch.Params["chat_id"]
 			}
 		}
-		if ch.Type == "mqtt" && ch.Params != nil {
+		if ch.Type == "mqtt" && ch.Params != nil && (activeProf == nil || activeProf.MQTTTopic == "") {
 			if ch.Params["broker_url"] != "" {
 				mqBroker = ch.Params["broker_url"]
 			}
@@ -4376,14 +4422,34 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				existingPeer, peerFound := registry.Get(p.DeviceID)
 				needsFastReply := !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
 
+				preservedEP := ""
+				preservedDirect := false
+				preservedLat := time.Duration(0)
+				preservedPingMs := int64(0)
+				if existingPeer != nil {
+					preservedEP = existingPeer.ActiveEndpoint
+					preservedDirect = existingPeer.DirectP2P
+					preservedLat = existingPeer.Latency
+					preservedPingMs = existingPeer.PingMs
+				}
+				if p.ActiveEndpoint != "" {
+					preservedEP = p.ActiveEndpoint
+				}
+
 				registry.Upsert(&peer.Peer{
 					DeviceID:         p.DeviceID,
 					Nickname:         nick,
+					DeviceName:       nick,
 					VirtualIP:        peerVIP,
 					PublicKey:        p.PublicKey,
 					PublicIP:         p.PublicIP,
 					LocalAddr:        p.LocalAddr,
 					STUNAddr:         p.STUNAddr,
+					ActiveEndpoint:   preservedEP,
+					DirectP2P:        preservedDirect,
+					Latency:          preservedLat,
+					PingMs:           preservedPingMs,
+					Candidates:       p.Candidates,
 					WGPubKey:         p.WGPubKey,
 					WGPort:           p.WGPort,
 					LastSeen:         time.Now(),
