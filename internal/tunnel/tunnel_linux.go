@@ -212,20 +212,53 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 
 	// 6. Разрешение входящего и транзитного трафика в iptables (Keenetic NDM / OpenWrt / Linux / Entware)
 	applyFirewallRules := func() {
-		iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
-		for _, ipt := range iptablesPaths {
-			_ = exec.Command(ipt, "-I", "INPUT", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
-			_ = exec.Command(ipt, "-I", "INPUT", "1", "-p", "icmp", "-j", "ACCEPT").Run()
-			_ = exec.Command(ipt, "-I", "INPUT", "1", "-p", "udp", "--dport", "47832", "-j", "ACCEPT").Run()
-			_ = exec.Command(ipt, "-I", "FORWARD", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
-			_ = exec.Command(ipt, "-I", "FORWARD", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
+		// Поиск доступных бинарников iptables
+		var iptCandidates []string
+		for _, p := range []string{"/usr/sbin/iptables", "/sbin/iptables", "/opt/sbin/iptables", "iptables"} {
+			if path, err := exec.LookPath(p); err == nil {
+				iptCandidates = append(iptCandidates, path)
+			}
+		}
+		if len(iptCandidates) == 0 {
+			iptCandidates = []string{"/usr/sbin/iptables", "/sbin/iptables", "iptables"}
+		}
 
-			// Специальные цепочки KeeneticOS (NDM)
-			_ = exec.Command(ipt, "-I", "_NDM_INPUT", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
-			_ = exec.Command(ipt, "-I", "_NDM_INPUT", "1", "-p", "icmp", "-j", "ACCEPT").Run()
-			_ = exec.Command(ipt, "-I", "_NDM_INPUT", "1", "-p", "udp", "--dport", "47832", "-j", "ACCEPT").Run()
-			_ = exec.Command(ipt, "-I", "_NDM_FORWARD", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
-			_ = exec.Command(ipt, "-I", "_NDM_FORWARD", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
+		// Выполнение iptables с поддержкой ожидания блокировки (-w 5)
+		runIpt := func(ipt string, args ...string) {
+			// Проверяем наличие правила через -C перед добавлением
+			checkArgs := append([]string{"-w", "5", "-C"}, args...)
+			if err := exec.Command(ipt, checkArgs...).Run(); err == nil {
+				return // Правило уже существует
+			}
+			// Добавляем правило через -I
+			insertArgs := append([]string{"-w", "5", "-I"}, append([]string{args[0], "1"}, args[1:]...)...)
+			if err := exec.Command(ipt, insertArgs...).Run(); err != nil {
+				// Fallback без -w на старых версиях iptables
+				insertNoWait := append([]string{"-I", args[0], "1"}, args[1:]...)
+				_ = exec.Command(ipt, insertNoWait...).Run()
+			}
+		}
+
+		for _, ipt := range iptCandidates {
+			// 1. Стандартные цепочки ядра Linux
+			runIpt(ipt, "INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
+			runIpt(ipt, "INPUT", "-p", "icmp", "-j", "ACCEPT")
+			runIpt(ipt, "FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
+			runIpt(ipt, "FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
+			runIpt(ipt, "OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
+
+			// 2. Специальные цепочки KeeneticOS (NDM Framework)
+			runIpt(ipt, "_NDM_INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
+			runIpt(ipt, "_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
+			runIpt(ipt, "_NDM_FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
+			runIpt(ipt, "_NDM_FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
+
+			// 3. Таблица mangle: отключение blackhole-маркировки для пакетов mesh
+			_ = exec.Command(ipt, "-w", "5", "-t", "mangle", "-I", "PREROUTING", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+
+			// 4. Разрешение входящих UDP-пакетов
+			runIpt(ipt, "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+			runIpt(ipt, "_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
 		}
 	}
 	applyFirewallRules()

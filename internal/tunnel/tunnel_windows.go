@@ -165,9 +165,9 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 	psSetup := fmt.Sprintf(`Get-NetRoute | Where-Object { ($_.DestinationPrefix -like "%s*" -or $_.DestinationPrefix -like "100.64.200*") -and $_.InterfaceIndex -ne %d } | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; Get-NetIPAddress | Where-Object { ($_.IPAddress -like "%s*" -or $_.IPAddress -like "100.64.200*") -and $_.InterfaceIndex -ne %d } | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue; $cur = Get-NetIPAddress | Where-Object { $_.IPAddress -eq "%s" -and $_.InterfaceIndex -eq %d }; if (-not $cur) { New-NetIPAddress -InterfaceIndex %d -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue }; Set-NetIPInterface -InterfaceIndex %d -DadTransmits 0 -InterfaceMetric 1 -RouterDiscovery Disabled -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex %d -DestinationPrefix "%s.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; New-NetRoute -InterfaceIndex %d -DestinationPrefix "100.64.200.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex %d -NetworkCategory Private -ErrorAction SilentlyContinue`, prefix, ifIndex, prefix, ifIndex, cleanVIP, ifIndex, ifIndex, cleanVIP, ifIndex, ifIndex, prefix, ifIndex, ifIndex)
 	_ = runHiddenPS(psSetup)
 
-	// Фоновое добавление правил брандмауэра
+	// Фоновое добавление правил брандмауэра (без дублирования)
 	go func() {
-		psFw := `netsh advfirewall firewall add rule name="NatBypass ICMPv4 In" dir=in action=allow protocol=ICMPv4 enable=yes; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue`
+		psFw := `if (-not (Get-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -Name "NatBypass ICMPv4 In" -Direction Inbound -Action Allow -Protocol ICMPv4 -ErrorAction SilentlyContinue }; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue`
 		_ = runHiddenPS(psFw)
 	}()
 

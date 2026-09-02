@@ -25,15 +25,20 @@ func ensureAdminOnWindows() {
 	go ensureFirewallRule()
 }
 
-// ensureFirewallRule создаёт правило Windows Firewall для входящего UDP на порту 47832
+// ensureFirewallRule создаёт правило Windows Firewall для входящего UDP на порту 47832 (без дубликатов)
 func ensureFirewallRule() {
 	const ruleName = "NatBypass UDP P2P (47832)"
+	checkCmd := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+ruleName)
+	checkCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	if err := checkCmd.Run(); err == nil {
+		return // Правило уже существует
+	}
 	cmd := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
 		"name="+ruleName, "dir=in", "action=allow", "protocol=UDP", "localport=47832",
 		"description=NatBypass UDP hole-punch P2P port", "enable=yes", "profile=any")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	if err := cmd.Run(); err == nil {
-		log.Info().Msg("✅ Правило Windows Firewall для UDP 47832 (P2P Direct) создано или уже существует")
+		log.Info().Msg("✅ Правило Windows Firewall для UDP 47832 (P2P Direct) создано")
 	}
 }
 
