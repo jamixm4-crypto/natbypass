@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.184"
+	Version = "1.9.185"
 	Commit  = "release"
 )
 
@@ -140,6 +140,7 @@ var (
 	procCreatePen             = modgdi32.NewProc("CreatePen")
 	procDrawTextW             = moduser32.NewProc("DrawTextW")
 	procFillRect              = moduser32.NewProc("FillRect")
+	procFrameRect             = moduser32.NewProc("FrameRect")
 	procBeginPaint            = moduser32.NewProc("BeginPaint")
 	procEndPaint              = moduser32.NewProc("EndPaint")
 	procInvalidateRect        = moduser32.NewProc("InvalidateRect")
@@ -469,6 +470,7 @@ var (
 	hBtnToggleLogs           uintptr
 	hBtnSaveCfg              uintptr
 	hBtnCheckUpdate          uintptr
+	lblUpdateStatus          uintptr
 
 	// Стартовый экран (Startup / Splash)
 	hSplashTitle   uintptr
@@ -1606,7 +1608,13 @@ func handleCommand(id uint16) {
 
 	case ID_BTN_CHECK_UPDATE:
 		addLog("🔍 Проверка обновлений на GitHub Releases...")
+		buttonLabels[ID_BTN_CHECK_UPDATE] = "⏳ Проверка обновлений..."
+		procInvalidateRect.Call(hBtnCheckUpdate, 0, 1)
 		go func() {
+			defer func() {
+				buttonLabels[ID_BTN_CHECK_UPDATE] = "🚀 Проверить обновления NatBypass на GitHub"
+				procInvalidateRect.Call(hBtnCheckUpdate, 0, 1)
+			}()
 			info, err := updater.CheckUpdate(context.Background(), Version)
 			if err != nil {
 				addLog("❌ Ошибка проверки обновлений: " + err.Error())
@@ -1616,26 +1624,20 @@ func handleCommand(id uint16) {
 				return
 			}
 			if !info.HasUpdate {
-				addLog(fmt.Sprintf("✅ У вас установлена самая свежая версия (%s)", Version))
-				msg, _ := windows.UTF16PtrFromString(fmt.Sprintf("У вас установлена самая свежая версия NatBypass (%s).\nОбновлений не требуется.", Version))
+				addLog(fmt.Sprintf("✅ У вас установлена самая свежая версия (v%s)", Version))
+				if lblUpdateStatus != 0 {
+					setControlText(lblUpdateStatus, fmt.Sprintf("✅ У вас установлена самая свежая версия (v%s)", Version))
+				}
+				msg, _ := windows.UTF16PtrFromString(fmt.Sprintf("У вас установлена самая свежая версия NatBypass (v%s).\nОбновлений не требуется.", Version))
 				title, _ := windows.UTF16PtrFromString("Обновление NatBypass")
 				procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x40 /* MB_ICONINFORMATION */)
 				return
 			}
-			addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Запрос подтверждения...", info.LatestVersion))
-			msgText := fmt.Sprintf("Доступна новая версия NatBypass: %s (текущая: %s)\n\nХотите скачать и установить обновление прямо сейчас?", info.LatestVersion, Version)
-			msg, _ := windows.UTF16PtrFromString(msgText)
-			title, _ := windows.UTF16PtrFromString("Доступно обновление")
-			ret, _, _ := procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x24 /* MB_YESNO | MB_ICONQUESTION */)
-			if ret == 6 /* IDYES */ {
-				addLog(fmt.Sprintf("⚡ Скачивание и применение обновления %s...", info.LatestVersion))
-				if err := updater.ApplyUpdate(context.Background(), info.AssetURL); err != nil {
-					addLog("❌ Ошибка применения обновления: " + err.Error())
-					errMsg, _ := windows.UTF16PtrFromString("Ошибка при установке обновления:\n" + err.Error())
-					errTitle, _ := windows.UTF16PtrFromString("Ошибка обновления")
-					procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(errMsg)), uintptr(unsafe.Pointer(errTitle)), 0x10)
-				}
+			addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Открытие окна обновления...", info.LatestVersion))
+			if lblUpdateStatus != 0 {
+				setControlText(lblUpdateStatus, fmt.Sprintf("🚀 Доступна новая версия: %s! Нажмите для обновления", info.LatestVersion))
 			}
+			showUpdateModal(info)
 		}()
 
 
@@ -2766,6 +2768,270 @@ func qrDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	return ret
 }
 
+var (
+	dlgUpdateInfo       *updater.ReleaseInfo
+	dlgUpdatePercent    int
+	dlgUpdateStatusText string
+	dlgUpdateErrorText  string
+	dlgUpdateStarted    bool
+	dlgUpdateCompleted  bool
+	hDlgUpdateStatus    uintptr
+	hDlgUpdateBtnStart  uintptr
+	hDlgUpdateBtnCancel uintptr
+)
+
+func showUpdateModal(info *updater.ReleaseInfo) {
+	if hMainWnd == 0 || info == nil {
+		return
+	}
+	hInstance, _, _ := procGetModuleHandleW.Call(0)
+	dlgUpdateInfo = info
+	dlgUpdatePercent = 0
+	dlgUpdateStatusText = "Готов к скачиванию"
+	dlgUpdateErrorText = ""
+	dlgUpdateStarted = false
+	dlgUpdateCompleted = false
+	dlgFinished = false
+
+	dlgClassName, _ := windows.UTF16PtrFromString("NatBypassUpdateDlgClass")
+	dlgTitle, _ := windows.UTF16PtrFromString("Обновление NatBypass")
+
+	dlgWc := WNDCLASSEXW{
+		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),
+		Style:         3,
+		LpfnWndProc:   windows.NewCallback(updateDlgProc),
+		HInstance:     hInstance,
+		HIcon:         hAppIcon,
+		HCursor:       hCursor,
+		HbrBackground: hBrushBg,
+		LpszClassName: dlgClassName,
+		HIconSm:       hAppIcon,
+	}
+	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&dlgWc)))
+
+	var parentRc RECT
+	procGetWindowRect.Call(hMainWnd, uintptr(unsafe.Pointer(&parentRc)))
+	dlgW := int32(520)
+	dlgH := int32(310)
+	dlgX := parentRc.Left + (parentRc.Right-parentRc.Left-dlgW)/2
+	dlgY := parentRc.Top + (parentRc.Bottom-parentRc.Top-dlgH)/2
+	if dlgX < 0 {
+		dlgX = 100
+	}
+	if dlgY < 0 {
+		dlgY = 100
+	}
+
+	hDlg, _, _ := procCreateWindowExW.Call(
+		0x0008|0x00010000,
+		uintptr(unsafe.Pointer(dlgClassName)),
+		uintptr(unsafe.Pointer(dlgTitle)),
+		WS_FIXEDWINDOW|WS_VISIBLE|WS_CLIPCHILDREN,
+		uintptr(dlgX), uintptr(dlgY), uintptr(dlgW), uintptr(dlgH),
+		hMainWnd, 0, hInstance, 0,
+	)
+
+	darkMode := int32(1)
+	procDwmSetWindowAttribute.Call(hDlg, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
+
+	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("🚀 Доступно обновление NatBypass %s", info.LatestVersion), 24, 18, 470, 24, hFontBold)
+	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("Текущая версия: v%s   ➜   Новая версия: %s", Version, info.LatestVersion), 24, 46, 470, 18, hFontNormal)
+
+	sizeMB := float64(info.AssetSize) / (1024 * 1024)
+	sizeStr := ""
+	if sizeMB > 0 {
+		sizeStr = fmt.Sprintf(" • Размер: %.1f MB", sizeMB)
+	}
+	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("Файл: %s%s • GitHub Releases", info.AssetName, sizeStr), 24, 68, 470, 18, hFontNormal)
+
+	hDlgUpdateStatus = createLabelOn(hDlg, hInstance, "Нажмите «Начать обновление» для загрузки и установки.", 24, 156, 470, 20, hFontNormal)
+
+	hDlgUpdateBtnStart = createOwnerDrawButtonOn(hDlg, hInstance, "⚡ Начать обновление", 24, 200, 240, 42, 6001, "primary")
+	hDlgUpdateBtnCancel = createOwnerDrawButtonOn(hDlg, hInstance, "Отмена", 274, 200, 220, 42, 6002, "normal")
+
+	procShowWindow.Call(hDlg, SW_SHOW)
+	procSetForegroundWindow.Call(hDlg)
+	procEnableWindow.Call(hMainWnd, 0)
+
+	// Запуск таймера обновления прогресса (каждые 80 мс)
+	procSetTimer.Call(hDlg, 1, 80, 0)
+
+	var msg MSG
+	for !dlgFinished {
+		ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		if int32(ret) <= 0 {
+			break
+		}
+		if msg.Message == 0x0100 {
+			if msg.WParam == 0x1B { // Escape
+				if !dlgUpdateStarted || dlgUpdateCompleted {
+					dlgFinished = true
+					break
+				}
+			}
+		}
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+
+	procKillTimer.Call(hDlg, 1)
+	procEnableWindow.Call(hMainWnd, 1)
+	procSetForegroundWindow.Call(hMainWnd)
+	procDestroyWindow.Call(hDlg)
+}
+
+func updateDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
+	switch msg {
+	case WM_ERASEBKGND:
+		return 1
+	case WM_PAINT:
+		var ps PAINTSTRUCT
+		hdc, _, _ := procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+		var rc RECT
+		procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
+		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&rc)), hBrushBg)
+
+		// 1. Отрисовка фона полосы прогресса (Progress Bar Track)
+		barRc := RECT{Left: 24, Top: 104, Right: 494, Bottom: 144}
+		hBrushTrack, _, _ := procCreateSolidBrush.Call(0x002D1E16) // #161e2d
+		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&barRc)), hBrushTrack)
+		procDeleteObject.Call(hBrushTrack)
+
+		// 2. Рамка полосы прогресса
+		hBrushBorder, _, _ := procCreateSolidBrush.Call(0x004A3626) // #26364a
+		procFrameRect.Call(hdc, uintptr(unsafe.Pointer(&barRc)), hBrushBorder)
+		procDeleteObject.Call(hBrushBorder)
+
+		// 3. Заполнение полосы прогресса (Fill Bar)
+		pct := dlgUpdatePercent
+		if pct < 0 {
+			pct = 0
+		}
+		if pct > 100 {
+			pct = 100
+		}
+		totalWidth := barRc.Right - barRc.Left - 4
+		fillWidth := int32(float64(totalWidth) * (float64(pct) / 100.0))
+		if fillWidth > 0 {
+			fillRc := RECT{
+				Left:   barRc.Left + 2,
+				Top:    barRc.Top + 2,
+				Right:  barRc.Left + 2 + fillWidth,
+				Bottom: barRc.Bottom - 2,
+			}
+			fillColor := uint32(0x00E9A50E) // Cyan #0ea5e9
+			if pct >= 100 {
+				fillColor = uint32(0x005EC522) // Green #22c55e
+			}
+			hBrushFill, _, _ := procCreateSolidBrush.Call(uintptr(fillColor))
+			procFillRect.Call(hdc, uintptr(unsafe.Pointer(&fillRc)), hBrushFill)
+			procDeleteObject.Call(hBrushFill)
+		}
+
+		// 4. Текст поверх полосы прогресса (Например: "65% • Скачивание...")
+		procSetBkMode.Call(hdc, 1 /* TRANSPARENT */)
+		procSetTextColor.Call(hdc, 0x00FFFFFF)
+		if hFontBold != 0 {
+			procSelectObject.Call(hdc, hFontBold)
+		}
+		pctText := fmt.Sprintf("%d%%", pct)
+		if !dlgUpdateStarted {
+			pctText = "0% — Ожидание запуска"
+		} else if dlgUpdateCompleted {
+			pctText = "100% — Обновление установлено!"
+		} else if dlgUpdatePercent > 0 {
+			pctText = fmt.Sprintf("%d%% — Загрузка файла...", pct)
+		}
+		pctUTF16, _ := windows.UTF16FromString(pctText)
+		textRc := barRc
+		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&pctUTF16[0])), uintptr(len(pctUTF16)-1), uintptr(unsafe.Pointer(&textRc)), 0x0001|0x0004|0x0020 /* DT_CENTER | DT_VCENTER | DT_SINGLELINE */)
+
+		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+		return 0
+
+	case 0x0113: // WM_TIMER
+		st := updater.GetStatus()
+		if dlgUpdateStarted {
+			changed := false
+			if dlgUpdatePercent != st.Percent {
+				dlgUpdatePercent = st.Percent
+				changed = true
+			}
+			if st.Status != "" && dlgUpdateStatusText != st.Status {
+				dlgUpdateStatusText = st.Status
+				setControlText(hDlgUpdateStatus, st.Status)
+			}
+			if st.Error != "" && dlgUpdateErrorText != st.Error {
+				dlgUpdateErrorText = st.Error
+				setControlText(hDlgUpdateStatus, "❌ "+st.Error)
+				buttonLabels[6001] = "❌ Ошибка (Повторить)"
+				buttonTypes[6001] = "red"
+				procEnableWindow.Call(hDlgUpdateBtnStart, 1)
+				procInvalidateRect.Call(hDlgUpdateBtnStart, 0, 1)
+			}
+			if st.Completed && !dlgUpdateCompleted {
+				dlgUpdateCompleted = true
+				dlgUpdatePercent = 100
+				changed = true
+				setControlText(hDlgUpdateStatus, "✅ Обновление установлено! Перезапуск приложения...")
+				buttonLabels[6001] = "✅ Перезапуск..."
+				buttonTypes[6001] = "green"
+				procInvalidateRect.Call(hDlgUpdateBtnStart, 0, 1)
+				buttonLabels[6002] = "Закрыть"
+				procInvalidateRect.Call(hDlgUpdateBtnCancel, 0, 1)
+			}
+			if changed {
+				barRc := RECT{Left: 24, Top: 104, Right: 494, Bottom: 144}
+				procInvalidateRect.Call(hwnd, uintptr(unsafe.Pointer(&barRc)), 0)
+			}
+		}
+		return 0
+
+	case WM_DRAWITEM:
+		dis := *(*DRAWITEMSTRUCT)(unsafe.Pointer(lParam))
+		drawCustomButton(&dis)
+		return 1
+
+	case WM_CTLCOLORSTATIC:
+		hdc := wParam
+		procSetBkMode.Call(hdc, 1)
+		procSetTextColor.Call(hdc, COLOR_TEXT)
+		return hBrushBg
+
+	case WM_COMMAND:
+		id := LOWORD(wParam)
+		if id == 6001 { // Начать обновление
+			if dlgUpdateCompleted {
+				dlgFinished = true
+				return 0
+			}
+			dlgUpdateStarted = true
+			dlgUpdateErrorText = ""
+			buttonLabels[6001] = "⏳ Скачивание..."
+			buttonTypes[6001] = "normal"
+			procEnableWindow.Call(hDlgUpdateBtnStart, 0)
+			procInvalidateRect.Call(hDlgUpdateBtnStart, 0, 1)
+			addLog(fmt.Sprintf("⚡ Запуск скачивания обновления %s (%s)...", dlgUpdateInfo.LatestVersion, dlgUpdateInfo.AssetName))
+
+			go func() {
+				if err := updater.ApplyUpdate(context.Background(), dlgUpdateInfo.AssetURL); err != nil {
+					addLog("❌ Ошибка применения обновления: " + err.Error())
+				}
+			}()
+			return 0
+		} else if id == 6002 { // Отмена / Закрыть
+			dlgFinished = true
+			return 0
+		}
+
+	case WM_CLOSE:
+		dlgFinished = true
+		return 0
+	}
+	ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
+	return ret
+}
+
 func handleSaveChannels() {
 	saveConfigFromUI()
 	addLog("💾 Настройки сигнальных каналов сохранены в config.yaml")
@@ -3298,12 +3564,13 @@ func buildModernUI(hInstance uintptr) {
 	hBtnToggleLogs = createOwnerDrawButton(hInstance, logsText, cx, 204, 415, 38, ID_BTN_TOGGLE_LOGS, logsType)
 
 	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx, 260, cw, 42, ID_BTN_SAVE_CFG, "primary")
-	hBtnCheckUpdate = createOwnerDrawButton(hInstance, "🚀 Проверить и обновить NatBypass с GitHub", cx, 310, cw, 38, ID_BTN_CHECK_UPDATE, "green")
+	hBtnCheckUpdate = createOwnerDrawButton(hInstance, "🚀 Проверить обновления NatBypass на GitHub", cx, 310, cw, 38, ID_BTN_CHECK_UPDATE, "green")
+	lblUpdateStatus = createLabel(hInstance, fmt.Sprintf("Текущая версия: v%s • Нажмите для проверки наличия обновлений с GitHub Releases", Version), cx, 354, cw, 20, hFontNormal)
 
 	tabPages[7] = []uintptr{
 		lblSetTitle, lblSetDesc, lblNick, hEditMyNick, lblNickHint,
 		lblSysHead, hBtnToggleAutostart, hBtnToggleMinimizeToTray, hBtnToggleLogs,
-		hBtnSaveCfg, hBtnCheckUpdate,
+		hBtnSaveCfg, hBtnCheckUpdate, lblUpdateStatus,
 	}
 
 	// СТАРТОВЫЙ ЭКРАН (STARTUP / SPLASH OVERLAY)
