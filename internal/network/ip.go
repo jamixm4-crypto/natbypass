@@ -206,27 +206,52 @@ func extractIPv4Subnet(addr net.Addr) string {
 	return fmt.Sprintf("%s/%d", networkIP.String(), ones)
 }
 
-// GetLocalLANIP РІРѕР·РІСЂР°С‰Р°РµС‚ РѕСЃРЅРѕРІРЅРѕР№ Р»РѕРєР°Р»СЊРЅС‹Р№ IPv4-Р°РґСЂРµСЃ СѓСЃС‚СЂРѕР№СЃС‚РІР°
+// GetLocalLANIP возвращает основной физический локальный IPv4-адрес устройства
 func GetLocalLANIP() string {
-	addrs, err := net.InterfaceAddrs()
+	ifaces, err := net.Interfaces()
 	if err != nil {
 		return ""
 	}
-	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
-			if ip4 := ipNet.IP.To4(); ip4 != nil {
-				ipStr := ip4.String()
-				if strings.HasPrefix(ipStr, "100.64.") {
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagPointToPoint != 0 {
+			continue
+		}
+		nameLower := strings.ToLower(iface.Name)
+		if strings.HasPrefix(nameLower, "nb") || strings.Contains(nameLower, "natbypass") || strings.Contains(nameLower, "wintun") ||
+			strings.HasPrefix(nameLower, "tun") || strings.HasPrefix(nameLower, "tap") || strings.HasPrefix(nameLower, "nwg") ||
+			strings.HasPrefix(nameLower, "wg") || strings.HasPrefix(nameLower, "docker") || strings.HasPrefix(nameLower, "veth") ||
+			strings.Contains(nameLower, "virtual") || strings.Contains(nameLower, "tailscale") || strings.Contains(nameLower, "zerotier") {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			if ip4 := ip.To4(); ip4 != nil {
+				// Пропускаем CGNAT подсеть 100.64.0.0/10
+				if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
 					continue
 				}
-				if strings.HasPrefix(ipStr, "192.168.") || strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "172.") {
-					return ipStr
+				if ip4.IsPrivate() {
+					return ip4.String()
 				}
 			}
 		}
 	}
 	return ""
 }
+
 
 var defaultIPv6APIs = []string{
 	"https://api6.ipify.org",

@@ -126,7 +126,11 @@ type WireGuardConfig struct {
 
 // GetAWGParams возвращает параметры на основе конфигурации AmneziaWG
 func (c *Config) GetAWGParams() wireguard.AWGParams {
+	activeProf := c.EnsureActiveProfile()
 	preset := c.WireGuard.AWGPreset
+	if preset == "" && activeProf != nil {
+		preset = activeProf.AWGPreset
+	}
 	if preset == "" {
 		preset = c.WireGuard.AWG.Preset
 	}
@@ -136,7 +140,31 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 
 	params := wireguard.GetAWGParamsByPreset(preset)
 
-	// Override custom AWG header and junk params if present in active profile / config
+	// Если в активном профиле заданы параметры AWG — они имеют наивысший приоритет
+	if activeProf != nil && activeProf.H1 != 0 {
+		params.H1 = activeProf.H1
+		params.H2 = activeProf.H2
+		params.H3 = activeProf.H3
+		params.H4 = activeProf.H4
+		if activeProf.S1 != 0 { params.S1 = activeProf.S1 }
+		if activeProf.S2 != 0 { params.S2 = activeProf.S2 }
+		if activeProf.Jc != 0 { params.Jc = activeProf.Jc }
+		if activeProf.Jmin != 0 { params.Jmin = activeProf.Jmin }
+		if activeProf.Jmax != 0 { params.Jmax = activeProf.Jmax }
+		if activeProf.HeaderProtectionKey != "" {
+			keyBytes, err := hex.DecodeString(activeProf.HeaderProtectionKey)
+			if err == nil && len(keyBytes) == 32 {
+				copy(params.HeaderProtectionKey[:], keyBytes)
+				params.HeaderProtectionEnabled = true
+			}
+		}
+		params.RandomTrailers = activeProf.RandomTrailers
+		params.DisableCookies = activeProf.DisableCookies
+		params.Version = wireguard.AWGVersion31
+		return params
+	}
+
+	// Override custom AWG header and junk params if present in config
 	if c.WireGuard.AWG.H1 != 0 {
 		params.H1 = c.WireGuard.AWG.H1
 		params.H2 = c.WireGuard.AWG.H2
@@ -180,6 +208,7 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 
 	return params
 }
+
 
 // CryptoConfig — настройки шифрования NaCl
 type CryptoConfig struct {

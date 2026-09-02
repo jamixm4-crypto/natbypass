@@ -299,7 +299,8 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 			nameLower := strings.ToLower(iface.Name)
 			if strings.HasPrefix(nameLower, "nb") || strings.Contains(nameLower, "natbypass") || strings.Contains(nameLower, "wintun") ||
 				strings.HasPrefix(nameLower, "tun") || strings.HasPrefix(nameLower, "tap") || strings.HasPrefix(nameLower, "nwg") ||
-				strings.HasPrefix(nameLower, "wg") || strings.HasPrefix(nameLower, "docker") || strings.HasPrefix(nameLower, "veth") {
+				strings.HasPrefix(nameLower, "wg") || strings.HasPrefix(nameLower, "docker") || strings.HasPrefix(nameLower, "veth") ||
+				strings.Contains(nameLower, "virtual") || strings.Contains(nameLower, "tailscale") || strings.Contains(nameLower, "zerotier") {
 				continue
 			}
 			addrs, err := iface.Addrs()
@@ -322,9 +323,12 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 					if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
 						continue
 					}
-					candidateSet[fmt.Sprintf("%s:%d", ip4.String(), localPort)] = struct{}{}
+					if ip4.IsPrivate() {
+						candidateSet[fmt.Sprintf("%s:%d", ip4.String(), localPort)] = struct{}{}
+					}
 				}
 			}
+
 		}
 	}
 

@@ -26,7 +26,7 @@ import (
 )
 
 
-const Version = "1.9.192"
+const Version = "1.9.193"
 
 
 
@@ -340,9 +340,30 @@ func StartEngine(configYAML string, tunFd int) string {
 				return
 			case <-ticker.C:
 				var awgParams *signaling.AWGParams
-				if cfg.WireGuard.AWG.Enabled || globalAWGPreset != "standard" {
-					awgParams = getAWGParamsFromPreset(globalAWGPreset)
+				if cfg != nil {
+					awgP := cfg.GetAWGParams()
+					awgParams = &signaling.AWGParams{
+						Jc:                      awgP.Jc,
+						Jmin:                    awgP.Jmin,
+						Jmax:                    awgP.Jmax,
+						S1:                      awgP.S1,
+						S2:                      awgP.S2,
+						S3:                      awgP.S3,
+						S4:                      awgP.S4,
+						H1:                      fmt.Sprintf("%d", awgP.H1),
+						H2:                      fmt.Sprintf("%d", awgP.H2),
+						H3:                      fmt.Sprintf("%d", awgP.H3),
+						H4:                      fmt.Sprintf("%d", awgP.H4),
+						Pmin:                    awgP.ContentPaddingAdditionMin,
+						Pmax:                    awgP.ContentPaddingAdditionMax,
+						Version:                 string(awgP.Version),
+						Preset:                  cfg.WireGuard.AWGPreset,
+						HeaderProtectionEnabled: awgP.HeaderProtectionEnabled,
+						RandomTrailers:          awgP.RandomTrailers,
+						DisableCookies:          awgP.DisableCookies,
+					}
 				}
+
 				pPort := 47832
 				if puncher != nil {
 					pPort = puncher.LocalPort()
@@ -399,7 +420,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             runtime.GOARCH,
-					Version:          "1.9.192",
+					Version:          "1.9.193",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -887,9 +908,30 @@ func RefreshPublicIP() {
 				activeTopic = activeProf.MQTTTopic
 			}
 			var awgParams *signaling.AWGParams
-			if globalConfig.WireGuard.AWG.Enabled || globalAWGPreset != "standard" {
-				awgParams = getAWGParamsFromPreset(globalAWGPreset)
+			if globalConfig != nil {
+				awgP := globalConfig.GetAWGParams()
+				awgParams = &signaling.AWGParams{
+					Jc:                      awgP.Jc,
+					Jmin:                    awgP.Jmin,
+					Jmax:                    awgP.Jmax,
+					S1:                      awgP.S1,
+					S2:                      awgP.S2,
+					S3:                      awgP.S3,
+					S4:                      awgP.S4,
+					H1:                      fmt.Sprintf("%d", awgP.H1),
+					H2:                      fmt.Sprintf("%d", awgP.H2),
+					H3:                      fmt.Sprintf("%d", awgP.H3),
+					H4:                      fmt.Sprintf("%d", awgP.H4),
+					Pmin:                    awgP.ContentPaddingAdditionMin,
+					Pmax:                    awgP.ContentPaddingAdditionMax,
+					Version:                 string(awgP.Version),
+					Preset:                  globalConfig.WireGuard.AWGPreset,
+					HeaderProtectionEnabled: awgP.HeaderProtectionEnabled,
+					RandomTrailers:          awgP.RandomTrailers,
+					DisableCookies:          awgP.DisableCookies,
+				}
 			}
+
 			cleanVIP := strings.TrimSpace(strings.Split(globalVirtualIP, "/")[0])
 			payload := &signaling.Payload{
 				DeviceID:         globalDevID,
