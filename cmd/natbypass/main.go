@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 
 
 var (
-	Version   = "1.9.176"
+	Version   = "1.9.180"
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
