@@ -230,8 +230,8 @@ switch -Wildcard ($Target) {
         $env:GOOS = "windows"
         $env:GOARCH = "amd64"
         $env:CGO_ENABLED = "0"
-        Write-Host "   Compiling NatBypass.exe (Pure Win32 GUI)..." -NoNewline
-        & $GoExe build -trimpath -ldflags "$LDFlags -H=windowsgui" -o (Join-Path $DistDir "NatBypass.exe") ./cmd/natbypass-gui
+        Write-Host "   Compiling NatBypass.exe (WebUI + Tray)..." -NoNewline
+        & $GoExe build -trimpath -ldflags "$LDFlags -H=windowsgui" -o (Join-Path $DistDir "NatBypass.exe") ./cmd/natbypass
         Write-Host " OK" -ForegroundColor Green
 
         Write-Host "   Compiling NatBypass-GUI.exe (Pure Win32 GUI)..." -NoNewline
