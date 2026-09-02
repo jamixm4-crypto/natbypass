@@ -21,6 +21,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import org.natbypass.app.ui.PeerUiModel
 
 // ── Status dot colors ─────────────────────────────────────────────────────────
@@ -93,6 +95,7 @@ fun PeerCard(
     modifier: Modifier = Modifier,
 ) {
     var showSheet by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
     val dotColor by animateColorAsState(
         targetValue = statusColor(peer.channelType),
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
@@ -100,7 +103,10 @@ fun PeerCard(
     )
 
     Card(
-        onClick = { showSheet = true },
+        onClick = {
+            try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Exception) {}
+            showSheet = true
+        },
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -110,6 +116,7 @@ fun PeerCard(
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
+
         Row(
             modifier = Modifier
                 .padding(12.dp)

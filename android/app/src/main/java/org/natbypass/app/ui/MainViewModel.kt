@@ -66,6 +66,9 @@ data class MainUiState(
     val rxBytes: Long = 0L,
     val txSpeedBps: Long = 0L,
     val rxSpeedBps: Long = 0L,
+    val txHistory: List<Float> = emptyList(),
+    val rxHistory: List<Float> = emptyList(),
+    val rttHistory: List<Float> = emptyList(),
     val peers: List<PeerUiModel> = emptyList(),
     val onlinePeers: Int = 0,
     val totalPeers: Int = 0,
@@ -88,13 +91,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var lastTxSpeedBps = 0L
     private var lastRxSpeedBps = 0L
 
+    private val txHistoryBuf = mutableListOf<Float>()
+    private val rxHistoryBuf = mutableListOf<Float>()
+    private val rttHistoryBuf = mutableListOf<Float>()
+
     private val prefs get() = getApplication<Application>()
         .getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
 
     init {
+        // Синхронизируем реальное состояние сервиса при старте
+        prefs.edit().putBoolean("vpn_running", NatBypassVpnService.isRunning).apply()
         startPolling()
         ensureEngineStarted()
     }
+
 
     private fun ensureEngineStarted() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -285,6 +295,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         val avgRtt = if (rttCount > 0) totalRtt / rttCount else 0L
 
+        // Обновляем буферы истории скорости и пинга (до 40 точек для плавного графика)
+        synchronized(txHistoryBuf) {
+            txHistoryBuf.add(lastTxSpeedBps.toFloat())
+            if (txHistoryBuf.size > 40) txHistoryBuf.removeAt(0)
+
+            rxHistoryBuf.add(lastRxSpeedBps.toFloat())
+            if (rxHistoryBuf.size > 40) rxHistoryBuf.removeAt(0)
+
+            rttHistoryBuf.add(avgRtt.toFloat())
+            if (rttHistoryBuf.size > 40) rttHistoryBuf.removeAt(0)
+        }
+
         _uiState.update {
             it.copy(
                 connectionState   = connState,
@@ -298,6 +320,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 rxBytes           = rxBytes,
                 txSpeedBps        = lastTxSpeedBps,
                 rxSpeedBps        = lastRxSpeedBps,
+                txHistory         = txHistoryBuf.toList(),
+                rxHistory         = rxHistoryBuf.toList(),
+                rttHistory        = rttHistoryBuf.toList(),
                 peers             = peers,
                 onlinePeers       = onlineCount,
                 totalPeers        = peers.size,
@@ -307,11 +332,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-
-    // в”Ђв”Ђ VPN control в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+    // ── VPN control ───────────────────────────────────────────────────────────
 
     fun onVpnToggleClick(activity: Activity, permissionLauncher: (Intent) -> Unit) {
-        val isRunning = prefs.getBoolean("vpn_running", false) || NatBypassVpnService.isRunning
+        // Проверяем РЕАЛЬНОЕ состояние запущенной службы
+        val isRunning = NatBypassVpnService.isRunning
         if (isRunning) {
             stopVpn(activity)
         } else {
@@ -323,6 +348,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
 
     fun startVpn(context: Context) {
         val intent = Intent(context, NatBypassVpnService::class.java).apply {

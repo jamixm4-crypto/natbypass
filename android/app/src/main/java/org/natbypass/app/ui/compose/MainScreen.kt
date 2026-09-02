@@ -3,9 +3,11 @@ package org.natbypass.app.ui.compose
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,10 +22,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +41,7 @@ import java.util.Locale
 import org.natbypass.app.ui.ConnectionState
 import org.natbypass.app.ui.MainUiState
 import org.natbypass.app.ui.PeerUiModel
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -202,10 +212,25 @@ fun MainScreen(
                 )
             }
 
+            // ── Bandwidth & RTT Live Chart ────────────────────────────────────
+            if (uiState.connectionState != ConnectionState.DISCONNECTED || uiState.txBytes > 0L || uiState.rxBytes > 0L) {
+                item {
+                    BandwidthLiveChart(
+                        txHistory = uiState.txHistory,
+                        rxHistory = uiState.rxHistory,
+                        rttHistory = uiState.rttHistory,
+                        currentTxSpeed = uiState.txSpeedBps,
+                        currentRxSpeed = uiState.rxSpeedBps,
+                        avgRttMs = uiState.avgRttMs,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+            }
 
             // ── Network profile card ─────────────────────────────────────────
             item {
                 NetworkCard(
+
                     profileName = uiState.activeProfileName.ifEmpty { "Основная сеть" },
                     onlinePeers = uiState.onlinePeers,
                     totalPeers  = uiState.totalPeers,
@@ -327,28 +352,31 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
     val isConnecting = state == ConnectionState.CONNECTING
 
     val interactionSource = remember { MutableInteractionSource() }
-    val scale by animateFloatAsState(
-        targetValue = 1f,
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val haptic = LocalHapticFeedback.current
+
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.88f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
+            stiffness = Spring.StiffnessLow
         ),
-        label = "btn_scale"
+        label = "btn_press_scale"
     )
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.6f, targetValue = 0f,
+        initialValue = 0.55f, targetValue = 0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = EaseOut),
+            animation = tween(1400, easing = EaseOut),
             repeatMode = RepeatMode.Restart
         ),
         label = "pulse_alpha"
     )
     val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f, targetValue = 1.30f,
+        initialValue = 1f, targetValue = 1.35f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = EaseOut),
+            animation = tween(1400, easing = EaseOut),
             repeatMode = RepeatMode.Restart
         ),
         label = "pulse_scale"
@@ -356,8 +384,11 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
 
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier.size(136.dp)
+        modifier = Modifier
+            .size(144.dp)
+            .scale(pressScale)
     ) {
+        // Glowing animated aura
         if (isConnecting) {
             Box(
                 modifier = Modifier
@@ -365,6 +396,15 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
                     .scale(pulseScale)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha))
+            )
+        } else if (isConnected) {
+            val auraColor = if (state == ConnectionState.CONNECTED_P2P) MaterialTheme.natColors.success else MaterialTheme.natColors.warning
+            Box(
+                modifier = Modifier
+                    .size(136.dp)
+                    .scale(pulseScale)
+                    .clip(CircleShape)
+                    .background(auraColor.copy(alpha = pulseAlpha * 0.35f))
             )
         }
 
@@ -382,13 +422,17 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .size(118.dp)
-                .scale(scale)
                 .clip(CircleShape)
                 .background(buttonColor)
                 .clickable(
                     interactionSource = interactionSource,
                     indication = null,
-                    onClick = onClick
+                    onClick = {
+                        try {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        } catch (_: Exception) {}
+                        onClick()
+                    }
                 ),
             contentAlignment = Alignment.Center,
         ) {
@@ -405,6 +449,7 @@ private fun ConnectToggle(state: ConnectionState, onClick: () -> Unit) {
         }
     }
 }
+
 
 // ── My device info card (Virtual IP + STUN Socket) ────────────────────────────
 @Composable
@@ -709,3 +754,204 @@ private fun EmptyPeersPlaceholder() {
         )
     }
 }
+
+// ── Bandwidth & RTT live chart ────────────────────────────────────────────────
+@Composable
+private fun BandwidthLiveChart(
+    txHistory: List<Float>,
+    rxHistory: List<Float>,
+    rttHistory: List<Float>,
+    currentTxSpeed: Long,
+    currentRxSpeed: Long,
+    avgRttMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    var showLatency by remember { mutableStateOf(false) }
+
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            // Header with toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (showLatency) Icons.Outlined.Speed else Icons.Outlined.TrendingUp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (showLatency) "Задержка (RTT Latency)" else "Загрузка канала",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.clickable { showLatency = !showLatency }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (showLatency) "Скорость" else "Пинг (мс)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Outlined.SwapHoriz,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Sub-metrics badges
+            if (!showLatency) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    val txSpd = if (currentTxSpeed >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", currentTxSpeed / (1024f * 1024f)) else String.format(Locale.US, "%d KB/s", currentTxSpeed / 1024)
+                    val rxSpd = if (currentRxSpeed >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", currentRxSpeed / (1024f * 1024f)) else String.format(Locale.US, "%d KB/s", currentRxSpeed / 1024)
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
+                        Spacer(Modifier.width(4.dp))
+                        Text("TX: $txSpd", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.natColors.success))
+                        Spacer(Modifier.width(4.dp))
+                        Text("RX: $rxSpd", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = if (avgRttMs > 0) "Текущий RTT: $avgRttMs мс" else "RTT: —",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // Smooth Canvas Curve
+            val primaryColor = MaterialTheme.colorScheme.primary
+            val successColor = MaterialTheme.natColors.success
+            val gridColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f)
+
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(100.dp)
+            ) {
+                val w = size.width
+                val h = size.height
+                if (w <= 0 || h <= 0) return@Canvas
+
+                // Draw background grid lines
+                drawLine(gridColor, Offset(0f, h * 0.25f), Offset(w, h * 0.25f), strokeWidth = 1f)
+                drawLine(gridColor, Offset(0f, h * 0.50f), Offset(w, h * 0.50f), strokeWidth = 1f)
+                drawLine(gridColor, Offset(0f, h * 0.75f), Offset(w, h * 0.75f), strokeWidth = 1f)
+
+                if (showLatency) {
+                    val rttPts = if (rttHistory.isNotEmpty()) rttHistory else listOf(0f, 0f)
+                    val maxVal = maxOf(rttPts.maxOrNull() ?: 100f, 60f)
+                    drawSmoothCurve(rttPts, maxVal, primaryColor, w, h, fillGradient = true)
+                } else {
+                    val txPts = if (txHistory.isNotEmpty()) txHistory else listOf(0f, 0f)
+                    val rxPts = if (rxHistory.isNotEmpty()) rxHistory else listOf(0f, 0f)
+                    val maxVal = maxOf((txPts + rxPts).maxOrNull() ?: 1024f, 5000f)
+
+                    drawSmoothCurve(rxPts, maxVal, successColor, w, h, fillGradient = true)
+                    drawSmoothCurve(txPts, maxVal, primaryColor, w, h, fillGradient = false)
+                }
+            }
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSmoothCurve(
+    points: List<Float>,
+    maxValue: Float,
+    color: Color,
+    width: Float,
+    height: Float,
+    fillGradient: Boolean = false,
+) {
+    if (points.size < 2) return
+    val stepX = width / (points.size - 1).coerceAtLeast(1)
+
+    val path = Path()
+    val fillPath = Path()
+
+    val firstY = height - (points[0] / maxValue).coerceIn(0f, 1f) * (height - 10f) - 5f
+    path.moveTo(0f, firstY)
+    if (fillGradient) {
+        fillPath.moveTo(0f, height)
+        fillPath.lineTo(0f, firstY)
+    }
+
+    for (i in 0 until points.size - 1) {
+        val p0x = i * stepX
+        val p0y = height - (points[i] / maxValue).coerceIn(0f, 1f) * (height - 10f) - 5f
+        val p1x = (i + 1) * stepX
+        val p1y = height - (points[i + 1] / maxValue).coerceIn(0f, 1f) * (height - 10f) - 5f
+
+        val cx1 = p0x + (p1x - p0x) / 2f
+        val cy1 = p0y
+        val cx2 = p0x + (p1x - p0x) / 2f
+        val cy2 = p1y
+
+        path.cubicTo(cx1, cy1, cx2, cy2, p1x, p1y)
+        if (fillGradient) {
+            fillPath.cubicTo(cx1, cy1, cx2, cy2, p1x, p1y)
+        }
+    }
+
+    if (fillGradient) {
+        fillPath.lineTo(width, height)
+        fillPath.close()
+        drawPath(
+            path = fillPath,
+            brush = Brush.verticalGradient(
+                colors = listOf(color.copy(alpha = 0.30f), color.copy(alpha = 0.02f)),
+                startY = 0f,
+                endY = height
+            )
+        )
+    }
+
+    drawPath(
+        path = path,
+        color = color,
+        style = Stroke(width = 2.5f, cap = StrokeCap.Round)
+    )
+}
+
