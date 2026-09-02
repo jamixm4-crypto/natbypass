@@ -167,12 +167,18 @@ class NatBypassVpnService : VpnService() {
                 } catch (e: Exception) { Log.w(TAG, "addDnsServer error: ${e.message}") }
             } else {
                 try {
-                    builder.addRoute("100.64.200.0", 24)
-                    Log.i(TAG, "Mesh route 100.64.200.0/24 added")
+                    val subnetParts = currentVip.split(".")
+                    val meshSubnet = if (subnetParts.size == 4) "${subnetParts[0]}.${subnetParts[1]}.${subnetParts[2]}.0" else "100.64.200.0"
+                    builder.addRoute(meshSubnet, prefix)
+                    Log.i(TAG, "Mesh route $meshSubnet/$prefix added")
+                    if (meshSubnet != "100.64.200.0") {
+                        try { builder.addRoute("100.64.200.0", 24) } catch (_: Exception) {}
+                    }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to add mesh route 100.64.200.0/24: ${e.message}")
+                    Log.e(TAG, "Failed to add mesh route: ${e.message}")
                 }
             }
+
 
             val advSubnets = prefs.getString("adv_subnets", "") ?: ""
             if (advSubnets.isNotEmpty()) {

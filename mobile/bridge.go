@@ -26,7 +26,7 @@ import (
 )
 
 
-const Version = "1.9.189"
+const Version = "1.9.190"
 
 
 
@@ -131,6 +131,12 @@ var (
 )
 
 func deriveInitialVirtualIP(devID string) string {
+	if globalConfig != nil {
+		vip := config.ResolveVirtualIP(globalConfig, devID)
+		if vip != "" {
+			return vip
+		}
+	}
 	if devID == "" {
 		return "100.64.200.10"
 	}
@@ -143,9 +149,14 @@ func deriveInitialVirtualIP(devID string) string {
 }
 
 func negotiateVirtualIP() {
-	if globalRegistry == nil {
+	if globalRegistry == nil || globalConfig == nil {
 		return
 	}
+	// Если IP явно задан в конфигурации или активном профиле - НЕ изменяем его автоматически!
+	if globalConfig.Network.Address != "" || (globalConfig.EnsureActiveProfile() != nil && globalConfig.EnsureActiveProfile().VirtualIP != "") {
+		return
+	}
+
 	usedIPs := make(map[string]string)
 	for _, p := range globalRegistry.List() {
 		pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
@@ -154,12 +165,15 @@ func negotiateVirtualIP() {
 		}
 	}
 
-
 	conflictDev, hasConflict := usedIPs[globalVirtualIP]
 	if hasConflict && conflictDev != "" {
 		if globalDevID > conflictDev {
+			prefix := "100.64.200"
+			if active := globalConfig.EnsureActiveProfile(); active != nil && active.Subnet != "" {
+				prefix = config.ExtractSubnetPrefix(active.Subnet)
+			}
 			for i := 10; i <= 250; i++ {
-				cand := fmt.Sprintf("100.64.200.%d", i)
+				cand := fmt.Sprintf("%s.%d", prefix, i)
 				if _, used := usedIPs[cand]; !used {
 					globalVirtualIP = cand
 					break
@@ -168,6 +182,7 @@ func negotiateVirtualIP() {
 		}
 	}
 }
+
 
 func init() {
 	multiWriter := io.MultiWriter(os.Stdout, globalLogs)
@@ -214,9 +229,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		devID = "Android-" + crypto.KeyToHex(pubKey)[:8]
 	}
 	globalDevID = devID
-	if globalVirtualIP == "" {
-		globalVirtualIP = deriveInitialVirtualIP(devID)
-	}
+	globalVirtualIP = config.ResolveVirtualIP(cfg, devID)
 	if cfg.App.DeviceName != "" {
 		globalDevName = cfg.App.DeviceName
 	} else if globalDevName == "" {
@@ -386,7 +399,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             runtime.GOARCH,
-					Version:          "1.9.189",
+					Version:          "1.9.190",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -1758,7 +1771,12 @@ func rebuildSignalingInternal(p *config.Profile) {
 	if p.AWGPreset != "" {
 		globalAWGPreset = p.AWGPreset
 	}
+
+	if globalConfig != nil && globalDevID != "" {
+		globalVirtualIP = config.ResolveVirtualIP(globalConfig, globalDevID)
+	}
 }
+
 
 // PingPeer активно отправляет UDP зонд пиру и возвращает реальный RTT в миллисекундах (-1 при отсутствии ответа)
 func PingPeer(deviceID string) int64 {
