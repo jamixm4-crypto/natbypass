@@ -78,25 +78,30 @@ if ($adapters) {
 
 # 4. Routes
 Log-Section "4. ТАБЛИЦА МАРШРУТИЗАЦИИ ДЛЯ MESH ПОДСЕТЕЙ"
-$routes = Get-NetRoute | Where-Object { $_.DestinationPrefix -like "10.123.111*" -or $_.DestinationPrefix -like "100.64.200*" }
+$targetIfIndices = if ($wintunAdapters) { $wintunAdapters | ForEach-Object { $_.InterfaceIndex } } else { @() }
+$routes = Get-NetRoute | Where-Object { ($targetIfIndices -contains $_.InterfaceIndex) -or $_.DestinationPrefix -like "10.11.12*" -or $_.DestinationPrefix -like "10.123.111*" -or $_.DestinationPrefix -like "100.64.200*" }
 if ($routes) {
     foreach ($r in $routes) {
         Log-Ok "Маршрут: $($r.DestinationPrefix) -> ifIndex $($r.InterfaceIndex) (Metric: $($r.RouteMetric))"
     }
 } else {
-    Log-Warn "Маршруты для 10.123.111.0/24 или 100.64.200.0/24 не найдены в таблице маршрутизации!"
+    Log-Warn "Маршруты для mesh-подсети не найдены в таблице маршрутизации!"
 }
+
 
 # 5. Windows Firewall
 Log-Section "5. БРАНДМАУЭР WINDOWS"
-$rules = Get-NetFirewallRule -DisplayName "*NatBypass*" -ErrorAction SilentlyContinue
+$rules = Get-NetFirewallRule -DisplayName "*NatBypass*" -ErrorAction SilentlyContinue | Group-Object DisplayName
 if ($rules) {
-    foreach ($r in $rules) {
-        Log-Ok "Правило брандмауэра: '$($r.DisplayName)' (Enabled: $($r.Enabled), Action: $($r.Action))"
+    foreach ($g in $rules) {
+        $first = $g.Group[0]
+        $count = if ($g.Count -gt 1) { " (всего правил: $($g.Count))" } else { "" }
+        Log-Ok "Правило брандмауэра: '$($g.Name)'$count (Enabled: $($first.Enabled), Action: $($first.Action))"
     }
 } else {
     Log-Info "Специальные правила NatBypass не найдены (трафик регулируется стандартным профилем)"
 }
+
 
 # 6. Local Daemon API
 Log-Section "6. ЛОКАЛЬНЫЙ API ДЕМОНА (HTTP 127.0.0.1:8080)"
