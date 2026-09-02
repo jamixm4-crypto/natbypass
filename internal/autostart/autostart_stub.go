@@ -5,3 +5,7 @@ package autostart
 func SetAutoStart(name, execPath string, enable bool) error {
 	return nil
 }
+
+func IsAutoStartEnabled(name string) bool {
+	return false
+}

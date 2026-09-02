@@ -1,4 +1,4 @@
-﻿//go:build windows
+//go:build windows
 
 package main
 
@@ -24,12 +24,11 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/natbypass/natbypass/internal/autostart"
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/relay"
-
-
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/tunnel"
@@ -95,7 +94,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.176"
+	Version = "1.9.179"
 	Commit  = "release"
 )
 
@@ -361,30 +360,41 @@ var (
 	buttonLabels = make(map[uint32]string)
 	buttonTypes  = make(map[uint32]string)
 
-	navButtons [6]uintptr
+	navButtons [8]uintptr
 	currentTab = 0
-	tabPages   [6][]uintptr
+	tabPages   [8][]uintptr
 
+	// Настройки окна и автозапуска
+	minimizeToTray     bool = true
+	isAutostartEnabled bool = false
 
-
-	// Вкладка 0: Обзор
+	// Вкладка 0: Обзор (Dashboard)
 	hLblStatus            uintptr
 	hLblIpInfo            uintptr
 	hLblChannels          uintptr
+	hLblCardVIP           uintptr
+	hLblCardPubIP         uintptr
+	hLblCardSTUN          uintptr
+	hLblCardSig           uintptr
 	hBtnVpn               uintptr
+	hBtnRefresh           uintptr
+	hBtnManageProfiles    uintptr
 	hBtnBookmarkPeer      uintptr
 	hBtnExitNodeSelect    uintptr
 	hBtnToggleSubnetRoute uintptr
+	hListSummaryPeers     uintptr
+
+	// Вкладка 1: Устройства (Peers)
 	hListPeers            uintptr
-	hBtnRefresh           uintptr
-	hBtnManageProfiles    uintptr
+	hBtnCopyPeerVIP       uintptr
+	hBtnPingPeer          uintptr
 	lastPeersHash         string
 	activeExitNodeID      string
 	activeExitVIP         string
 	activeSubnetRoutes    = make(map[string]string)
 	activeSubnetRoutesMu  sync.RWMutex
 
-	// Вкладка 1: Профили сетей
+	// Вкладка 2: Профили сетей
 	hListProfiles   uintptr
 	hBtnProfSwitch  uintptr
 	hBtnProfQR      uintptr
@@ -401,7 +411,7 @@ var (
 	activeQRBitmap  [][]bool
 	activeQRText    string
 
-	// Вкладка 2: AmneziaWG
+	// Вкладка 3: AmneziaWG 3.1
 	hBtnAwgStd        uintptr
 	hBtnAwgDpi        uintptr
 	hBtnAwgStealth    uintptr
@@ -423,8 +433,7 @@ var (
 	hBtnSaveAwg       uintptr
 	hBtnOpenAwgClient uintptr
 
-	// Вкладка 2: Настройки
-	hEditMyNick      uintptr
+	// Вкладка 4: Каналы связи (Signaling)
 	hBtnModeParallel uintptr
 	hBtnModeMQTT     uintptr
 	hBtnModeTG       uintptr
@@ -435,18 +444,30 @@ var (
 	hEditMqttBr      uintptr
 	hEditMqttTp      uintptr
 	hBtnTestMqtt     uintptr
+	hBtnSaveChannels uintptr
+
+	// Вкладка 5: Шлюз и подсети (Routing)
 	hBtnAllowExit      uintptr
 	allowExitNode      bool
 	hBtnAddLocalSubnet uintptr
 	hEditAdvSubnets    uintptr
-	hBtnToggleLogs   uintptr
-	hBtnToggleDiag   uintptr
-	hBtnSaveCfg      uintptr
 
-	// Вкладка 3: Диагностика
-	hBtnRunDiag   uintptr
-	hBtnDumpStack uintptr
-	hEditDiagLog  uintptr
+	// Вкладка 6: Диагностика и Журнал
+	hBtnRunDiag    uintptr
+	hBtnDumpStack  uintptr
+	hEditDiagLog   uintptr
+	hEditLogs      uintptr
+	hBtnClrLogs    uintptr
+	hBtnSaveLogs   uintptr
+	hBtnToggleDiag uintptr
+
+	// Вкладка 7: Настройки приложения (Settings)
+	hEditMyNick              uintptr
+	hBtnToggleAutostart      uintptr
+	hBtnToggleMinimizeToTray uintptr
+	hBtnToggleLogs           uintptr
+	hBtnSaveCfg              uintptr
+	hBtnCheckUpdate          uintptr
 
 	// Стартовый экран (Startup / Splash)
 	hSplashTitle   uintptr
@@ -459,11 +480,6 @@ var (
 	splashControls []uintptr
 	splashTicks    int  = 0
 	isSplashActive bool = true
-
-	// Вкладка 4: Логи
-	hEditLogs    uintptr
-	hBtnClrLogs  uintptr
-	hBtnSaveLogs uintptr
 
 	allControls []uintptr
 
@@ -487,7 +503,7 @@ var (
 	addressBook      map[string]string = make(map[string]string)
 	addressBookMu    sync.RWMutex
 	saveLogsToDisk   bool = false
-	showDiagnostics  bool = false
+	showDiagnostics  bool = true
 	myVirtualIP      string = "100.64.200.1"
 	myPublicIP       string
 	mySTUNAddr       string
@@ -523,13 +539,15 @@ var (
 const (
 	ID_TIMER_POLL = 1001
 
-	// Навигация
+	// Навигация (8 вкладок)
 	ID_NAV_DASHBOARD = 3001
-	ID_NAV_PROFILES  = 3002
-	ID_NAV_AWG       = 3003
-	ID_NAV_SETTINGS  = 3004
-	ID_NAV_DIAG      = 3005
-	ID_NAV_LOGS      = 3006
+	ID_NAV_PEERS     = 3002
+	ID_NAV_PROFILES  = 3003
+	ID_NAV_AWG       = 3004
+	ID_NAV_CHANNELS  = 3005
+	ID_NAV_ROUTING   = 3006
+	ID_NAV_DIAG      = 3007
+	ID_NAV_SETTINGS  = 3008
 
 	// Действия
 	ID_BTN_VPN             = 4001
@@ -560,6 +578,12 @@ const (
 	ID_BTN_EXIT_NODE_SELECT = 4034
 	ID_BTN_TOGGLE_SUBNET   = 4035
 	ID_BTN_ADD_LOCAL_SUBNET = 4036
+	ID_BTN_COPY_PEER_VIP   = 4037
+	ID_BTN_PING_PEER       = 4038
+	ID_BTN_TOGGLE_AUTOSTART = 4039
+	ID_BTN_TOGGLE_TRAY     = 4040
+	ID_BTN_SAVE_CHANNELS   = 4041
+
 	ID_BTN_MQ_EMQX         = 4051
 	ID_BTN_MQ_HIVE         = 4052
 	ID_BTN_MQ_MOSQ         = 4053
@@ -898,7 +922,7 @@ func main() {
 
 	// 5. Регистрация класса окна
 	className, _ := windows.UTF16PtrFromString("NatBypassModernAppClass")
-	windowTitle, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Сеть & AmneziaWG 2.0")
+	windowTitle, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Сеть & AmneziaWG 3.1")
 
 	wc := WNDCLASSEXW{
 		CbSize:        uint32(unsafe.Sizeof(WNDCLASSEXW{})),
@@ -914,13 +938,16 @@ func main() {
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 	writeDebug("Класс окна зарегистрирован")
 
-	// 6. Создание главного окна (фиксированный премиальный размер без деформации контролов)
+	// Проверяем текущий статус автозапуска в реестре Windows
+	isAutostartEnabled = autostart.IsAutoStartEnabled("NatBypass")
+
+	// 6. Создание главного окна (комфортный премиальный размер 1120x760 для четкого отображения всех элементов)
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowTitle)),
 		WS_FIXEDWINDOW|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
-		60, 40, 1060, 720,
+		60, 40, 1120, 760,
 		0, 0, hInstance, 0,
 	)
 	hMainWnd = hwnd
@@ -995,15 +1022,15 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&clientRect)))
 		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&clientRect)), hBrushBg)
 
-		sidebarRect := RECT{Left: 0, Top: 0, Right: 220, Bottom: clientRect.Bottom}
+		sidebarRect := RECT{Left: 0, Top: 0, Right: 230, Bottom: clientRect.Bottom}
 		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&sidebarRect)), hBrushSidebar)
 
 		procSelectObject.Call(hdc, hPenBorder)
 		var pt POINT
-		procMoveToEx.Call(hdc, 220, 0, uintptr(unsafe.Pointer(&pt)))
-		procLineTo.Call(hdc, 220, uintptr(clientRect.Bottom))
+		procMoveToEx.Call(hdc, 230, 0, uintptr(unsafe.Pointer(&pt)))
+		procLineTo.Call(hdc, 230, uintptr(clientRect.Bottom))
 
-		cardRect := RECT{Left: 232, Top: 10, Right: clientRect.Right - 10, Bottom: clientRect.Bottom - 10}
+		cardRect := RECT{Left: 242, Top: 10, Right: clientRect.Right - 10, Bottom: clientRect.Bottom - 10}
 		procFillRect.Call(hdc, uintptr(unsafe.Pointer(&cardRect)), hBrushCard)
 
 		procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
@@ -1014,13 +1041,36 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		drawCustomButton(&dis)
 		return 1
 
+	case 0x007B: // WM_CONTEXTMENU
+		targetHWND := wParam
+		if targetHWND == hListPeers || targetHWND == hListSummaryPeers {
+			x := int32(LOWORD(lParam))
+			y := int32(HIWORD(lParam))
+			if x == -1 && y == -1 {
+				var pt struct{ X, Y int32 }
+				procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+				x = pt.X
+				y = pt.Y
+			}
+			showPeerContextMenu(hwnd, targetHWND, x, y)
+			return 0
+		}
+
 	case WM_SYSCOMMAND:
 		if wParam == SC_CLOSE {
+			if minimizeToTray {
+				procShowWindow.Call(hwnd, SW_HIDE)
+				return 0
+			}
 			exitApp()
 			return 0
 		}
 
 	case WM_CLOSE:
+		if minimizeToTray {
+			procShowWindow.Call(hwnd, SW_HIDE)
+			return 0
+		}
 		exitApp()
 		return 0
 
@@ -1226,15 +1276,15 @@ func drawCustomButton(pDIS *DRAWITEMSTRUCT) {
 	isActiveNav := false
 	if isNav {
 		if (id == ID_NAV_DASHBOARD && currentTab == 0) ||
-			(id == ID_NAV_PROFILES && currentTab == 1) ||
-			(id == ID_NAV_AWG && currentTab == 2) ||
-			(id == ID_NAV_SETTINGS && currentTab == 3) ||
-			(id == ID_NAV_DIAG && currentTab == 4) ||
-			(id == ID_NAV_LOGS && currentTab == 5) {
+			(id == ID_NAV_PEERS && currentTab == 1) ||
+			(id == ID_NAV_PROFILES && currentTab == 2) ||
+			(id == ID_NAV_AWG && currentTab == 3) ||
+			(id == ID_NAV_CHANNELS && currentTab == 4) ||
+			(id == ID_NAV_ROUTING && currentTab == 5) ||
+			(id == ID_NAV_DIAG && currentTab == 6) ||
+			(id == ID_NAV_SETTINGS && currentTab == 7) {
 			isActiveNav = true
 		}
-
-
 	}
 
 	if isPressed {
@@ -1318,19 +1368,38 @@ func handleCommand(id uint16) {
 	switch id {
 	case ID_NAV_DASHBOARD:
 		selectTab(0)
-	case ID_NAV_PROFILES:
+	case ID_NAV_PEERS:
 		selectTab(1)
-	case ID_NAV_AWG:
+	case ID_NAV_PROFILES:
 		selectTab(2)
-	case ID_NAV_SETTINGS:
+	case ID_NAV_AWG:
 		selectTab(3)
-	case ID_NAV_DIAG:
+	case ID_NAV_CHANNELS:
 		selectTab(4)
-	case ID_NAV_LOGS:
+	case ID_NAV_ROUTING:
 		selectTab(5)
+	case ID_NAV_DIAG:
+		selectTab(6)
+	case ID_NAV_SETTINGS:
+		selectTab(7)
 
 	case ID_BTN_MANAGE_PROFILES:
-		selectTab(1)
+		selectTab(2)
+
+	case ID_BTN_COPY_PEER_VIP:
+		handleCopySelectedPeerVIP()
+
+	case ID_BTN_PING_PEER:
+		handlePingSelectedPeer()
+
+	case ID_BTN_TOGGLE_AUTOSTART:
+		handleToggleAutostart()
+
+	case ID_BTN_TOGGLE_TRAY:
+		handleToggleMinimizeToTray()
+
+	case ID_BTN_SAVE_CHANNELS:
+		handleSaveChannels()
 
 
 
@@ -2658,24 +2727,192 @@ func qrDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	return ret
 }
 
+func handleSaveChannels() {
+	saveConfigFromUI()
+	addLog("💾 Настройки сигнальных каналов сохранены в config.yaml")
+	if vpnConnected && engineCtx != nil {
+		go func() {
+			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+			mqBroker := strings.TrimSpace(getControlText(hEditMqttBr))
+			mqTopic := strings.TrimSpace(getControlText(hEditMqttTp))
+			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, mqBroker, mqTopic)
+			triggerPublish()
+		}()
+	}
+}
+
+func handleCopySelectedPeerVIP() {
+	if registry == nil {
+		return
+	}
+	peers := registry.List()
+	selIdx, _, _ := procSendMessageW.Call(hListPeers, 0x0188, 0, 0)
+	idx := int(int32(selIdx)) / 2
+	if idx >= 0 && idx < len(peers) {
+		p := peers[idx]
+		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		if vip != "" {
+			copyToClipboard(vip)
+			addLog(fmt.Sprintf("📋 Скопирован Virtual IP: %s (%s)", vip, p.Nickname))
+		}
+	}
+}
+
+func handlePingSelectedPeer() {
+	if registry == nil {
+		return
+	}
+	peers := registry.List()
+	selIdx, _, _ := procSendMessageW.Call(hListPeers, 0x0188, 0, 0)
+	idx := int(int32(selIdx)) / 2
+	if idx >= 0 && idx < len(peers) {
+		p := peers[idx]
+		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		if vip != "" {
+			addLog(fmt.Sprintf("🧪 Запуск ICMP Ping до %s (%s)...", vip, p.Nickname))
+			go func() {
+				cmd := exec.Command("ping", "-n", "3", "-w", "1000", vip)
+				cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+				out, err := cmd.CombinedOutput()
+				if err == nil {
+					addLog(fmt.Sprintf("🟢 Результат Ping до %s:\r\n%s", p.Nickname, string(out)))
+				} else {
+					addLog(fmt.Sprintf("🔴 Ошибка Ping до %s: %s", p.Nickname, err.Error()))
+				}
+			}()
+		}
+	}
+}
+
+func handleToggleAutostart() {
+	execPath, err := os.Executable()
+	if err != nil {
+		addLog("⚠️ Не удалось определить путь к исполняемому файлу: " + err.Error())
+		return
+	}
+	isAutostartEnabled = !isAutostartEnabled
+	if err := autostart.SetAutoStart("NatBypass", execPath, isAutostartEnabled); err != nil {
+		addLog("⚠️ Ошибка настройки автозапуска в реестре: " + err.Error())
+		isAutostartEnabled = !isAutostartEnabled
+	} else {
+		if isAutostartEnabled {
+			buttonLabels[ID_BTN_TOGGLE_AUTOSTART] = "🚀 Автозапуск при старте Windows: ВКЛ"
+			buttonTypes[ID_BTN_TOGGLE_AUTOSTART] = "green"
+			addLog("🚀 Автозапуск NatBypass в реестре Windows включен")
+		} else {
+			buttonLabels[ID_BTN_TOGGLE_AUTOSTART] = "🚀 Автозапуск при старте Windows: ВЫКЛ"
+			buttonTypes[ID_BTN_TOGGLE_AUTOSTART] = "normal"
+			addLog("🚀 Автозапуск NatBypass в реестре Windows отключен")
+		}
+		if hBtnToggleAutostart != 0 {
+			procInvalidateRect.Call(hBtnToggleAutostart, 0, 1)
+		}
+	}
+}
+
+func handleToggleMinimizeToTray() {
+	minimizeToTray = !minimizeToTray
+	if minimizeToTray {
+		buttonLabels[ID_BTN_TOGGLE_TRAY] = "📥 Сворачивать в трей при закрытии: ВКЛ"
+		buttonTypes[ID_BTN_TOGGLE_TRAY] = "green"
+		addLog("📥 При нажатии на крестик окно сворачивается в системный трей")
+	} else {
+		buttonLabels[ID_BTN_TOGGLE_TRAY] = "📥 Сворачивать в трей при закрытии: ВЫКЛ"
+		buttonTypes[ID_BTN_TOGGLE_TRAY] = "normal"
+		addLog("📥 При нажатии на крестик приложение будет полностью завершаться")
+	}
+	if hBtnToggleMinimizeToTray != 0 {
+		procInvalidateRect.Call(hBtnToggleMinimizeToTray, 0, 1)
+	}
+}
+
+func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
+	if registry == nil {
+		return
+	}
+	peers := registry.List()
+	if len(peers) == 0 {
+		return
+	}
+	selIdx, _, _ := procSendMessageW.Call(hList, 0x0188 /* LB_GETCURSEL */, 0, 0)
+	idx := int(int32(selIdx))
+	if hList == hListPeers {
+		idx = idx / 2
+	}
+	if idx < 0 || idx >= len(peers) {
+		return
+	}
+	targetPeer := peers[idx]
+	if targetPeer == nil {
+		return
+	}
+
+	hMenu, _, _ := procCreatePopupMenu.Call()
+	copyVIPStr, _ := syscall.UTF16PtrFromString(fmt.Sprintf("📋 Скопировать Virtual IP (%s)", targetPeer.VirtualIP))
+	copyPubStr, _ := syscall.UTF16PtrFromString(fmt.Sprintf("🌐 Скопировать STUN/WAN (%s)", targetPeer.STUNAddr))
+	pingStr, _ := syscall.UTF16PtrFromString(fmt.Sprintf("🧪 Проверить Ping до %s", targetPeer.Nickname))
+	bmStr, _ := syscall.UTF16PtrFromString("⭐ Задать имя (Закладка)...")
+	exitStr, _ := syscall.UTF16PtrFromString("🌐 Использовать как шлюз (Exit Node)")
+	subnetStr, _ := syscall.UTF16PtrFromString("🏠 Маршрутизировать подсеть узла")
+
+	procAppendMenuW.Call(hMenu, 0, 6001, uintptr(unsafe.Pointer(copyVIPStr)))
+	procAppendMenuW.Call(hMenu, 0, 6002, uintptr(unsafe.Pointer(copyPubStr)))
+	procAppendMenuW.Call(hMenu, 0, 0x00000800 /* MF_SEPARATOR */, 0)
+	procAppendMenuW.Call(hMenu, 0, 6003, uintptr(unsafe.Pointer(pingStr)))
+	procAppendMenuW.Call(hMenu, 0, 6004, uintptr(unsafe.Pointer(bmStr)))
+	procAppendMenuW.Call(hMenu, 0, 0x00000800 /* MF_SEPARATOR */, 0)
+	procAppendMenuW.Call(hMenu, 0, 6005, uintptr(unsafe.Pointer(exitStr)))
+	procAppendMenuW.Call(hMenu, 0, 6006, uintptr(unsafe.Pointer(subnetStr)))
+
+	procSetForegroundWindow.Call(hParent)
+	cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */|0x0002 /* TPM_RIGHTBUTTON */, uintptr(x), uintptr(y), 0, hParent, 0)
+
+	switch cmd {
+	case 6001:
+		vip := strings.TrimSpace(strings.Split(targetPeer.VirtualIP, "/")[0])
+		if vip != "" {
+			copyToClipboard(vip)
+			addLog("📋 Скопирован Virtual IP: " + vip)
+		}
+	case 6002:
+		addr := targetPeer.STUNAddr
+		if addr == "" {
+			addr = targetPeer.PublicIP
+		}
+		if addr != "" {
+			copyToClipboard(addr)
+			addLog("🌐 Скопирован адрес узла: " + addr)
+		}
+	case 6003:
+		handlePingSelectedPeer()
+	case 6004:
+		handleBookmarkPeer()
+	case 6005:
+		handleExitNodeSelect()
+	case 6006:
+		handleToggleSubnetRoute()
+	}
+}
+
 func applyDiagnosticsVisibility() {
 	if showDiagnostics {
-		procShowWindow.Call(navButtons[4], uintptr(SW_SHOW))
+		procShowWindow.Call(navButtons[6], uintptr(SW_SHOW))
 		buttonLabels[ID_BTN_TOGGLE_DIAG] = "🩺 Вкладка Диагностика: ВКЛ"
 		buttonTypes[ID_BTN_TOGGLE_DIAG] = "green"
 	} else {
-		procShowWindow.Call(navButtons[4], uintptr(SW_HIDE))
+		procShowWindow.Call(navButtons[6], uintptr(SW_HIDE))
 		buttonLabels[ID_BTN_TOGGLE_DIAG] = "🩺 Вкладка Диагностика: ВЫКЛ"
 		buttonTypes[ID_BTN_TOGGLE_DIAG] = "normal"
-		if currentTab == 4 {
+		if currentTab == 6 {
 			selectTab(0)
 		}
 	}
 	if hBtnToggleDiag != 0 {
 		procInvalidateRect.Call(hBtnToggleDiag, 0, 1)
 	}
-	if navButtons[4] != 0 {
-		procInvalidateRect.Call(navButtons[4], 0, 1)
+	if navButtons[6] != 0 {
+		procInvalidateRect.Call(navButtons[6], 0, 1)
 	}
 	procInvalidateRect.Call(hMainWnd, 0, 1)
 }
@@ -2721,247 +2958,297 @@ func setActiveAWGPresetButton(activeID uint32) {
 }
 
 func buildModernUI(hInstance uintptr) {
-	lblLogo := createLabel(hInstance, "🛸 NatBypass", 20, 24, 180, 30, hFontTitle)
-	lblVer := createLabel(hInstance, fmt.Sprintf("v%s • P2P Mesh", strings.TrimPrefix(Version, "v")), 20, 56, 180, 20, hFontBold)
+	lblLogo := createLabel(hInstance, "🛸 NatBypass", 20, 20, 190, 30, hFontTitle)
+	lblVer := createLabel(hInstance, fmt.Sprintf("v%s • P2P Mesh", strings.TrimPrefix(Version, "v")), 20, 52, 190, 20, hFontBold)
 
 	navTitles := []string{
-		"🚀  Обзор и Сеть",
+		"🚀  Обзор сети",
+		"👥  Устройства",
 		"🌐  Сети и профили",
-		"🛡️  AmneziaWG 2.0",
-		"⚙️  Настройки",
+		"🛡️  AmneziaWG 3.1",
+		"📡  Каналы связи",
+		"🏠  Шлюз и подсети",
 		"🩺  Диагностика",
-		"📋  Журнал событий",
+		"⚙️  Настройки",
 	}
-	navIDs := []uint32{ID_NAV_DASHBOARD, ID_NAV_PROFILES, ID_NAV_AWG, ID_NAV_SETTINGS, ID_NAV_DIAG, ID_NAV_LOGS}
+	navIDs := []uint32{
+		ID_NAV_DASHBOARD,
+		ID_NAV_PEERS,
+		ID_NAV_PROFILES,
+		ID_NAV_AWG,
+		ID_NAV_CHANNELS,
+		ID_NAV_ROUTING,
+		ID_NAV_DIAG,
+		ID_NAV_SETTINGS,
+	}
 
 	for i, t := range navTitles {
-		navButtons[i] = createOwnerDrawButton(hInstance, t, 16, 96+(i*44), 188, 36, navIDs[i], "nav")
+		navButtons[i] = createOwnerDrawButton(hInstance, t, 16, 88+(i*40), 198, 34, navIDs[i], "nav")
 	}
-	if !showDiagnostics {
-		procShowWindow.Call(navButtons[4], uintptr(SW_HIDE))
-	}
-
-
 
 	allControls = append(allControls, lblLogo, lblVer)
 
-	cx := 244
-	cw := 790
+	cx := 250
+	cw := 840
 
-	// СТРАНИЦА 0: ОБЗОР
-	hLblStatus = createLabel(hInstance, "🟡 ПОИСК УСТРОЙСТВ В СЕТИ...", cx, 20, cw, 26, hFontTitle)
-	hLblIpInfo = createLabel(hInstance, "Устройство: Определение... | Внешний IP: — | STUN: —", cx, 48, cw, 20, hFontNormal)
-	hLblChannels = createLabel(hInstance, "📡 Сигнальный канал: Инициализация...", cx, 70, cw, 20, hFontNormal)
+	// СТРАНИЦА 0: ОБЗОР (DASHBOARD)
+	lblDashTitle := createLabel(hInstance, "🚀 Обзор состояния P2P Mesh сети", cx, 16, cw, 28, hFontTitle)
+	hLblStatus = createLabel(hInstance, "🟡 ПОИСК УСТРОЙСТВ В СЕТИ...", cx, 46, cw, 22, hFontHeader)
 
-	hBtnVpn = createOwnerDrawButton(hInstance, "🔴 ОЖИДАНИЕ СВЯЗИ (Поиск устройств в сети...)", cx, 96, 420, 38, ID_BTN_VPN, "red")
-	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить", cx+430, 96, 105, 38, ID_BTN_REFRESH, "normal")
-	hBtnManageProfiles = createOwnerDrawButton(hInstance, "🌐 Профили", cx+545, 96, 115, 38, ID_BTN_MANAGE_PROFILES, "normal")
-	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ Закладка", cx+670, 96, 120, 38, ID_BTN_BOOKMARK_PEER, "normal")
+	hBtnVpn = createOwnerDrawButton(hInstance, "🔴 ОЖИДАНИЕ СВЯЗИ (Поиск устройств...)", cx, 74, 480, 38, ID_BTN_VPN, "red")
+	hBtnRefresh = createOwnerDrawButton(hInstance, "⚡ Обновить", cx+490, 74, 165, 38, ID_BTN_REFRESH, "normal")
+	hBtnManageProfiles = createOwnerDrawButton(hInstance, "🌐 Профили", cx+665, 74, 175, 38, ID_BTN_MANAGE_PROFILES, "normal")
 
-	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "🌐 Выход в интернет: Локальный (Отключен)", cx, 140, 385, 40, ID_BTN_EXIT_NODE_SELECT, "normal")
-	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+395, 140, 395, 40, ID_BTN_TOGGLE_SUBNET, "normal")
+	hLblCardVIP = createLabel(hInstance, "Локальный VIP:\r\n100.64.200.1", cx, 120, 200, 42, hFontBold)
+	hLblCardPubIP = createLabel(hInstance, "Внешний IP:\r\nОпределение...", cx+210, 120, 200, 42, hFontNormal)
+	hLblCardSTUN = createLabel(hInstance, "STUN Сокет:\r\nПоиск сокета...", cx+420, 120, 200, 42, hFontNormal)
+	hLblCardSig = createLabel(hInstance, "Сигнальный канал:\r\nИнициализация...", cx+630, 120, 210, 42, hFontNormal)
 
-	lblPeersTitle := createLabel(hInstance, "👥 Устройства в вашей сети (Прямой P2P статус и адресная книга):", cx, 188, cw, 22, hFontHeader)
-	hListPeers = createListBox(hInstance, cx, 214, cw, 460, hFontNormal)
+	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "🌐 Выход в интернет: Локальный (Отключен)", cx, 170, 415, 36, ID_BTN_EXIT_NODE_SELECT, "normal")
+	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+425, 170, 415, 36, ID_BTN_TOGGLE_SUBNET, "normal")
 
-	tabPages[0] = []uintptr{hLblStatus, hLblIpInfo, hLblChannels, hBtnVpn, hBtnRefresh, hBtnManageProfiles, hBtnBookmarkPeer, hBtnExitNodeSelect, hBtnToggleSubnetRoute, lblPeersTitle, hListPeers}
-	writeDebug("buildModernUI: страница 0 создана")
+	lblSummaryTitle := createLabel(hInstance, "👥 Активные участники сети (P2P статус и задержки):", cx, 214, cw, 22, hFontHeader)
+	hListSummaryPeers = createListBox(hInstance, cx, 238, cw, 470, hFontNormal)
 
-	// СТРАНИЦА 1: УПРАВЛЕНИЕ ПРОФИЛЯМИ P2P СЕТЕЙ
-	lblProfTitle := createLabel(hInstance, "🌐 Управление профилями P2P сетей (Mesh Profiles)", cx, 20, cw, 28, hFontTitle)
-	lblProfDesc := createLabel(hInstance, "Каждый профиль — это отдельная изолированная сеть. Выбирайте сеть или создавайте новые.", cx, 48, cw, 20, hFontNormal)
+	tabPages[0] = []uintptr{
+		lblDashTitle, hLblStatus, hBtnVpn, hBtnRefresh, hBtnManageProfiles,
+		hLblCardVIP, hLblCardPubIP, hLblCardSTUN, hLblCardSig,
+		hBtnExitNodeSelect, hBtnToggleSubnetRoute, lblSummaryTitle, hListSummaryPeers,
+	}
 
-	hListProfiles = createListBox(hInstance, cx, 74, cw, 220, hFontNormal)
+	// СТРАНИЦА 1: УСТРОЙСТВА (PEERS)
+	lblPeersPageTitle := createLabel(hInstance, "👥 Устройства в вашей P2P сети (Mesh Nodes)", cx, 16, cw, 28, hFontTitle)
+	lblPeersDesc := createLabel(hInstance, "Все обнаруженные пиры с прямыми UDP P2P каналами и адресами. Кликните правой кнопкой мыши для меню действий.", cx, 44, cw, 18, hFontNormal)
 
-	hBtnProfSwitch = createOwnerDrawButton(hInstance, "⚡ Подключить сеть", cx, 304, 185, 36, ID_BTN_PROF_SWITCH, "green")
-	hBtnProfQR = createOwnerDrawButton(hInstance, "📱 QR-код", cx+195, 304, 150, 36, ID_BTN_PROF_QR, "primary")
-	hBtnProfCreate = createOwnerDrawButton(hInstance, "➕ Новая сеть", cx+355, 304, 180, 36, ID_BTN_PROF_CREATE, "normal")
-	hBtnProfImport = createOwnerDrawButton(hInstance, "📥 Импорт", cx+545, 304, 245, 36, ID_BTN_PROF_IMPORT, "normal")
+	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ Задать имя", cx, 68, 180, 34, ID_BTN_BOOKMARK_PEER, "normal")
+	hBtnCopyPeerVIP = createOwnerDrawButton(hInstance, "📋 Скопировать IP", cx+190, 68, 180, 34, ID_BTN_COPY_PEER_VIP, "normal")
+	hBtnPingPeer = createOwnerDrawButton(hInstance, "🧪 Ping узла", cx+380, 68, 160, 34, ID_BTN_PING_PEER, "normal")
+	btnExitNodeDirect := createOwnerDrawButton(hInstance, "🌐 Назначить шлюзом (Exit Node)", cx+550, 68, 290, 34, ID_BTN_EXIT_NODE_SELECT, "normal")
 
-	lblProfEditHead := createLabel(hInstance, "⚙️ Параметры выбранной сети (Редактирование):", cx, 350, cw, 22, hFontHeader)
-
-	lblProfName := createLabel(hInstance, "Название сети:", cx, 380, 160, 20, hFontBold)
-	hEditProfName = createEdit(hInstance, "", cx+170, 376, 340, 28, false, false, hFontNormal)
-
-	hBtnProfExport = createOwnerDrawButton(hInstance, "🔗 Скопировать ссылку", cx+520, 376, 270, 28, ID_BTN_PROF_EXPORT, "normal")
-
-	lblProfTopic := createLabel(hInstance, "MQTT Топик (секрет):", cx, 416, 160, 20, hFontBold)
-	hEditProfTopic = createEdit(hInstance, "", cx+170, 412, 620, 28, false, false, hFontNormal)
-
-	lblProfBroker := createLabel(hInstance, "MQTT Брокер:", cx, 452, 160, 20, hFontBold)
-	hEditProfBroker = createEdit(hInstance, "", cx+170, 448, 620, 28, false, false, hFontNormal)
-
-	lblProfVIP := createLabel(hInstance, "Virtual IP (напр. 100.64.200.5):", cx, 488, 160, 20, hFontBold)
-	hEditProfVIP = createEdit(hInstance, "", cx+170, 484, 620, 28, false, false, hFontNormal)
-
-	hBtnProfSave = createOwnerDrawButton(hInstance, "💾 Сохранить изменения профиля", cx+170, 526, 340, 38, ID_BTN_PROF_SAVE, "primary")
-	hBtnProfDelete = createOwnerDrawButton(hInstance, "🗑️ Удалить эту сеть", cx+520, 526, 270, 38, ID_BTN_PROF_DELETE, "red")
+	hListPeers = createListBox(hInstance, cx, 108, cw, 600, hFontNormal)
 
 	tabPages[1] = []uintptr{
+		lblPeersPageTitle, lblPeersDesc, hBtnBookmarkPeer, hBtnCopyPeerVIP, hBtnPingPeer, btnExitNodeDirect, hListPeers,
+	}
+
+	// СТРАНИЦА 2: ПРОФИЛИ СЕТЕЙ (PROFILES)
+	lblProfTitle := createLabel(hInstance, "🌐 Управление профилями P2P сетей (Mesh Profiles)", cx, 16, cw, 28, hFontTitle)
+	lblProfDesc := createLabel(hInstance, "Каждый профиль — это отдельная изолированная сеть. Выбирайте сеть или создавайте новые.", cx, 44, cw, 18, hFontNormal)
+
+	hListProfiles = createListBox(hInstance, cx, 68, cw, 190, hFontNormal)
+
+	hBtnProfSwitch = createOwnerDrawButton(hInstance, "⚡ Подключить сеть", cx, 266, 175, 34, ID_BTN_PROF_SWITCH, "green")
+	hBtnProfQR = createOwnerDrawButton(hInstance, "📱 QR-код", cx+185, 266, 130, 34, ID_BTN_PROF_QR, "primary")
+	hBtnProfCreate = createOwnerDrawButton(hInstance, "➕ Новая сеть", cx+325, 266, 150, 34, ID_BTN_PROF_CREATE, "normal")
+	hBtnProfImport = createOwnerDrawButton(hInstance, "📥 Импорт", cx+485, 266, 150, 34, ID_BTN_PROF_IMPORT, "normal")
+	hBtnProfExport = createOwnerDrawButton(hInstance, "🔗 Скопировать ссылку", cx+645, 266, 195, 34, ID_BTN_PROF_EXPORT, "normal")
+
+	lblProfEditHead := createLabel(hInstance, "⚙️ Параметры выбранной сети (Редактирование):", cx, 308, cw, 22, hFontHeader)
+
+	lblProfName := createLabel(hInstance, "Название сети:", cx, 338, 160, 20, hFontBold)
+	hEditProfName = createEdit(hInstance, "", cx+165, 334, 675, 28, false, false, hFontNormal)
+
+	lblProfTopic := createLabel(hInstance, "MQTT Топик (секрет):", cx, 374, 160, 20, hFontBold)
+	hEditProfTopic = createEdit(hInstance, "", cx+165, 370, 675, 28, false, false, hFontNormal)
+
+	lblProfBroker := createLabel(hInstance, "MQTT Брокер:", cx, 410, 160, 20, hFontBold)
+	hEditProfBroker = createEdit(hInstance, "", cx+165, 406, 675, 28, false, false, hFontNormal)
+
+	lblProfVIP := createLabel(hInstance, "Virtual IP (напр. 100.64.200.5):", cx, 446, 160, 20, hFontBold)
+	hEditProfVIP = createEdit(hInstance, "", cx+165, 442, 675, 28, false, false, hFontNormal)
+
+	hBtnProfSave = createOwnerDrawButton(hInstance, "💾 Сохранить изменения профиля", cx+165, 480, 415, 38, ID_BTN_PROF_SAVE, "primary")
+	hBtnProfDelete = createOwnerDrawButton(hInstance, "🗑️ Удалить эту сеть", cx+590, 480, 250, 38, ID_BTN_PROF_DELETE, "red")
+
+	tabPages[2] = []uintptr{
 		lblProfTitle, lblProfDesc, hListProfiles,
-		hBtnProfSwitch, hBtnProfQR, hBtnProfCreate, hBtnProfImport,
-		lblProfEditHead, lblProfName, hEditProfName, hBtnProfExport,
+		hBtnProfSwitch, hBtnProfQR, hBtnProfCreate, hBtnProfImport, hBtnProfExport,
+		lblProfEditHead, lblProfName, hEditProfName,
 		lblProfTopic, hEditProfTopic, lblProfBroker, hEditProfBroker,
 		lblProfVIP, hEditProfVIP,
 		hBtnProfSave, hBtnProfDelete,
 	}
-	writeDebug("buildModernUI: страница 1 создана")
 
-	// СТРАНИЦА 2: AMNEZIAWG 2.0
-	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 3.1 — Защита от блокировок DPI (ТСПУ 2026)", cx, 20, cw, 28, hFontTitle)
-	lblAwgDesc := createLabel(hInstance, "Поведенческая обфускация: Header Protection (ChaCha20), Random Trailers, Content Padding и джиттер таймеров.", cx, 48, cw, 20, hFontNormal)
+	// СТРАНИЦА 3: AMNEZIAWG 3.1
+	lblAwgTitle := createLabel(hInstance, "🛡️ AmneziaWG 3.1 — Защита от блокировок DPI (ТСПУ)", cx, 16, cw, 28, hFontTitle)
+	lblAwgDesc := createLabel(hInstance, "Поведенческая обфускация: Header Protection (ChaCha20), Content Padding, Random Trailers и джиттер таймеров.", cx, 44, cw, 18, hFontNormal)
 
-	hBtnAwgStd = createOwnerDrawButton(hInstance, "🛡️ AWG 2.0 Anti-TSPU", cx, 78, 190, 36, ID_BTN_AWG_STD, "normal")
-	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🔒 AWG 3.1 Strict (Макс. ТСПУ)", cx+200, 78, 190, 36, ID_BTN_AWG_DPI, "primary")
-	hBtnAwgStealth = createOwnerDrawButton(hInstance, "⚖️ AWG 3.1 Balanced", cx+400, 78, 190, 36, ID_BTN_AWG_STEALTH, "normal")
-	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайный 3.1", cx+600, 78, 190, 36, ID_BTN_RAND_AWG, "normal")
+	hBtnAwgDpi = createOwnerDrawButton(hInstance, "🔒 AWG 3.1 Strict (ТСПУ)", cx, 70, 205, 34, ID_BTN_AWG_DPI, "primary")
+	hBtnAwgStealth = createOwnerDrawButton(hInstance, "⚖️ AWG 3.1 Balanced", cx+212, 70, 205, 34, ID_BTN_AWG_STEALTH, "normal")
+	hBtnAwgStd = createOwnerDrawButton(hInstance, "🛡️ Стандартный WireGuard", cx+424, 70, 205, 34, ID_BTN_AWG_STD, "normal")
+	hBtnRandomAwg = createOwnerDrawButton(hInstance, "🎲 Случайный 3.1", cx+635, 70, 205, 34, ID_BTN_RAND_AWG, "normal")
 
-	lblJc := createLabel(hInstance, "Jc (мусор):", cx, 128, 75, 20, hFontNormal)
-	hEditAwgJc = createEdit(hInstance, "4", cx+80, 124, 55, 28, false, false, hFontNormal)
+	lblJc := createLabel(hInstance, "Jc (мусор):", cx, 114, 70, 20, hFontNormal)
+	hEditAwgJc = createEdit(hInstance, "4", cx+75, 110, 60, 28, false, false, hFontNormal)
 
-	lblJmin := createLabel(hInstance, "Jmin:", cx+150, 128, 45, 20, hFontNormal)
-	hEditAwgJmin = createEdit(hInstance, "40", cx+198, 124, 55, 28, false, false, hFontNormal)
+	lblJmin := createLabel(hInstance, "Jmin:", cx+145, 114, 45, 20, hFontNormal)
+	hEditAwgJmin = createEdit(hInstance, "40", cx+195, 110, 60, 28, false, false, hFontNormal)
 
-	lblJmax := createLabel(hInstance, "Jmax:", cx+268, 128, 45, 20, hFontNormal)
-	hEditAwgJmax = createEdit(hInstance, "70", cx+318, 124, 55, 28, false, false, hFontNormal)
+	lblJmax := createLabel(hInstance, "Jmax:", cx+265, 114, 45, 20, hFontNormal)
+	hEditAwgJmax = createEdit(hInstance, "70", cx+315, 110, 60, 28, false, false, hFontNormal)
 
-	lblS1 := createLabel(hInstance, "S1:", cx+388, 128, 30, 20, hFontNormal)
-	hEditAwgS1 = createEdit(hInstance, "48", cx+422, 124, 55, 28, false, false, hFontNormal)
+	lblS1 := createLabel(hInstance, "S1:", cx+385, 114, 30, 20, hFontNormal)
+	hEditAwgS1 = createEdit(hInstance, "48", cx+420, 110, 60, 28, false, false, hFontNormal)
 
-	lblS2 := createLabel(hInstance, "S2:", cx+492, 128, 30, 20, hFontNormal)
-	hEditAwgS2 = createEdit(hInstance, "32", cx+526, 124, 55, 28, false, false, hFontNormal)
+	lblS2 := createLabel(hInstance, "S2:", cx+490, 114, 30, 20, hFontNormal)
+	hEditAwgS2 = createEdit(hInstance, "32", cx+525, 110, 60, 28, false, false, hFontNormal)
 
-	lblH1 := createLabel(hInstance, "H1 (Init):", cx, 166, 65, 20, hFontNormal)
-	hEditAwgH1 = createEdit(hInstance, "1428571428", cx+70, 162, 110, 28, false, false, hFontNormal)
+	lblH1 := createLabel(hInstance, "H1 (Init):", cx, 148, 65, 20, hFontNormal)
+	hEditAwgH1 = createEdit(hInstance, "1428571428", cx+70, 144, 125, 28, false, false, hFontNormal)
 
-	lblH2 := createLabel(hInstance, "H2 (Resp):", cx+195, 166, 75, 20, hFontNormal)
-	hEditAwgH2 = createEdit(hInstance, "2147483647", cx+275, 162, 110, 28, false, false, hFontNormal)
+	lblH2 := createLabel(hInstance, "H2 (Resp):", cx+205, 148, 75, 20, hFontNormal)
+	hEditAwgH2 = createEdit(hInstance, "2147483647", cx+285, 144, 125, 28, false, false, hFontNormal)
 
-	lblH3 := createLabel(hInstance, "H3 (Cookie):", cx+400, 166, 85, 20, hFontNormal)
-	hEditAwgH3 = createEdit(hInstance, "857142857", cx+490, 162, 110, 28, false, false, hFontNormal)
+	lblH3 := createLabel(hInstance, "H3 (Cookie):", cx+420, 148, 85, 20, hFontNormal)
+	hEditAwgH3 = createEdit(hInstance, "857142857", cx+510, 144, 125, 28, false, false, hFontNormal)
 
-	lblH4 := createLabel(hInstance, "H4 (Data):", cx+615, 166, 70, 20, hFontNormal)
-	hEditAwgH4 = createEdit(hInstance, "1122334455", cx+690, 162, 100, 28, false, false, hFontNormal)
+	lblH4 := createLabel(hInstance, "H4 (Data):", cx+645, 148, 70, 20, hFontNormal)
+	hEditAwgH4 = createEdit(hInstance, "1122334455", cx+720, 144, 120, 28, false, false, hFontNormal)
 
-	lblConfTitle := createLabel(hInstance, "📄 Готовый конфиг AmneziaWG (Скопируйте в Amnezia VPN или на роутер):", cx, 200, cw, 22, hFontHeader)
-	hEditAwgConf = createEdit(hInstance, "", cx, 226, cw, 390, true, true, hFontMono)
+	lblConfTitle := createLabel(hInstance, "📄 Готовый конфиг AmneziaWG (Скопируйте в Amnezia VPN или на роутер):", cx, 180, cw, 22, hFontHeader)
+	hEditAwgConf = createEdit(hInstance, "", cx, 204, cw, 440, true, true, hFontMono)
 
-	hBtnCopyAwg = createOwnerDrawButton(hInstance, "📋 Скопировать конфиг", cx, 626, 240, 40, ID_BTN_COPY_AWG, "primary")
-	hBtnSaveAwg = createOwnerDrawButton(hInstance, "💾 Сохранить в natbypass.conf", cx+250, 626, 270, 40, ID_BTN_SAVE_AWG, "normal")
-	hBtnOpenAwgClient = createOwnerDrawButton(hInstance, "🚀 Открыть Amnezia", cx+530, 626, 260, 40, ID_BTN_OPEN_AWG_CLIENT, "normal")
+	hBtnCopyAwg = createOwnerDrawButton(hInstance, "📋 Скопировать конфиг", cx, 654, 260, 38, ID_BTN_COPY_AWG, "primary")
+	hBtnSaveAwg = createOwnerDrawButton(hInstance, "💾 Сохранить в natbypass.conf", cx+275, 654, 280, 38, ID_BTN_SAVE_AWG, "normal")
+	hBtnOpenAwgClient = createOwnerDrawButton(hInstance, "🚀 Открыть Amnezia", cx+570, 654, 270, 38, ID_BTN_OPEN_AWG_CLIENT, "normal")
 
-	tabPages[2] = []uintptr{
+	tabPages[3] = []uintptr{
 		lblAwgTitle, lblAwgDesc, hBtnAwgStd, hBtnAwgDpi, hBtnAwgStealth, hBtnRandomAwg,
 		lblJc, hEditAwgJc, lblJmin, hEditAwgJmin, lblJmax, hEditAwgJmax, lblS1, hEditAwgS1, lblS2, hEditAwgS2,
 		lblH1, hEditAwgH1, lblH2, hEditAwgH2, lblH3, hEditAwgH3, lblH4, hEditAwgH4,
 		lblConfTitle, hEditAwgConf, hBtnCopyAwg, hBtnSaveAwg, hBtnOpenAwgClient,
 	}
-	writeDebug("buildModernUI: страница 2 создана")
 
-	// СТРАНИЦА 3: НАСТРОЙКИ
-	lblSetTitle := createLabel(hInstance, "⚙️ Сигнальные каналы & Настройки приложения", cx, 20, cw, 28, hFontTitle)
+	// СТРАНИЦА 4: КАНАЛЫ СВЯЗИ (SIGNALING)
+	lblSigTitle := createLabel(hInstance, "📡 Сигнальные каналы связи (Signaling Channels)", cx, 16, cw, 28, hFontTitle)
+	lblSigDesc := createLabel(hInstance, "Каналы используются только для обмена координатами (STUN/IP). Данные передаются строго P2P.", cx, 44, cw, 18, hFontNormal)
 
-	lblNick := createLabel(hInstance, "🏷️ Ваше имя / Никнейм:", cx, 52, 200, 20, hFontBold)
-	hEditMyNick = createEdit(hInstance, myNick, cx+210, 48, 400, 28, false, false, hFontNormal)
-	lblNickHint := createLabel(hInstance, "💡 Имя, которое увидят другие участники сети (например: Домашний ПК, Ноутбук)", cx+210, 78, 570, 18, hFontNormal)
+	lblMode := createLabel(hInstance, "🎯 Режим работы каналов:", cx, 76, 200, 20, hFontBold)
+	hBtnModeParallel = createOwnerDrawButton(hInstance, "🔄 Параллельно (MQTT+TG)", cx+210, 72, 255, 32, ID_BTN_MODE_PARALLEL, "primary")
+	hBtnModeMQTT = createOwnerDrawButton(hInstance, "⚡ Только MQTT", cx+475, 72, 175, 32, ID_BTN_MODE_MQTT, "normal")
+	hBtnModeTG = createOwnerDrawButton(hInstance, "💬 Только Telegram", cx+660, 72, 180, 32, ID_BTN_MODE_TG, "normal")
 
-	lblMode := createLabel(hInstance, "🎯 Режим работы каналов:", cx, 100, 200, 20, hFontBold)
-	hBtnModeParallel = createOwnerDrawButton(hInstance, "🔄 Параллельно (MQTT+TG)", cx+210, 96, 255, 32, ID_BTN_MODE_PARALLEL, "primary")
-	hBtnModeMQTT = createOwnerDrawButton(hInstance, "⚡ Только MQTT", cx+475, 96, 150, 32, ID_BTN_MODE_MQTT, "normal")
-	hBtnModeTG = createOwnerDrawButton(hInstance, "💬 Только Telegram", cx+635, 96, 155, 32, ID_BTN_MODE_TG, "normal")
+	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", cx, 114, cw, 22, hFontHeader)
+	lblMqBr := createLabel(hInstance, "URL Брокера:", cx, 140, 200, 20, hFontNormal)
+	hEditMqttBr = createEdit(hInstance, "tcp://broker.emqx.io:1883", cx+210, 136, 440, 28, false, false, hFontNormal)
+	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+660, 134, 180, 32, ID_BTN_TEST_MQTT, "normal")
 
-	lblMqHead := createLabel(hInstance, "⚡ MQTT Брокер:", cx, 134, cw, 22, hFontHeader)
-	lblMqBr := createLabel(hInstance, "URL Брокера:", cx, 158, 200, 20, hFontNormal)
-	hEditMqttBr = createEdit(hInstance, "tcp://broker.emqx.io:1883", cx+210, 154, 400, 28, false, false, hFontNormal)
-	hBtnTestMqtt = createOwnerDrawButton(hInstance, "🧪 Проверить MQTT", cx+620, 152, 170, 32, ID_BTN_TEST_MQTT, "normal")
+	lblMqPresets := createLabel(hInstance, "Пресеты:", cx+210, 170, 75, 18, hFontNormal)
+	hBtnMqEMQX := createOwnerDrawButton(hInstance, "⚡ EMQX", cx+290, 168, 95, 24, ID_BTN_MQ_EMQX, "normal")
+	hBtnMqHive := createOwnerDrawButton(hInstance, "⚡ HiveMQ", cx+395, 168, 105, 24, ID_BTN_MQ_HIVE, "normal")
+	hBtnMqMosq := createOwnerDrawButton(hInstance, "⚡ Mosquitto", cx+510, 168, 120, 24, ID_BTN_MQ_MOSQ, "normal")
+	hBtnMqEcl := createOwnerDrawButton(hInstance, "⚡ Eclipse", cx+640, 168, 100, 24, ID_BTN_MQ_ECL, "normal")
 
-	lblMqPresets := createLabel(hInstance, "Пресеты:", cx+210, 186, 65, 18, hFontNormal)
-	hBtnMqEMQX := createOwnerDrawButton(hInstance, "⚡ EMQX", cx+280, 184, 85, 22, ID_BTN_MQ_EMQX, "normal")
-	hBtnMqHive := createOwnerDrawButton(hInstance, "⚡ HiveMQ", cx+370, 184, 95, 22, ID_BTN_MQ_HIVE, "normal")
-	hBtnMqMosq := createOwnerDrawButton(hInstance, "⚡ Mosquitto", cx+470, 184, 110, 22, ID_BTN_MQ_MOSQ, "normal")
-	hBtnMqEcl := createOwnerDrawButton(hInstance, "⚡ Eclipse", cx+585, 184, 90, 22, ID_BTN_MQ_ECL, "normal")
+	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 202, 200, 20, hFontNormal)
+	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 198, 630, 28, false, false, hFontNormal)
+	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: mynet/supersecret/2029", cx+210, 228, 630, 18, hFontNormal)
 
-	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 212, 200, 20, hFontNormal)
-	hEditMqttTp = createEdit(hInstance, "natbypass/mynet/peers", cx+210, 208, 400, 28, false, false, hFontNormal)
-	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: mynet/supersecret/2029", cx+210, 238, 570, 18, hFontNormal)
+	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 256, cw, 22, hFontHeader)
+	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 282, 200, 20, hFontNormal)
+	hEditTgToken = createEdit(hInstance, "", cx+210, 278, 440, 28, false, false, hFontNormal)
+	hBtnTestTg = createOwnerDrawButton(hInstance, "🧪 Проверить бот", cx+660, 276, 180, 32, ID_BTN_TEST_TG, "normal")
 
-	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 260, cw, 22, hFontHeader)
-	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 284, 200, 20, hFontNormal)
-	hEditTgToken = createEdit(hInstance, "", cx+210, 280, 400, 28, false, false, hFontNormal)
-	hBtnTestTg = createOwnerDrawButton(hInstance, "🧪 Проверить бот", cx+620, 278, 170, 32, ID_BTN_TEST_TG, "normal")
+	lblTgChat := createLabel(hInstance, "Chat ID (ЛС или Группа):", cx, 316, 200, 20, hFontNormal)
+	hEditTgChat = createEdit(hInstance, "", cx+210, 312, 630, 28, false, false, hFontNormal)
+	lblTgHint := createLabel(hInstance, "💡 1) Создайте бота в @BotFather  2) Узнайте Chat ID через @userinfobot  3) Добавьте ботов всех ПК в одну группу!", cx, 344, cw, 18, hFontNormal)
 
-	lblTgChat := createLabel(hInstance, "Chat ID (ЛС или Группа):", cx, 314, 200, 20, hFontNormal)
-	hEditTgChat = createEdit(hInstance, "", cx+210, 310, 400, 28, false, false, hFontNormal)
-	lblTgHint := createLabel(hInstance, "💡 Настройка: 1) Создайте бота в @BotFather  2) Узнайте Chat ID через @userinfobot  3) Добавьте ботов всех ПК в одну группу!", cx, 340, cw, 18, hFontNormal)
+	hBtnSaveChannels = createOwnerDrawButton(hInstance, "💾 Применить и сохранить настройки каналов", cx+160, 380, 520, 42, ID_BTN_SAVE_CHANNELS, "primary")
 
-	lblExitHead := createLabel(hInstance, "🌐 Маршрутизация & Шлюз (Exit Node & Локальные подсети):", cx, 366, cw, 22, hFontHeader)
-	exitText := "🌐 Разрешить выход в интернет через меня: ВЫКЛ"
+	tabPages[4] = []uintptr{
+		lblSigTitle, lblSigDesc, lblMode, hBtnModeParallel, hBtnModeMQTT, hBtnModeTG,
+		lblMqHead, lblMqBr, hEditMqttBr, hBtnTestMqtt, lblMqPresets, hBtnMqEMQX, hBtnMqHive, hBtnMqMosq, hBtnMqEcl, lblMqTp, hEditMqttTp, lblMqTopicHint,
+		lblTgHead, lblTgToken, hEditTgToken, hBtnTestTg, lblTgChat, hEditTgChat, lblTgHint,
+		hBtnSaveChannels,
+	}
+
+	// СТРАНИЦА 5: ШЛЮЗ И ПОДСЕТИ (ROUTING)
+	lblRoutingTitle := createLabel(hInstance, "🏠 Маршрутизация трафика (Exit Node & Локальные подсети)", cx, 16, cw, 28, hFontTitle)
+	lblRoutingDesc := createLabel(hInstance, "Настройка выхода в интернет через удаленные компьютеры сети и доступ к локальным устройствам.", cx, 44, cw, 18, hFontNormal)
+
+	lblExitHead := createLabel(hInstance, "🌐 Выход в интернет (Exit Node):", cx, 74, cw, 22, hFontHeader)
+	btnExitClientDirect := createOwnerDrawButton(hInstance, "🌐 Переключить шлюз Exit Node", cx, 102, 415, 38, ID_BTN_EXIT_NODE_SELECT, "normal")
+
+	exitText := "🛡️ Выход через этот ПК: ВЫКЛ"
 	exitType := "normal"
 	if allowExitNode {
-		exitText = "🌐 Разрешить выход в интернет через меня: ВКЛ"
+		exitText = "🛡️ Выход через этот ПК: ВКЛ"
 		exitType = "green"
 	}
-	hBtnAllowExit = createOwnerDrawButton(hInstance, exitText, cx, 390, 385, 34, ID_BTN_ALLOW_EXIT, exitType)
+	hBtnAllowExit = createOwnerDrawButton(hInstance, exitText, cx+425, 102, 415, 38, ID_BTN_ALLOW_EXIT, exitType)
+
+	lblSubnetHead := createLabel(hInstance, "🏠 Доступ к локальным подсетям (LAN):", cx, 154, cw, 22, hFontHeader)
 
 	localSubnets := network.GetLocalSubnets()
 	addSubnetBtnText := "➕ Добавить мою сеть"
 	if len(localSubnets) > 0 {
 		addSubnetBtnText = fmt.Sprintf("➕ Добавить мою сеть: %s", localSubnets[0])
 	}
-	hBtnAddLocalSubnet = createOwnerDrawButton(hInstance, addSubnetBtnText, cx+395, 390, 395, 34, ID_BTN_ADD_LOCAL_SUBNET, "normal")
+	hBtnAddLocalSubnet = createOwnerDrawButton(hInstance, addSubnetBtnText, cx, 182, 415, 38, ID_BTN_ADD_LOCAL_SUBNET, "normal")
+	btnSubnetToggleDirect := createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+425, 182, 415, 38, ID_BTN_TOGGLE_SUBNET, "normal")
 
-	lblAdvSubnets := createLabel(hInstance, "🏠 Локальные подсети для общего доступа (напр. 192.168.1.0/24):", cx, 432, 470, 20, hFontNormal)
-	hEditAdvSubnets = createEdit(hInstance, "", cx+480, 428, 310, 28, false, false, hFontNormal)
+	lblAdvSubnets := createLabel(hInstance, "Список анонсируемых подсетей (через запятую, напр. 192.168.1.0/24):", cx, 230, 480, 20, hFontNormal)
+	hEditAdvSubnets = createEdit(hInstance, "", cx+490, 226, 350, 28, false, false, hFontNormal)
 
-	lblSysHead := createLabel(hInstance, "🛠️ Системные функции & Интерфейс:", cx, 464, cw, 22, hFontHeader)
+	tabPages[5] = []uintptr{
+		lblRoutingTitle, lblRoutingDesc,
+		lblExitHead, btnExitClientDirect, hBtnAllowExit,
+		lblSubnetHead, hBtnAddLocalSubnet, btnSubnetToggleDirect, lblAdvSubnets, hEditAdvSubnets,
+	}
+
+	// СТРАНИЦА 6: ДИАГНОСТИКА И ЖУРНАЛ
+	lblDiagTitle := createLabel(hInstance, "🩺 Диагностика связности & Журнал событий", cx, 16, cw, 28, hFontTitle)
+	hBtnRunDiag = createOwnerDrawButton(hInstance, "🔄 Комплексный тест сети", cx, 48, 230, 36, ID_BTN_RUN_DIAG, "primary")
+	hBtnDumpStack = createOwnerDrawButton(hInstance, "⚡ Снимок памяти", cx+240, 48, 210, 36, ID_BTN_DUMP_STACK, "normal")
+	hBtnSaveLogs = createOwnerDrawButton(hInstance, "💾 Экспорт лога", cx+460, 48, 185, 36, ID_BTN_SAVE_LOGS, "normal")
+	hEditLogs = createEdit(hInstance, "", cx, 92, cw, 610, true, true, hFontMono)
+	hEditDiagLog = hEditLogs
+
+	tabPages[6] = []uintptr{lblDiagTitle, hBtnRunDiag, hBtnDumpStack, hBtnSaveLogs, hBtnClrLogs, hEditLogs}
+
+	// СТРАНИЦА 7: НАСТРОЙКИ (SETTINGS)
+	lblSetTitle := createLabel(hInstance, "⚙️ Настройки приложения NatBypass", cx, 16, cw, 28, hFontTitle)
+	lblSetDesc := createLabel(hInstance, "Параметры автозапуска, интеграции с Windows и обновление приложения.", cx, 44, cw, 18, hFontNormal)
+
+	lblNick := createLabel(hInstance, "🏷️ Ваше имя / Никнейм:", cx, 74, 200, 20, hFontBold)
+	hEditMyNick = createEdit(hInstance, myNick, cx+210, 70, 630, 28, false, false, hFontNormal)
+	lblNickHint := createLabel(hInstance, "💡 Имя, которое увидят другие участники сети (например: Домашний ПК, Ноутбук)", cx+210, 100, 630, 18, hFontNormal)
+
+	lblSysHead := createLabel(hInstance, "🛠️ Интеграция с системой Windows:", cx, 130, cw, 22, hFontHeader)
+
+	autostartText := "🚀 Автозапуск при старте Windows: ВЫКЛ"
+	autostartType := "normal"
+	if isAutostartEnabled {
+		autostartText = "🚀 Автозапуск при старте Windows: ВКЛ"
+		autostartType = "green"
+	}
+	hBtnToggleAutostart = createOwnerDrawButton(hInstance, autostartText, cx, 158, 415, 38, ID_BTN_TOGGLE_AUTOSTART, autostartType)
+
+	trayText := "📥 Сворачивать в трей при закрытии: ВКЛ"
+	trayType := "green"
+	if !minimizeToTray {
+		trayText = "📥 Сворачивать в трей при закрытии: ВЫКЛ"
+		trayType = "normal"
+	}
+	hBtnToggleMinimizeToTray = createOwnerDrawButton(hInstance, trayText, cx+425, 158, 415, 38, ID_BTN_TOGGLE_TRAY, trayType)
+
 	logsText := "💾 Запись логов на диск: ВЫКЛ"
 	logsType := "normal"
 	if saveLogsToDisk {
 		logsText = "💾 Запись логов на диск: ВКЛ"
 		logsType = "green"
 	}
-	hBtnToggleLogs = createOwnerDrawButton(hInstance, logsText, cx, 488, 385, 34, ID_BTN_TOGGLE_LOGS, logsType)
+	hBtnToggleLogs = createOwnerDrawButton(hInstance, logsText, cx, 204, 415, 38, ID_BTN_TOGGLE_LOGS, logsType)
 
-	diagText := "🩺 Вкладка Диагностика: ВКЛ"
-	diagType := "green"
-	if !showDiagnostics {
-		diagText = "🩺 Вкладка Диагностика: ВЫКЛ"
-		diagType = "normal"
+	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx, 260, cw, 42, ID_BTN_SAVE_CFG, "primary")
+	hBtnCheckUpdate = createOwnerDrawButton(hInstance, "🚀 Проверить и обновить NatBypass с GitHub", cx, 310, cw, 38, ID_BTN_CHECK_UPDATE, "green")
+
+	tabPages[7] = []uintptr{
+		lblSetTitle, lblSetDesc, lblNick, hEditMyNick, lblNickHint,
+		lblSysHead, hBtnToggleAutostart, hBtnToggleMinimizeToTray, hBtnToggleLogs,
+		hBtnSaveCfg, hBtnCheckUpdate,
 	}
-	hBtnToggleDiag = createOwnerDrawButton(hInstance, diagText, cx+395, 488, 395, 34, ID_BTN_TOGGLE_DIAG, diagType)
-
-	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx+145, 536, 500, 42, ID_BTN_SAVE_CFG, "primary")
-	hBtnCheckUpdate := createOwnerDrawButton(hInstance, "🚀 Проверить и обновить NatBypass с GitHub", cx+145, 588, 500, 38, ID_BTN_CHECK_UPDATE, "green")
-
-	tabPages[3] = []uintptr{
-		lblSetTitle, lblNick, hEditMyNick, lblNickHint, lblMode, hBtnModeParallel, hBtnModeMQTT, hBtnModeTG,
-		lblMqHead, lblMqBr, hEditMqttBr, hBtnTestMqtt, lblMqPresets, hBtnMqEMQX, hBtnMqHive, hBtnMqMosq, hBtnMqEcl, lblMqTp, hEditMqttTp, lblMqTopicHint,
-		lblTgHead, lblTgToken, hEditTgToken, hBtnTestTg, lblTgChat, hEditTgChat, lblTgHint,
-		lblExitHead, hBtnAllowExit, hBtnAddLocalSubnet, lblAdvSubnets, hEditAdvSubnets,
-		lblSysHead, hBtnToggleLogs, hBtnToggleDiag, hBtnSaveCfg, hBtnCheckUpdate,
-	}
-	writeDebug("buildModernUI: страница 3 создана")
-
-	// СТРАНИЦА 4: ДИАГНОСТИКА
-	lblDiagTitle := createLabel(hInstance, "🩺 Диагностика связности & Дебаггер памяти", cx, 36, cw, 28, hFontTitle)
-	hBtnRunDiag = createOwnerDrawButton(hInstance, "🔄 Комплексный тест сети", cx, 75, 240, 40, ID_BTN_RUN_DIAG, "primary")
-	hBtnDumpStack = createOwnerDrawButton(hInstance, "⚡ Снимок памяти и потоков", cx+250, 75, 240, 40, ID_BTN_DUMP_STACK, "normal")
-	hEditDiagLog = createEdit(hInstance, "Нажмите кнопку выше для комплексной проверки сети и доступности пиров...", cx, 130, cw, 520, true, true, hFontMono)
-
-	tabPages[4] = []uintptr{lblDiagTitle, hBtnRunDiag, hBtnDumpStack, hEditDiagLog}
-	writeDebug("buildModernUI: страница 4 создана")
-
-	// СТРАНИЦА 5: ЖУРНАЛ СОБЫТИЙ
-	lblLogTitle := createLabel(hInstance, "📋 Журнал событий в реальном времени", cx, 36, cw-260, 28, hFontTitle)
-	hBtnSaveLogs = createOwnerDrawButton(hInstance, "💾 Экспорт лога", cx+cw-250, 36, 120, 32, ID_BTN_SAVE_LOGS, "primary")
-	hBtnClrLogs = createOwnerDrawButton(hInstance, "🗑 Очистить", cx+cw-120, 36, 120, 32, ID_BTN_CLR_LOGS, "normal")
-	hEditLogs = createEdit(hInstance, "", cx, 75, cw, 575, true, true, hFontMono)
-
-	tabPages[5] = []uintptr{lblLogTitle, hBtnSaveLogs, hBtnClrLogs, hEditLogs}
-	writeDebug("buildModernUI: страница 5 создана")
 
 	// СТАРТОВЫЙ ЭКРАН (STARTUP / SPLASH OVERLAY)
-
 	hSplashTitle = createLabel(hInstance, "🛸 NatBypass P2P Mesh Engine", cx+40, 50, cw-80, 36, hFontTitle)
 	hSplashSub = createLabel(hInstance, "Автономная P2P mesh-сеть нового поколения • Инициализация...", cx+40, 92, cw-80, 22, hFontNormal)
 	hSplashStep1 = createLabel(hInstance, "🟢 [ 1/4 ] 🧹 Очистка старых сессий и фоновых процессов — Завершено", cx+60, 160, cw-120, 24, hFontHeader)
@@ -2972,7 +3259,6 @@ func buildModernUI(hInstance uintptr) {
 
 	splashControls = []uintptr{hSplashTitle, hSplashSub, hSplashStep1, hSplashStep2, hSplashStep3, hSplashStep4, hSplashBar}
 
-	// Скрываем сплэш-контролы по умолчанию
 	for _, h := range splashControls {
 		procShowWindow.Call(h, uintptr(SW_HIDE))
 	}
@@ -2982,7 +3268,6 @@ func buildModernUI(hInstance uintptr) {
 	applyDiagnosticsVisibility()
 	writeDebug("buildModernUI: fillConfigFields и renderAWGText завершены")
 
-	// Переключаем на активную страницу 0 (Обзор) и скрываем остальные
 	selectTab(0)
 }
 
@@ -2998,7 +3283,7 @@ func showSplashScreen() {
 	}
 	for _, btn := range navButtons {
 		if btn != 0 {
-			if btn == navButtons[4] && !showDiagnostics {
+			if btn == navButtons[6] && !showDiagnostics {
 				procShowWindow.Call(btn, uintptr(SW_HIDE))
 				continue
 			}
@@ -3021,7 +3306,6 @@ func hideSplashScreen() {
 	selectTab(0)
 }
 
-
 func selectTab(index int) {
 	if isSplashActive {
 		hideSplashScreen()
@@ -3039,7 +3323,7 @@ func selectTab(index int) {
 			}
 		}
 	}
-	if index == 2 && syncAWGPeerParams != nil && hBtnSyncAwg != 0 {
+	if index == 3 && syncAWGPeerParams != nil && hBtnSyncAwg != 0 {
 		procShowWindow.Call(hBtnSyncAwg, uintptr(SW_SHOW))
 		procInvalidateRect.Call(hBtnSyncAwg, 0, 1)
 	} else if hBtnSyncAwg != 0 {
@@ -3047,7 +3331,7 @@ func selectTab(index int) {
 	}
 	for _, btn := range navButtons {
 		if btn != 0 {
-			if btn == navButtons[4] && !showDiagnostics {
+			if btn == navButtons[6] && !showDiagnostics {
 				procShowWindow.Call(btn, uintptr(SW_HIDE))
 			} else {
 				procShowWindow.Call(btn, uintptr(SW_SHOW))
@@ -3055,13 +3339,16 @@ func selectTab(index int) {
 			}
 		}
 	}
-	if index == 1 {
-		refreshProfilesUI()
+	if index == 0 || index == 1 {
+		updateData()
 	}
 	if index == 2 {
+		refreshProfilesUI()
+	}
+	if index == 3 {
 		renderAWGTextFromUI()
 	}
-	if index == 5 {
+	if index == 6 {
 		flushLogsToUI()
 	}
 	procInvalidateRect.Call(hMainWnd, 0, 1)
@@ -4520,11 +4807,28 @@ func updateData() {
 			activeProfName = active.Name
 		}
 	}
-	infoText := fmt.Sprintf("Сеть: 🟢 [%s] | %s | VIP: %s | Внешний IP: %s", activeProfName, devTitle, myVirtualIP, ipStr)
-	setControlText(hLblIpInfo, infoText)
+	if hLblIpInfo != 0 {
+		infoText := fmt.Sprintf("Сеть: 🟢 [%s] | %s | VIP: %s | Внешний IP: %s", activeProfName, devTitle, myVirtualIP, ipStr)
+		setControlText(hLblIpInfo, infoText)
+	}
 
-	chText := fmt.Sprintf("📡 Активный режим: %s", activeChannelStr)
-	setControlText(hLblChannels, chText)
+	if hLblChannels != 0 {
+		chText := fmt.Sprintf("📡 Активный режим: %s", activeChannelStr)
+		setControlText(hLblChannels, chText)
+	}
+
+	if hLblCardVIP != 0 {
+		setControlText(hLblCardVIP, fmt.Sprintf("Локальный VIP:\r\n%s", myVirtualIP))
+	}
+	if hLblCardPubIP != 0 {
+		setControlText(hLblCardPubIP, fmt.Sprintf("Внешний IP:\r\n%s", ipStr))
+	}
+	if hLblCardSTUN != 0 {
+		setControlText(hLblCardSTUN, fmt.Sprintf("STUN Сокет:\r\n%s", stunStr))
+	}
+	if hLblCardSig != 0 {
+		setControlText(hLblCardSig, fmt.Sprintf("Сигнальный канал:\r\n%s", activeChannelStr))
+	}
 
 	onlineCount := 0
 	directP2PCount := 0
@@ -4573,7 +4877,7 @@ func updateData() {
 			syncBtnLabel := fmt.Sprintf("🔄 Применить настройки AmneziaWG с узла [%s]", mismatchPeerName)
 			buttonLabels[ID_BTN_SYNC_AWG] = syncBtnLabel
 			buttonTypes[ID_BTN_SYNC_AWG] = "yellow"
-			if currentTab == 1 && !isSplashActive && hBtnSyncAwg != 0 {
+			if currentTab == 3 && !isSplashActive && hBtnSyncAwg != 0 {
 				procShowWindow.Call(hBtnSyncAwg, uintptr(SW_SHOW))
 				procInvalidateRect.Call(hBtnSyncAwg, 0, 1)
 			}
@@ -4648,9 +4952,20 @@ func updateData() {
 
 		if currentHash != lastPeersHash {
 			lastPeersHash = currentHash
-			procSendMessageW.Call(hListPeers, 0x0184, 0, 0)
+			if hListPeers != 0 {
+				procSendMessageW.Call(hListPeers, 0x0184, 0, 0)
+			}
+			if hListSummaryPeers != 0 {
+				procSendMessageW.Call(hListSummaryPeers, 0x0184, 0, 0)
+			}
+
 			if len(peers) == 0 {
-				addListBoxItem(hListPeers, "  📡 Ожидание подключения других устройств... (0 пиров онлайн)")
+				if hListPeers != 0 {
+					addListBoxItem(hListPeers, "  📡 Ожидание подключения других устройств... (0 пиров онлайн)")
+				}
+				if hListSummaryPeers != 0 {
+					addListBoxItem(hListSummaryPeers, "  📡 Ожидание подключения других устройств... (0 пиров онлайн)")
+				}
 			} else {
 				for _, p := range peers {
 					if p == nil || p.DeviceID == "" {
@@ -4706,7 +5021,7 @@ func updateData() {
 
 					var extraTags []string
 					if p.AWG != nil || p.DirectP2P {
-						extraTags = append(extraTags, "[AWG 2.0]")
+						extraTags = append(extraTags, "[AWG 3.1]")
 					}
 					pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 					myCleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
@@ -4717,10 +5032,10 @@ func updateData() {
 						extraTags = append(extraTags, "[Шлюз]")
 					}
 					if len(p.AdvertisedRoutes) > 0 {
-						extraTags = append(extraTags, fmt.Sprintf("[: %s]", strings.Join(p.AdvertisedRoutes, ", ")))
+						extraTags = append(extraTags, fmt.Sprintf("[LAN: %s]", strings.Join(p.AdvertisedRoutes, ", ")))
 					}
 					if p.Online && p.AWG != nil && !awgParamsMatch(cachedAWGParams, p.AWG) {
-						extraTags = append(extraTags, "[AWG: ]")
+						extraTags = append(extraTags, "[AWG: ⚠️]")
 					}
 					extraInfo := ""
 					if len(extraTags) > 0 {
@@ -4752,20 +5067,27 @@ func updateData() {
 					line1 := fmt.Sprintf("  %s %s [%s] (ID: %s)", icon, nameDisplay, platBadge, p.DeviceID)
 					line2 := fmt.Sprintf("     └── VIP: %s | %s | %s%s", vip, statusDisplay, addrDisplay, extraInfo)
 
-					addListBoxItem(hListPeers, line1)
-					addListBoxItem(hListPeers, line2)
+					if hListPeers != 0 {
+						addListBoxItem(hListPeers, line1)
+						addListBoxItem(hListPeers, line2)
+					}
+
+					if hListSummaryPeers != 0 {
+						sumLine := fmt.Sprintf("  %s %s • VIP: %s • %s • %s", icon, nameDisplay, vip, statusDisplay, platBadge)
+						addListBoxItem(hListSummaryPeers, sumLine)
+					}
 				}
 			}
 			awgDirty = true
 		}
 	}
 
-	if awgDirty && currentTab == 1 {
+	if awgDirty && currentTab == 3 {
 		awgDirty = false
 		renderAWGTextFromUI()
 	}
 
-	if currentTab == 4 {
+	if currentTab == 6 {
 		flushLogsToUI()
 	}
 }

@@ -19,3 +19,13 @@ func SetAutoStart(name, execPath string, enable bool) error {
 	_ = k.DeleteValue(name)
 	return nil
 }
+
+func IsAutoStartEnabled(name string) bool {
+	k, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer k.Close()
+	_, _, err = k.GetStringValue(name)
+	return err == nil
+}
