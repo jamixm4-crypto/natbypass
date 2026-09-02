@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -94,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.181"
+	Version = "1.9.182"
 	Commit  = "release"
 )
 
@@ -869,34 +870,70 @@ func main() {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	hCursor, _, _ = procLoadCursorW.Call(0, 32512) // IDC_ARROW
 
-	// Загружаем иконку из встроенных ресурсов PE (ID 1 / 7) или напрямую из файла app.ico
-	hAppIcon, _, _ = procLoadIconW.Call(hInstance, 1)
-	if hAppIcon == 0 {
-		hAppIcon, _, _ = procLoadIconW.Call(hInstance, 7)
+	// Загружаем иконку (большая для Taskbar / Alt+Tab и маленькая для заголовка окна / системного трея)
+	var hIconBig uintptr
+	var hIconSmall uintptr
+
+	// 1) Пробуем загрузить из встроенных PE ресурсов по ID 1 (MAKEINTRESOURCE(1))
+	hIconBig, _, _ = procLoadImageW.Call(
+		hInstance,
+		1,
+		1, // IMAGE_ICON
+		32, 32,
+		0x00000040, // LR_SHARED
+	)
+	hIconSmall, _, _ = procLoadImageW.Call(
+		hInstance,
+		1,
+		1, // IMAGE_ICON
+		16, 16,
+		0x00000040, // LR_SHARED
+	)
+
+	// 2) Если по ID 1 не найдено, пробуем LoadIconW по ID 1 или имени "APP"
+	if hIconBig == 0 {
+		hIconBig, _, _ = procLoadIconW.Call(hInstance, 1)
 	}
-	if hAppIcon == 0 {
-		hAppIcon, _, _ = procLoadImageW.Call(
-			hInstance,
-			1,
-			1, // IMAGE_ICON
-			0, 0,
-			0x00000040|0x00008000,
-		)
+	if hIconBig == 0 {
+		appStr, _ := windows.UTF16PtrFromString("APP")
+		hIconBig, _, _ = procLoadIconW.Call(hInstance, uintptr(unsafe.Pointer(appStr)))
 	}
-	if hAppIcon == 0 {
-		icoPath, _ := windows.UTF16PtrFromString("app.ico")
-		hAppIcon, _, _ = procLoadImageW.Call(
-			0,
-			uintptr(unsafe.Pointer(icoPath)),
-			1, // IMAGE_ICON
-			0, 0,
-			0x00000010|0x00000040|0x00008000,
-		)
-	}
-	if hAppIcon == 0 {
-		hAppIcon, _, _ = procLoadIconW.Call(0, 32512)
+	if hIconSmall == 0 {
+		hIconSmall = hIconBig
 	}
 
+	// 3) Если все еще 0, пробуем загрузить из файла app.ico рядом с исполняемым файлом
+	if hIconBig == 0 {
+		if exePath, err := os.Executable(); err == nil {
+			exeDir := filepath.Dir(exePath)
+			icoFile := filepath.Join(exeDir, "app.ico")
+			if _, err := os.Stat(icoFile); err == nil {
+				icoPtr, _ := windows.UTF16PtrFromString(icoFile)
+				hIconBig, _, _ = procLoadImageW.Call(
+					0,
+					uintptr(unsafe.Pointer(icoPtr)),
+					1, // IMAGE_ICON
+					32, 32,
+					0x00000010|0x00000040, // LR_LOADFROMFILE | LR_SHARED
+				)
+				hIconSmall, _, _ = procLoadImageW.Call(
+					0,
+					uintptr(unsafe.Pointer(icoPtr)),
+					1, // IMAGE_ICON
+					16, 16,
+					0x00000010|0x00000040, // LR_LOADFROMFILE | LR_SHARED
+				)
+			}
+		}
+	}
+
+	// 4) Фолбэк на стандартную иконку Windows, если совсем ничего нет
+	if hIconBig == 0 {
+		hIconBig, _, _ = procLoadIconW.Call(0, 32512)
+	}
+	if hIconSmall == 0 {
+		hIconSmall = hIconBig
+	}
 
 	hBrushBg, _, _ = procCreateSolidBrush.Call(COLOR_BG)
 	hBrushSidebar, _, _ = procCreateSolidBrush.Call(COLOR_SIDEBAR)
@@ -929,11 +966,11 @@ func main() {
 		Style:         3,
 		LpfnWndProc:   windows.NewCallback(wndProc),
 		HInstance:     hInstance,
-		HIcon:         hAppIcon,
+		HIcon:         hIconBig,
 		HCursor:       hCursor,
 		HbrBackground: hBrushBg,
 		LpszClassName: className,
-		HIconSm:       hAppIcon,
+		HIconSm:       hIconSmall,
 	}
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 	writeDebug("Класс окна зарегистрирован")
@@ -953,15 +990,16 @@ func main() {
 	hMainWnd = hwnd
 	writeDebug(fmt.Sprintf("Главное окно создано, HWND=0x%X", hMainWnd))
 
-	procSendMessageW.Call(hMainWnd, 0x0080, 1, hAppIcon)
-	procSendMessageW.Call(hMainWnd, 0x0080, 0, hAppIcon)
+	// Устанавливаем иконки окна для панели задач и заголовка (WM_SETICON)
+	procSendMessageW.Call(hMainWnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, hIconBig)
+	procSendMessageW.Call(hMainWnd, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, hIconSmall)
 
 	// DWM Dark Mode заголовок
 	darkMode := int32(1)
 	procDwmSetWindowAttribute.Call(hMainWnd, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
 	// Инициализация иконки в системном трее Windows
-	initTrayIcon(hMainWnd, hAppIcon)
+	initTrayIcon(hMainWnd, hIconSmall)
 
 	// Построение элементов нативного интерфейса Windows (Pure Win32 GDI Controls)
 	writeDebug("Начало построения UI buildModernUI()...")
