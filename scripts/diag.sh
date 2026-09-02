@@ -166,7 +166,7 @@ if command -v iptables >/dev/null 2>&1; then
         log_warn "Правило iptables INPUT для nb0 отсутствует"
     fi
     if [ "$IS_KEENETIC" -eq 1 ]; then
-        if iptables -L _NDM_INPUT -n 2>/dev/null | grep -q "nb0"; then
+        if iptables -C _NDM_INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -L _NDM_INPUT -n -v 2>/dev/null | grep -q "nb0"; then
             log_ok "Цепочка KeeneticOS _NDM_INPUT для nb0: ACCEPT"
         else
             log_warn "Цепочка KeeneticOS _NDM_INPUT для nb0 отсутствует"
