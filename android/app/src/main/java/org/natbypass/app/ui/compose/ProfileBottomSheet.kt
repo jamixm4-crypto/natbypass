@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui.compose
+package org.natbypass.app.ui.compose
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -107,13 +107,26 @@ private fun ProfileItem(
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(text = profile.name, fontWeight = if (profile.isActive) FontWeight.SemiBold else FontWeight.Normal)
-            Text(
-                text = profile.mqttTopic.ifEmpty { profile.mqttBroker },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (profile.virtualIp.isNotEmpty()) {
+                    Text(
+                        text = profile.virtualIp,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    text = profile.mqttTopic.ifEmpty { profile.mqttBroker },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
         }
         // Actions
+
         IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Outlined.Edit, "Редактировать", modifier = Modifier.size(18.dp))
         }

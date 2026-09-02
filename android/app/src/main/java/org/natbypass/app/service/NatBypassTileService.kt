@@ -46,7 +46,11 @@ class NatBypassTileService : TileService() {
         val tile = qsTile ?: return
         val running = NatBypassVpnService.isRunning
         tile.state = if (running) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        tile.subtitle = if (running) "10.200.0.100" else "Отключено"
+        val vip = try {
+            org.natbypass.app.util.MobileBridge.getVirtualIP().substringBefore("/").trim().ifEmpty { "Подключено" }
+        } catch (_: Exception) { "Подключено" }
+        tile.subtitle = if (running) vip else "Отключено"
         tile.updateTile()
     }
 }
+
