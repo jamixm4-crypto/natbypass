@@ -306,12 +306,20 @@ EOF
         cat > /opt/etc/ndm/netfilter.d/010-natbypass.sh << 'NDM_EOF'
 #!/bin/sh
 [ "$type" = "ip6tables" ] && exit 0
-[ "$table" != "filter" ] && exit 0
 
-iptables -C INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i nb0 -j ACCEPT
-iptables -C FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i nb0 -j ACCEPT
-iptables -C _NDM_INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i nb0 -j ACCEPT 2>/dev/null || true
-iptables -C _NDM_FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i nb0 -j ACCEPT 2>/dev/null || true
+if [ "$table" = "filter" ]; then
+    iptables -C INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i nb0 -j ACCEPT
+    iptables -C FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i nb0 -j ACCEPT
+    iptables -C OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -I OUTPUT 1 -o nb0 -j ACCEPT
+    iptables -C _NDM_INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i nb0 -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i nb0 -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_OUTPUT 1 -o nb0 -j ACCEPT 2>/dev/null || true
+fi
+
+if [ "$table" = "mangle" ]; then
+    iptables -t mangle -C PREROUTING -i nb0 -j ACCEPT 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i nb0 -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -C OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o nb0 -j ACCEPT 2>/dev/null || true
+fi
 NDM_EOF
         chmod +x /opt/etc/ndm/netfilter.d/010-natbypass.sh
         /opt/etc/ndm/netfilter.d/010-natbypass.sh 2>/dev/null || true

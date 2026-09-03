@@ -68,19 +68,19 @@ jobs:
         run: |
           $VERSION = "${{ github.ref_name }}"
           $env:GOARCH = "amd64"
-          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-linux-amd64 ./cmd/natbypass-cli
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-linux-amd64 ./cmd/natbypass
 
           $env:GOARCH = "arm64"
-          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-linux-arm64 ./cmd/natbypass-cli
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-linux-arm64 ./cmd/natbypass
 
           $env:GOARCH = "mipsle"
           $env:GOMIPS = "softfloat"
-          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-keenetic-mipsle ./cmd/natbypass-cli
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-keenetic-mipsle ./cmd/natbypass
           Copy-Item build/natbypass-keenetic-mipsle build/natbypass-router-mipsle -Force
 
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"
-          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-router-mips ./cmd/natbypass-cli
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-router-mips ./cmd/natbypass
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2

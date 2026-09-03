@@ -1,4 +1,4 @@
-﻿package network
+package network
 
 import (
 	"context"
@@ -67,16 +67,39 @@ func NewSTUNClient(servers []string) *STUNClient {
 }
 
 func (s *STUNClient) GetMappedAddress(ctx context.Context) (net.IP, int, error) {
-	var lastErr error
+	if len(s.servers) == 0 {
+		return nil, 0, errors.New("no STUN servers configured")
+	}
 
-	for _, server := range s.servers {
-		reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		ip, port, err := s.getMappedAddressFromServer(reqCtx, server)
-		cancel()
-		if err == nil && ip != nil {
-			return ip, port, nil
+	type stunResult struct {
+		ip   net.IP
+		port int
+		err  error
+	}
+
+	resCh := make(chan stunResult, len(s.servers))
+	probeCtx, cancelProbes := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelProbes()
+
+	for _, srv := range s.servers {
+		go func(server string) {
+			ip, port, err := s.getMappedAddressFromServer(probeCtx, server)
+			resCh <- stunResult{ip: ip, port: port, err: err}
+		}(srv)
+	}
+
+	var lastErr error
+	for i := 0; i < len(s.servers); i++ {
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		case res := <-resCh:
+			if res.err == nil && res.ip != nil {
+				cancelProbes() // Cancel remaining probes immediately once first responds
+				return res.ip, res.port, nil
+			}
+			lastErr = res.err
 		}
-		lastErr = err
 	}
 
 	if lastErr != nil {
@@ -84,6 +107,7 @@ func (s *STUNClient) GetMappedAddress(ctx context.Context) (net.IP, int, error) 
 	}
 	return nil, 0, errors.New("failed to get mapped address from all STUN servers")
 }
+
 
 func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server string) (net.IP, int, error) {
 	addr, err := net.ResolveUDPAddr("udp4", server)

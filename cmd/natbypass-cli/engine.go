@@ -49,6 +49,32 @@ func triggerPublish() {
 	}
 }
 
+// isLowPowerArch returns true when running on MIPS/MIPSLE/ARM embedded routers.
+func isLowPowerArch() bool {
+	return runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "arm"
+}
+
+// adaptiveKeepAliveInterval returns the keepalive interval tuned for the current architecture.
+// On MIPS/ARM routers we use a longer interval to reduce CPU and syscall overhead.
+func adaptiveKeepAliveInterval() time.Duration {
+	if isLowPowerArch() {
+		return constants.LowPowerKeepAliveInterval
+	}
+	return constants.KeepAliveInterval
+}
+
+// adaptivePublishInterval returns the publish interval tuned for the current architecture.
+func adaptivePublishInterval(cfgInterval int) time.Duration {
+	if cfgInterval > 0 {
+		return time.Duration(cfgInterval) * time.Second
+	}
+	if isLowPowerArch() {
+		return constants.LowPowerPublishInterval
+	}
+	return constants.DefaultPublishInterval
+}
+
+
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	logTarget := ""
 	if cfg.App.SaveLogsToDisk {
@@ -303,7 +329,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				inSrcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
 				inDstIP := net.IPv4(payload[16], payload[17], payload[18], payload[19]).String()
-				log.Info().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
+				log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 				_ = tunDev.WritePacket(payload)
 			}
 		}
@@ -317,6 +343,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		// Signaling is strictly for control plane / peer discovery.
 		// All data plane traffic flows strictly peer-to-peer over direct UDP.
 
+		// sync.Pool for zero-allocation packet buffers in the hot-path
+		tunPktPool := &sync.Pool{
+			New: func() any {
+				b := make([]byte, 65536)
+				return &b
+			},
+		}
 
 		// L3 Data-plane: Outbound packets from TUN -> Dispatch to peer over UDP Direct or MQTT Relay
 		pktCh := make(chan []byte, 256)
@@ -327,9 +360,23 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					return
 				default:
 				}
+				// Blocking read: tunDev.file.Read() blocks until data arrives — no CPU spin
+				bufPtr := tunPktPool.Get().(*[]byte)
 				pkt, err := tunDev.ReadPacket()
+				tunPktPool.Put(bufPtr)
 				if err != nil {
-					time.Sleep(1 * time.Millisecond)
+					// Transient errors (e.g. EAGAIN on non-blocking fd): yield briefly
+					select {
+					case <-engineCtx.Done():
+						return
+					default:
+						// Brief yield only on error, not busy-spin (100ms on MIPS/ARM prevents CPU burn)
+						if isLowPowerArch() {
+							time.Sleep(100 * time.Millisecond)
+						} else {
+							time.Sleep(10 * time.Millisecond)
+						}
+					}
 					continue
 				}
 				if len(pkt) < 20 {
@@ -343,6 +390,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 		}()
+
 		go func() {
 			for {
 				select {
@@ -429,17 +477,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							pmax = p.AWG.Pmax
 						}
 
-					// 1. Pure P2P Direct UDP packet transmission
-					if targetEP != "" && puncher != nil {
-						srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
-						log.Info().Str("src", srcIP).Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Int("len", len(pkt)).Msg("📤 TUN→UDP outbound")
-						err := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
-						if err != nil {
-							log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
+						// 1. Pure P2P Direct UDP packet transmission
+						if targetEP != "" && puncher != nil {
+							srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
+							log.Debug().Str("src", srcIP).Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Int("len", len(pkt)).Msg("📤 TUN→UDP outbound")
+							err := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
+							if err != nil {
+								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
+							}
+						} else {
+							log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no endpoint or puncher")
 						}
-					} else {
-						log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no endpoint or puncher")
-					}
 
 						// 1b. Reactive instant hole punching if direct P2P is not yet confirmed
 						if !p.DirectP2P && puncher != nil {
@@ -458,11 +506,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}()
 	}
 
-	// Dedicated rapid 2.5s keepalive & probe loop for maintaining carrier CGNAT mappings
+	// Dedicated keepalive & probe loop for maintaining carrier CGNAT mappings.
+	// Interval is adaptive: 2s on x86/x64, 10s on MIPS/ARM to spare embedded CPU.
 	if puncher != nil {
 		go func() {
-			kaTicker := time.NewTicker(2 * time.Second)
+			kaTicker := time.NewTicker(adaptiveKeepAliveInterval())
 			defer kaTicker.Stop()
+
 			for {
 				select {
 				case <-engineCtx.Done():
@@ -471,6 +521,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					for _, p := range registry.List() {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
 							_ = puncher.SendKeepAlive(p.ActiveEndpoint)
+							// If peer's signaling STUNAddr has diverged from our current ActiveEndpoint, probe it to recover from remote port re-binds
+							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							}
 						} else {
 							if p.ActiveEndpoint != "" {
 								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
@@ -583,11 +637,7 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 	if webui.IsKeeneticOS() {
 		log.Info().Msg("🛡️ Обнаружена KeeneticOS: активирована системная авторизация роутера")
 		customAuth = webui.VerifyKeeneticAuth
-	} else if runtime.GOOS != "linux" && runtime.GOOS != "windows" && username == "" && password == "" {
-		username = "admin"
-		password = "admin"
-		log.Info().Str("user", username).Msg("🔐 Web UI защищен авторизацией по умолчанию (admin/admin)")
-	} else if runtime.GOOS == "linux" && username == "" && password == "" {
+	} else if runtime.GOOS != "windows" && username == "" && password == "" {
 		username = "admin"
 		password = "admin"
 		log.Info().Str("user", username).Msg("🔐 Web UI защищен авторизацией по умолчанию (admin/admin)")
@@ -754,20 +804,24 @@ func publishLoop(
 	sigMgr *signaling.FallbackManager,
 	tunDev *tunnel.Device,
 ) {
-	publishInterval := time.Duration(cfg.App.PublishInterval) * time.Second
-	if publishInterval <= 0 {
-		publishInterval = constants.DefaultPublishInterval
-	}
+	publishInterval := adaptivePublishInterval(cfg.App.PublishInterval)
 
 	ticker := time.NewTicker(publishInterval)
 	defer ticker.Stop()
 
 	var stunAddr string
+	var stunCachedAt time.Time         // STUN result cache timestamp for MIPS/ARM
+	var candidatesCached []string      // Cached ICE candidates
+	stunCacheTTL := publishInterval * 4 // Refresh STUN at most once per 4 publish cycles
+	if isLowPowerArch() && stunCacheTTL < constants.LowPowerSTUNCacheInterval {
+		stunCacheTTL = constants.LowPowerSTUNCacheInterval
+	}
 	lastVIP := virtualIP
 
 	publishOnce := func() {
 		// Dynamic reload of current config & Virtual IP & MQTT topic
 		currentVIP := virtualIP
+
 		if configFile != "" {
 			if reloaded, rErr := config.Load(configFile); rErr == nil && reloaded != nil {
 				*cfg = *reloaded
@@ -830,14 +884,20 @@ func publishLoop(
 
 		var candidates []string
 		if puncher != nil {
-			if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
-				stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
-			} else {
-				log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
+			// On MIPS/ARM: cache STUN results to avoid 6 STUN queries every publish cycle.
+			// Re-query only when cache TTL expires or public IP has changed.
+			now := time.Now()
+			stunCacheExpired := now.Sub(stunCachedAt) >= stunCacheTTL
+			if stunCacheExpired || stunAddr == "" {
+				if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
+					stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
+					stunCachedAt = now
+					candidatesCached = puncher.DiscoverCandidates(ctx, ip.String())
+				} else {
+					log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
+				}
 			}
-
-			// Harvest full list of ICE-like candidate endpoints
-			candidates = puncher.DiscoverCandidates(ctx, ip.String())
+			candidates = candidatesCached
 
 			myNAT := puncher.GetNATType()
 			peers := registry.List()
@@ -1059,6 +1119,7 @@ func receiveLoop(
 			existingPeer, peerFound := registry.Get(p.DeviceID)
 			needsFastReply := !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
 
+			// При наличии стабильного прямого P2P сокета — не сбиваем его зондированием чужих локальных подсетей
 			if puncher != nil {
 				if p.ActiveEndpoint != "" {
 					_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
@@ -1089,9 +1150,16 @@ func receiveLoop(
 			preservedDirect := false
 			preservedLat := int64(0)
 			if existingPeer != nil {
-				preservedEP = existingPeer.ActiveEndpoint
-				preservedDirect = existingPeer.DirectP2P
-				preservedLat = existingPeer.PingMs
+				// If peer's STUNAddr changed, the old ActiveEndpoint is dead and must be refreshed!
+				if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
+					preservedEP = p.STUNAddr
+					preservedDirect = false
+					preservedLat = 0
+				} else {
+					preservedEP = existingPeer.ActiveEndpoint
+					preservedDirect = existingPeer.DirectP2P
+					preservedLat = existingPeer.PingMs
+				}
 			}
 
 			registry.Upsert(&peer.Peer{

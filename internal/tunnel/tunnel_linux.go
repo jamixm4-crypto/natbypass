@@ -297,12 +297,15 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 			runIpt("_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
 			runIpt("_NDM_FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
 			runIpt("_NDM_FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
+			runIpt("_NDM_OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
 
 			// 3. Таблица mangle: отключение blackhole-маркировки для пакетов mesh
 			if hasWait {
 				_ = exec.Command(ipt, "-w", "2", "-t", "mangle", "-I", "PREROUTING", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+				_ = exec.Command(ipt, "-w", "2", "-t", "mangle", "-I", "OUTPUT", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
 			} else {
 				_ = exec.Command(ipt, "-t", "mangle", "-I", "PREROUTING", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+				_ = exec.Command(ipt, "-t", "mangle", "-I", "OUTPUT", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
 			}
 
 			// 4. Разрешение входящих UDP-пакетов
@@ -311,7 +314,7 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		}
 
 		// Прямой вызов через sh -c (на случай ограниченного окружения Entware на KeeneticOS)
-		shCmd := fmt.Sprintf(`iptables -I INPUT 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I INPUT 1 -i %s -j ACCEPT 2>/dev/null; iptables -I FORWARD 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I FORWARD 1 -i %s -j ACCEPT 2>/dev/null; iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null; iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
+		shCmd := fmt.Sprintf(`iptables -I INPUT 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I INPUT 1 -i %s -j ACCEPT 2>/dev/null; iptables -I FORWARD 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I FORWARD 1 -i %s -j ACCEPT 2>/dev/null; iptables -I OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I OUTPUT 1 -o %s -j ACCEPT 2>/dev/null; iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null; iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null; iptables -I _NDM_OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_OUTPUT 1 -o %s -j ACCEPT 2>/dev/null`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
 		_ = exec.Command("sh", "-c", shCmd).Run()
 
 		// 5. nftables (Ubuntu 22.04+, Debian 12+): добавляем разрешение для nb0 через nft напрямую
@@ -340,19 +343,28 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		_ = os.MkdirAll("/opt/etc/ndm/netfilter.d", 0755)
 		hookContent := fmt.Sprintf(`#!/bin/sh
 [ "$type" = "ip6tables" ] && exit 0
-[ "$table" != "filter" ] && exit 0
 
-iptables -C INPUT -i %s -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i %s -j ACCEPT
-iptables -C FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %s -j ACCEPT
-iptables -C _NDM_INPUT -i %s -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null || true
-iptables -C _NDM_FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null || true
-`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
+if [ "$table" = "filter" ]; then
+    iptables -C INPUT -i %s -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i %s -j ACCEPT
+    iptables -C FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %s -j ACCEPT
+    iptables -C OUTPUT -o %s -j ACCEPT 2>/dev/null || iptables -I OUTPUT 1 -o %s -j ACCEPT
+    iptables -C _NDM_INPUT -i %s -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_OUTPUT -o %s -j ACCEPT 2>/dev/null || iptables -I _NDM_OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || true
+fi
+
+if [ "$table" = "mangle" ]; then
+    iptables -t mangle -C PREROUTING -i %s -j ACCEPT 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i %s -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -C OUTPUT -o %s -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || true
+fi
+`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
 		hookPath := "/opt/etc/ndm/netfilter.d/010-natbypass.sh"
 		if cur, rErr := os.ReadFile(hookPath); rErr != nil || string(cur) != hookContent {
 			_ = os.WriteFile(hookPath, []byte(hookContent), 0755)
 			_ = exec.Command("chmod", "+x", hookPath).Run()
 		}
 	}
+
 
 	// Фоновый сторожевой таймер: проверяет правила мягко (раз в 45 сек), без нагрузки на CPU.
 	// Если правило на месте — команды НЕ выполняются (0 forks).
