@@ -26,6 +26,7 @@ fun SpeedDialFab(
     onToggle: () -> Unit,
     onScanQR: () -> Unit,
     onShareQR: () -> Unit,
+    onImportLink: () -> Unit,
     onDiagnostics: () -> Unit,
 ) {
     Column(horizontalAlignment = Alignment.End) {
@@ -43,6 +44,11 @@ fun SpeedDialFab(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                SpeedDialItem(
+                    icon  = Icons.Outlined.Link,
+                    label = "Вставить ссылку на сеть",
+                    onClick = onImportLink,
+                )
                 SpeedDialItem(
                     icon  = Icons.Outlined.QrCodeScanner,
                     label = "Сканировать QR",

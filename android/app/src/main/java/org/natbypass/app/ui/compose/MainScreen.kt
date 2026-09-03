@@ -57,6 +57,7 @@ fun MainScreen(
     onOpenSettings: () -> Unit,
     onOpenQRScanner: () -> Unit,
     onShareQR: () -> Unit,
+    onImportLink: () -> Unit,
     onSync: () -> Unit,
     onClearCache: () -> Unit,
     onCheckUpdate: () -> Unit,
@@ -177,6 +178,7 @@ fun MainScreen(
                 onToggle = { speedDialExpanded = !speedDialExpanded },
                 onScanQR = { speedDialExpanded = false; onOpenQRScanner() },
                 onShareQR = { speedDialExpanded = false; onShareQR() },
+                onImportLink = { speedDialExpanded = false; onImportLink() },
                 onDiagnostics = { speedDialExpanded = false; onOpenDiagnostics() },
             )
         }

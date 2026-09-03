@@ -653,7 +653,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.198"
+		ver = "1.9.199"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1460,7 +1460,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.198"
+		ver = "1.9.199"
 	}
 
 	vip := s.state.VirtualIP
@@ -1698,8 +1698,8 @@ func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		AllowExitNode      bool   `json:"allow_exit_node"`
-		DefaultGatewayPeer string `json:"default_gateway_peer"`
+		AllowExitNode      *bool   `json:"allow_exit_node"`
+		DefaultGatewayPeer *string `json:"default_gateway_peer"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
@@ -1708,12 +1708,29 @@ func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 
 	cfg, _ := config.Load(s.configPath)
 	if cfg != nil {
-		cfg.Network.AllowExitNode = req.AllowExitNode
-		cfg.Network.SelectedExitNode = req.DefaultGatewayPeer
+		if req.AllowExitNode != nil {
+			cfg.Network.AllowExitNode = *req.AllowExitNode
+			if *req.AllowExitNode {
+				_ = tunnel.EnableHostIPForwardingSubnet(cfg.Network.Address)
+				s.AddEvent("info", "Режим Exit Node включен", "Активирован NAT Masquerade для доступа в интернет")
+			} else {
+				_ = tunnel.DisableHostIPForwarding()
+				s.AddEvent("info", "Режим Exit Node выключен", "NAT Masquerade деактивирован")
+			}
+		}
+		if req.DefaultGatewayPeer != nil {
+			cfg.Network.SelectedExitNode = *req.DefaultGatewayPeer
+		}
 		_ = config.Save(cfg, s.configPath, true)
+		if s.onConfigChange != nil {
+			s.onConfigChange()
+		}
 	}
-	s.AddEvent("info", fmt.Sprintf("Exit Node обновлен: allow=%v gateway=%s", req.AllowExitNode, req.DefaultGatewayPeer), "")
-	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "selected_exit_node": req.DefaultGatewayPeer}, "")
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":                 true,
+		"allow_exit_node":    cfg.Network.AllowExitNode,
+		"selected_exit_node": cfg.Network.SelectedExitNode,
+	}, "")
 }
 
 // handleRoutingSubnets — POST /api/routing/subnets — сохранение анонсируемых подсетей
@@ -1829,7 +1846,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		cfg.Network.AdvertisedSubnets = req.AdvertisedSubnets
 	}
 	if req.AllowExitNode || len(req.AdvertisedSubnets) > 0 {
-		_ = tunnel.EnableHostIPForwarding()
+		_ = tunnel.EnableHostIPForwardingSubnet(cfg.Network.Address)
 	} else {
 		_ = tunnel.DisableHostIPForwarding()
 	}

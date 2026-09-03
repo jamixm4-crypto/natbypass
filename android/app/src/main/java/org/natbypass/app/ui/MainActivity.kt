@@ -232,6 +232,9 @@ private fun NatBypassApp(
                 val uri = org.natbypass.app.util.MobileBridge.exportProfileURI("")
                 showQrDialogPayload = if (uri.isNotEmpty()) uri else "https://github.com/jamixm4-crypto/natbypass"
             },
+            onImportLink = {
+                showImportDialog = true
+            },
             onSync = {
                 viewModel.syncNetwork()
                 Toast.makeText(context, "🔄 Синхронизация сети...", Toast.LENGTH_SHORT).show()

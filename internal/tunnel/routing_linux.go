@@ -23,7 +23,7 @@ func runLinuxCmd(name string, args ...string) error {
 func EnableHostIPForwardingSubnet(subnet string) error {
 	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.ip_forward=1")
 	if subnet == "" {
-		subnet = "100.64.200.0/24"
+		subnet = "10.11.12.0/24"
 	}
 	cleanSubnet := subnet
 	if !strings.Contains(cleanSubnet, "/") {
@@ -31,15 +31,25 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		if len(parts) >= 3 {
 			cleanSubnet = fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
 		} else {
-			cleanSubnet = "100.64.200.0/24"
+			cleanSubnet = "10.11.12.0/24"
 		}
 	}
 	iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
 	for _, ipt := range iptablesPaths {
 		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", cleanSubnet, "-j", "MASQUERADE")
 		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", cleanSubnet, "-j", "MASQUERADE")
-		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
-		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "10.0.0.0/8", "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", "10.0.0.0/8", "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE")
+
+		// Forwarding rules for nb0
+		_ = runLinuxCmd(ipt, "-C", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
+		_ = runLinuxCmd(ipt, "-I", "FORWARD", "1", "-i", "nb0", "-j", "ACCEPT")
+		_ = runLinuxCmd(ipt, "-C", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
+		_ = runLinuxCmd(ipt, "-I", "FORWARD", "1", "-o", "nb0", "-j", "ACCEPT")
+		_ = runLinuxCmd(ipt, "-I", "_NDM_FORWARD", "1", "-i", "nb0", "-j", "ACCEPT")
+		_ = runLinuxCmd(ipt, "-I", "_NDM_FORWARD", "1", "-o", "nb0", "-j", "ACCEPT")
 	}
 	return nil
 }

@@ -453,6 +453,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 					}
 
+					// 3. Fallback to Selected Exit Node for default Internet routing (0.0.0.0/0)
+					if (!found || p == nil) && cfg.Network.SelectedExitNode != "" {
+						if exitPeer, ok := registry.Get(cfg.Network.SelectedExitNode); ok && exitPeer != nil {
+							p = exitPeer
+							found = true
+						} else {
+							for _, item := range registry.List() {
+								if item.DeviceID == cfg.Network.SelectedExitNode || item.VirtualIP == cfg.Network.SelectedExitNode {
+									p = item
+									found = true
+									break
+								}
+							}
+						}
+					}
+
 					if found && p != nil {
 						targetEP := p.ActiveEndpoint
 						if magicSock != nil {
@@ -1036,10 +1052,12 @@ func publishLoop(
 			Arch:            runtime.GOARCH,
 			Version:         Version,
 			IsKeenetic:      webui.IsKeeneticOS(),
-			AWG:             awgParams,
-			MTU:             activeMTU,
-			AdaptationEpoch: activeEpoch,
-			DPIPreset:       activeDPI,
+			AWG:              awgParams,
+			MTU:              activeMTU,
+			AdaptationEpoch:  activeEpoch,
+			DPIPreset:        activeDPI,
+			IsExitNode:       cfg.Network.AllowExitNode,
+			AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 		}
 
 		_ = sigMgr.Send(ctx, payload)
