@@ -300,6 +300,23 @@ case "$1" in
 esac
 EOF
         chmod +x "${INIT_SCRIPT}"
+
+        # Постоянный системный хук брандмауэра KeeneticOS (NDM Framework)
+        mkdir -p /opt/etc/ndm/netfilter.d
+        cat > /opt/etc/ndm/netfilter.d/010-natbypass.sh << 'NDM_EOF'
+#!/bin/sh
+[ "$type" = "ip6tables" ] && exit 0
+[ "$table" != "filter" ] && exit 0
+
+iptables -C INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i nb0 -j ACCEPT
+iptables -C FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i nb0 -j ACCEPT
+iptables -C _NDM_INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i nb0 -j ACCEPT 2>/dev/null || true
+iptables -C _NDM_FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i nb0 -j ACCEPT 2>/dev/null || true
+NDM_EOF
+        chmod +x /opt/etc/ndm/netfilter.d/010-natbypass.sh
+        /opt/etc/ndm/netfilter.d/010-natbypass.sh 2>/dev/null || true
+        print_green "✓ Постоянный хук брандмауэра KeeneticOS установлен (/opt/etc/ndm/netfilter.d/010-natbypass.sh)"
+
         "${INIT_SCRIPT}" start
         print_green "✓ Служба Keenetic Entware запущена (/opt/etc/init.d/S99natbypass start)"
 

@@ -104,6 +104,8 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		return nil, fmt.Errorf("ioctl TUNSETIFF error: %v", errno)
 	}
 
+	// Ensure pure blocking I/O so file.Read() blocks in kernel queue without spinning CPU on Linux/MIPS
+	_ = syscall.SetNonblock(int(file.Fd()), false)
 
 	dev := &Device{
 		AdapterName: adapterName,
@@ -111,6 +113,7 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		file:        file,
 		stopCh:      make(chan struct{}),
 	}
+
 
 	// 3. Назначение IP-адреса и включение интерфейса
 	if virtualIP != "" {
@@ -331,11 +334,31 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	}
 	applyFirewallRules()
 
-	// Фоновый сторожевой таймер: Keenetic ndm периодически пересоздает цепочки правил при смене сети.
-	// Поддерживаем правила в актуальном состоянии каждые 8 секунд (защищено от повторного запуска).
+	// Автоматическое создание/обновление системного хука брандмауэра KeeneticOS
+	// NDM автоматически вызывает скрипты из /opt/etc/ndm/netfilter.d/ при любых сетевых изменениях
+	if _, err := os.Stat("/opt/etc"); err == nil {
+		_ = os.MkdirAll("/opt/etc/ndm/netfilter.d", 0755)
+		hookContent := fmt.Sprintf(`#!/bin/sh
+[ "$type" = "ip6tables" ] && exit 0
+[ "$table" != "filter" ] && exit 0
+
+iptables -C INPUT -i %s -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i %s -j ACCEPT
+iptables -C FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %s -j ACCEPT
+iptables -C _NDM_INPUT -i %s -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null || true
+iptables -C _NDM_FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null || true
+`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
+		hookPath := "/opt/etc/ndm/netfilter.d/010-natbypass.sh"
+		if cur, rErr := os.ReadFile(hookPath); rErr != nil || string(cur) != hookContent {
+			_ = os.WriteFile(hookPath, []byte(hookContent), 0755)
+			_ = exec.Command("chmod", "+x", hookPath).Run()
+		}
+	}
+
+	// Фоновый сторожевой таймер: проверяет правила мягко (раз в 45 сек), без нагрузки на CPU.
+	// Если правило на месте — команды НЕ выполняются (0 forks).
 	d.watchdogOnce.Do(func() {
 		go func() {
-			ticker := time.NewTicker(8 * time.Second)
+			ticker := time.NewTicker(45 * time.Second)
 			defer ticker.Stop()
 			for {
 				select {
@@ -345,15 +368,19 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 					if atomic.LoadInt32(&d.isClosed) == 1 {
 						return
 					}
-					applyFirewallRules()
+					// Быстрая проверка: если правило INPUT для nb0 уже активно, ничего не делаем
+					chk := exec.Command("iptables", "-C", "INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
+					if chk.Run() != nil {
+						applyFirewallRules()
+					}
 				}
 			}
 		}()
 	})
 
 	return nil
-
 }
+
 
 // SetMTU динамически обновляет MTU на интерфейсе Linux/Keenetic
 func (d *Device) SetMTU(mtu int) error {

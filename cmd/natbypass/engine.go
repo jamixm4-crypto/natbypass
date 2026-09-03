@@ -370,11 +370,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					case <-engineCtx.Done():
 						return
 					default:
-						// Brief yield only on error, not busy-spin
+						// Brief yield only on error, not busy-spin (100ms on MIPS/ARM prevents CPU burn)
 						if isLowPowerArch() {
-							time.Sleep(5 * time.Millisecond)
+							time.Sleep(100 * time.Millisecond)
 						} else {
-							time.Sleep(1 * time.Millisecond)
+							time.Sleep(10 * time.Millisecond)
 						}
 					}
 					continue
