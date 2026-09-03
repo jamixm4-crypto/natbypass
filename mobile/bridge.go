@@ -26,7 +26,7 @@ import (
 )
 
 
-const Version = "1.9.194"
+const Version = "1.9.195"
 
 
 
@@ -420,7 +420,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             runtime.GOARCH,
-					Version:          "1.9.194",
+					Version:          "1.9.195",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -446,7 +446,12 @@ func StartEngine(configYAML string, tunFd int) string {
 				if p != nil {
 					// Расшифровка сквозного шифрования (E2E) сетевым ключом профиля
 					if len(p.Encrypted) > 0 {
-						activeProf := cfg.EnsureActiveProfile()
+						var activeProf *config.Profile
+						if globalConfig != nil {
+							activeProf = globalConfig.EnsureActiveProfile()
+						} else if cfg != nil {
+							activeProf = cfg.EnsureActiveProfile()
+						}
 						if activeProf != nil {
 							kBytes := activeProf.GetNetworkKeyBytes()
 							if decBytes, err := crypto.DecryptSelf(p.Encrypted, kBytes); err == nil {
@@ -459,7 +464,13 @@ func StartEngine(configYAML string, tunFd int) string {
 					}
 				}
 				if p != nil && p.DeviceID != devID {
-					activeProf := cfg.EnsureActiveProfile()
+					var activeProf *config.Profile
+					if globalConfig != nil {
+						activeProf = globalConfig.EnsureActiveProfile()
+					} else if cfg != nil {
+						activeProf = cfg.EnsureActiveProfile()
+					}
+
 					if activeProf != nil {
 						match := false
 						if activeProf.MQTTTopic != "" && p.Topic == activeProf.MQTTTopic {
@@ -495,6 +506,7 @@ func StartEngine(configYAML string, tunFd int) string {
 						PublicIP:         p.PublicIP,
 						LocalAddr:        p.LocalAddr,
 						STUNAddr:         p.STUNAddr,
+						Candidates:       p.Candidates,
 						IPv6Addr:         p.IPv6Addr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
@@ -520,6 +532,11 @@ func StartEngine(configYAML string, tunFd int) string {
 					if puncher != nil {
 						go func(target *signaling.Payload) {
 							addrs := []string{target.STUNAddr, target.LocalAddr}
+							for _, cand := range target.Candidates {
+								if cand != "" && cand != target.STUNAddr && cand != target.LocalAddr {
+									addrs = append(addrs, cand)
+								}
+							}
 							if target.IPv6Addr != "" {
 								addrs = append(addrs, target.IPv6Addr)
 							}
@@ -543,6 +560,7 @@ func StartEngine(configYAML string, tunFd int) string {
 						}(p)
 					}
 				}
+
 			}
 		}
 	}()

@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.194"
+	Version = "1.9.195"
 	Commit  = "release"
 )
 
@@ -168,7 +168,11 @@ var (
 
 	modshell32            = syscall.NewLazyDLL("shell32.dll")
 	procShell_NotifyIconW = modshell32.NewProc("Shell_NotifyIconW")
+	procDragAcceptFiles   = modshell32.NewProc("DragAcceptFiles")
+	procDragQueryFileW    = modshell32.NewProc("DragQueryFileW")
+	procDragFinish        = modshell32.NewProc("DragFinish")
 )
+
 
 type NOTIFYICONDATAW struct {
 	CbSize           uint32
@@ -991,7 +995,9 @@ func main() {
 		0, 0, hInstance, 0,
 	)
 	hMainWnd = hwnd
+	procDragAcceptFiles.Call(hMainWnd, 1)
 	writeDebug(fmt.Sprintf("Главное окно создано, HWND=0x%X", hMainWnd))
+
 
 	// Устанавливаем иконки окна для панели задач и заголовка (WM_SETICON)
 	procSendMessageW.Call(hMainWnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, hIconBig)
@@ -1141,11 +1147,23 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		procSetTextColor.Call(hdc, COLOR_TEXT)
 		return hBrushInput
 
+	case 0x0233: /* WM_DROPFILES */
+		hDrop := wParam
+		var buf [512]uint16
+		ret, _, _ := procDragQueryFileW.Call(hDrop, 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+		if ret > 0 {
+			filePath := windows.UTF16ToString(buf[:ret])
+			procDragFinish.Call(hDrop)
+			handleDroppedFile(filePath)
+		}
+		return 0
+
 	case WM_TIMER:
 		if wParam == ID_TIMER_POLL {
 			updateData()
 		}
 		return 0
+
 
 	case WM_COMMAND:
 		id := LOWORD(wParam)
@@ -2245,13 +2263,15 @@ func handleProfileSwitch() {
 	lastPeersHash = ""
 	procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
 
-	if vpnConnected && engineCtx != nil {
+	if engineCtx != nil {
 		go func() {
 			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
 			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
 			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, target.MQTTBroker, target.MQTTTopic)
+			triggerPublish()
 		}()
 	}
+
 
 	refreshProfilesUI()
 	addLog(fmt.Sprintf("🟢 Активный профиль переключен на «%s» (Топик: %s)", target.Name, target.MQTTTopic))
@@ -2342,31 +2362,16 @@ func handleProfileSave() {
 		}
 		lastPeersHash = ""
 		procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
-		if vpnConnected && engineCtx != nil {
+		if engineCtx != nil {
 			go func() {
 				tgToken := strings.TrimSpace(getControlText(hEditTgToken))
 				tgChat := strings.TrimSpace(getControlText(hEditTgChat))
 				rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, p.MQTTBroker, p.MQTTTopic)
+				triggerPublish()
 			}()
 		}
 	}
 
-	if p.ID == cfg.ActiveProfileID {
-		setControlText(hEditMqttBr, p.MQTTBroker)
-		setControlText(hEditMqttTp, p.MQTTTopic)
-		if registry != nil {
-			registry.ClearAll()
-		}
-		lastPeersHash = ""
-		procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
-		if vpnConnected && engineCtx != nil {
-			go func() {
-				tgToken := strings.TrimSpace(getControlText(hEditTgToken))
-				tgChat := strings.TrimSpace(getControlText(hEditTgChat))
-				rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, p.MQTTBroker, p.MQTTTopic)
-			}()
-		}
-	}
 
 	refreshProfilesUI()
 	addLog(fmt.Sprintf("💾 Настройки профиля «%s» сохранены", p.Name))
@@ -2484,20 +2489,128 @@ func handleProfileImport() {
 	lastPeersHash = ""
 	procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
 
-	if vpnConnected && engineCtx != nil {
+	if engineCtx != nil {
 		go func() {
 			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
 			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
 			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, saved.MQTTBroker, saved.MQTTTopic)
+			triggerPublish()
 		}()
 	}
+
 
 	refreshProfilesUI()
 	triggerPublish()
 	addLog(fmt.Sprintf("📥 Успешно импортирован и активирован профиль «%s» (VIP: %s, Топик: %s)", saved.Name, cleanVIP, saved.MQTTTopic))
 }
 
+func handleDroppedFile(filePath string) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		addLog("❌ Ошибка чтения файла: " + err.Error())
+		return
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return
+	}
+
+	// 1. Попытка распарсить как natbypass://profile?...
+	if strings.HasPrefix(content, "natbypass://profile") || (strings.Contains(content, "topic=") && strings.Contains(content, "broker=")) {
+		parsed, err := config.ImportProfileURI(content)
+		if err == nil && parsed != nil {
+			if cfg == nil {
+				cfg = &config.Config{}
+			}
+			parsed.IsActive = true
+			saved := cfg.AddOrUpdateProfile(*parsed)
+			cfg.SyncAWGWithProfile(saved)
+			_ = config.Save(cfg, configPath, false)
+			applyAWGProfileToGUI(saved)
+
+			myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
+			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+			if tunDev != nil {
+				_ = tunDev.SetVirtualIP(cleanVIP)
+			}
+			if uiServer != nil {
+				uiServer.SetVirtualIP(cleanVIP)
+			}
+			setControlText(hEditMqttBr, saved.MQTTBroker)
+			setControlText(hEditMqttTp, saved.MQTTTopic)
+
+			if registry != nil {
+				registry.ClearAll()
+			}
+			lastPeersHash = ""
+			procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+
+			if engineCtx != nil {
+				go func() {
+					tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+					tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+					rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, saved.MQTTBroker, saved.MQTTTopic)
+					triggerPublish()
+				}()
+			}
+			refreshProfilesUI()
+			addLog(fmt.Sprintf("📥 Успешно импортирован профиль «%s» из перетащенного файла", saved.Name))
+			return
+		}
+	}
+
+	// 2. Попытка распарсить как YAML конфиг
+	newCfg, err := config.LoadFromString(content)
+	if err == nil && newCfg != nil {
+		cfg = newCfg
+		_ = config.Save(cfg, configPath, false)
+		active := cfg.EnsureActiveProfile()
+		cfg.SyncAWGWithProfile(active)
+		applyAWGProfileToGUI(active)
+
+		myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
+		cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+		if tunDev != nil {
+			_ = tunDev.SetVirtualIP(cleanVIP)
+		}
+		if uiServer != nil {
+			uiServer.SetVirtualIP(cleanVIP)
+		}
+		if active != nil {
+			setControlText(hEditMqttBr, active.MQTTBroker)
+			setControlText(hEditMqttTp, active.MQTTTopic)
+		}
+
+		if registry != nil {
+			registry.ClearAll()
+		}
+		lastPeersHash = ""
+		procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+
+		if engineCtx != nil {
+			go func() {
+				tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+				tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+				mqBroker := ""
+				mqTopic := ""
+				if active != nil {
+					mqBroker = active.MQTTBroker
+					mqTopic = active.MQTTTopic
+				}
+				rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, mqBroker, mqTopic)
+				triggerPublish()
+			}()
+		}
+		refreshProfilesUI()
+		addLog("📥 Конфигурация успешно обновлена из файла " + filepath.Base(filePath))
+		return
+	}
+
+	addLog("⚠️ Не удалось распознать формат файла (ожидается config.yaml или ссылка natbypass://profile)")
+}
+
 func showProfileImportDialog() (string, bool) {
+
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	dlgClassName, _ := windows.UTF16PtrFromString("NatBypassImportDlgClass")
 	dlgTitle, _ := windows.UTF16PtrFromString("Импорт профиля P2P сети")
@@ -3035,7 +3148,7 @@ func updateDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 func handleSaveChannels() {
 	saveConfigFromUI()
 	addLog("💾 Настройки сигнальных каналов сохранены в config.yaml")
-	if vpnConnected && engineCtx != nil {
+	if engineCtx != nil {
 		go func() {
 			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
 			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
@@ -3046,6 +3159,7 @@ func handleSaveChannels() {
 		}()
 	}
 }
+
 
 func handleCopySelectedPeerVIP() {
 	if registry == nil {
@@ -4545,25 +4659,9 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 }
 
 func getLocalLANIP() string {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return ""
-	}
-	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
-			if ip4 := ipNet.IP.To4(); ip4 != nil {
-				ipStr := ip4.String()
-				if strings.HasPrefix(ipStr, "10.200.") {
-					continue // Пропускаем собственный виртуальный mesh-интерфейс NatBypass
-				}
-				if strings.HasPrefix(ipStr, "192.168.") || strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "172.") {
-					return ipStr
-				}
-			}
-		}
-	}
-	return ""
+	return network.GetLocalLANIP()
 }
+
 
 func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, name string) {
 	inCh, err := ch.Receive(ctx)

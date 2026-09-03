@@ -340,7 +340,34 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// LoadFromString парсит конфигурацию из строки YAML
+func LoadFromString(content string) (*Config, error) {
+	v := viper.New()
+	v.SetConfigType("yaml")
+	v.SetEnvPrefix("NATBYPASS")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	v.AutomaticEnv()
+	setDefaults(v)
+
+	plain, err := DecryptConfigData([]byte(content))
+	if err != nil {
+		plain = []byte(content)
+	}
+
+	if err := v.ReadConfig(bytes.NewReader(plain)); err != nil {
+		return nil, err
+	}
+
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, err
+	}
+	cfg.EnsureActiveProfile()
+	return &cfg, nil
+}
+
 // Save сохраняет конфигурацию в YAML файл с опциональным шифрованием
+
 func Save(cfg *Config, path string, encrypt bool) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")
