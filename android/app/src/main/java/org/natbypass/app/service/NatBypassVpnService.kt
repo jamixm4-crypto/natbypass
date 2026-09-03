@@ -137,13 +137,14 @@ class NatBypassVpnService : VpnService() {
                 .setSession("NatBypass")
                 .addAddress(currentVip, prefix)
                 .setMtu(1420)
-                .setBlocking(false)
-                .allowBypass()
+                .setBlocking(true)
+
+            if (!useExitNode) {
+                builder.allowBypass()
+            }
 
             try {
                 // Исключаем само приложение NatBypass из VPN-туннеля.
-                // Это критически важно: сокеты Go (MQTT брокер, STUN, UDP Puncher) должны идти напрямую через Wi-Fi/LTE,
-                // иначе при маршруте 0.0.0.0/0 возникает зацикливание трафика (петля маршрутизации)!
                 builder.addDisallowedApplication(packageName)
             } catch (e: Exception) {
                 Log.w(TAG, "addDisallowedApplication error: ${e.message}")
@@ -160,7 +161,18 @@ class NatBypassVpnService : VpnService() {
                     builder.addRoute("0.0.0.0", 0)
                     Log.i(TAG, "ExitNode default route 0.0.0.0/0 added")
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to add default route: ${e.message}")
+                    Log.e(TAG, "Failed to add default IPv4 route: ${e.message}")
+                }
+                // Для Android 14/15/16: перехват IPv6 для исключения утечки через CLAT/IPv6-First
+                try {
+                    builder.allowFamily(android.system.OsConstants.AF_INET6)
+                    builder.addAddress("fd00:10:11:12::2", 64)
+                    builder.addRoute("::", 0)
+                    builder.addDnsServer("2606:4700:4700::1111")
+                    builder.addDnsServer("2001:4860:4860::8888")
+                    Log.i(TAG, "ExitNode default route ::/0 and IPv6 DNS added")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "IPv6 route setup notice: ${t.message}")
                 }
                 try {
                     builder.addDnsServer("1.1.1.1")
@@ -216,6 +228,17 @@ class NatBypassVpnService : VpnService() {
             org.natbypass.app.util.MobileBridge.startEngine(configYaml, fd)
             if (selectedExitNode.isNotEmpty()) {
                 org.natbypass.app.util.MobileBridge.selectExitNode(selectedExitNode)
+            }
+
+            // Защита сокета UDP от зацикливания маршрутизации (критично для Android 14/15/16)
+            try {
+                val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
+                if (sockFd > 0) {
+                    val ok = protect(sockFd)
+                    Log.i(TAG, "VpnService.protect($sockFd) applied: $ok")
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "protect socket error: ${t.message}")
             }
 
             isRunning = true

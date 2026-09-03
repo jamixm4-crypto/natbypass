@@ -836,6 +836,25 @@ func (p *UDPPuncher) Close() error {
 	}
 	return nil
 }
+
+// SocketFd returns the underlying socket file descriptor for Android VpnService.protect()
+func (p *UDPPuncher) SocketFd() int {
+	p.mu.Lock()
+	conn := p.conn
+	p.mu.Unlock()
+	if conn == nil {
+		return -1
+	}
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		return -1
+	}
+	var fdVal int = -1
+	_ = raw.Control(func(fd uintptr) {
+		fdVal = int(fd)
+	})
+	return fdVal
+}
 // SendDualPathProbe sends hole punch probes to both STUN public endpoint and LAN IP.
 func (p *UDPPuncher) SendDualPathProbe(stunAddr, localAddr string) error {
 	var err1, err2 error

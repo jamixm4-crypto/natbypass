@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/natbypass/natbypass/internal/config"
@@ -26,7 +28,7 @@ import (
 )
 
 
-const Version = "1.9.201"
+const Version = "1.9.202"
 
 
 
@@ -432,7 +434,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             runtime.GOARCH,
-					Version:          "1.9.201",
+					Version:          "1.9.202",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -702,9 +704,22 @@ func attachTUN(tunFd int) {
 					return
 				default:
 					n, err := tf.Read(buf)
-					if err != nil || n == 0 {
-						// Socket closed or EOF -> exit loop cleanly
-						return
+					if err != nil {
+						// On Android 15/16 with non-blocking fd or temporary empty buffer: do not exit!
+						if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
+							time.Sleep(2 * time.Millisecond)
+							continue
+						}
+						if ctx.Err() != nil {
+							return
+						}
+						logger.Warn().Err(err).Msg("TUN read error, retrying...")
+						time.Sleep(20 * time.Millisecond)
+						continue
+					}
+					if n == 0 {
+						time.Sleep(2 * time.Millisecond)
+						continue
 					}
 					pkt := buf[:n]
 					atomic.AddUint64(&globalTxBytes, uint64(n))
@@ -1226,6 +1241,16 @@ func GetSelectedExitNode() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
 	return globalExitNode
+}
+
+// GetUDPSocketFd возвращает дескриптор сокета UDP Puncher для вызова VpnService.protect() в Android
+func GetUDPSocketFd() int {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalPuncher != nil {
+		return globalPuncher.SocketFd()
+	}
+	return -1
 }
 
 // SetAllowExitNode разрешает другим устройствам выходить в интернет через этот узел
