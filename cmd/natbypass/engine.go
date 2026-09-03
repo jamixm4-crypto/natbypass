@@ -521,6 +521,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					for _, p := range registry.List() {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
 							_ = puncher.SendKeepAlive(p.ActiveEndpoint)
+							// If peer's signaling STUNAddr has diverged from our current ActiveEndpoint, probe it to recover from remote port re-binds
+							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							}
 						} else {
 							if p.ActiveEndpoint != "" {
 								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
@@ -1146,9 +1150,16 @@ func receiveLoop(
 			preservedDirect := false
 			preservedLat := int64(0)
 			if existingPeer != nil {
-				preservedEP = existingPeer.ActiveEndpoint
-				preservedDirect = existingPeer.DirectP2P
-				preservedLat = existingPeer.PingMs
+				// If peer's STUNAddr changed, the old ActiveEndpoint is dead and must be refreshed!
+				if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
+					preservedEP = p.STUNAddr
+					preservedDirect = false
+					preservedLat = 0
+				} else {
+					preservedEP = existingPeer.ActiveEndpoint
+					preservedDirect = existingPeer.DirectP2P
+					preservedLat = existingPeer.PingMs
+				}
 			}
 
 			registry.Upsert(&peer.Peer{

@@ -243,52 +243,73 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	applyFirewallRules := func() {
 		// Поиск доступных бинарников iptables
 		var iptCandidates []string
-		for _, p := range []string{"/usr/sbin/iptables", "/sbin/iptables", "/opt/sbin/iptables", "iptables"} {
+		for _, p := range []string{"/usr/sbin/iptables", "/sbin/iptables", "iptables", "/opt/sbin/iptables"} {
 			if path, err := exec.LookPath(p); err == nil {
-				iptCandidates = append(iptCandidates, path)
+				// Avoid duplicate paths
+				found := false
+				for _, existing := range iptCandidates {
+					if existing == path {
+						found = true
+						break
+					}
+				}
+				if !found {
+					iptCandidates = append(iptCandidates, path)
+				}
 			}
 		}
 		if len(iptCandidates) == 0 {
 			iptCandidates = []string{"/usr/sbin/iptables", "/sbin/iptables", "iptables"}
 		}
 
-		// Выполнение iptables с поддержкой ожидания блокировки (-w 5)
-		runIpt := func(ipt string, args ...string) {
-			// Проверяем наличие правила через -C перед добавлением
-			checkArgs := append([]string{"-w", "5", "-C"}, args...)
-			if err := exec.Command(ipt, checkArgs...).Run(); err == nil {
-				return // Правило уже существует
-			}
-			// Добавляем правило через -I
-			insertArgs := append([]string{"-w", "5", "-I"}, append([]string{args[0], "1"}, args[1:]...)...)
-			if err := exec.Command(ipt, insertArgs...).Run(); err != nil {
-				// Fallback без -w на старых версиях iptables
-				insertNoWait := append([]string{"-I", args[0], "1"}, args[1:]...)
-				_ = exec.Command(ipt, insertNoWait...).Run()
-			}
-		}
-
 		for _, ipt := range iptCandidates {
+			// Проверяем, поддерживает ли данная сборка iptables ключ -w (wait lock)
+			hasWait := exec.Command(ipt, "-w", "1", "-L", "INPUT", "-n").Run() == nil
+
+			runIpt := func(args ...string) {
+				var checkArgs, insertArgs []string
+				if hasWait {
+					checkArgs = append([]string{"-w", "2", "-C"}, args...)
+					insertArgs = append([]string{"-w", "2", "-I"}, append([]string{args[0], "1"}, args[1:]...)...)
+				} else {
+					checkArgs = append([]string{"-C"}, args...)
+					insertArgs = append([]string{"-I"}, append([]string{args[0], "1"}, args[1:]...)...)
+				}
+
+				if err := exec.Command(ipt, checkArgs...).Run(); err == nil {
+					return // Правило уже существует
+				}
+				_ = exec.Command(ipt, insertArgs...).Run()
+			}
+
 			// 1. Стандартные цепочки ядра Linux
-			runIpt(ipt, "INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
-			runIpt(ipt, "INPUT", "-p", "icmp", "-j", "ACCEPT")
-			runIpt(ipt, "FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
-			runIpt(ipt, "FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
-			runIpt(ipt, "OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
+			runIpt("INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
+			runIpt("INPUT", "-p", "icmp", "-j", "ACCEPT")
+			runIpt("FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
+			runIpt("FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
+			runIpt("OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
 
 			// 2. Специальные цепочки KeeneticOS (NDM Framework)
-			runIpt(ipt, "_NDM_INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
-			runIpt(ipt, "_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
-			runIpt(ipt, "_NDM_FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
-			runIpt(ipt, "_NDM_FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
+			runIpt("_NDM_INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
+			runIpt("_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
+			runIpt("_NDM_FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
+			runIpt("_NDM_FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
 
 			// 3. Таблица mangle: отключение blackhole-маркировки для пакетов mesh
-			_ = exec.Command(ipt, "-w", "5", "-t", "mangle", "-I", "PREROUTING", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+			if hasWait {
+				_ = exec.Command(ipt, "-w", "2", "-t", "mangle", "-I", "PREROUTING", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+			} else {
+				_ = exec.Command(ipt, "-t", "mangle", "-I", "PREROUTING", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+			}
 
 			// 4. Разрешение входящих UDP-пакетов
-			runIpt(ipt, "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
-			runIpt(ipt, "_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+			runIpt("INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+			runIpt("_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
 		}
+
+		// Прямой вызов через sh -c (на случай ограниченного окружения Entware на KeeneticOS)
+		shCmd := fmt.Sprintf(`iptables -I INPUT 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I INPUT 1 -i %s -j ACCEPT 2>/dev/null; iptables -I FORWARD 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I FORWARD 1 -i %s -j ACCEPT 2>/dev/null; iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null; iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
+		_ = exec.Command("sh", "-c", shCmd).Run()
 
 		// 5. nftables (Ubuntu 22.04+, Debian 12+): добавляем разрешение для nb0 через nft напрямую
 		if nft, err := exec.LookPath("nft"); err == nil {
@@ -300,6 +321,7 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 			// Разрешение ICMP глобально
 			_ = exec.Command(nft, "add", "rule", "inet", "filter", "input", "ip", "protocol", "icmp", "accept").Run()
 		}
+
 
 		// 6. ufw (Ubuntu): разрешение через профиль ufw если доступен
 		if ufw, err := exec.LookPath("ufw"); err == nil {

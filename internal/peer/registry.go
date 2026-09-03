@@ -76,14 +76,18 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.Latency = existing.Latency
 		newer.PingMs = existing.PingMs
 	}
-	// Guaranteed preservation of established P2P endpoint across signaling updates
-	if existing.ActiveEndpoint != "" {
+	// Guaranteed preservation of established P2P endpoint across signaling updates UNLESS STUN address has changed
+	stunChanged := newer.STUNAddr != "" && existing.STUNAddr != "" && newer.STUNAddr != existing.STUNAddr
+	if existing.ActiveEndpoint != "" && !stunChanged {
 		if newer.ActiveEndpoint == "" {
 			newer.ActiveEndpoint = existing.ActiveEndpoint
 		}
 		newer.DirectP2P = true
-	} else if newer.ActiveEndpoint != "" {
+	} else if newer.ActiveEndpoint != "" && !stunChanged {
 		newer.DirectP2P = true
+	} else if stunChanged {
+		newer.ActiveEndpoint = newer.STUNAddr
+		newer.DirectP2P = false
 	}
 
 	if newer.Arch == "" && existing.Arch != "" {
