@@ -123,16 +123,45 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 	return dev, nil
 }
 
+var packetPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, 65536)
+		return &buf
+	},
+}
+
 func (d *Device) ReadPacket() ([]byte, error) {
 	if atomic.LoadInt32(&d.isClosed) == 1 {
 		return nil, fmt.Errorf("интерфейс закрыт")
 	}
-	buf := make([]byte, 65535) // Максимальный размер IP пакета
+	bufPtr := packetPool.Get().(*[]byte)
+	buf := *bufPtr
 	n, err := d.file.Read(buf)
 	if err != nil {
+		packetPool.Put(bufPtr)
 		return nil, err
 	}
-	return buf[:n], nil
+	res := make([]byte, n)
+	copy(res, buf[:n])
+	packetPool.Put(bufPtr)
+	return res, nil
+}
+
+func (d *Device) ReadPacketPooled() ([]byte, func(), error) {
+	if atomic.LoadInt32(&d.isClosed) == 1 {
+		return nil, nil, fmt.Errorf("интерфейс закрыт")
+	}
+	bufPtr := packetPool.Get().(*[]byte)
+	buf := *bufPtr
+	n, err := d.file.Read(buf)
+	if err != nil {
+		packetPool.Put(bufPtr)
+		return nil, nil, err
+	}
+	release := func() {
+		packetPool.Put(bufPtr)
+	}
+	return buf[:n], release, nil
 }
 
 func (d *Device) WritePacket(packet []byte) error {

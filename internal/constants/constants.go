@@ -41,4 +41,12 @@ const (
 	MaxProbesPerSecond = 10
 	MinProbeInterval   = 100 * time.Millisecond
 	KeepAliveInterval  = 4 * time.Second
+
+	// Low-power embedded router constants for MIPS/MIPSLE/ARM (Keenetic, OpenWrt)
+	// These significantly reduce CPU load and syscall frequency on weak single-core devices.
+	LowPowerPublishInterval     = 30 * time.Second
+	LowPowerKeepAliveInterval   = 10 * time.Second
+	LowPowerPeerMonitorInterval = 30 * time.Second
+	LowPowerSTUNCacheInterval   = 60 * time.Second
+	MaxPeersRouter              = 64 // Maximum peers in registry for embedded router builds
 )

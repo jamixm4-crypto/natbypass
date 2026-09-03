@@ -180,14 +180,23 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 
 // Registry manages thread-safe tracking of discovered mesh peers.
 type Registry struct {
-	mu    sync.RWMutex
-	peers map[string]*Peer
+	mu       sync.RWMutex
+	peers    map[string]*Peer
+	maxPeers int
 }
 
 // NewRegistry creates a new peer registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		peers: make(map[string]*Peer),
+	}
+}
+
+// NewRegistryWithLimit creates a new peer registry with a maximum limit.
+func NewRegistryWithLimit(maxPeers int) *Registry {
+	return &Registry{
+		peers:    make(map[string]*Peer),
+		maxPeers: maxPeers,
 	}
 }
 
@@ -245,6 +254,22 @@ func (r *Registry) Upsert(p *Peer) {
 		p.Online = true
 		p.LastSeen = now
 		r.peers[p.DeviceID] = p
+	}
+
+	if r.maxPeers > 0 && len(r.peers) > r.maxPeers {
+		var oldestID string
+		var oldestTime time.Time
+		first := true
+		for id, peer := range r.peers {
+			if first || peer.LastSeen.Before(oldestTime) {
+				oldestID = id
+				oldestTime = peer.LastSeen
+				first = false
+			}
+		}
+		if !first {
+			delete(r.peers, oldestID)
+		}
 	}
 }
 

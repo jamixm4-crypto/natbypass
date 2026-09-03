@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/diode"
 	"github.com/rs/zerolog/log"
 )
 
@@ -32,6 +33,13 @@ func setupLogging(level, logFile string) {
 				NoColor:    false,
 			}
 			output = cw
+		}
+	}
+
+	if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "arm" {
+		output = diode.NewWriter(output, 1000, 10*time.Millisecond, func(missed int) {})
+		if level == "info" {
+			level = "warn"
 		}
 	}
 

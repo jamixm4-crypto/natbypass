@@ -298,7 +298,6 @@ func (ms *MagicSock) TriggerRoamingProbes() {
 		for _, cand := range pr.Candidates {
 			if cand.Address != "" {
 				_ = ms.puncher.SendHolePunchProbe(cand.Address)
-				time.Sleep(5 * time.Millisecond)
 			}
 		}
 		pr.mu.RUnlock()

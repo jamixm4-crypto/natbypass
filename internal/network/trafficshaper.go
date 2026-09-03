@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"math/big"
 	"net"
+	"runtime"
 	"sync"
 	"time"
 
@@ -87,7 +88,9 @@ func (s *TrafficShaper) SendPacket(conn *net.UDPConn, addr *net.UDPAddr, payload
 			if err != nil {
 				sendErr = err
 			}
-			time.Sleep(1 * time.Millisecond) // микро-пауза между фрагментами видеокадра
+			if runtime.GOARCH != "mips" && runtime.GOARCH != "mipsle" && runtime.GOARCH != "arm" {
+				time.Sleep(2 * time.Millisecond)
+			}
 		}
 	} else {
 		_, sendErr = conn.WriteToUDP(payload, addr)

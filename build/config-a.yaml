@@ -1,0 +1,44 @@
+app:
+  name: "NatBypass-A"
+  version: "1.9.20"
+  log_level: "debug"
+  publish_interval: 3
+  device_id: "TestNodeA"
+  log_file: "dist/natbypass-a.log"
+
+web_ui:
+  enabled: true
+  port: 8081
+  username: "admin"
+  password: ""
+
+network:
+  upnp_enabled: false
+  address: "100.64.200.10/24"
+  udp_port: 51821
+  stun_servers:
+    - "stun.l.google.com:19302"
+    - "stun.cloudflare.com:3478"
+
+profiles:
+  - id: "prof-main"
+    name: "E2E Mesh"
+    mqtt_broker: "tcp://broker.emqx.io:1883"
+    mqtt_topic: "natbypass/e2e/testmesh_v1920"
+    virtual_ip: "100.64.200.10"
+    is_active: true
+
+signaling:
+  default_channel: "mqtt"
+  mqtt_broker: "tcp://broker.emqx.io:1883"
+  mqtt_topic: "natbypass/e2e/testmesh_v1920"
+  channels:
+    - type: "mqtt"
+      enabled: true
+      priority: 1
+      params:
+        broker_url: "tcp://broker.emqx.io:1883"
+        topic: "natbypass/e2e/testmesh_v1920"
+
+wireguard:
+  enabled: false
