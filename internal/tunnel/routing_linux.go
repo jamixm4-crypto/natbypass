@@ -4,6 +4,7 @@ package tunnel
 
 import (
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 
@@ -38,6 +39,8 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	for _, ipt := range iptablesPaths {
 		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", cleanSubnet, "-j", "MASQUERADE")
 		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", cleanSubnet, "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", cleanSubnet, "!", "-o", "nb0", "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", cleanSubnet, "!", "-o", "nb0", "-j", "MASQUERADE")
 		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "10.0.0.0/8", "-j", "MASQUERADE")
 		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", "10.0.0.0/8", "-j", "MASQUERADE")
 		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE")
@@ -50,7 +53,15 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		_ = runLinuxCmd(ipt, "-I", "FORWARD", "1", "-o", "nb0", "-j", "ACCEPT")
 		_ = runLinuxCmd(ipt, "-I", "_NDM_FORWARD", "1", "-i", "nb0", "-j", "ACCEPT")
 		_ = runLinuxCmd(ipt, "-I", "_NDM_FORWARD", "1", "-o", "nb0", "-j", "ACCEPT")
+
+		// Bi-directional TCP MSS Clamping to prevent MTU Blackhole on 4G/PPPoE
+		_ = runLinuxCmd(ipt, "-t", "mangle", "-D", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+		_ = runLinuxCmd(ipt, "-t", "mangle", "-I", "FORWARD", "1", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
 	}
+
+	// Keenetic / OpenWrt: ensure forwarded traffic from mesh subnet can lookup default WAN table
+	_ = runLinuxCmd("ip", "rule", "del", "from", cleanSubnet, "lookup", "default")
+	_ = runLinuxCmd("ip", "rule", "add", "from", cleanSubnet, "lookup", "default", "priority", "60")
 	return nil
 }
 
@@ -68,12 +79,59 @@ func DisableHostIPForwarding() error {
 	return nil
 }
 
-// EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1).
-func EnableExitNodeRouting(gatewayVIP string) error {
+var (
+	lastBypassedEndpointIP string
+)
+
+// getPhysicalGatewayLinux finds the physical default gateway IP
+func getPhysicalGatewayLinux() string {
+	cmd := exec.Command("sh", "-c", "ip route show default | grep -v 'nb0' | head -n1 | awk '{print $3}'")
+	out, err := cmd.Output()
+	if err == nil {
+		gw := strings.TrimSpace(string(out))
+		if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
+			return gw
+		}
+	}
+	return ""
+}
+
+func extractHostIP(endpoint string) string {
+	if endpoint == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		host = endpoint
+	}
+	host = strings.TrimSpace(host)
+	ip := net.ParseIP(host)
+	if ip != nil && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsUnspecified() {
+		return host
+	}
+	return ""
+}
+
+// EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1),
+// with automatic routing-loop prevention by adding a bypass route to the remote endpoint.
+func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	if gatewayVIP == "" {
 		return fmt.Errorf("gateway VIP is required")
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+
+	// 1. Bypass remote endpoint IP via physical default gateway to prevent routing loop
+	for _, ep := range remoteEndpoints {
+		if hostIP := extractHostIP(ep); hostIP != "" {
+			if physGW := getPhysicalGatewayLinux(); physGW != "" {
+				_ = runLinuxCmd("ip", "route", "add", hostIP+"/32", "via", physGW)
+				lastBypassedEndpointIP = hostIP
+				break
+			}
+		}
+	}
+
+	// 2. Add def1 routes
 	err1 := runLinuxCmd("ip", "route", "add", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "onlink")
 	if err1 != nil {
 		_ = runLinuxCmd("ip", "route", "add", "0.0.0.0/1", "via", cleanVIP)
@@ -85,7 +143,7 @@ func EnableExitNodeRouting(gatewayVIP string) error {
 	return nil
 }
 
-// DisableExitNodeRouting removes def1 routes.
+// DisableExitNodeRouting removes def1 routes and bypass route.
 func DisableExitNodeRouting(gatewayVIP string) error {
 	if gatewayVIP != "" {
 		cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
@@ -94,6 +152,11 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	}
 	_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1")
 	_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1")
+
+	if lastBypassedEndpointIP != "" {
+		_ = runLinuxCmd("ip", "route", "del", lastBypassedEndpointIP+"/32")
+		lastBypassedEndpointIP = ""
+	}
 	return nil
 }
 

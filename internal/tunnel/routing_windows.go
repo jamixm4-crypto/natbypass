@@ -4,6 +4,7 @@ package tunnel
 
 import (
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -78,12 +79,61 @@ func DisableHostIPForwarding() error {
 	return nil
 }
 
-// EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1) via gatewayVIP.
-func EnableExitNodeRouting(gatewayVIP string) error {
+var (
+	lastBypassedEndpointIP string
+)
+
+// getPhysicalGatewayWindows finds the current primary physical default gateway IP
+func getPhysicalGatewayWindows() string {
+	psScript := `(Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.InterfaceAlias -notlike '*NatBypass*' } | Sort-Object RouteMetric | Select-Object -First 1).NextHop`
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	out, err := cmd.Output()
+	if err == nil {
+		gw := strings.TrimSpace(string(out))
+		if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
+			return gw
+		}
+	}
+	return ""
+}
+
+func extractHostIP(endpoint string) string {
+	if endpoint == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		host = endpoint
+	}
+	host = strings.TrimSpace(host)
+	ip := net.ParseIP(host)
+	if ip != nil && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsUnspecified() {
+		return host
+	}
+	return ""
+}
+
+// EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1) via gatewayVIP,
+// with automatic routing-loop prevention and DNS configuration.
+func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	if gatewayVIP == "" {
 		return fmt.Errorf("gateway VIP is required")
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+
+	// 1. Routing loop prevention: bypass remote endpoint's public IP via physical default gateway
+	for _, ep := range remoteEndpoints {
+		if hostIP := extractHostIP(ep); hostIP != "" {
+			if physGW := getPhysicalGatewayWindows(); physGW != "" {
+				_ = runRouteCmd("route", "add", hostIP, "mask", "255.255.255.255", physGW, "metric", "1")
+				lastBypassedEndpointIP = hostIP
+				break
+			}
+		}
+	}
+
+	// 2. Add WireGuard def1 /1 routes
 	if err := runRouteCmd("route", "add", "0.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"); err != nil {
 		return fmt.Errorf("failed to add default route 0.0.0.0/1 via %s: %w", cleanVIP, err)
 	}
@@ -91,10 +141,15 @@ func EnableExitNodeRouting(gatewayVIP string) error {
 		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", cleanVIP)
 		return fmt.Errorf("failed to add default route 128.0.0.0/1 via %s: %w", cleanVIP, err)
 	}
+
+	// 3. Configure public DNS on NatBypass adapter to prevent DNS failure / leaks
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", "name=NatBypass", "static", "1.1.1.1", "register=primary", "validate=no")
+	_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", "name=NatBypass", "address=8.8.8.8", "index=2", "validate=no")
+
 	return nil
 }
 
-// DisableExitNodeRouting removes the default gateway /1 routes via gatewayVIP.
+// DisableExitNodeRouting removes the default gateway /1 routes, bypass route, and restores DNS.
 func DisableExitNodeRouting(gatewayVIP string) error {
 	var errs []string
 	if gatewayVIP != "" {
@@ -104,6 +159,16 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
 		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
 	}
+
+	// Remove bypass route if was added
+	if lastBypassedEndpointIP != "" {
+		_ = runRouteCmd("route", "delete", lastBypassedEndpointIP, "mask", "255.255.255.255")
+		lastBypassedEndpointIP = ""
+	}
+
+	// Reset DNS on adapter
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", "name=NatBypass", "source=dhcp")
+
 	if len(errs) > 0 {
 		return fmt.Errorf("errors disabling exit node routing: %s", strings.Join(errs, "; "))
 	}

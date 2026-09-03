@@ -21,7 +21,7 @@ func DisableHostIPForwarding() error {
 }
 
 // EnableExitNodeRouting stub.
-func EnableExitNodeRouting(gatewayVIP string) error {
+func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	return ErrRoutingNotSupported
 }
 

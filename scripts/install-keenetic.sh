@@ -319,7 +319,16 @@ fi
 if [ "$table" = "mangle" ]; then
     iptables -t mangle -C PREROUTING -i nb0 -j ACCEPT 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i nb0 -j ACCEPT 2>/dev/null || true
     iptables -t mangle -C OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o nb0 -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 fi
+
+if [ "$table" = "nat" ]; then
+    iptables -t nat -C POSTROUTING -s 10.11.12.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.11.12.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -C POSTROUTING -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
+fi
+
+ip rule add from 10.11.12.0/24 lookup default priority 60 2>/dev/null || true
+ip rule add from 100.64.200.0/24 lookup default priority 60 2>/dev/null || true
 NDM_EOF
         chmod +x /opt/etc/ndm/netfilter.d/010-natbypass.sh
         /opt/etc/ndm/netfilter.d/010-natbypass.sh 2>/dev/null || true

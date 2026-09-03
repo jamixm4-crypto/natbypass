@@ -653,7 +653,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.199"
+		ver = "1.9.200"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1460,7 +1460,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.199"
+		ver = "1.9.200"
 	}
 
 	vip := s.state.VirtualIP
@@ -2626,9 +2626,21 @@ func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Requ
 	}
 
 	if req.Enabled {
-		if req.GatewayVIP == "" && s.registry != nil {
-			if p, ok := s.registry.Get(req.PeerID); ok {
-				req.GatewayVIP = p.VirtualIP
+		var remoteEPs []string
+		if s.registry != nil {
+			if p, ok := s.registry.Get(req.PeerID); ok && p != nil {
+				if req.GatewayVIP == "" {
+					req.GatewayVIP = p.VirtualIP
+				}
+				if p.ActiveEndpoint != "" {
+					remoteEPs = append(remoteEPs, p.ActiveEndpoint)
+				}
+				if p.STUNAddr != "" {
+					remoteEPs = append(remoteEPs, p.STUNAddr)
+				}
+				if p.PublicIP != "" {
+					remoteEPs = append(remoteEPs, p.PublicIP)
+				}
 			}
 		}
 		if req.GatewayVIP == "" {
@@ -2636,7 +2648,7 @@ func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		if err := tunnel.EnableExitNodeRouting(req.GatewayVIP); err != nil {
+		if err := tunnel.EnableExitNodeRouting(req.GatewayVIP, remoteEPs...); err != nil {
 			s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка настройки шлюза: "+err.Error())
 			return
 		}

@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.199"
+	Version = "1.9.200"
 	Commit  = "release"
 )
 
@@ -1901,7 +1901,7 @@ func handleExitNodeSelect() {
 	activeExitNodeID = targetPeer.DeviceID
 	activeExitVIP = targetVIP
 
-	if err := tunnel.EnableExitNodeRouting(targetVIP); err != nil {
+	if err := tunnel.EnableExitNodeRouting(targetVIP, targetPeer.ActiveEndpoint, targetPeer.STUNAddr, targetPeer.PublicIP); err != nil {
 		addLog("❌ Ошибка настройки маршрутизации через Exit Node: " + err.Error())
 		writeDebug("EnableExitNodeRouting error: " + err.Error())
 	} else {
