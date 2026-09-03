@@ -26,7 +26,7 @@ import (
 )
 
 
-const Version = "1.9.200"
+const Version = "1.9.201"
 
 
 
@@ -211,6 +211,9 @@ func StartEngine(configYAML string, tunFd int) string {
 		return fmt.Sprintf("ошибка парсинга конфига: %v", err)
 	}
 	globalConfig = cfg
+	if globalExitNode == "" && cfg.Network.SelectedExitNode != "" {
+		globalExitNode = cfg.Network.SelectedExitNode
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	engineCtx = ctx
@@ -261,6 +264,15 @@ func StartEngine(configYAML string, tunFd int) string {
 		))
 	}
 	globalSigMgr = signaling.NewFallbackManager(channels)
+	globalSigMgr.SubscribeTunnelData(devID, func(pkt []byte) {
+		atomic.AddUint64(&globalRxBytes, uint64(len(pkt)))
+		engineMu.Lock()
+		tf := globalTunFile
+		engineMu.Unlock()
+		if tf != nil {
+			_, _ = tf.Write(pkt)
+		}
+	})
 
 	// UDP Puncher для P2P сокетов
 	// UDPPort=0 (по умолчанию) → OS выделяет случайный порт (не конфликтует с AWG/WG)
@@ -420,7 +432,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             runtime.GOARCH,
-					Version:          "1.9.200",
+					Version:          "1.9.201",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -718,28 +730,81 @@ func attachTUN(tunFd int) {
 						}
 
 
+						cleanVIP := strings.TrimSpace(strings.Split(globalVirtualIP, "/")[0])
+						if destIP.String() == cleanVIP {
+							if tf != nil {
+								_, _ = tf.Write(pkt)
+							}
+							continue
+						}
+
 						if targetPeer == nil && globalExitNode != "" && globalRegistry != nil {
-							if ep, ok := globalRegistry.Get(globalExitNode); ok && ep.Online {
+							if ep, ok := globalRegistry.Get(globalExitNode); ok && ep != nil {
 								targetPeer = ep
+							} else {
+								for _, p := range globalRegistry.List() {
+									pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+									if p.DeviceID == globalExitNode || pVIP == globalExitNode || p.Nickname == globalExitNode {
+										targetPeer = p
+										break
+									}
+								}
 							}
 						}
 
 						if targetPeer != nil {
-							if globalPuncher != nil {
-								if targetPeer.ActiveEndpoint != "" {
-									_ = globalPuncher.SendDataPacket(targetPeer.ActiveEndpoint, pkt)
-								}
-								if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetPeer.ActiveEndpoint {
-									_ = globalPuncher.SendDataPacket(targetPeer.LocalAddr, pkt)
-								}
-								if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint && targetPeer.STUNAddr != targetPeer.LocalAddr {
-									_ = globalPuncher.SendDataPacket(targetPeer.STUNAddr, pkt)
+							pmin := 0
+							pmax := 0
+							if targetPeer.AWG != nil {
+								pmin = targetPeer.AWG.Pmin
+								pmax = targetPeer.AWG.Pmax
+							}
+
+							targetEP := targetPeer.ActiveEndpoint
+							if targetEP == "" {
+								targetEP = targetPeer.STUNAddr
+							}
+							if targetEP == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
+								targetEP = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
+							}
+							if targetEP == "" && len(targetPeer.Candidates) > 0 {
+								targetEP = targetPeer.Candidates[0]
+							}
+							if targetEP == "" {
+								targetEP = targetPeer.LocalAddr
+							}
+
+							sentDirect := false
+							if targetEP != "" && globalPuncher != nil {
+								if err := globalPuncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
+									sentDirect = true
 								}
 							}
-							// Data plane is strictly pure P2P direct UDP
+
+							// Если прямой P2P еще не подтвержден — пробуем все известные адреса узла
+							if !targetPeer.DirectP2P && globalPuncher != nil {
+								if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+									_ = globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax)
+								}
+								if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP {
+									_ = globalPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, pkt, pmin, pmax)
+								}
+								for _, cand := range targetPeer.Candidates {
+									if cand != "" && cand != targetEP && cand != targetPeer.STUNAddr {
+										_ = globalPuncher.SendDataPacketWithPadding(cand, pkt, pmin, pmax)
+									}
+								}
+							}
+
+							// Резервный транспорт через сигнальный MQTT брокер (Relay Fallback), если UDP заблокирован
+							if !sentDirect && globalSigMgr != nil {
+								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, pkt)
+							}
+
 							logger.Debug().
 								Str("dst", destIP.String()).
 								Str("peer", targetPeer.DeviceID).
+								Str("ep", targetEP).
 								Int("size", len(pkt)).
 								Msg("📤 TUN TX: пакет отправлен узлу")
 						} else {
@@ -1107,9 +1172,53 @@ func SetDeviceName(name string) {
 // SelectExitNode выбирает шлюз для выхода в интернет
 func SelectExitNode(deviceID string) {
 	engineMu.Lock()
-	defer engineMu.Unlock()
 	globalExitNode = deviceID
+	if globalConfig != nil {
+		globalConfig.Network.SelectedExitNode = deviceID
+	}
+	epDev := deviceID
+	puncher := globalPuncher
+	reg := globalRegistry
+	engineMu.Unlock()
+
 	logger.Info().Str("exit_node", deviceID).Msg("Выбран Exit Node для Android")
+
+	// Немедленно запускаем пробитие UDP-канала до выбранного узла-шлюза
+	if epDev != "" && puncher != nil && reg != nil {
+		go func() {
+			var p *peer.Peer
+			if item, ok := reg.Get(epDev); ok && item != nil {
+				p = item
+			} else {
+				for _, item := range reg.List() {
+					pVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
+					if item.DeviceID == epDev || pVIP == epDev {
+						p = item
+						break
+					}
+				}
+			}
+			if p != nil {
+				for i := 0; i < 5; i++ {
+					if p.ActiveEndpoint != "" {
+						_ = puncher.SendKeepAlive(p.ActiveEndpoint)
+					}
+					if p.STUNAddr != "" {
+						_ = puncher.SendHolePunchProbe(p.STUNAddr)
+					}
+					if p.PublicIP != "" && p.WGPort > 0 {
+						_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+					}
+					for _, cand := range p.Candidates {
+						if cand != "" {
+							_ = puncher.SendHolePunchProbe(cand)
+						}
+					}
+					time.Sleep(150 * time.Millisecond)
+				}
+			}
+		}()
+	}
 }
 
 // GetSelectedExitNode возвращает ID выбранного шлюза

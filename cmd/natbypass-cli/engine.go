@@ -340,6 +340,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			})
 		}
 
+		if sigMgr != nil {
+			sigMgr.SubscribeTunnelData(deviceID, func(payload []byte) {
+				onInboundPacket(payload, nil)
+			})
+		}
+
 		// Signaling is strictly for control plane / peer discovery.
 		// All data plane traffic flows strictly peer-to-peer over direct UDP.
 
@@ -494,15 +500,23 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 
 						// 1. Pure P2P Direct UDP packet transmission
+						sentDirect := false
 						if targetEP != "" && puncher != nil {
 							srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
 							log.Debug().Str("src", srcIP).Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Int("len", len(pkt)).Msg("📤 TUN→UDP outbound")
 							err := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
-							if err != nil {
+							if err == nil {
+								sentDirect = true
+							} else {
 								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
 							}
 						} else {
 							log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no endpoint or puncher")
+						}
+
+						// Fallback: relay via MQTT when direct UDP is not yet confirmed or failed
+						if !sentDirect && sigMgr != nil {
+							_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
 						}
 
 						// 1b. Reactive instant hole punching if direct P2P is not yet confirmed

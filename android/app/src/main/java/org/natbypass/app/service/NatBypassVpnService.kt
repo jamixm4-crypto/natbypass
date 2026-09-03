@@ -131,6 +131,7 @@ class NatBypassVpnService : VpnService() {
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
             val useExitNode = selectedExitNode.isNotEmpty()
+            org.natbypass.app.util.MobileBridge.selectExitNode(selectedExitNode)
 
             val builder = Builder()
                 .setSession("NatBypass")
@@ -213,6 +214,9 @@ class NatBypassVpnService : VpnService() {
             val configFile = File(filesDir, "config.yaml")
             val configYaml = if (configFile.exists()) configFile.readText() else "{}"
             org.natbypass.app.util.MobileBridge.startEngine(configYaml, fd)
+            if (selectedExitNode.isNotEmpty()) {
+                org.natbypass.app.util.MobileBridge.selectExitNode(selectedExitNode)
+            }
 
             isRunning = true
 
