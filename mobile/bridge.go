@@ -304,6 +304,7 @@ func StartEngine(configYAML string, tunFd int) string {
 
 // periodic probeTicker maintains connection
 		}
+	})
 	globalPuncher = puncher
 	if puncher != nil {
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
