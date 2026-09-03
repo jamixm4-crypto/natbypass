@@ -28,7 +28,7 @@ import (
 )
 
 
-const Version = "1.9.204"
+const Version = "1.9.205"
 
 
 
@@ -304,8 +304,12 @@ func StartEngine(configYAML string, tunFd int) string {
 
 // periodic probeTicker maintains connection
 		}
-	})
 	globalPuncher = puncher
+	if puncher != nil {
+		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+			puncher.SetCipherKey(activeProf.NetworkKey)
+		}
+	}
 
 	// Определение IP и STUN на постоянном UDP Puncher сокете
 	ipDisc := network.NewDiscoverer(cfg.Network.IPApis, 5*time.Second)
@@ -434,11 +438,17 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             runtime.GOARCH,
-					Version:          "1.9.204",
+					Version:          "1.9.205",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
-				_ = globalSigMgr.Send(ctx, payload)
+				toSend := payload
+				if activeKey != "" {
+					if enc, err := signaling.EncryptPayloadWithKey(payload, activeKey); err == nil && enc != nil {
+						toSend = enc
+					}
+				}
+				_ = globalSigMgr.Send(ctx, toSend)
 			}
 		}
 	}()
@@ -1050,7 +1060,13 @@ func RefreshPublicIP() {
 				NetworkKey:       activeKey,
 				Topic:            activeTopic,
 			}
-			_ = globalSigMgr.Send(ctx, payload)
+			toSend := payload
+			if activeKey != "" {
+				if enc, err := signaling.EncryptPayloadWithKey(payload, activeKey); err == nil && enc != nil {
+					toSend = enc
+				}
+			}
+			_ = globalSigMgr.Send(ctx, toSend)
 		}
 
 		// 5. Мгновенная отправка UDP hole punch зондов на все известные пиры

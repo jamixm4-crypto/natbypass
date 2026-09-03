@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -91,4 +92,9 @@ func DecryptSelf(encrypted []byte, key [32]byte) ([]byte, error) {
 	}
 
 	return decrypted, nil
+}
+
+// DeriveKey derives a 32-byte key from any secret string using SHA-256.
+func DeriveKey(secret string) [32]byte {
+	return sha256.Sum256([]byte(secret))
 }

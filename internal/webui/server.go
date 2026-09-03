@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -653,7 +654,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.204"
+		ver = "1.9.205"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1460,7 +1461,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.204"
+		ver = "1.9.205"
 	}
 
 	vip := s.state.VirtualIP
@@ -2063,6 +2064,9 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.AssetURL = info.AssetURL
+	} else if !updater.IsValidAssetURL(req.AssetURL) {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "недопустимый или недоверенный источник файла обновления")
+		return
 	}
 
 	go func() {
@@ -2912,6 +2916,18 @@ func (s *Server) handleAWGApply(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDiagnosticsPing — POST /api/diagnostics/ping — выполнение ping целевого узла
+var validTargetRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,253}[a-zA-Z0-9])?$`)
+
+func isValidDiagnosticTarget(t string) bool {
+	if t == "" || len(t) > 255 || strings.HasPrefix(t, "-") {
+		return false
+	}
+	if ip := net.ParseIP(t); ip != nil {
+		return true
+	}
+	return validTargetRegex.MatchString(t)
+}
+
 func (s *Server) handleDiagnosticsPing(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
@@ -2926,6 +2942,10 @@ func (s *Server) handleDiagnosticsPing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := strings.TrimSpace(req.Target)
+	if !isValidDiagnosticTarget(target) {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "недопустимый формат целевого адреса или имени хоста")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
@@ -2964,6 +2984,10 @@ func (s *Server) handleDiagnosticsTraceroute(w http.ResponseWriter, r *http.Requ
 	}
 
 	target := strings.TrimSpace(req.Target)
+	if !isValidDiagnosticTarget(target) {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "недопустимый формат целевого адреса или имени хоста")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 

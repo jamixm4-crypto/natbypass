@@ -54,9 +54,21 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
 			netsh interface ipv4 set interface $_.InterfaceAlias forwarding=enabled
 		}
-		Remove-NetNat -Name 'NatBypassNAT' -Confirm:$false -ErrorAction SilentlyContinue
-		New-NetNat -Name 'NatBypassNAT' -InternalIPInterfaceAddressPrefix '%s' -ErrorAction SilentlyContinue
-	`, cleanSubnet)
+		$existing = Get-NetNat -ErrorAction SilentlyContinue
+		$matched = $false
+		if ($existing) {
+			foreach ($nat in $existing) {
+				if ($nat.InternalIPInterfaceAddressPrefix -eq '%s') {
+					$matched = $true
+					break
+				}
+			}
+		}
+		if (-not $matched) {
+			Remove-NetNat -Name 'NatBypassNAT' -Confirm:$false -ErrorAction SilentlyContinue
+			New-NetNat -Name 'NatBypassNAT' -InternalIPInterfaceAddressPrefix '%s' -ErrorAction SilentlyContinue
+		}
+	`, cleanSubnet, cleanSubnet)
 	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 
 	// 3. Add Windows firewall rules for interface forwarding

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/natbypass/natbypass/internal/constants"
+	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/pion/stun/v2"
 )
 
@@ -123,6 +124,23 @@ type UDPPuncher struct {
 	keepAliveMu      sync.Mutex
 	addrCache        sync.Map
 	lastReversePing  sync.Map
+
+	cipherKey    [32]byte
+	hasCipherKey bool
+	cipherMu     sync.RWMutex
+}
+
+// SetCipherKey конфигурирует ключ симметричного шифрования (ChaCha20-Poly1305) для L3 Data-plane пакетов.
+func (p *UDPPuncher) SetCipherKey(key string) {
+	p.cipherMu.Lock()
+	defer p.cipherMu.Unlock()
+	if key == "" {
+		p.hasCipherKey = false
+		p.cipherKey = [32]byte{}
+		return
+	}
+	p.cipherKey = crypto.DeriveKey(key)
+	p.hasCipherKey = true
 }
 
 // resolveAddr resolves a UDP address string with caching to avoid per-packet overhead.
@@ -536,6 +554,20 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 		return err
 	}
 
+	p.cipherMu.RLock()
+	cKey := p.cipherKey
+	hasCKey := p.hasCipherKey
+	p.cipherMu.RUnlock()
+
+	dataToSend := payload
+	header := []byte(constants.TunHeader)
+	if hasCKey {
+		if enc, encErr := crypto.EncryptSelf(payload, cKey); encErr == nil && len(enc) > 0 {
+			dataToSend = enc
+			header = []byte(constants.TunEncryptedHeader)
+		}
+	}
+
 	if pmax > 0 && pmax >= pmin {
 		padLen := pmin
 		if diff := pmax - pmin; diff > 0 {
@@ -544,22 +576,21 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			padLen += int(b[0]) % (diff + 1)
 		}
 		if padLen > 0 {
-			header := []byte(constants.TunPaddedHeader)
-			pLen := uint16(len(payload))
-			fullPkt := make([]byte, len(header)+2+len(payload)+padLen)
-			copy(fullPkt, header)
-			binary.BigEndian.PutUint16(fullPkt[len(header):len(header)+2], pLen)
-			copy(fullPkt[len(header)+2:], payload)
-			_, _ = rand.Read(fullPkt[len(header)+2+len(payload):])
+			pHeader := []byte(constants.TunPaddedHeader)
+			pLen := uint16(len(dataToSend))
+			fullPkt := make([]byte, len(pHeader)+2+len(dataToSend)+padLen)
+			copy(fullPkt, pHeader)
+			binary.BigEndian.PutUint16(fullPkt[len(pHeader):len(pHeader)+2], pLen)
+			copy(fullPkt[len(pHeader)+2:], dataToSend)
+			_, _ = rand.Read(fullPkt[len(pHeader)+2+len(dataToSend):])
 			_, err = p.conn.WriteToUDP(fullPkt, rAddr)
 			return err
 		}
 	}
 
-	header := []byte(constants.TunHeader)
-	fullPkt := make([]byte, len(header)+len(payload))
+	fullPkt := make([]byte, len(header)+len(dataToSend))
 	copy(fullPkt, header)
-	copy(fullPkt[len(header):], payload)
+	copy(fullPkt[len(header):], dataToSend)
 
 	p.mu.Lock()
 	shaper := p.trafficShaper
@@ -741,6 +772,16 @@ func (p *UDPPuncher) readLoop() {
 			realLen := int(binary.BigEndian.Uint16(buf[constants.TunPaddedHeaderSize : constants.TunPaddedHeaderSize+2]))
 			if realLen > 0 && constants.TunPaddedHeaderSize+2+realLen <= n {
 				p.handleTunnelPacket(buf[constants.TunPaddedHeaderSize+2:constants.TunPaddedHeaderSize+2+realLen], remoteAddr)
+			}
+		case n > constants.TunEncryptedHeaderSize && string(buf[:constants.TunEncryptedHeaderSize]) == constants.TunEncryptedHeader:
+			p.cipherMu.RLock()
+			cKey := p.cipherKey
+			hasCKey := p.hasCipherKey
+			p.cipherMu.RUnlock()
+			if hasCKey {
+				if dec, err := crypto.DecryptSelf(buf[constants.TunEncryptedHeaderSize:n], cKey); err == nil && len(dec) > 0 {
+					p.handleTunnelPacket(dec, remoteAddr)
+				}
 			}
 		case n > constants.TunHeaderSize && string(buf[:constants.TunHeaderSize]) == constants.TunHeader:
 			p.handleTunnelPacket(buf[constants.TunHeaderSize:n], remoteAddr)

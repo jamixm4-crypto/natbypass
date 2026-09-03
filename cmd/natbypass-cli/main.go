@@ -15,7 +15,7 @@ import (
 
 
 var (
-	Version   = "1.9.204"
+	Version   = "1.9.205"
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
@@ -31,6 +31,13 @@ var (
 
 
 func main() {
+	// Embedded router optimization: reduce GC and OS thread pressure on MIPS/ARM
+	if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "arm" {
+		runtime.GOMAXPROCS(1)
+		debug.SetGCPercent(10)
+		debug.SetMemoryLimit(32 << 20) // 32 MB heap limit
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 			stack := debug.Stack()

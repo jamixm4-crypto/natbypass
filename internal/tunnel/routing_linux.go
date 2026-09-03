@@ -3,10 +3,13 @@
 package tunnel
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/natbypass/natbypass/internal/network"
 )
@@ -62,7 +65,42 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	// Keenetic / OpenWrt: ensure forwarded traffic from mesh subnet can lookup default WAN table
 	_ = runLinuxCmd("ip", "rule", "del", "from", cleanSubnet, "lookup", "default")
 	_ = runLinuxCmd("ip", "rule", "add", "from", cleanSubnet, "lookup", "default", "priority", "60")
+
+	StartLinuxNATWatchdog(context.Background(), cleanSubnet)
 	return nil
+}
+
+var (
+	natWatchdogCancel context.CancelFunc
+	natWatchdogMu     sync.Mutex
+)
+
+// StartLinuxNATWatchdog запускает фоновый сторож целостности правил iptables на Keenetic/Linux (каждые 25 сек).
+func StartLinuxNATWatchdog(ctx context.Context, subnet string) {
+	natWatchdogMu.Lock()
+	if natWatchdogCancel != nil {
+		natWatchdogCancel()
+	}
+	wCtx, cancel := context.WithCancel(ctx)
+	natWatchdogCancel = cancel
+	natWatchdogMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(25 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-wCtx.Done():
+				return
+			case <-ticker.C:
+				cmd := exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", subnet, "-j", "MASQUERADE")
+				if err := cmd.Run(); err != nil {
+					// Правило исчезло (сброс цепочек NDM при смене WAN) -> восстанавливаем
+					_ = EnableHostIPForwardingSubnet(subnet)
+				}
+			}
+		}
+	}()
 }
 
 // EnableHostIPForwarding enables kernel IPv4 forwarding and adds iptables NAT masquerading for default mesh subnet.
@@ -72,6 +110,13 @@ func EnableHostIPForwarding() error {
 
 // DisableHostIPForwarding removes iptables NAT masquerading rule.
 func DisableHostIPForwarding() error {
+	natWatchdogMu.Lock()
+	if natWatchdogCancel != nil {
+		natWatchdogCancel()
+		natWatchdogCancel = nil
+	}
+	natWatchdogMu.Unlock()
+
 	iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
 	for _, ipt := range iptablesPaths {
 		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")

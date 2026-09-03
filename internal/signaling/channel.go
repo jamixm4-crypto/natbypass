@@ -306,9 +306,57 @@ func EncryptPayload(p *Payload, pubKey, privKey [32]byte) (*Payload, error) {
 		return nil, err
 	}
 
-	// Копируем все поля и прикрепляем зашифрованный блоб
-	res := *p
-	res.Encrypted = enc
+	// Скрываем конфиденциальные данные в открытом заголовке
+	res := &Payload{
+		DeviceID:  p.DeviceID,
+		Timestamp: p.Timestamp,
+		Encrypted: enc,
+	}
+	return res, nil
+}
+
+// EncryptPayloadWithKey шифрует маяк симметричным ключом комнаты (NetworkKey) и полностью скрывает чувствительные данные из открытого JSON.
+func EncryptPayloadWithKey(p *Payload, keyStr string) (*Payload, error) {
+	if keyStr == "" {
+		return p, nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	key := crypto.DeriveKey(keyStr)
+	enc, err := crypto.EncryptSelf(data, key)
+	if err != nil {
+		return nil, err
+	}
+	// В открытом виде оставляем ТОЛЬКО идентификатор и зашифрованный блоб
+	res := &Payload{
+		DeviceID:  p.DeviceID,
+		Timestamp: p.Timestamp,
+		Encrypted: enc,
+	}
+	return res, nil
+}
+
+// DecryptPayloadWithKey расшифровывает маяк симметричным ключом комнаты.
+func DecryptPayloadWithKey(p *Payload, keyStr string) (*Payload, error) {
+	if len(p.Encrypted) == 0 {
+		return p, nil
+	}
+	if keyStr == "" {
+		return p, nil
+	}
+	key := crypto.DeriveKey(keyStr)
+	data, err := crypto.DecryptSelf(p.Encrypted, key)
+	if err != nil {
+		return nil, err
+	}
+
+	var res Payload
+	if err := json.Unmarshal(data, &res); err != nil {
+		return nil, err
+	}
+
 	return &res, nil
 }
 

@@ -758,6 +758,9 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 	if punchErr != nil {
 		log.Warn().Err(punchErr).Msg("Failed to initialize UDP puncher socket")
 	} else if puncher != nil {
+		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+			puncher.SetCipherKey(activeProf.NetworkKey)
+		}
 		puncher.StartKeepAliveLoop()
 		magicSock = network.NewMagicSock(puncher, func(devID, oldPath, newPath string, pType network.PathType) {
 			log.Info().Str("peer", devID).Str("old", oldPath).Str("new", newPath).Str("type", string(pType)).Msg("🔀 MagicSock: Path switched")
@@ -1074,7 +1077,13 @@ func publishLoop(
 			AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 		}
 
-		_ = sigMgr.Send(ctx, payload)
+		toSend := payload
+		if activeKey != "" {
+			if enc, err := signaling.EncryptPayloadWithKey(payload, activeKey); err == nil && enc != nil {
+				toSend = enc
+			}
+		}
+		_ = sigMgr.Send(ctx, toSend)
 	}
 
 	// Rapid initial discovery burst (3 beacons within 1.5s for instant mesh convergence)
@@ -1123,9 +1132,20 @@ func receiveLoop(
 				return
 			}
 			if len(p.Encrypted) > 0 {
-				decrypted, decErr := signaling.DecryptPayload(p, pubKey, privKey)
-				if decErr == nil {
-					p = decrypted
+				activeKey := ""
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+					activeKey = activeProf.NetworkKey
+				}
+				if activeKey != "" {
+					if dec, decErr := signaling.DecryptPayloadWithKey(p, activeKey); decErr == nil && dec != nil {
+						p = dec
+					}
+				}
+				if len(p.Encrypted) > 0 {
+					decrypted, decErr := signaling.DecryptPayload(p, pubKey, privKey)
+					if decErr == nil && decrypted != nil {
+						p = decrypted
+					}
 				}
 			}
 			if p.DeviceID == deviceID {

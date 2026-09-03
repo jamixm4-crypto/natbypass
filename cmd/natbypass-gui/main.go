@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.204"
+	Version = "1.9.205"
 	Commit  = "release"
 )
 
@@ -118,6 +118,7 @@ var (
 	procSendMessageW          = moduser32.NewProc("SendMessageW")
 	procGetWindowTextW        = moduser32.NewProc("GetWindowTextW")
 	procSetWindowTextW        = moduser32.NewProc("SetWindowTextW")
+	procSetWindowPos          = moduser32.NewProc("SetWindowPos")
 	procShowWindow            = moduser32.NewProc("ShowWindow")
 	procUpdateWindow          = moduser32.NewProc("UpdateWindow")
 	procSetForegroundWindow   = moduser32.NewProc("SetForegroundWindow")
@@ -1057,6 +1058,17 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		return 1
 
 	case WM_SIZE:
+		procInvalidateRect.Call(hwnd, 0, 1)
+		return 0
+
+	case 0x02E0: // WM_DPICHANGED: adaptive resize when moved to high-DPI monitor
+		newRect := (*RECT)(unsafe.Pointer(lParam))
+		if newRect != nil {
+			procSetWindowPos.Call(hwnd, 0,
+				uintptr(newRect.Left), uintptr(newRect.Top),
+				uintptr(newRect.Right-newRect.Left), uintptr(newRect.Bottom-newRect.Top),
+				0x0004 /* SWP_NOZORDER */ | 0x0010 /* SWP_NOACTIVATE */)
+		}
 		procInvalidateRect.Call(hwnd, 0, 1)
 		return 0
 
@@ -3938,6 +3950,9 @@ func startEngineFromConfig(c *config.Config) {
 	})
 	if err == nil {
 		udpPuncher = puncher
+		if activeProf := c.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+			udpPuncher.SetCipherKey(activeProf.NetworkKey)
+		}
 		puncher.StartKeepAliveLoop()
 		guiMagicSock = network.NewMagicSock(puncher, func(devID, oldPath, newPath string, pType network.PathType) {
 			writeDebug(fmt.Sprintf("🧲 Magicsock GUI: путь к %s переключен: %s -> %s (%s)", devID, oldPath, newPath, pType))
@@ -4711,8 +4726,21 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				}
 
 				if len(p.Encrypted) > 0 {
-					if dec, err := signaling.DecryptPayload(p, myPubKey, myPrivKey); err == nil && dec != nil {
-						p = dec
+					activeKey := ""
+					if cfg != nil {
+						if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+							activeKey = activeProf.NetworkKey
+						}
+					}
+					if activeKey != "" {
+						if dec, decErr := signaling.DecryptPayloadWithKey(p, activeKey); decErr == nil && dec != nil {
+							p = dec
+						}
+					}
+					if len(p.Encrypted) > 0 {
+						if dec, err := signaling.DecryptPayload(p, myPubKey, myPrivKey); err == nil && dec != nil {
+							p = dec
+						}
 					}
 				}
 
@@ -5181,6 +5209,11 @@ func publishCurrentState(ctx context.Context) {
 	}
 
 	toSend := payload
+	if activeKey != "" {
+		if enc, err := signaling.EncryptPayloadWithKey(payload, activeKey); err == nil && enc != nil {
+			toSend = enc
+		}
+	}
 
 	for _, ch := range sigChannels {
 		// Если пиры подключены и канал Telegram — не спамим в чат/группу

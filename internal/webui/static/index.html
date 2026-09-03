@@ -429,6 +429,21 @@
       .form-input { padding: 6px 10px; font-size: 0.8rem; }
     }
 
+    /* Мобильная адаптивность для смартфонов (экраны до 768px) */
+    @media (max-width: 768px) {
+      .topbar { flex-direction: column; align-items: stretch !important; gap: 8px; }
+      .topbar-actions { justify-content: space-between; width: 100%; }
+      .nav-tabs { flex-wrap: wrap; gap: 4px; }
+      .nav-tab { flex: 1 1 auto; text-align: center; font-size: 0.75rem; padding: 6px 10px; }
+      .dashboard-grid { grid-template-columns: 1fr !important; }
+      .card-right-large { grid-column: span 1 !important; }
+      .peer-card-actions { flex-direction: column !important; width: 100%; }
+      .peer-card-actions button { width: 100%; margin: 2px 0; }
+      .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%; }
+      .modal-content { width: 95% !important; max-width: 95% !important; margin: 10px auto; padding: 16px !important; }
+      .badge { font-size: 0.68rem !important; }
+    }
+
     .donut-ring {
       position: relative;
       width: 85px;
@@ -880,6 +895,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 </head>
 
 <body>
+  <div id="offlineBanner" style="display:none; position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:99999; background:rgba(239, 68, 68, 0.92); color:#fff; padding:8px 20px; border-radius:30px; font-weight:700; font-size:0.82rem; backdrop-filter:blur(8px); box-shadow:0 4px 20px rgba(239,68,68,0.4); text-align:center;">⚠️ Связь с узлом NatBypass потеряна. Переподключение...</div>
 
   <!-- Fullscreen Login & Authorization Screen -->
   <div id="authScreen" style="display:none;">
@@ -1006,7 +1022,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.204</span>
+          <span id="topUpdateLabel">v1.9.205</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1017,7 +1033,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.204</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.205</span>
           <div class="online-dot"></div>
         </div>
 
@@ -3049,7 +3065,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           cachedPeers = pJson.data;
           renderPeers(cachedPeers);
         }
-      } catch (e) {}
+        const bOff = document.getElementById('offlineBanner');
+        if (bOff) bOff.style.display = 'none';
+      } catch (e) {
+        const bOff = document.getElementById('offlineBanner');
+        if (bOff) bOff.style.display = 'block';
+      }
     }
 
     let currentSelectedExitNode = '';

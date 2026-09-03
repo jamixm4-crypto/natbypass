@@ -376,10 +376,26 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	return "", "", 0
 }
 
+// IsValidAssetURL проверяет, что URL обновления исходит исключительно из доверенного официального репозитория GitHub.
+func IsValidAssetURL(urlStr string) bool {
+	if urlStr == "" {
+		return false
+	}
+	// Разрешаем только официальные релизы репозитория или подписанный CDN GitHub
+	return strings.HasPrefix(urlStr, "https://github.com/"+GithubRepo+"/releases/download/") ||
+		strings.HasPrefix(urlStr, "https://objects.githubusercontent.com/github-production-release-asset-")
+}
+
 // ApplyUpdate выполняет скачивание, атомарную замену бинарника и перезапуск
 func ApplyUpdate(ctx context.Context, assetURL string) error {
 	if assetURL == "" {
 		return fmt.Errorf("URL для скачивания обновления не задан")
+	}
+
+	if !IsValidAssetURL(assetURL) {
+		err := fmt.Errorf("отклонено: недоверенный источник обновления (%s)", assetURL)
+		setStatus(false, 0, "", err.Error(), false)
+		return err
 	}
 
 	setStatus(true, 5, "Инициализация скачивания...", "", false)

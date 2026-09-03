@@ -145,11 +145,6 @@ func (s *Server) checkCredentials(username, password string) bool {
 		return true
 	}
 
-	// 4. Default fallback on non-router systems (Linux/Windows generic admin/admin)
-	if (username == "admin" || username == "root") && (password == "admin" || password == "admin123") {
-		return true
-	}
-
 	return false
 }
 
@@ -187,7 +182,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		Expires:  time.Now().Add(30 * 24 * time.Hour),
-		HttpOnly: false,
+		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -212,7 +207,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		Expires:  time.Unix(0, 0),
-		HttpOnly: false,
+		HttpOnly: true,
 	})
 
 	s.jsonResponse(w, http.StatusOK, map[string]bool{"ok": true}, "")
