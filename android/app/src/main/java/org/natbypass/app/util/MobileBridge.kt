@@ -349,6 +349,20 @@ object MobileBridge {
             "Ошибка: ${e.message}"
         }
     }
+
+    /** Получить файловый дескриптор сокета UDP Puncher для вызова protect(fd) */
+    fun getUDPSocketFd(): Int {
+        val method = getMethod("getUDPSocketFd") ?: return -1
+        return try {
+            val res = method.invoke(null)
+            when (res) {
+                is Number -> res.toInt()
+                else -> -1
+            }
+        } catch (e: Exception) {
+            -1
+        }
+    }
 }
 
 

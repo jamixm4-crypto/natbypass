@@ -232,9 +232,9 @@ class NatBypassVpnService : VpnService() {
 
             // Защита сокета UDP от зацикливания маршрутизации (критично для Android 14/15/16)
             try {
-                val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
+                val sockFd: Int = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
                 if (sockFd > 0) {
-                    val ok = protect(sockFd)
+                    val ok: Boolean = protect(sockFd)
                     Log.i(TAG, "VpnService.protect($sockFd) applied: $ok")
                 }
             } catch (t: Throwable) {
