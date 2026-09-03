@@ -373,6 +373,9 @@ class NatBypassVpnService : VpnService() {
             ).apply {
                 description = getString(R.string.notif_channel_desc)
                 setShowBadge(false)
+                enableVibration(false)
+                enableLights(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
@@ -380,7 +383,9 @@ class NatBypassVpnService : VpnService() {
 
     private fun buildNotification(statusText: String, showDisconnect: Boolean = true): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
         }
         val pOpen = PendingIntent.getActivity(
             this, 0, openIntent,
@@ -393,6 +398,11 @@ class NatBypassVpnService : VpnService() {
             .setContentText(statusText)
             .setContentIntent(pOpen)
             .setOngoing(showDisconnect)
+            .setShowWhen(false)
+            .setAutoCancel(false)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
 
         if (showDisconnect) {
             val disconnectIntent = Intent(this, NatBypassVpnService::class.java).apply {

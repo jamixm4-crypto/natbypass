@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.203"
+	Version = "1.9.204"
 	Commit  = "release"
 )
 
@@ -867,6 +867,11 @@ func main() {
 		go func() {
 			_ = tunnel.EnableHostIPForwarding()
 		}()
+	}
+	// Восстанавливаем активный Exit Node из сохранённого конфига
+	// Маршруты будут пересозданы после подключения к пиру в handleExitNodeSelect()
+	if cfg.Network.SelectedExitNode != "" {
+		activeExitNodeID = cfg.Network.SelectedExitNode
 	}
 	if err != nil {
 		showDiagnostics = false
@@ -4875,6 +4880,23 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 
 				// Автоматическое динамическое P2P согласование IP-адресов
 				negotiateVirtualIP()
+
+				// Авто-восстановление маршрутизации через Exit Node если он только что появился онлайн
+				if activeExitNodeID != "" && p.DeviceID == activeExitNodeID && p.IsExitNode && activeExitVIP == "" {
+					targetVIP := p.VirtualIP
+					if targetVIP == "" {
+						targetVIP = "100.64.200.2"
+					}
+					activeExitVIP = targetVIP
+					go func(vip string, peerPayload *signaling.Payload) {
+						time.Sleep(500 * time.Millisecond) // дождаться P2P handshake
+						eps := []string{peerPayload.ActiveEndpoint, peerPayload.STUNAddr, peerPayload.PublicIP}
+						if err := tunnel.EnableExitNodeRouting(vip, eps...); err == nil {
+							addLog(fmt.Sprintf("🌐 Exit Node [%s] онлайн, маршрут восстановлен автоматически (%s)", peerPayload.DeviceID, vip))
+							writeDebug("Auto-restored Exit Node routing via " + vip)
+						}
+					}(targetVIP, p)
+				}
 			}
 		}
 	}()
