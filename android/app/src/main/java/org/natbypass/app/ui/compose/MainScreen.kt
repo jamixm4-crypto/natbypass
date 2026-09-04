@@ -78,6 +78,7 @@ fun MainScreen(
                         } catch (e: Exception) {
                             "v1.6.9"
                         }
+                    }
                     val isBeta = remember {
                         context.getSharedPreferences("natbypass_prefs", android.content.Context.MODE_PRIVATE).getBoolean("beta_channel", false)
                     }
