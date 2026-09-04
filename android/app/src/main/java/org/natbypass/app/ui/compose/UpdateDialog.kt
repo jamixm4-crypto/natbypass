@@ -1,18 +1,18 @@
 package org.natbypass.app.ui.compose
 
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import android.content.Context
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,10 +28,10 @@ fun UpdateDialog(
     onCancelDownload: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
-    val prefs = androidx.compose.runtime.remember { context.getSharedPreferences("natbypass_prefs", android.content.Context.MODE_PRIVATE) }
-    var betaChannel by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(prefs.getBoolean("beta_channel", false)) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE) }
+    var betaChannel by remember { mutableStateOf(prefs.getBoolean("beta_channel", false)) }
 
     when (state) {
         is UpdateState.Idle -> {}
@@ -170,7 +170,7 @@ fun UpdateDialog(
                 },
 
                 confirmButton = {
-                    var isStartingDownload by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+                    var isStartingDownload by remember { mutableStateOf(false) }
                     Button(
                         onClick = {
                             if (!isStartingDownload) {
