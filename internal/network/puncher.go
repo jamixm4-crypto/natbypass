@@ -780,20 +780,45 @@ func (p *UDPPuncher) readLoop() {
 		case n > constants.TunPaddedHeaderSize+2 && string(buf[:constants.TunPaddedHeaderSize]) == constants.TunPaddedHeader:
 			realLen := int(binary.BigEndian.Uint16(buf[constants.TunPaddedHeaderSize : constants.TunPaddedHeaderSize+2]))
 			if realLen > 0 && constants.TunPaddedHeaderSize+2+realLen <= n {
-				p.handleTunnelPacket(buf[constants.TunPaddedHeaderSize+2:constants.TunPaddedHeaderSize+2+realLen], remoteAddr)
+				rawPayload := buf[constants.TunPaddedHeaderSize+2 : constants.TunPaddedHeaderSize+2+realLen]
+				p.cipherMu.RLock()
+				cKey := p.cipherKey
+				hasCKey := p.hasCipherKey
+				p.cipherMu.RUnlock()
+				if hasCKey {
+					if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
+						p.handleTunnelPacket(dec, remoteAddr)
+						continue
+					}
+				}
+				p.handleTunnelPacket(rawPayload, remoteAddr)
 			}
 		case n > constants.TunEncryptedHeaderSize && string(buf[:constants.TunEncryptedHeaderSize]) == constants.TunEncryptedHeader:
+			rawPayload := buf[constants.TunEncryptedHeaderSize:n]
 			p.cipherMu.RLock()
 			cKey := p.cipherKey
 			hasCKey := p.hasCipherKey
 			p.cipherMu.RUnlock()
 			if hasCKey {
-				if dec, err := crypto.DecryptSelf(buf[constants.TunEncryptedHeaderSize:n], cKey); err == nil && len(dec) > 0 {
+				if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
 					p.handleTunnelPacket(dec, remoteAddr)
+					continue
 				}
 			}
+			p.handleTunnelPacket(rawPayload, remoteAddr)
 		case n > constants.TunHeaderSize && string(buf[:constants.TunHeaderSize]) == constants.TunHeader:
-			p.handleTunnelPacket(buf[constants.TunHeaderSize:n], remoteAddr)
+			rawPayload := buf[constants.TunHeaderSize:n]
+			p.cipherMu.RLock()
+			cKey := p.cipherKey
+			hasCKey := p.hasCipherKey
+			p.cipherMu.RUnlock()
+			if hasCKey {
+				if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
+					p.handleTunnelPacket(dec, remoteAddr)
+					continue
+				}
+			}
+			p.handleTunnelPacket(rawPayload, remoteAddr)
 		default:
 			p.mu.Lock()
 			handler := p.awgHandler
