@@ -53,6 +53,7 @@ type AppState struct {
 	VirtualIP      string    `json:"virtual_ip"`
 	PublicIP       string    `json:"public_ip"`
 	STUNAddr       string    `json:"stun_addr"`
+	NATType        string    `json:"nat_type,omitempty"`
 	Uptime         string    `json:"uptime"`
 	CurrentChannel string    `json:"current_channel"`
 	StartedAt      time.Time `json:"started_at"`
@@ -206,6 +207,13 @@ func (s *Server) SetAppState(deviceID, publicIP, stunAddr string, virtualIP ...s
 func (s *Server) SetVirtualIP(vip string) {
 	if s.state != nil {
 		s.state.VirtualIP = vip
+	}
+}
+
+// SetNATType задаёт тип NAT узла для отображения в WebUI
+func (s *Server) SetNATType(natType string) {
+	if s.state != nil {
+		s.state.NATType = natType
 	}
 }
 
@@ -495,8 +503,8 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 0. Разрешить локальный read-only опрос статуса и пиров (localhost 127.0.0.1 / ::1) для diag/CLI
-		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers") && r.Method == http.MethodGet {
+		// 0. Разрешить локальный read-only опрос статуса, пиров и дашборда (localhost 127.0.0.1 / ::1) для diag/CLI/WebUI
+		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard") && r.Method == http.MethodGet {
 			host, _, _ := net.SplitHostPort(r.RemoteAddr)
 			if host == "" {
 				host = r.RemoteAddr
@@ -666,7 +674,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.209"
+		ver = "1.9.210"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1473,7 +1481,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.209"
+		ver = "1.9.210"
 	}
 
 	vip := s.state.VirtualIP
@@ -1502,8 +1510,16 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	natType := "Full Cone / UDP OK"
+	if s.state != nil && s.state.NATType != "" {
+		natType = s.state.NATType
+	} else if stunAddr != "" && strings.Contains(stunAddr, "Недоступен") {
+		natType = "📡 Relay mode (Порт закрыт)"
+	}
+
 	data := map[string]interface{}{
 		"version":            ver,
+		"nat_type":           natType,
 		"ip_conflict":        hasIPConflict,
 		"conflict_peer_name": conflictPeerName,
 		"conflict_ip":        conflictIP,

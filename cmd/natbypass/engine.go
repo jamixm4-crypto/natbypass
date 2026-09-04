@@ -152,6 +152,60 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	}
 	tunDev, tunErr := tunnel.CreateAdapter(adapterName, myVirtualIP)
 
+	if uiServer != nil {
+		onCfgReload := func() {
+			if configFile != "" {
+				if reloaded, rErr := config.Load(configFile); rErr == nil && reloaded != nil {
+					*cfg = *reloaded
+				}
+			}
+			activeProf := cfg.EnsureActiveProfile()
+			if activeProf != nil {
+				cfg.SyncSignalingWithProfile(activeProf)
+				if puncher != nil && activeProf.NetworkKey != "" {
+					puncher.SetCipherKey(activeProf.NetworkKey)
+				}
+			}
+			targetTopic := ""
+			if activeProf != nil && activeProf.MQTTTopic != "" {
+				targetTopic = activeProf.MQTTTopic
+			}
+			if targetTopic == "" {
+				for _, ch := range cfg.Signaling.Channels {
+					if ch.Type == "mqtt" && ch.Params["topic"] != "" {
+						targetTopic = ch.Params["topic"]
+						break
+					}
+				}
+			}
+			if targetTopic != "" && sigMgr != nil {
+				sigMgr.UpdateMQTTTopic(targetTopic)
+			}
+			if registry != nil {
+				registry.ClearAll()
+			}
+			newVIP := resolveVirtualIP(cfg, deviceID)
+			if newVIP != "" {
+				myVirtualIP = newVIP
+				if tunDev != nil {
+					_ = tunDev.SetVirtualIP(newVIP)
+				}
+				uiServer.SetVirtualIP(newVIP)
+			}
+			triggerPublish()
+		}
+		uiServer.SetOnConfigChange(onCfgReload)
+		uiServer.SetOnProfileSwitch(func(p *config.Profile) error {
+			if p != nil {
+				if configFile != "" {
+					_ = config.Save(cfg, configFile, false)
+				}
+				onCfgReload()
+			}
+			return nil
+		})
+	}
+
 	if tunErr != nil {
 		log.Warn().Err(tunErr).Msg("Could not create TUN adapter (ensure running with Administrator rights)")
 	} else {
@@ -163,60 +217,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				log.Warn().Err(err).Msg("Failed to enable MSS clamping")
 			}
 			defer tunnel.DisableMSSClamping(adapterName)
-		}
-
-		if uiServer != nil {
-			onCfgReload := func() {
-				if configFile != "" {
-					if reloaded, rErr := config.Load(configFile); rErr == nil && reloaded != nil {
-						*cfg = *reloaded
-					}
-				}
-				activeProf := cfg.EnsureActiveProfile()
-				if activeProf != nil {
-					cfg.SyncSignalingWithProfile(activeProf)
-					if puncher != nil && activeProf.NetworkKey != "" {
-						puncher.SetCipherKey(activeProf.NetworkKey)
-					}
-				}
-				targetTopic := ""
-				if activeProf != nil && activeProf.MQTTTopic != "" {
-					targetTopic = activeProf.MQTTTopic
-				}
-				if targetTopic == "" {
-					for _, ch := range cfg.Signaling.Channels {
-						if ch.Type == "mqtt" && ch.Params["topic"] != "" {
-							targetTopic = ch.Params["topic"]
-							break
-						}
-					}
-				}
-				if targetTopic != "" && sigMgr != nil {
-					sigMgr.UpdateMQTTTopic(targetTopic)
-				}
-				if registry != nil {
-					registry.ClearAll()
-				}
-				newVIP := resolveVirtualIP(cfg, deviceID)
-				if newVIP != "" {
-					myVirtualIP = newVIP
-					if tunDev != nil {
-						_ = tunDev.SetVirtualIP(newVIP)
-					}
-					uiServer.SetVirtualIP(newVIP)
-				}
-				triggerPublish()
-			}
-			uiServer.SetOnConfigChange(onCfgReload)
-			uiServer.SetOnProfileSwitch(func(p *config.Profile) error {
-				if p != nil {
-					if configFile != "" {
-						_ = config.Save(cfg, configFile, false)
-					}
-					onCfgReload()
-				}
-				return nil
-			})
 		}
 
 		// Self-check and self-ping of Virtual IP
@@ -811,20 +811,35 @@ func initialDiscovery(ctx context.Context, puncher *network.UDPPuncher, ipDisc *
 	var publicIP net.IP = net.IPv4(0, 0, 0, 0)
 	var stunAddr string
 
-	if ip, err := ipDisc.GetPublicIPCached(ctx, 5*time.Minute); err == nil {
-		publicIP = ip
-		log.Info().Str("ip", publicIP.String()).Msg("Public IP discovered")
-	}
-
+	// 1. Fast STUN Discovery first (UDP roundtrip takes ~50-200ms vs 10-60s for HTTP)
 	if puncher != nil {
-		if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
+		extIP, port, err := puncher.DiscoverMappedAddress(ctx)
+		if err == nil && extIP != nil && port > 0 {
 			stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
-			log.Info().Str("stun_addr", stunAddr).Msg("STUN endpoint mapped via UDPPuncher")
+			publicIP = extIP
+			log.Info().Str("stun_addr", stunAddr).Str("ip", publicIP.String()).Msg("STUN endpoint mapped via UDPPuncher")
+		} else {
+			log.Warn().Err(err).Msg("STUN mapping failed or timed out; setting relay fallback")
+			stunAddr = "Недоступен (Relay / Symmetric NAT)"
 		}
 	}
 
 	if uiServer != nil {
 		uiServer.SetAppState(deviceID, publicIP.String(), stunAddr)
+		if puncher != nil {
+			uiServer.SetNATType(puncher.GetNATType().String())
+		}
+	}
+
+	// 2. HTTP Public IP discovery as fallback/supplement if STUN didn't get public IP
+	if ipDisc != nil && (publicIP.IsUnspecified() || publicIP.IsLoopback()) {
+		if ip, err := ipDisc.GetPublicIPCached(ctx, 5*time.Minute); err == nil && ip != nil {
+			publicIP = ip
+			log.Info().Str("ip", publicIP.String()).Msg("Public IP discovered via HTTP fallback")
+			if uiServer != nil {
+				uiServer.SetAppState(deviceID, publicIP.String(), stunAddr)
+			}
+		}
 	}
 }
 
@@ -934,13 +949,16 @@ func publishLoop(
 			// Re-query only when cache TTL expires or public IP has changed.
 			now := time.Now()
 			stunCacheExpired := now.Sub(stunCachedAt) >= stunCacheTTL
-			if stunCacheExpired || stunAddr == "" {
+			if stunCacheExpired || stunAddr == "" || stunAddr == "Недоступен (Relay / Symmetric NAT)" {
 				if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
 					stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
 					stunCachedAt = now
 					candidatesCached = puncher.DiscoverCandidates(ctx, ip.String())
 				} else {
 					log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
+					if stunAddr == "" {
+						stunAddr = "Недоступен (Relay / Symmetric NAT)"
+					}
 				}
 			}
 			candidates = candidatesCached
@@ -1020,6 +1038,9 @@ func publishLoop(
 		if uiServer != nil {
 			uiServer.SetAppState(deviceID, ip.String(), stunAddr)
 			uiServer.SetVirtualIP(virtualIP)
+			if puncher != nil {
+				uiServer.SetNATType(puncher.GetNATType().String())
+			}
 		}
 
 		natLabel := "unknown"
@@ -1161,7 +1182,7 @@ func receiveLoop(
 					}
 				}
 			}
-			if p.DeviceID == deviceID {
+			if p.DeviceID == "" || p.DeviceID == deviceID {
 				continue
 			}
 

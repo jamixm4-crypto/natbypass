@@ -145,14 +145,14 @@ func (p *UDPPuncher) SetCipherKey(key string) {
 }
 
 // resolveAddr resolves a UDP address string with caching to avoid per-packet overhead.
-// Tries dual-stack "udp" first, falls back to "udp4" exactly as the original code did.
+// Tries IPv4 "udp4" first to avoid IPv6 AAAA DNS resolution delays on Linux, falls back to "udp".
 func (p *UDPPuncher) resolveAddr(targetAddr string) (*net.UDPAddr, error) {
 	if cached, ok := p.addrCache.Load(targetAddr); ok {
 		return cached.(*net.UDPAddr), nil
 	}
-	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+	rAddr, err := net.ResolveUDPAddr("udp4", targetAddr)
 	if err != nil {
-		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
+		rAddr, err = net.ResolveUDPAddr("udp", targetAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -276,9 +276,9 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 		serversToQuery = serversToQuery[:3]
 	}
 	for _, srv := range serversToQuery {
-		srvAddr, err := net.ResolveUDPAddr("udp", srv)
+		srvAddr, err := net.ResolveUDPAddr("udp4", srv)
 		if err != nil {
-			srvAddr, err = net.ResolveUDPAddr("udp4", srv)
+			srvAddr, err = net.ResolveUDPAddr("udp", srv)
 			if err != nil {
 				continue
 			}
@@ -361,36 +361,55 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 
 // DiscoverMappedAddress sends a STUN Binding Request from the persistent socket.
 func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, error) {
+	// 1. Быстрая проверка: возможно, адрес уже обнаружен
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	if p.mappedIP != nil && p.mappedPort > 0 {
+		ip, port := p.mappedIP, p.mappedPort
+		p.mu.Unlock()
+		return ip, port, nil
+	}
+	conn := p.conn
+	servers := make([]string, len(p.stunServers))
+	copy(servers, p.stunServers)
+	p.mu.Unlock()
 
-	for _, srv := range p.stunServers {
-		srvAddr, err := net.ResolveUDPAddr("udp", srv)
+	if conn == nil {
+		return nil, 0, fmt.Errorf("UDP socket closed")
+	}
+
+	for _, srv := range servers {
+		srvAddr, err := net.ResolveUDPAddr("udp4", srv)
 		if err != nil {
-			srvAddr, err = net.ResolveUDPAddr("udp4", srv)
+			srvAddr, err = net.ResolveUDPAddr("udp", srv)
 			if err != nil {
 				continue
 			}
 		}
 
 		msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
-		if _, err := p.conn.WriteToUDP(msg.Raw, srvAddr); err != nil {
+		if _, err := conn.WriteToUDP(msg.Raw, srvAddr); err != nil {
 			continue
 		}
 
 		select {
 		case <-p.stunRespCh:
-			if p.mappedIP != nil && p.mappedPort > 0 {
-				return p.mappedIP, p.mappedPort, nil
+			p.mu.Lock()
+			ip, port := p.mappedIP, p.mappedPort
+			p.mu.Unlock()
+			if ip != nil && port > 0 {
+				return ip, port, nil
 			}
-		case <-time.After(800 * time.Millisecond):
+		case <-time.After(400 * time.Millisecond):
 		case <-ctx.Done():
 			return nil, 0, ctx.Err()
 		}
 	}
 
-	if p.mappedIP != nil && p.mappedPort > 0 {
-		return p.mappedIP, p.mappedPort, nil
+	p.mu.Lock()
+	ip, port := p.mappedIP, p.mappedPort
+	p.mu.Unlock()
+	if ip != nil && port > 0 {
+		return ip, port, nil
 	}
 	return nil, 0, fmt.Errorf("STUN discovery timeout")
 }
@@ -616,8 +635,10 @@ func (p *UDPPuncher) handleSTUNMessage(data []byte) {
 
 	var xorAddr stun.XORMappedAddress
 	if err := xorAddr.GetFrom(&stunResp); err == nil {
+		p.mu.Lock()
 		p.mappedIP = xorAddr.IP
 		p.mappedPort = xorAddr.Port
+		p.mu.Unlock()
 		select {
 		case p.stunRespCh <- struct{}{}:
 		default:
@@ -627,8 +648,10 @@ func (p *UDPPuncher) handleSTUNMessage(data []byte) {
 
 	var mappedAddr stun.MappedAddress
 	if err := mappedAddr.GetFrom(&stunResp); err == nil {
+		p.mu.Lock()
 		p.mappedIP = mappedAddr.IP
 		p.mappedPort = mappedAddr.Port
+		p.mu.Unlock()
 		select {
 		case p.stunRespCh <- struct{}{}:
 		default:
@@ -951,12 +974,9 @@ func (p *UDPPuncher) SendMTUProbe(targetAddr string, targetMTU int) error {
 	if targetAddr == "" || p.conn == nil || targetMTU < 1280 || targetMTU > 1500 {
 		return nil
 	}
-	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+	rAddr, err := p.resolveAddr(targetAddr)
 	if err != nil {
-		rAddr, err = net.ResolveUDPAddr("udp4", targetAddr)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
 	header := fmt.Sprintf("%s%d:%s:", constants.MTUProbePrefix, targetMTU, p.myDevID)
