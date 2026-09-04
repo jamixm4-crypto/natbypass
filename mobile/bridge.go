@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.221-beta.1"
+const Version = "1.9.221-beta.2"
 
 
 
@@ -269,11 +269,18 @@ func StartEngine(configYAML string, tunFd int) string {
 	globalSigMgr = signaling.NewFallbackManager(channels)
 	globalSigMgr.SubscribeTunnelData(devID, func(pkt []byte) {
 		atomic.AddUint64(&globalRxBytes, uint64(len(pkt)))
+		dataToProcess := pkt
+		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+			cKey := crypto.DeriveKey(activeProf.NetworkKey)
+			if dec, decErr := crypto.DecryptSelf(pkt, cKey); decErr == nil && len(dec) >= 20 {
+				dataToProcess = dec
+			}
+		}
 		engineMu.Lock()
 		tf := globalTunFile
 		engineMu.Unlock()
 		if tf != nil {
-			_, _ = tf.Write(pkt)
+			_, _ = tf.Write(dataToProcess)
 		}
 	})
 
@@ -831,7 +838,14 @@ func attachTUN(tunFd int) {
 
 							// Резервный транспорт через сигнальный MQTT брокер (Relay Fallback), если UDP заблокирован
 							if !sentDirect && globalSigMgr != nil {
-								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, pkt)
+								dataToSend := pkt
+								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+									cKey := crypto.DeriveKey(activeProf.NetworkKey)
+									if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+										dataToSend = enc
+									}
+								}
+								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, dataToSend)
 							}
 
 							logger.Debug().

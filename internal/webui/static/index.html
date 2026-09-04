@@ -1030,7 +1030,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.221-beta.1</span>
+          <span id="topUpdateLabel">v1.9.221-beta.2</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1041,7 +1041,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.221-beta.1</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.221-beta.2</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1492,7 +1492,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     <div id="tab-settings" class="tab-pane">
       <!-- Auto-Updater Card -->
       <div class="glass-card" style="margin-bottom: 16px; border-color: rgba(34, 197, 94, 0.3); background: linear-gradient(135deg, rgba(34, 197, 94, 0.04), rgba(14, 20, 32, 0.7));">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom: 14px;">
           <div>
             <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 4px; display:flex; align-items:center; gap:8px;">
               <span style="color:#4ade80;">🚀</span> Автообновление системы (GitHub Releases)
@@ -1503,6 +1503,28 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <button onclick="openUpdateModal()" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #06b6d4); font-size:0.85rem; padding:8px 16px;">
               🔄 Проверить и обновить
             </button>
+          </div>
+        </div>
+
+        <!-- Inline Beta Channel Switch in Settings Tab -->
+        <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:10px; padding:12px 16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+              <div style="font-size:0.88rem; font-weight:700; color:#fbbf24; display:flex; align-items:center; gap:6px;">
+                <span>🧪 Тестовые сборки (Beta / Pre-release)</span>
+                <span id="badgeBetaSettings" class="badge badge-warning" style="display:none; font-size:0.65rem;">АКТИВНО</span>
+              </div>
+              <div style="font-size:0.76rem; color:var(--text-muted); margin-top:2px;">
+                Включите, чтобы получать предварительные сборки с новейшими оптимизациями и обходом блокировок
+              </div>
+            </div>
+            <label class="switch" style="position:relative; display:inline-block; width:46px; height:24px; flex-shrink:0; margin:0;">
+              <input type="checkbox" id="toggleBetaSettings" onchange="syncBetaToggle(this.checked)" style="opacity:0; width:0; height:0;">
+              <span class="slider round"></span>
+            </label>
+          </div>
+          <div id="betaWarningSettings" style="display:none; margin-top:8px; font-size:0.75rem; color:#fde047;">
+            ⚠️ <b>Внимание:</b> Тестовые сборки содержат новейшие экспериментальные функции и могут работать нестабильно.
           </div>
         </div>
       </div>
@@ -2339,37 +2361,59 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     let cachedUpdateInfo = null;
     let updatePollTimer = null;
 
-    function openUpdateModal() {
-      document.getElementById('updateModal').classList.add('active');
-      const isBeta = localStorage.getItem('natbypass_beta_channel') === '1';
-      const toggle = document.getElementById('toggleBetaChannel');
-      if (toggle) {
-        toggle.checked = isBeta;
-      }
-      const warnBox = document.getElementById('betaWarningBox');
-      const badge = document.getElementById('badgeBetaTag');
-      if (warnBox) warnBox.style.display = isBeta ? 'block' : 'none';
-      if (badge) badge.style.display = isBeta ? 'inline-block' : 'none';
+    function syncBetaToggle(checked) {
+      const mToggle = document.getElementById('toggleBetaChannel');
+      const sToggle = document.getElementById('toggleBetaSettings');
+      if (mToggle) mToggle.checked = checked;
+      if (sToggle) sToggle.checked = checked;
+      const sBadge = document.getElementById('badgeBetaSettings');
+      const sWarn = document.getElementById('betaWarningSettings');
+      if (sBadge) sBadge.style.display = checked ? 'inline-block' : 'none';
+      if (sWarn) sWarn.style.display = checked ? 'block' : 'none';
+      const mWarn = document.getElementById('betaWarningBox');
+      const mBadge = document.getElementById('badgeBetaTag');
+      if (mWarn) mWarn.style.display = checked ? 'block' : 'none';
+      if (mBadge) mBadge.style.display = checked ? 'inline-block' : 'none';
 
-      checkUpdateManual();
-    }
-
-    async function onBetaChannelToggle(checked) {
       localStorage.setItem('natbypass_beta_channel', checked ? '1' : '0');
-      const warnBox = document.getElementById('betaWarningBox');
-      const badge = document.getElementById('badgeBetaTag');
-      if (warnBox) warnBox.style.display = checked ? 'block' : 'none';
-      if (badge) badge.style.display = checked ? 'inline-block' : 'none';
-
+      showToast(checked ? '🧪 Включен канал предварительных сборок (Beta)' : '📦 Включен стабильный канал обновлений');
+      
       try {
-        await fetch('/api/update/channel', {
+        fetch('/api/update/channel', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({beta_channel: checked})
         });
       } catch(e) {}
 
+      if (document.getElementById('updateModal') && document.getElementById('updateModal').classList.contains('active')) {
+        checkUpdateManual();
+      }
+    }
+
+    function openUpdateModal() {
+      document.getElementById('updateModal').classList.add('active');
+      const isBeta = localStorage.getItem('natbypass_beta_channel') === '1';
+      const toggle = document.getElementById('toggleBetaChannel');
+      if (toggle) toggle.checked = isBeta;
+      const sToggle = document.getElementById('toggleBetaSettings');
+      if (sToggle) sToggle.checked = isBeta;
+
+      const warnBox = document.getElementById('betaWarningBox');
+      const badge = document.getElementById('badgeBetaTag');
+      if (warnBox) warnBox.style.display = isBeta ? 'block' : 'none';
+      if (badge) badge.style.display = isBeta ? 'inline-block' : 'none';
+
+      const sBadge = document.getElementById('badgeBetaSettings');
+      const sWarn = document.getElementById('betaWarningSettings');
+      if (sBadge) sBadge.style.display = isBeta ? 'inline-block' : 'none';
+      if (sWarn) sWarn.style.display = isBeta ? 'block' : 'none';
+
       checkUpdateManual();
+    }
+
+    async function onBetaChannelToggle(checked) {
+      syncBetaToggle(checked);
     }
 
     function closeUpdateModal() {
@@ -3057,6 +3101,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const totalPeers = d.total_peers || 0;
           const p2pActive = d.p2p_active || 0;
           const avgLat = d.avg_latency_ms || 0;
+
+          if (d.selected_exit_node !== undefined) {
+            currentSelectedExitNode = d.selected_exit_node || '';
+            currentActiveExitVIP = d.active_exit_vip || '';
+            renderGatewayBanner(d);
+          }
+
         const bannerConflict = document.getElementById('bannerIPConflict');
         if (bannerConflict) {
           if (d.ip_conflict) {
@@ -3255,7 +3306,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           }
           latDisplay = `<span style="color:${col}; font-weight:700;" class="mono">${dot} ${latMs} ms</span>`;
         } else if (p.direct_p2p) {
-          latDisplay = `<span style="color:#4ade80; font-weight:700;" class="mono">🟢 15 ms</span>`;
+          latDisplay = `<span style="color:#4ade80; font-weight:600;" class="mono">🟢 P2P (OK)</span>`;
+        } else {
+          latDisplay = `<span style="color:var(--text-dim);" class="mono">—</span>`;
         }
 
         // Канал доступности устройства
@@ -3275,13 +3328,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         let exitBadge = '—';
         let exitBtn = '';
         if (p.is_exit_node) {
-          const isExitActive = (currentSelectedExitNode === p.device_id);
+          const isExitActive = (currentSelectedExitNode === p.device_id || (currentActiveExitVIP && currentActiveExitVIP === vIP));
           if (isExitActive) {
-            exitBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" title="Нажмите чтобы отключить шлюз">🟢 Exit Node (АКТИВЕН)</span>`;
-            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#22c55e; color:#000; font-weight:700; padding:3px 9px; font-size:0.72rem;">🟢 Шлюз ВКЛ</button>`;
+            exitBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" title="Нажмите чтобы отключить шлюз">✅ Активный интернет-шлюз</span>`;
+            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-weight:700; padding:3px 9px; font-size:0.72rem;" title="Отключить шлюз и восстановить прямой интернет">🔌 Отключить шлюз</button>`;
           } else {
-            exitBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" title="Нажмите чтобы направить интернет через этот узел">🌐 Exit Node</span>`;
-            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.4); padding:3px 9px; font-size:0.72rem;">🌐 В интернет</button>`;
+            exitBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" title="Нажмите чтобы направить весь интернет через этот узел">🌐 Интернет-шлюз</span>`;
+            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.4); padding:3px 9px; font-size:0.72rem;" title="Направить весь интернет через это устройство">🌐 Использовать как шлюз</button>`;
           }
         }
 
@@ -4389,6 +4442,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             });
           }
           updateChannelUI(currentChannelMode || 'parallel');
+
+          // Sync Beta switch in Settings tab
+          const isBeta = (c.app && c.app.beta_channel !== undefined) ? !!c.app.beta_channel : (localStorage.getItem('natbypass_beta_channel') === '1');
+          localStorage.setItem('natbypass_beta_channel', isBeta ? '1' : '0');
+          const sToggle = document.getElementById('toggleBetaSettings');
+          if (sToggle) sToggle.checked = isBeta;
+          const sBadge = document.getElementById('badgeBetaSettings');
+          const sWarn = document.getElementById('betaWarningSettings');
+          if (sBadge) sBadge.style.display = isBeta ? 'inline-block' : 'none';
+          if (sWarn) sWarn.style.display = isBeta ? 'block' : 'none';
         }
       } catch (e) {}
     }
@@ -5047,6 +5110,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       });
 
       checkAuthStatus();
+      loadRoutingStatus();
       // Мгновенное получение актуальной версии сервера при загрузке
       fetch('/api/status?_t=' + Date.now(), { cache: 'no-store' })
         .then(r => r.json())
@@ -5061,6 +5125,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             if (badgeVer) badgeVer.innerText = vStr;
           }
         }).catch(() => {});
+
+      // Initialize Beta switch on page load
+      const isBetaInit = localStorage.getItem('natbypass_beta_channel') === '1';
+      const sToggleInit = document.getElementById('toggleBetaSettings');
+      if (sToggleInit) sToggleInit.checked = isBetaInit;
+      const sBadgeInit = document.getElementById('badgeBetaSettings');
+      const sWarnInit = document.getElementById('betaWarningSettings');
+      if (sBadgeInit) sBadgeInit.style.display = isBetaInit ? 'inline-block' : 'none';
+      if (sWarnInit) sWarnInit.style.display = isBetaInit ? 'block' : 'none';
     });
   
 async function changeAdminPassword() {

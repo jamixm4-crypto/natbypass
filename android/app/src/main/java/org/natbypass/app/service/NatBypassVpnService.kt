@@ -60,18 +60,67 @@ class NatBypassVpnService : VpnService() {
         createNotificationChannel()
     }
 
+    private fun startForegroundCompat(notification: Notification) {
+        try {
+            if (Build.VERSION.SDK_INT >= 34) { // Android 14+ (API 34)
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { // Android 10-13 (API 29-33)
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "startForegroundCompat fallback: ${t.message}")
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } catch (t2: Throwable) {
+                Log.e(TAG, "startForeground completely failed: ${t2.message}")
+                try {
+                    @Suppress("DEPRECATION")
+                    startForeground(NOTIFICATION_ID, notification)
+                } catch (_: Throwable) {}
+            }
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         when (action) {
             ACTION_CONNECT -> {
-                connect(forceReconfigure = false)
+                val initialNotif = buildNotification("Подключение к P2P меш-сети...", showDisconnect = true)
+                startForegroundCompat(initialNotif)
+                serviceScope.launch(Dispatchers.IO) {
+                    connect(forceReconfigure = false)
+                }
             }
             ACTION_RECONNECT -> {
-                connect(forceReconfigure = true)
+                val initialNotif = buildNotification("Переподключение...", showDisconnect = true)
+                startForegroundCompat(initialNotif)
+                serviceScope.launch(Dispatchers.IO) {
+                    connect(forceReconfigure = true)
+                }
             }
             ACTION_DISCONNECT -> {
-                disconnect()
-                stopSelf()
+                serviceScope.launch(Dispatchers.IO) {
+                    disconnect()
+                    stopSelf()
+                }
             }
             else -> {
                 if (!isRunning) {
@@ -93,17 +142,10 @@ class NatBypassVpnService : VpnService() {
 
             val notif = buildNotification("Подключено к P2P сети ($currentVip)", showDisconnect = true)
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    startForeground(
-                        NOTIFICATION_ID, notif,
-                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                    )
-                } else {
-                    startForeground(NOTIFICATION_ID, notif)
-                }
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.notify(NOTIFICATION_ID, notif)
             } catch (t: Throwable) {
-                Log.w(TAG, "startForeground fallback: ${t.message}")
-                try { startForeground(NOTIFICATION_ID, notif) } catch (_: Throwable) {}
+                Log.w(TAG, "Notification update error: ${t.message}")
             }
 
             try {
@@ -239,6 +281,13 @@ class NatBypassVpnService : VpnService() {
             }
 
             isRunning = true
+
+            try {
+                sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
+                    putExtra("state", "connected")
+                    putExtra("vip", currentVip)
+                })
+            } catch (_: Throwable) {}
 
             serviceScope.launch {
                 delay(500)

@@ -56,7 +56,7 @@
             android:name=".service.NatBypassVpnService"
             android:exported="false"
             android:stopWithTask="false"
-            android:foregroundServiceType="connectedDevice"
+            android:foregroundServiceType="systemExempted|connectedDevice"
             android:permission="android.permission.BIND_VPN_SERVICE">
             <intent-filter>
                 <action android:name="android.net.VpnService" />

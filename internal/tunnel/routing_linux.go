@@ -88,6 +88,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	// 2. Forwarding rules for nb0
 	ensureIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
 	ensureIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
+	ensureIptablesRule(ipt, "", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT")
 
 	// Keenetic NDM chains if present
 	if isKeeneticDevice() {
@@ -184,20 +185,46 @@ func getPhysicalGatewayLinux() string {
 	return ""
 }
 
-func extractHostIP(endpoint string) string {
+func extractHostIPs(endpoint string) []string {
 	if endpoint == "" {
-		return ""
+		return nil
 	}
-	host, _, err := net.SplitHostPort(endpoint)
+	s := strings.TrimSpace(endpoint)
+	if idx := strings.Index(s, "://"); idx != -1 {
+		s = s[idx+3:]
+	}
+	if idx := strings.Index(s, "/"); idx != -1 {
+		s = s[:idx]
+	}
+	host, _, err := net.SplitHostPort(s)
 	if err != nil {
-		host = endpoint
+		host = s
 	}
 	host = strings.TrimSpace(host)
-	ip := net.ParseIP(host)
-	if ip != nil && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsUnspecified() {
-		return host
+	if host == "" {
+		return nil
 	}
-	return ""
+	if ip := net.ParseIP(host); ip != nil {
+		if !ip.IsLoopback() && !ip.IsUnspecified() {
+			return []string{ip.String()}
+		}
+		return nil
+	}
+
+	// Resolve domain names (e.g. broker.emqx.io, stun servers)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", host)
+	if err != nil || len(ips) == 0 {
+		return nil
+	}
+	var res []string
+	for _, ip := range ips {
+		if !ip.IsLoopback() && !ip.IsUnspecified() {
+			res = append(res, ip.String())
+		}
+	}
+	return res
 }
 
 // EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1),
@@ -213,7 +240,7 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	if physGW != "" {
 		linuxBypassedMu.Lock()
 		for _, ep := range remoteEndpoints {
-			if hostIP := extractHostIP(ep); hostIP != "" {
+			for _, hostIP := range extractHostIPs(ep) {
 				alreadyAdded := false
 				for _, prev := range lastBypassedEndpointIPs {
 					if prev == hostIP {
@@ -239,6 +266,11 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	if err2 != nil {
 		_ = runLinuxCmd("ip", "route", "add", "128.0.0.0/1", "via", cleanVIP)
 	}
+
+	// 3. Ensure DNS servers (1.1.1.1, 8.8.8.8) are routed via exit node
+	_ = runLinuxCmd("ip", "route", "add", "1.1.1.1/32", "via", cleanVIP, "dev", "nb0", "onlink")
+	_ = runLinuxCmd("ip", "route", "add", "8.8.8.8/32", "via", cleanVIP, "dev", "nb0", "onlink")
+
 	return nil
 }
 
@@ -248,9 +280,13 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 		cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
 		_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1", "via", cleanVIP)
 		_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1", "via", cleanVIP)
+		_ = runLinuxCmd("ip", "route", "del", "1.1.1.1/32", "via", cleanVIP)
+		_ = runLinuxCmd("ip", "route", "del", "8.8.8.8/32", "via", cleanVIP)
 	}
 	_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1")
 	_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1")
+	_ = runLinuxCmd("ip", "route", "del", "1.1.1.1/32")
+	_ = runLinuxCmd("ip", "route", "del", "8.8.8.8/32")
 
 	linuxBypassedMu.Lock()
 	for _, hostIP := range lastBypassedEndpointIPs {

@@ -78,6 +78,8 @@ fun MainScreen(
                         } catch (e: Exception) {
                             "v1.6.9"
                         }
+                    val isBeta = remember {
+                        context.getSharedPreferences("natbypass_prefs", android.content.Context.MODE_PRIVATE).getBoolean("beta_channel", false)
                     }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -93,11 +95,12 @@ fun MainScreen(
                         Spacer(Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            color = if (isBeta) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            modifier = Modifier.clickable { onCheckUpdate() }
                         ) {
                             Text(
-                                text = vName,
-                                color = MaterialTheme.colorScheme.primary,
+                                text = if (isBeta) "$vName • BETA" else vName,
+                                color = if (isBeta) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.primary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
@@ -150,7 +153,7 @@ fun MainScreen(
                             modifier = Modifier.background(MaterialTheme.colorScheme.surface)
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Проверить обновления") },
+                                text = { Text(if (isBeta) "Проверить обновления (Beta-канал)" else "Проверить обновления") },
                                 leadingIcon = { Icon(Icons.Outlined.CloudDownload, contentDescription = null) },
                                 onClick = { menuExpanded = false; onCheckUpdate() }
                             )

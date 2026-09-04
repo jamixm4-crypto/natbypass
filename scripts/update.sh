@@ -10,7 +10,13 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.1.0"
+    BETA_MODE=0
+
+    for arg in "$@"; do
+        case "$arg" in
+            --beta|-b) BETA_MODE=1 ;;
+        esac
+    done
 
     print_purple() { printf "\033[0;35m%s\033[0m\n" "$1"; }
     print_cyan()   { printf "\033[0;36m%s\033[0m\n" "$1"; }
@@ -20,8 +26,16 @@ main() {
     print_bold()   { printf "\033[1;37m%s\033[0m\n" "$1"; }
 
     echo "--------------------------------------------------------------"
-    print_bold ">> Обновление NatBypass Mesh Network до последней версии"
+    if [ "$BETA_MODE" -eq 1 ]; then
+        print_yellow ">> Обновление NatBypass до тестовой версии (BETA / PRE-RELEASE)"
+        TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+    else
+        print_bold ">> Обновление NatBypass Mesh Network до последней стабильной версии"
+        TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+    fi
+    [ -z "$TAG" ] && TAG="v1.9.220"
     echo "--------------------------------------------------------------"
+    printf "✓ Целевой релиз:           "; print_green "${TAG}"
 
     # 1. Detect Architecture
     RAW_ARCH=$(uname -m 2>/dev/null || echo "unknown")
@@ -87,19 +101,30 @@ main() {
 
     # 3. Download Latest Binary to Temporary File
     TMP_BIN="/tmp/natbypass.new"
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${DEFAULT_TAG}/natbypass-${DEFAULT_TAG}-${BIN_SUFFIX}"
-    FALLBACK_URL="https://github.com/${REPO}/releases/latest/download/natbypass-${DEFAULT_TAG}-${BIN_SUFFIX}"
+    URLS="
+https://github.com/${REPO}/releases/download/${TAG}/natbypass-${TAG}-${BIN_SUFFIX}
+https://github.com/${REPO}/releases/download/${TAG}/natbypass-${BIN_SUFFIX}
+https://github.com/${REPO}/releases/latest/download/natbypass-${TAG}-${BIN_SUFFIX}
+https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
+"
 
-    echo ">> Загрузка новой версии (${BIN_SUFFIX})..."
+    echo ">> Загрузка версии ${TAG} (${BIN_SUFFIX})..."
     DOWNLOADED=0
 
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_BIN}" 2>/dev/null && DOWNLOADED=1 || \
-        curl -fsSL "${FALLBACK_URL}" -o "${TMP_BIN}" 2>/dev/null && DOWNLOADED=1 || true
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q "${DOWNLOAD_URL}" -O "${TMP_BIN}" 2>/dev/null && DOWNLOADED=1 || \
-        wget -q "${FALLBACK_URL}" -O "${TMP_BIN}" 2>/dev/null && DOWNLOADED=1 || true
-    fi
+    for u in $URLS; do
+        [ -z "$u" ] && continue
+        if command -v curl >/dev/null 2>&1; then
+            if curl -fsSL "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                DOWNLOADED=1
+                break
+            fi
+        elif command -v wget >/dev/null 2>&1; then
+            if wget -q "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                DOWNLOADED=1
+                break
+            fi
+        fi
+    done
 
     if [ "$DOWNLOADED" -eq 0 ] || [ ! -s "${TMP_BIN}" ]; then
         print_red "[!] Ошибка загрузки обновления. Проверьте интернет-соединение."

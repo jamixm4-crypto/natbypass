@@ -9,11 +9,15 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import org.natbypass.app.util.AppUpdateManager
 import org.natbypass.app.util.UpdateState
 import java.util.Locale
 
@@ -166,13 +170,30 @@ fun UpdateDialog(
                 },
 
                 confirmButton = {
+                    var isStartingDownload by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
                     Button(
-                        onClick = { onDownload(state.version, state.apkUrl, state.sizeBytes) },
+                        onClick = {
+                            if (!isStartingDownload) {
+                                isStartingDownload = true
+                                onDownload(state.version, state.apkUrl, state.sizeBytes)
+                            }
+                        },
+                        enabled = !isStartingDownload,
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Скачать и обновить")
+                        if (isStartingDownload) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Подключение...")
+                        } else {
+                            Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Скачать и обновить")
+                        }
                     }
                 },
                 dismissButton = {
@@ -193,7 +214,7 @@ fun UpdateDialog(
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                         // Progress bar
                         LinearProgressIndicator(
-                            progress = { state.progress },
+                            progress = state.progress,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(8.dp),

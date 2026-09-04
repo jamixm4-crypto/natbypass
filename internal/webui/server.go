@@ -749,7 +749,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.1"
+		ver = "1.9.221-beta.2"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1546,7 +1546,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.1"
+		ver = "1.9.221-beta.2"
 	}
 
 	vip := s.state.VirtualIP
@@ -1606,6 +1606,20 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"awg_preset":        awgPreset,
 		"throughput_str":    throughputStr,
 		"throughput_kb":     throughputKB,
+		"selected_exit_node": func() string {
+			if cfg != nil {
+				return cfg.Network.SelectedExitNode
+			}
+			return ""
+		}(),
+		"active_exit_vip": func() string {
+			if cfg != nil && cfg.Network.SelectedExitNode != "" && s.registry != nil {
+				if p, ok := s.registry.Get(cfg.Network.SelectedExitNode); ok && p != nil {
+					return p.VirtualIP
+				}
+			}
+			return ""
+		}(),
 	}
 
 	s.jsonResponse(w, http.StatusOK, data, "")
@@ -2790,15 +2804,24 @@ func (s *Server) handleRoutingStatus(w http.ResponseWriter, r *http.Request) {
 	activeExitVIP := ""
 	activeExitName := ""
 	if cfg.Network.SelectedExitNode != "" && s.registry != nil {
-		if p, ok := s.registry.Get(cfg.Network.SelectedExitNode); ok && p.Online && p.IsExitNode {
+		if p, ok := s.registry.Get(cfg.Network.SelectedExitNode); ok && p != nil {
 			activeExitVIP = p.VirtualIP
-			activeExitName = p.DeviceID
-		} else if cfg.Network.SelectedExitNode != "" {
-			// Auto-recovery: Peer is offline or disabled Exit Node -> flush client routing
-			_ = tunnel.DisableExitNodeRouting(activeExitVIP)
-			cfg.Network.SelectedExitNode = ""
-			_ = config.Save(cfg, s.configPath, false)
-			s.AddEvent("warn", "Шлюз недоступен", "Автоматический возврат на прямое интернет-соединение")
+			activeExitName = p.DeviceName
+			if activeExitName == "" {
+				activeExitName = p.Nickname
+			}
+			if activeExitName == "" {
+				activeExitName = p.DeviceID
+			}
+			if p.ExitRevoked {
+				// Удаленный узел явно отозвал разрешение на раздачу интернета
+				_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+				cfg.Network.SelectedExitNode = ""
+				_ = config.Save(cfg, s.configPath, false)
+				s.AddEvent("warn", "Шлюз отозван", "Удаленный узел запретил выход в интернет через себя. Автоматический возврат на локальный интернет.")
+			}
+		} else {
+			activeExitName = cfg.Network.SelectedExitNode
 		}
 	}
 

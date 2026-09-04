@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.221-beta.1"
+	Version = "1.9.221-beta.2"
 	Commit  = "beta"
 )
 
@@ -389,10 +389,12 @@ var (
 	hBtnManageProfiles    uintptr
 	hBtnBookmarkPeer      uintptr
 	hBtnExitNodeSelect    uintptr
+	hBtnExitNodeDisable   uintptr
 	hBtnToggleSubnetRoute uintptr
 	hListSummaryPeers     uintptr
 
 	// Вкладка 1: Устройства (Peers)
+	hLblPeersDesc         uintptr
 	hListPeers            uintptr
 	hBtnCopyPeerVIP       uintptr
 	hBtnPingPeer          uintptr
@@ -401,6 +403,12 @@ var (
 	activeExitVIP         string
 	activeSubnetRoutes    = make(map[string]string)
 	activeSubnetRoutesMu  sync.RWMutex
+
+	// Состояние асинхронной проверки обновлений
+	updateCheckMu    sync.Mutex
+	isCheckingUpdate bool
+	lastUpdateInfo   *updater.ReleaseInfo
+	lastUpdateErr    error
 
 	// Вкладка 2: Профили сетей
 	hListProfiles   uintptr
@@ -597,7 +605,9 @@ const (
 	ID_BTN_MQ_HIVE         = 4052
 	ID_BTN_MQ_MOSQ         = 4053
 	ID_BTN_MQ_ECL          = 4054
-	ID_BTN_CHECK_UPDATE    = 4055
+	ID_BTN_CHECK_UPDATE      = 4055
+	ID_BTN_EXIT_NODE_DISABLE = 4056
+	WM_CHECK_UPDATE_DONE     = 0x8000 + 105
 
 	// Профили
 	ID_BTN_PROF_SWITCH = 4060
@@ -1060,6 +1070,46 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 	}()
 
 	switch msg {
+	case WM_CHECK_UPDATE_DONE:
+		buttonLabels[ID_BTN_CHECK_UPDATE] = "🚀 Проверить обновления NatBypass на GitHub"
+		if hBtnCheckUpdate != 0 {
+			procInvalidateRect.Call(hBtnCheckUpdate, 0, 1)
+		}
+
+		updateCheckMu.Lock()
+		info := lastUpdateInfo
+		err := lastUpdateErr
+		updateCheckMu.Unlock()
+
+		if err != nil {
+			addLog("❌ Ошибка проверки обновлений: " + err.Error())
+			if lblUpdateStatus != 0 {
+				setControlText(lblUpdateStatus, "❌ Ошибка проверки: "+err.Error())
+			}
+			msg, _ := windows.UTF16PtrFromString("Не удалось проверить обновления:\n" + err.Error())
+			title, _ := windows.UTF16PtrFromString("Обновление NatBypass")
+			procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x10 /* MB_ICONERROR */)
+			return 0
+		}
+
+		if info == nil || !info.HasUpdate {
+			addLog(fmt.Sprintf("✅ У вас установлена самая свежая версия (v%s)", Version))
+			if lblUpdateStatus != 0 {
+				setControlText(lblUpdateStatus, fmt.Sprintf("✅ У вас установлена самая свежая версия (v%s)", Version))
+			}
+			msg, _ := windows.UTF16PtrFromString(fmt.Sprintf("У вас установлена самая свежая версия NatBypass (v%s).\nОбновлений не требуется.", Version))
+			title, _ := windows.UTF16PtrFromString("Обновление NatBypass")
+			procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x40 /* MB_ICONINFORMATION */)
+			return 0
+		}
+
+		addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Открытие окна обновления...", info.LatestVersion))
+		if lblUpdateStatus != 0 {
+			setControlText(lblUpdateStatus, fmt.Sprintf("🚀 Доступна новая версия: %s! Нажмите для обновления", info.LatestVersion))
+		}
+		showUpdateModal(info)
+		return 0
+
 	case WM_ERASEBKGND:
 		return 1
 
@@ -1637,43 +1687,36 @@ func handleCommand(id uint16) {
 		saveConfig()
 
 	case ID_BTN_CHECK_UPDATE:
+		updateCheckMu.Lock()
+		if isCheckingUpdate {
+			updateCheckMu.Unlock()
+			return
+		}
+		isCheckingUpdate = true
+		updateCheckMu.Unlock()
+
 		addLog("🔍 Проверка обновлений на GitHub Releases...")
 		buttonLabels[ID_BTN_CHECK_UPDATE] = "⏳ Проверка обновлений..."
 		procInvalidateRect.Call(hBtnCheckUpdate, 0, 1)
 		go func() {
-			defer func() {
-				buttonLabels[ID_BTN_CHECK_UPDATE] = "🚀 Проверить обновления NatBypass на GitHub"
-				procInvalidateRect.Call(hBtnCheckUpdate, 0, 1)
-			}()
 			includeBeta := false
 			if cfg != nil && cfg.App.BetaChannel {
 				includeBeta = true
 			}
-			info, err := updater.CheckUpdateWithOptions(context.Background(), Version, updater.CheckOptions{
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+			defer cancel()
+
+			info, err := updater.CheckUpdateWithOptions(ctx, Version, updater.CheckOptions{
 				IncludePrerelease: includeBeta,
 			})
-			if err != nil {
-				addLog("❌ Ошибка проверки обновлений: " + err.Error())
-				msg, _ := windows.UTF16PtrFromString("Не удалось проверить обновления:\n" + err.Error())
-				title, _ := windows.UTF16PtrFromString("Обновление NatBypass")
-				procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x10 /* MB_ICONERROR */)
-				return
-			}
-			if !info.HasUpdate {
-				addLog(fmt.Sprintf("✅ У вас установлена самая свежая версия (v%s)", Version))
-				if lblUpdateStatus != 0 {
-					setControlText(lblUpdateStatus, fmt.Sprintf("✅ У вас установлена самая свежая версия (v%s)", Version))
-				}
-				msg, _ := windows.UTF16PtrFromString(fmt.Sprintf("У вас установлена самая свежая версия NatBypass (v%s).\nОбновлений не требуется.", Version))
-				title, _ := windows.UTF16PtrFromString("Обновление NatBypass")
-				procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x40 /* MB_ICONINFORMATION */)
-				return
-			}
-			addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Открытие окна обновления...", info.LatestVersion))
-			if lblUpdateStatus != 0 {
-				setControlText(lblUpdateStatus, fmt.Sprintf("🚀 Доступна новая версия: %s! Нажмите для обновления", info.LatestVersion))
-			}
-			showUpdateModal(info)
+
+			updateCheckMu.Lock()
+			lastUpdateInfo = info
+			lastUpdateErr = err
+			isCheckingUpdate = false
+			updateCheckMu.Unlock()
+
+			procPostMessageW.Call(hMainWnd, WM_CHECK_UPDATE_DONE, 0, 0)
 		}()
 
 
@@ -1750,6 +1793,9 @@ func handleCommand(id uint16) {
 
 	case ID_BTN_EXIT_NODE_SELECT:
 		handleExitNodeSelect()
+
+	case ID_BTN_EXIT_NODE_DISABLE:
+		disableExitNode()
 
 	case ID_BTN_TOGGLE_SUBNET:
 		handleToggleSubnetRoute()
@@ -1848,6 +1894,56 @@ func handleBookmarkPeer() {
 	updateData()
 }
 
+func setExitNodePeer(targetPeer *peer.Peer) {
+	if targetPeer == nil {
+		return
+	}
+	if activeExitVIP != "" {
+		_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+	}
+	targetVIP := strings.TrimSpace(strings.Split(targetPeer.VirtualIP, "/")[0])
+	if targetVIP == "" {
+		targetVIP = "100.64.200.2"
+	}
+	activeExitNodeID = targetPeer.DeviceID
+	activeExitVIP = targetVIP
+
+	if err := tunnel.EnableExitNodeRouting(targetVIP, targetPeer.ActiveEndpoint, targetPeer.STUNAddr, targetPeer.PublicIP); err != nil {
+		addLog("❌ Ошибка настройки маршрутизации через Exit Node: " + err.Error())
+		writeDebug("EnableExitNodeRouting error: " + err.Error())
+	} else {
+		peerDisplay := targetPeer.Nickname
+		if peerDisplay == "" {
+			peerDisplay = targetPeer.DeviceID
+		}
+		msg := fmt.Sprintf("🌐 Весь интернет направлен через Exit Node: [%s] (%s)", peerDisplay, targetVIP)
+		addLog(msg)
+		writeDebug(msg)
+		buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("🟢 Шлюз: [%s] (%s)", peerDisplay, targetVIP)
+		buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "green"
+		if hBtnExitNodeSelect != 0 {
+			procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
+		}
+		updateData()
+	}
+}
+
+func disableExitNode() {
+	if activeExitVIP != "" {
+		_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+	}
+	activeExitNodeID = ""
+	activeExitVIP = ""
+	buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
+	buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
+	if hBtnExitNodeSelect != 0 {
+		procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
+	}
+	addLog("🌐 Выход в интернет через Exit Node отключен. Восстановлен стандартный интернет-шлюз.")
+	writeDebug("Exit Node disabled, restored default gateway")
+	updateData()
+}
+
 func handleExitNodeSelect() {
 	if registry == nil {
 		addLog("⚠️ Сетевой реестр не инициализирован")
@@ -1863,16 +1959,7 @@ func handleExitNodeSelect() {
 
 	if len(exitNodes) == 0 {
 		if activeExitNodeID != "" {
-			if activeExitVIP != "" {
-				_ = tunnel.DisableExitNodeRouting(activeExitVIP)
-			}
-			activeExitNodeID = ""
-			activeExitVIP = ""
-			buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
-			buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
-			if hBtnExitNodeSelect != 0 {
-				procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
-			}
+			disableExitNode()
 			addLog("🌐 В сети нет доступных Exit Node устройств. Маршрут сброшен на локальный.")
 		} else {
 			addLog("💡 В сети пока нет устройств с включенным Exit Node. Включите Exit Node на удаленном устройстве.")
@@ -1889,60 +1976,12 @@ func handleExitNodeSelect() {
 	}
 
 	if currIdx == len(exitNodes)-1 {
-		// Turn off exit routing
-		if activeExitVIP != "" {
-			_ = tunnel.DisableExitNodeRouting(activeExitVIP)
-		}
-		activeExitNodeID = ""
-		activeExitVIP = ""
-		buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
-		buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
-		if hBtnExitNodeSelect != 0 {
-			procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
-		}
-		addLog("🌐 Выход в интернет через Exit Node отключен. Восстановлен стандартный интернет-шлюз.")
-		writeDebug("Exit Node disabled, restored default gateway")
+		disableExitNode()
 		return
 	}
 
-	if activeExitVIP != "" {
-		_ = tunnel.DisableExitNodeRouting(activeExitVIP)
-	}
-
 	nextIdx := currIdx + 1
-	targetPeer := exitNodes[nextIdx]
-	targetVIP := targetPeer.VirtualIP
-	if targetVIP == "" {
-		targetVIP = "100.64.200.2"
-	}
-
-	activeExitNodeID = targetPeer.DeviceID
-	activeExitVIP = targetVIP
-
-	if err := tunnel.EnableExitNodeRouting(targetVIP, targetPeer.ActiveEndpoint, targetPeer.STUNAddr, targetPeer.PublicIP); err != nil {
-		addLog("❌ Ошибка настройки маршрутизации через Exit Node: " + err.Error())
-		writeDebug("EnableExitNodeRouting error: " + err.Error())
-	} else {
-		addressBookMu.RLock()
-		bm := addressBook[targetPeer.DeviceID]
-		addressBookMu.RUnlock()
-		peerDisplay := targetPeer.Nickname
-		if bm != "" {
-			peerDisplay = "[*] " + bm
-		} else if peerDisplay == "" {
-			peerDisplay = targetPeer.DeviceID
-		}
-
-		buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("🟢 Шлюз: [%s] (%s)", peerDisplay, targetVIP)
-		buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "green"
-		if hBtnExitNodeSelect != 0 {
-			procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
-		}
-
-		msg := fmt.Sprintf("🌐 Весь интернет-трафик перенаправлен через Exit Node: [%s] (%s)", peerDisplay, targetVIP)
-		addLog(msg)
-		writeDebug(msg)
-	}
+	setExitNodePeer(exitNodes[nextIdx])
 }
 
 func handleToggleSubnetRoute() {
@@ -3056,6 +3095,72 @@ func handleCopySelectedPeerVIP() {
 	}
 }
 
+func handlePingTargetPeer(p *peer.Peer) {
+	if p == nil {
+		return
+	}
+	vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+	if vip == "" {
+		return
+	}
+
+	buttonLabels[ID_BTN_PING_PEER] = fmt.Sprintf("⏳ Пинг %s...", vip)
+	if hBtnPingPeer != 0 {
+		procInvalidateRect.Call(hBtnPingPeer, 0, 1)
+	}
+	if hLblPeersDesc != 0 {
+		setControlText(hLblPeersDesc, fmt.Sprintf("🧪 Отправка ICMP пакетов к %s (%s)...", p.Nickname, vip))
+	}
+	addLog(fmt.Sprintf("🧪 Запуск реального ICMP Ping устройства до %s (%s)...", vip, p.Nickname))
+
+	go func() {
+		defer func() {
+			buttonLabels[ID_BTN_PING_PEER] = "🧪 Ping узла"
+			if hBtnPingPeer != 0 {
+				procInvalidateRect.Call(hBtnPingPeer, 0, 1)
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+		defer cancel()
+
+		rtt, err := diagnostic.PingVirtualIP(ctx, vip, 2*time.Second)
+		if err == nil && rtt > 0 {
+			p.Latency = rtt
+			p.PingMs = rtt.Milliseconds()
+			p.DirectP2P = true
+			p.Online = true
+			if registry != nil {
+				registry.Upsert(p)
+			}
+			msg := fmt.Sprintf("🟢 Реальный ICMP Ping до %s (%s): %v (успешно)", p.Nickname, vip, rtt.Round(time.Millisecond))
+			addLog(msg)
+			if hLblPeersDesc != 0 {
+				setControlText(hLblPeersDesc, fmt.Sprintf("🟢 Ping до %s (%s): %d ms (успешно)", p.Nickname, vip, rtt.Milliseconds()))
+			}
+		} else {
+			p.PingMs = 0
+			if registry != nil {
+				registry.Upsert(p)
+			}
+			errText := "таймаут ожидания ответа"
+			if err != nil {
+				errText = err.Error()
+			}
+			addLog(fmt.Sprintf("🔴 Ошибка реального ICMP Ping до %s (%s): %s", p.Nickname, vip, errText))
+			if hLblPeersDesc != 0 {
+				setControlText(hLblPeersDesc, fmt.Sprintf("🔴 Узел %s (%s) не отвечает: %s", p.Nickname, vip, errText))
+			}
+		}
+
+		selIdx, _, _ := procSendMessageW.Call(hListPeers, 0x0188 /* LB_GETCURSEL */, 0, 0)
+		updateData()
+		if int32(selIdx) >= 0 {
+			procSendMessageW.Call(hListPeers, 0x0186 /* LB_SETCURSEL */, selIdx, 0)
+		}
+	}()
+}
+
 func handlePingSelectedPeer() {
 	if registry == nil {
 		return
@@ -3064,34 +3169,10 @@ func handlePingSelectedPeer() {
 	selIdx, _, _ := procSendMessageW.Call(hListPeers, 0x0188, 0, 0)
 	idx := int(int32(selIdx)) / 2
 	if idx >= 0 && idx < len(peers) {
-		p := peers[idx]
-		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-		if vip != "" {
-			addLog(fmt.Sprintf("🧪 Запуск реального ICMP Ping устройства до %s (%s)...", vip, p.Nickname))
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				rtt, err := diagnostic.PingVirtualIP(ctx, vip, 2*time.Second)
-				if err == nil && rtt > 0 {
-					p.Latency = rtt
-					p.PingMs = rtt.Milliseconds()
-					p.DirectP2P = true
-					p.Online = true
-					registry.Upsert(p)
-					addLog(fmt.Sprintf("🟢 Реальный ICMP Ping до %s (%s): %v (успешно)", p.Nickname, vip, rtt.Round(time.Millisecond)))
-					updateData()
-				} else {
-					p.Latency = 0
-					p.PingMs = 0
-					registry.Upsert(p)
-					if err != nil {
-						addLog(fmt.Sprintf("🔴 Ошибка реального ICMP Ping до %s (%s): %s", p.Nickname, vip, err.Error()))
-					} else {
-						addLog(fmt.Sprintf("🔴 Ошибка реального ICMP Ping до %s (%s): узел не отвечает (таймаут)", p.Nickname, vip))
-					}
-					updateData()
-				}
-			}()
+		handlePingTargetPeer(peers[idx])
+	} else {
+		if hLblPeersDesc != 0 {
+			setControlText(hLblPeersDesc, "⚠️ Сначала выберите узел из списка ниже для проверки Ping")
 		}
 	}
 }
@@ -3164,7 +3245,15 @@ func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
 	copyPubStr, _ := syscall.UTF16PtrFromString(fmt.Sprintf("🌐 Скопировать STUN/WAN (%s)", targetPeer.STUNAddr))
 	pingStr, _ := syscall.UTF16PtrFromString(fmt.Sprintf("🧪 Проверить Ping до %s", targetPeer.Nickname))
 	bmStr, _ := syscall.UTF16PtrFromString("⭐ Задать имя (Закладка)...")
-	exitStr, _ := syscall.UTF16PtrFromString("🌐 Использовать как шлюз (Exit Node)")
+	var exitLabel string
+	if targetPeer.DeviceID == activeExitNodeID {
+		exitLabel = "🔴 Отключить шлюз (Exit Node)"
+	} else if targetPeer.IsExitNode {
+		exitLabel = "🌐 Использовать как шлюз (Exit Node)"
+	} else {
+		exitLabel = "🌐 Назначить шлюзом (Exit Node)"
+	}
+	exitStr, _ := syscall.UTF16PtrFromString(exitLabel)
 	subnetStr, _ := syscall.UTF16PtrFromString("🏠 Маршрутизировать подсеть узла")
 
 	procAppendMenuW.Call(hMenu, 0, 6001, uintptr(unsafe.Pointer(copyVIPStr)))
@@ -3196,11 +3285,15 @@ func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
 			addLog("🌐 Скопирован адрес узла: " + addr)
 		}
 	case 6003:
-		handlePingSelectedPeer()
+		handlePingTargetPeer(targetPeer)
 	case 6004:
 		handleBookmarkPeer()
 	case 6005:
-		handleExitNodeSelect()
+		if targetPeer.DeviceID == activeExitNodeID {
+			disableExitNode()
+		} else {
+			setExitNodePeer(targetPeer)
+		}
 	case 6006:
 		handleToggleSubnetRoute()
 	}
@@ -3315,8 +3408,9 @@ func buildModernUI(hInstance uintptr) {
 	hLblCardSTUN = createLabel(hInstance, "STUN Сокет:\r\nПоиск сокета...", cx+420, 120, 200, 42, hFontNormal)
 	hLblCardSig = createLabel(hInstance, "Сигнальный канал:\r\nИнициализация...", cx+630, 120, 210, 42, hFontNormal)
 
-	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "🌐 Выход в интернет: Локальный (Отключен)", cx, 170, 415, 36, ID_BTN_EXIT_NODE_SELECT, "normal")
-	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+425, 170, 415, 36, ID_BTN_TOGGLE_SUBNET, "normal")
+	hBtnExitNodeSelect = createOwnerDrawButton(hInstance, "🌐 Выход в интернет: Локальный (Отключен)", cx, 170, 310, 36, ID_BTN_EXIT_NODE_SELECT, "normal")
+	hBtnExitNodeDisable = createOwnerDrawButton(hInstance, "🔴 Отключить шлюз", cx+318, 170, 160, 36, ID_BTN_EXIT_NODE_DISABLE, "red")
+	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+486, 170, 354, 36, ID_BTN_TOGGLE_SUBNET, "normal")
 
 	lblSummaryTitle := createLabel(hInstance, "👥 Активные участники сети (P2P статус и задержки):", cx, 214, cw, 22, hFontHeader)
 	hListSummaryPeers = createListBox(hInstance, cx, 238, cw, 470, hFontNormal)
@@ -3324,12 +3418,12 @@ func buildModernUI(hInstance uintptr) {
 	tabPages[0] = []uintptr{
 		lblDashTitle, hLblStatus, hBtnVpn, hBtnRefresh, hBtnManageProfiles,
 		hLblCardVIP, hLblCardPubIP, hLblCardSTUN, hLblCardSig,
-		hBtnExitNodeSelect, hBtnToggleSubnetRoute, lblSummaryTitle, hListSummaryPeers,
+		hBtnExitNodeSelect, hBtnExitNodeDisable, hBtnToggleSubnetRoute, lblSummaryTitle, hListSummaryPeers,
 	}
 
 	// СТРАНИЦА 1: УСТРОЙСТВА (PEERS)
 	lblPeersPageTitle := createLabel(hInstance, "👥 Устройства в вашей P2P сети (Mesh Nodes)", cx, 16, cw, 28, hFontTitle)
-	lblPeersDesc := createLabel(hInstance, "Все обнаруженные пиры с прямыми UDP P2P каналами и адресами. Кликните правой кнопкой мыши для меню действий.", cx, 44, cw, 18, hFontNormal)
+	hLblPeersDesc = createLabel(hInstance, "Все обнаруженные пиры с прямыми UDP P2P каналами и адресами. Кликните правой кнопкой мыши для меню действий.", cx, 44, cw, 18, hFontNormal)
 
 	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ Задать имя", cx, 68, 180, 34, ID_BTN_BOOKMARK_PEER, "normal")
 	hBtnCopyPeerVIP = createOwnerDrawButton(hInstance, "📋 Скопировать IP", cx+190, 68, 180, 34, ID_BTN_COPY_PEER_VIP, "normal")
@@ -3339,7 +3433,7 @@ func buildModernUI(hInstance uintptr) {
 	hListPeers = createListBox(hInstance, cx, 108, cw, 600, hFontNormal)
 
 	tabPages[1] = []uintptr{
-		lblPeersPageTitle, lblPeersDesc, hBtnBookmarkPeer, hBtnCopyPeerVIP, hBtnPingPeer, btnExitNodeDirect, hListPeers,
+		lblPeersPageTitle, hLblPeersDesc, hBtnBookmarkPeer, hBtnCopyPeerVIP, hBtnPingPeer, btnExitNodeDirect, hListPeers,
 	}
 
 	// СТРАНИЦА 2: ПРОФИЛИ СЕТЕЙ (PROFILES)
@@ -4036,8 +4130,24 @@ func startEngineFromConfig(c *config.Config) {
 								}
 
 								// 1. Прямая отправка пакета строго по прямому P2P UDP сокету
+								sentDirect := false
 								if udpPuncher != nil && targetEP != "" {
-									_ = udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax)
+									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
+										sentDirect = true
+									}
+								}
+								// Резервный транспорт: релей через зашифрованный MQTT, если прямой P2P не подтвержден
+								if (!sentDirect || !targetPeer.DirectP2P) && activeMQTT != nil {
+									dataToSend := packet
+									if cfg != nil {
+										if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+											cKey := crypto.DeriveKey(activeProf.NetworkKey)
+											if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
+												dataToSend = enc
+											}
+										}
+									}
+									_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, dataToSend)
 								}
 								// 1b. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
 								if !targetPeer.DirectP2P && udpPuncher != nil {
@@ -4585,11 +4695,20 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 
 		// Быстрый релей пакетов туннеля через MQTT (гарантирует сквозной пинг при любом типе NAT/VPN)
 		mqttCh.SubscribeTunnelData(myDevID, func(pkt []byte) {
-			if len(pkt) < 20 {
+			dataToProcess := pkt
+			if cfg != nil {
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+					cKey := crypto.DeriveKey(activeProf.NetworkKey)
+					if dec, decErr := crypto.DecryptSelf(pkt, cKey); decErr == nil && len(dec) >= 20 {
+						dataToProcess = dec
+					}
+				}
+			}
+			if len(dataToProcess) < 20 {
 				return
 			}
-			srcIP := tunnel.GetSrcIP(pkt)
-			destIP := tunnel.GetDestIP(pkt)
+			srcIP := tunnel.GetSrcIP(dataToProcess)
+			destIP := tunnel.GetDestIP(dataToProcess)
 			if srcIP == nil || destIP == nil {
 				return
 			}
@@ -4602,7 +4721,7 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 			// Все пакеты идут прямо в Wintun — OS сама обрабатывает ICMP, TCP, UDP
 			atomic.AddUint64(&packetsRecvCount, 1)
 			if tunDev != nil {
-				_ = tunDev.WritePacket(pkt)
+				_ = tunDev.WritePacket(dataToProcess)
 			}
 		})
 	}
@@ -5379,6 +5498,11 @@ func updateData() {
 			}
 		}
 
+		exitSuffix := ""
+		if activeExitVIP != "" {
+			exitSuffix = fmt.Sprintf(" | 🌐 Шлюз: %s", activeExitVIP)
+		}
+
 		// Реальная верификация статуса mesh-соединения
 		if directP2PCount > 0 {
 			vpnConnected = true
@@ -5386,19 +5510,19 @@ func updateData() {
 			if minRTT > 0 {
 				pingStr = fmt.Sprintf(" (%v)", minRTT.Round(time.Millisecond))
 			}
-			setControlText(hLblStatus, fmt.Sprintf("🟢 ПРЯМАЯ P2P СВЯЗЬ АКТИВНА (%d пир(ов)%s)", directP2PCount, pingStr))
+			setControlText(hLblStatus, fmt.Sprintf("🟢 ПРЯМАЯ P2P СВЯЗЬ АКТИВНА (%d пир(ов)%s)%s", directP2PCount, pingStr, exitSuffix))
 			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 Прямой P2P%s • VIP: %s", pingStr, myVirtualIP)
 			buttonTypes[ID_BTN_VPN] = "green"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else if onlineCount > 0 {
 			vpnConnected = true
-			setControlText(hLblStatus, fmt.Sprintf("🟢 СЕТЬ АКТИВНА (%d пир(ов) онлайн | Релей/STUN)", onlineCount))
+			setControlText(hLblStatus, fmt.Sprintf("🟢 СЕТЬ АКТИВНА (%d пир(ов) онлайн | Релей/STUN)%s", onlineCount, exitSuffix))
 			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 В СЕТИ (%d пир(ов) | VIP: %s)", onlineCount, myVirtualIP)
 			buttonTypes[ID_BTN_VPN] = "green"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else {
 			vpnConnected = false
-			setControlText(hLblStatus, "🟡 ПОИСК УСТРОЙСТВ В СЕТИ...")
+			setControlText(hLblStatus, "🟡 ПОИСК УСТРОЙСТВ В СЕТИ..."+exitSuffix)
 			buttonLabels[ID_BTN_VPN] = "🔴 ОЖИДАНИЕ СВЯЗИ (0 пиров)"
 			buttonTypes[ID_BTN_VPN] = "red"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
@@ -5406,11 +5530,16 @@ func updateData() {
 
 		if currentHash != lastPeersHash {
 			lastPeersHash = currentHash
+			var selPeerIdx, selSummaryIdx int32 = -1, -1
 			if hListPeers != 0 {
-				procSendMessageW.Call(hListPeers, 0x0184, 0, 0)
+				res, _, _ := procSendMessageW.Call(hListPeers, 0x0188 /* LB_GETCURSEL */, 0, 0)
+				selPeerIdx = int32(res)
+				procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
 			}
 			if hListSummaryPeers != 0 {
-				procSendMessageW.Call(hListSummaryPeers, 0x0184, 0, 0)
+				res, _, _ := procSendMessageW.Call(hListSummaryPeers, 0x0188 /* LB_GETCURSEL */, 0, 0)
+				selSummaryIdx = int32(res)
+				procSendMessageW.Call(hListSummaryPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
 			}
 
 			if len(peers) == 0 {
@@ -5482,7 +5611,9 @@ func updateData() {
 					if p.Online && pVIP == myCleanVIP && p.DeviceID != myDevID {
 						extraTags = append(extraTags, "[⚠️ КОНФЛИКТ IP!]")
 					}
-					if p.IsExitNode {
+					if p.DeviceID == activeExitNodeID {
+						extraTags = append(extraTags, "[🟢 АКТИВНЫЙ ШЛЮЗ]")
+					} else if p.IsExitNode {
 						extraTags = append(extraTags, "[Шлюз]")
 					}
 					if len(p.AdvertisedRoutes) > 0 {
@@ -5531,6 +5662,13 @@ func updateData() {
 						addListBoxItem(hListSummaryPeers, sumLine)
 					}
 				}
+			}
+
+			if hListPeers != 0 && selPeerIdx >= 0 {
+				procSendMessageW.Call(hListPeers, 0x0186 /* LB_SETCURSEL */, uintptr(selPeerIdx), 0)
+			}
+			if hListSummaryPeers != 0 && selSummaryIdx >= 0 {
+				procSendMessageW.Call(hListSummaryPeers, 0x0186 /* LB_SETCURSEL */, uintptr(selSummaryIdx), 0)
 			}
 			awgDirty = true
 		}

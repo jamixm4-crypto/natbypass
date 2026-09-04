@@ -35,6 +35,7 @@ type Peer struct {
 	Version          string               `json:"version,omitempty"`
 	IsKeenetic       bool                 `json:"is_keenetic,omitempty"`
 	IsExitNode       bool                 `json:"is_exit_node,omitempty"`
+	ExitRevoked      bool                 `json:"exit_revoked,omitempty"`
 	AdvertisedRoutes []string             `json:"advertised_routes,omitempty"`
 	LastSeen         time.Time            `json:"last_seen"`
 	Online           bool                 `json:"online"`
@@ -72,22 +73,24 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	}
 
 	// Unconditional preservation of measured latency and ping across periodic signaling beacons
-	if newer.Latency == 0 && existing.Latency > 0 {
-		newer.Latency = existing.Latency
-		newer.PingMs = existing.PingMs
-	}
-	// Guaranteed preservation of established P2P endpoint across signaling updates UNLESS STUN address has changed
 	stunChanged := newer.STUNAddr != "" && existing.STUNAddr != "" && newer.STUNAddr != existing.STUNAddr
-	if existing.ActiveEndpoint != "" && !stunChanged {
+	if stunChanged {
+		newer.ActiveEndpoint = newer.STUNAddr
+		newer.DirectP2P = false
+		newer.Latency = 0
+		newer.PingMs = 0
+	} else {
 		if newer.ActiveEndpoint == "" {
 			newer.ActiveEndpoint = existing.ActiveEndpoint
 		}
-		newer.DirectP2P = true
-	} else if newer.ActiveEndpoint != "" && !stunChanged {
-		newer.DirectP2P = true
-	} else if stunChanged {
-		newer.ActiveEndpoint = newer.STUNAddr
-		newer.DirectP2P = false
+		if !newer.DirectP2P {
+			newer.DirectP2P = existing.DirectP2P
+		}
+	}
+
+	if newer.Latency == 0 && existing.Latency > 0 && existing.DirectP2P {
+		newer.Latency = existing.Latency
+		newer.PingMs = existing.PingMs
 	}
 
 	if newer.Arch == "" && existing.Arch != "" {

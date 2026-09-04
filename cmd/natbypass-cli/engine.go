@@ -367,6 +367,28 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				inSrcIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
 				inDstIP := net.IPv4(payload[16], payload[17], payload[18], payload[19]).String()
+
+				// Userspace ICMP reflection for instant ping response across Linux, routers, and cross-border nodes
+				cleanMyVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+				if inDstIP == cleanMyVIP && len(payload) >= 28 && payload[9] == 1 && payload[20] == 8 {
+					if reply := createICMPEchoReply(payload); len(reply) > 0 {
+						if directAddr != nil && puncher != nil {
+							_ = puncher.SendDataPacketWithPadding(directAddr.String(), reply, 0, 0)
+						} else if sigMgr != nil && registry != nil {
+							if senderPeer, ok := registry.GetByVirtualIP(inSrcIP); ok && senderPeer != nil {
+								replyToSend := reply
+								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+									cKey := crypto.DeriveKey(activeProf.NetworkKey)
+									if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
+										replyToSend = enc
+									}
+								}
+								_ = sigMgr.PublishTunnelData(senderPeer.DeviceID, replyToSend)
+							}
+						}
+					}
+				}
+
 				log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 				_ = tunDev.WritePacket(payload)
 			}
@@ -380,7 +402,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 		if sigMgr != nil {
 			sigMgr.SubscribeTunnelData(deviceID, func(payload []byte) {
-				onInboundPacket(payload, nil)
+				dataToProcess := payload
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+					cKey := crypto.DeriveKey(activeProf.NetworkKey)
+					if dec, decErr := crypto.DecryptSelf(payload, cKey); decErr == nil && len(dec) >= 20 {
+						dataToProcess = dec
+					}
+				}
+				onInboundPacket(dataToProcess, nil)
 			})
 		}
 
@@ -552,9 +581,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no endpoint or puncher")
 						}
 
-						// Fallback: relay via MQTT when direct UDP is not yet confirmed or failed
-						if !sentDirect && sigMgr != nil {
-							_ = sigMgr.PublishTunnelData(p.DeviceID, pkt)
+						// Fallback: relay via MQTT/Signaling when direct UDP is not confirmed or P2P failed
+						if (!sentDirect || !p.DirectP2P) && sigMgr != nil {
+							dataToSend := pkt
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+								cKey := crypto.DeriveKey(activeProf.NetworkKey)
+								if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+									dataToSend = enc
+								}
+							}
+							_ = sigMgr.PublishTunnelData(p.DeviceID, dataToSend)
 						}
 
 						// 1b. Reactive instant hole punching if direct P2P is not yet confirmed
@@ -641,6 +677,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 1200*time.Millisecond)
 							pingCancel()
 							if err == nil && rtt > 0 {
+								p.ProbeCount = 0
 								if p.Latency > 0 {
 									p.Latency = time.Duration(float64(p.Latency)*0.6 + float64(rtt)*0.4)
 								} else {
@@ -649,6 +686,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								p.PingMs = p.Latency.Milliseconds()
 								p.DirectP2P = true
 								registry.Upsert(p)
+							} else {
+								p.ProbeCount++
+								if p.ProbeCount >= 2 {
+									p.DirectP2P = false
+									p.Latency = 0
+									p.PingMs = 0
+									registry.Upsert(p)
+								}
 							}
 						}
 					}

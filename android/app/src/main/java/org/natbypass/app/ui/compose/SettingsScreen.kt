@@ -71,6 +71,12 @@ fun SettingsScreen(
     var tgChat          by remember { mutableStateOf("") }
     var tgProxy         by remember { mutableStateOf("") }
 
+    var betaChannel     by remember { mutableStateOf(prefs.getBoolean("beta_channel", false)) }
+    val versionName     = remember {
+        try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.9.221-beta.1" }
+        catch (_: Exception) { "1.9.221-beta.1" }
+    }
+
     // Initialize from Active Profile in MobileBridge
     LaunchedEffect(Unit) {
         try {
@@ -263,6 +269,55 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // ── Update & Beta Channel (Top Priority) ───────────────────────
+            SettingsSection(title = "Канал обновлений (Beta) и версия", icon = Icons.Outlined.CloudDownload) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "NatBypass Mesh Network", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text(text = "Версия v$versionName (P2P Mesh + AWG 2.0)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (betaChannel) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.errorContainer
+                        ) {
+                            Text(
+                                text = "BETA КАНАЛ",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                SettingsSwitch(
+                    title = "Тестовые сборки (Beta)",
+                    subtitle = "Получать предварительные обновления. Могут содержать экспериментальные фичи и работать нестабильно!",
+                    icon = Icons.Outlined.Science,
+                    checked = betaChannel,
+                    onCheckedChange = { checked ->
+                        betaChannel = checked
+                        prefs.edit().putBoolean("beta_channel", checked).apply()
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = onCheckUpdate,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (betaChannel) "Проверить обновления (Beta-канал)" else "Проверить обновления на GitHub")
+                }
+            }
+
             // ── Appearance ─────────────────────────────────────────────────
             SettingsSection(title = "Внешний вид", icon = Icons.Outlined.Palette) {
                 Text(
@@ -662,43 +717,17 @@ fun SettingsScreen(
                 }
             }
 
-            // ── App info & Updates ─────────────────────────────────────────
-            SettingsSection(title = "О приложении и обновления", icon = Icons.Outlined.Info) {
-                val versionName = try {
-                    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.3.0"
-                } catch (_: Exception) { "1.3.0" }
-
+            // ── App info ───────────────────────────────────────────────────
+            SettingsSection(title = "О приложении", icon = Icons.Outlined.Info) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(text = "NatBypass Mesh", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        Text(text = "Версия v$versionName (P2P Mesh + AWG 2.0)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(text = "NatBypass Mesh Network", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text(text = "Версия v$versionName • Android • Pure Go Core", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                }
-                Spacer(Modifier.height(10.dp))
-                var betaChannel by remember { mutableStateOf(prefs.getBoolean("beta_channel", false)) }
-                SettingsSwitch(
-                    title = "Тестовые сборки (Beta)",
-                    subtitle = "Получать предварительные обновления. Могут работать нестабильно!",
-                    icon = Icons.Outlined.Science,
-                    checked = betaChannel,
-                    onCheckedChange = { checked ->
-                        betaChannel = checked
-                        prefs.edit().putBoolean("beta_channel", checked).apply()
-                    }
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = onCheckUpdate,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (betaChannel) "Проверить обновления (включая Beta)" else "Проверить обновления на GitHub")
                 }
             }
 

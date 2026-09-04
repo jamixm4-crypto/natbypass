@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -27,7 +28,7 @@ sealed class UpdateState {
     ) : UpdateState()
     data class Downloading(
         val version: String,
-        val progressPercent: Int,
+        val progress: Float,
         val downloadedMB: Float,
         val totalMB: Float,
         val speedMBs: Float,
@@ -43,6 +44,7 @@ object AppUpdateManager {
     val updateState: StateFlow<UpdateState> = _updateState.asStateFlow()
 
     private var downloadCancelled = false
+    private val isDownloading = java.util.concurrent.atomic.AtomicBoolean(false)
 
     suspend fun checkForUpdates(currentVersion: String, manual: Boolean, includePrerelease: Boolean = false): UpdateState = withContext(Dispatchers.IO) {
         _updateState.value = UpdateState.Checking
@@ -130,7 +132,21 @@ object AppUpdateManager {
     }
 
     suspend fun downloadAndInstall(context: Context, version: String, apkUrl: String, sizeBytes: Long) = withContext(Dispatchers.IO) {
+        if (!isDownloading.compareAndSet(false, true)) {
+            return@withContext
+        }
         downloadCancelled = false
+
+        val estMB = if (sizeBytes > 0) sizeBytes.toFloat() / (1024 * 1024) else 15f
+        _updateState.value = UpdateState.Downloading(
+            version      = version,
+            progress     = 0f,
+            downloadedMB = 0f,
+            totalMB      = estMB,
+            speedMBs     = 0f,
+            etaSec       = 0,
+        )
+
         val destFile = File(context.cacheDir, "NatBypass-v$version.apk")
         if (destFile.exists()) destFile.delete()
 
@@ -199,15 +215,20 @@ object AppUpdateManager {
 
         } catch (e: Exception) {
             _updateState.value = UpdateState.Error("Ошибка загрузки: ${e.message}")
+        } finally {
+            isDownloading.set(false)
         }
     }
 
     fun cancelDownload() {
         downloadCancelled = true
+        isDownloading.set(false)
         _updateState.value = UpdateState.Idle
     }
 
     fun dismiss() {
+        downloadCancelled = true
+        isDownloading.set(false)
         _updateState.value = UpdateState.Idle
     }
 
