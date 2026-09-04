@@ -216,7 +216,12 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handleAuthCheck — GET /api/auth/check
 func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 	isWindows := (runtime.GOOS == "windows")
-	authRequired := !isWindows && (s.password != "" || s.customAuth != nil || IsKeeneticOS())
+	var authRequired bool
+	if isWindows {
+		authRequired = (s.password != "" || s.customAuth != nil)
+	} else {
+		authRequired = (s.password != "" || s.customAuth != nil || IsKeeneticOS())
+	}
 	
 	// Check session cookie
 	if cookie, err := r.Cookie("nb_session"); err == nil && isValidSession(cookie.Value) {

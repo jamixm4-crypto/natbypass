@@ -156,7 +156,7 @@ func (s *Server) SetOnProfileSwitch(cb func(p *config.Profile) error) {
 
 // NewServer создаёт новый экземпляр Web UI сервера
 func NewServer(port int, user, password string, registry *peer.Registry, sigMgr *signaling.FallbackManager) *Server {
-	if user == "" && password == "" && !IsKeeneticOS() {
+	if user == "" && password == "" && !IsKeeneticOS() && runtime.GOOS != "windows" {
 		user = "admin"
 		var b [6]byte
 		_, _ = cryptoRandReader.Read(b[:])
@@ -484,7 +484,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Если авторизация не требуется (Windows локальный клиент без пароля в config)
-		authRequired := (s.password != "" || s.customAuth != nil || IsKeeneticOS() || runtime.GOOS != "windows")
+		var authRequired bool
+		if runtime.GOOS == "windows" {
+			authRequired = s.password != "" || s.customAuth != nil
+		} else {
+			authRequired = s.password != "" || s.customAuth != nil || IsKeeneticOS()
+		}
 		if !authRequired {
 			next.ServeHTTP(w, r)
 			return
@@ -661,7 +666,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.207"
+		ver = "1.9.208"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1468,7 +1473,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.207"
+		ver = "1.9.208"
 	}
 
 	vip := s.state.VirtualIP
