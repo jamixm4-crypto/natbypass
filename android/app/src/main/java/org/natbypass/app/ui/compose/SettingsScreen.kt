@@ -679,6 +679,18 @@ fun SettingsScreen(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+                var betaChannel by remember { mutableStateOf(prefs.getBoolean("beta_channel", false)) }
+                SettingsSwitch(
+                    title = "Тестовые сборки (Beta)",
+                    subtitle = "Получать предварительные обновления. Могут работать нестабильно!",
+                    icon = Icons.Outlined.Science,
+                    checked = betaChannel,
+                    onCheckedChange = { checked ->
+                        betaChannel = checked
+                        prefs.edit().putBoolean("beta_channel", checked).apply()
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = onCheckUpdate,
                     modifier = Modifier.fillMaxWidth(),
@@ -686,7 +698,7 @@ fun SettingsScreen(
                 ) {
                     Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Проверить обновления на GitHub")
+                    Text(if (betaChannel) "Проверить обновления (включая Beta)" else "Проверить обновления на GitHub")
                 }
             }
 

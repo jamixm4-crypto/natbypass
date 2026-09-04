@@ -193,8 +193,10 @@ private fun NatBypassApp(
         val currentVersion = try {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.3.0"
         } catch (_: Exception) { "1.3.0" }
+        val prefs = context.getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+        val includeBeta = prefs.getBoolean("beta_channel", false)
         coroutineScope.launch {
-            AppUpdateManager.checkForUpdates(currentVersion, manual = true)
+            AppUpdateManager.checkForUpdates(currentVersion, manual = true, includePrerelease = includeBeta)
         }
     }
 

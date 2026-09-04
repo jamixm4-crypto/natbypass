@@ -359,6 +359,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/update/check", s.handleUpdateCheck)
 	mux.HandleFunc("/api/update/apply", s.handleUpdateApply)
 	mux.HandleFunc("/api/update/status", s.handleUpdateStatus)
+	mux.HandleFunc("/api/update/channel", s.handleUpdateChannel)
 	// Профили сети (Multi-Profile Mesh Networks)
 	mux.HandleFunc("/api/profiles", s.handleProfilesList)
 	mux.HandleFunc("/api/awg/generate-random", s.handleAWGGenerateRandom)
@@ -748,7 +749,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.220"
+		ver = "1.9.221-beta.1"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1545,7 +1546,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.220"
+		ver = "1.9.221-beta.1"
 	}
 
 	vip := s.state.VirtualIP
@@ -1934,6 +1935,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		DoHEnabled      bool   `json:"doh_enabled"`
 		SaveLogsToDisk    bool     `json:"save_logs_to_disk"`
 		ShowDiagnostics   bool     `json:"show_diagnostics"`
+		BetaChannel       bool     `json:"beta_channel"`
 		AutoStart         bool     `json:"autostart"`
 		AllowExitNode     bool     `json:"allow_exit_node"`
 		AdvertisedSubnets []string `json:"advertised_subnets"`
@@ -1953,6 +1955,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.App.SaveLogsToDisk = req.SaveLogsToDisk
 	cfg.App.ShowDiagnostics = req.ShowDiagnostics
+	cfg.App.BetaChannel = req.BetaChannel
 	s.deviceName = req.DeviceName
 	if req.VirtualIP != "" {
 		cleanVIP := strings.TrimSpace(strings.Split(req.VirtualIP, "/")[0])
@@ -2144,6 +2147,32 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(manifest)
 }
 
+// handleUpdateChannel — POST /api/update/channel — переключает канал обновлений (stable/beta)
+func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	var req struct {
+		BetaChannel bool `json:"beta_channel"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	cfg.App.BetaChannel = req.BetaChannel
+	_ = config.Save(cfg, s.configPath, false)
+	if s.cfg != nil {
+		s.cfg.App.BetaChannel = req.BetaChannel
+	}
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":           true,
+		"beta_channel": req.BetaChannel,
+	}, "")
+}
+
 // handleUpdateCheck — GET /api/update/check — проверяет наличие новой версии на GitHub
 func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -2154,7 +2183,26 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if ver == "" {
 		ver = "1.0.0"
 	}
-	info, err := updater.CheckUpdate(r.Context(), ver)
+
+	channel := r.URL.Query().Get("channel")
+	includePre := r.URL.Query().Get("include_prerelease") == "true" || strings.EqualFold(channel, "beta")
+
+	if channel == "" && !includePre {
+		if s.cfg != nil && s.cfg.App.BetaChannel {
+			includePre = true
+			channel = "beta"
+		} else if cfg, err := config.Load(s.configPath); err == nil && cfg != nil && cfg.App.BetaChannel {
+			includePre = true
+			channel = "beta"
+		}
+	}
+
+	opts := updater.CheckOptions{
+		IncludePrerelease: includePre,
+		Channel:           channel,
+	}
+
+	info, err := updater.CheckUpdateWithOptions(r.Context(), ver, opts)
 	if err != nil {
 		s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"has_update":      false,
@@ -2173,7 +2221,9 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		AssetURL string `json:"asset_url"`
+		AssetURL          string `json:"asset_url"`
+		IncludePrerelease bool   `json:"include_prerelease"`
+		Channel           string `json:"channel"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.AssetURL == "" {
@@ -2181,7 +2231,14 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 		if ver == "" {
 			ver = "1.0.0"
 		}
-		info, err := updater.CheckUpdate(r.Context(), ver)
+		includePre := req.IncludePrerelease || strings.EqualFold(req.Channel, "beta")
+		if !includePre && s.cfg != nil && s.cfg.App.BetaChannel {
+			includePre = true
+		}
+		info, err := updater.CheckUpdateWithOptions(r.Context(), ver, updater.CheckOptions{
+			IncludePrerelease: includePre,
+			Channel:           req.Channel,
+		})
 		if err != nil || info == nil || info.AssetURL == "" {
 			s.jsonResponse(w, http.StatusBadRequest, nil, "не удалось найти файл обновления для вашей системы")
 			return

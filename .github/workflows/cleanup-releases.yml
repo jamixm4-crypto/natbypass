@@ -26,13 +26,23 @@ jobs:
             });
 
             console.log(`Found ${releases.length} releases`);
-            if (releases.length > 1) {
-              const sorted = releases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-              const latest = sorted[0];
-              console.log(`Keeping ONLY latest release: ${latest.name} (${latest.tag_name})`);
+            if (releases.length > 0) {
+              const stables = releases.filter(r => !r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+              const betas = releases.filter(r => r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-              for (const release of sorted.slice(1)) {
-                console.log(`Deleting old release: ${release.name} (${release.tag_name}) ID: ${release.id}`);
+              const keepIds = new Set();
+              if (stables.length > 0) {
+                keepIds.add(stables[0].id);
+                console.log(`Keeping latest STABLE release: ${stables[0].tag_name} (ID: ${stables[0].id})`);
+              }
+              for (const beta of betas.slice(0, 2)) {
+                keepIds.add(beta.id);
+                console.log(`Keeping latest BETA release: ${beta.tag_name} (ID: ${beta.id})`);
+              }
+
+              for (const release of releases) {
+                if (keepIds.has(release.id)) continue;
+                console.log(`Deleting superseded release: ${release.name || release.tag_name} (${release.tag_name}) ID: ${release.id}`);
                 try {
                   await github.rest.repos.deleteRelease({
                     owner: context.repo.owner,

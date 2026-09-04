@@ -23,10 +23,11 @@ sealed class UpdateState {
         val apkUrl: String,
         val sizeBytes: Long,
         val isNewer: Boolean,
+        val isPrerelease: Boolean = false,
     ) : UpdateState()
     data class Downloading(
         val version: String,
-        val progress: Float, // 0.0 .. 1.0
+        val progressPercent: Int,
         val downloadedMB: Float,
         val totalMB: Float,
         val speedMBs: Float,
@@ -43,10 +44,15 @@ object AppUpdateManager {
 
     private var downloadCancelled = false
 
-    suspend fun checkForUpdates(currentVersion: String, manual: Boolean): UpdateState = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdates(currentVersion: String, manual: Boolean, includePrerelease: Boolean = false): UpdateState = withContext(Dispatchers.IO) {
         _updateState.value = UpdateState.Checking
         try {
-            val url = URL("https://api.github.com/repos/jamixm4-crypto/natbypass/releases/latest")
+            val apiUrl = if (includePrerelease) {
+                "https://api.github.com/repos/jamixm4-crypto/natbypass/releases?per_page=10"
+            } else {
+                "https://api.github.com/repos/jamixm4-crypto/natbypass/releases/latest"
+            }
+            val url = URL(apiUrl)
             val conn = url.openConnection() as HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
@@ -54,8 +60,22 @@ object AppUpdateManager {
 
             if (conn.responseCode == 200) {
                 val response = conn.inputStream.bufferedReader().use { it.readText() }
-                val releaseObj = JSONObject(response)
+                val releaseObj: JSONObject = if (includePrerelease) {
+                    val arr = JSONArray(response)
+                    var best: JSONObject? = null
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        if (obj.optBoolean("draft", false)) continue
+                        if (best == null || compareSemVer(obj.optString("tag_name", ""), best.optString("tag_name", "")) > 0) {
+                            best = obj
+                        }
+                    }
+                    best ?: throw Exception("Нет доступных релизов на GitHub")
+                } else {
+                    JSONObject(response)
+                }
                 val tagName = releaseObj.optString("tag_name", "").removePrefix("v")
+                val isPrerelease = releaseObj.optBoolean("prerelease", false)
                 // GitHub API может прислать "body": null (JSON null), в этом случае
                 // optString вернёт строку "null" — проверяем явно через isNull()
                 val releaseBody = if (releaseObj.isNull("body")) {
@@ -83,11 +103,12 @@ object AppUpdateManager {
                 val isNewer = isNewerVersion(currentVersion, tagName)
                 if (apkDownloadUrl.isNotEmpty()) {
                     val state = UpdateState.Available(
-                        version    = tagName,
-                        changelog  = releaseBody,
-                        apkUrl     = apkDownloadUrl,
-                        sizeBytes  = apkSize,
-                        isNewer    = isNewer
+                        version      = tagName,
+                        changelog    = releaseBody,
+                        apkUrl       = apkDownloadUrl,
+                        sizeBytes    = apkSize,
+                        isNewer      = isNewer,
+                        isPrerelease = isPrerelease
                     )
                     _updateState.value = state
                     return@withContext state
@@ -208,16 +229,68 @@ object AppUpdateManager {
     }
 
     private fun isNewerVersion(current: String, latest: String): Boolean {
+        return compareSemVer(latest, current) > 0
+    }
+
+    fun compareSemVer(v1Raw: String, v2Raw: String): Int {
         try {
-            val curParts = current.split(".").map { it.toIntOrNull() ?: 0 }
-            val latParts = latest.split(".").map { it.toIntOrNull() ?: 0 }
-            for (i in 0 until maxOf(curParts.size, latParts.size)) {
-                val c = curParts.getOrElse(i) { 0 }
-                val l = latParts.getOrElse(i) { 0 }
-                if (l > c) return true
-                if (l < c) return false
+            val v1Clean = v1Raw.trim().removePrefix("v").removePrefix("V")
+            val v2Clean = v2Raw.trim().removePrefix("v").removePrefix("V")
+
+            val v1Parts = v1Clean.split("-", limit = 2)
+            val v2Parts = v2Clean.split("-", limit = 2)
+
+            val v1Main = v1Parts[0].split(".").map { it.toIntOrNull() ?: 0 }
+            val v2Main = v2Parts[0].split(".").map { it.toIntOrNull() ?: 0 }
+
+            val maxLen = maxOf(v1Main.size, v2Main.size)
+            for (i in 0 until maxLen) {
+                val p1 = v1Main.getOrElse(i) { 0 }
+                val p2 = v2Main.getOrElse(i) { 0 }
+                if (p1 > p2) return 1
+                if (p1 < p2) return -1
             }
-        } catch (_: Exception) {}
-        return false
+
+            val v1HasPre = v1Parts.size > 1 && v1Parts[1].isNotBlank()
+            val v2HasPre = v2Parts.size > 1 && v2Parts[1].isNotBlank()
+
+            if (!v1HasPre && v2HasPre) return 1
+            if (v1HasPre && !v2HasPre) return -1
+            if (!v1HasPre && !v2HasPre) return 0
+
+            return comparePrerelease(v1Parts[1], v2Parts[1])
+        } catch (_: Exception) {
+            return 0
+        }
+    }
+
+    private fun comparePrerelease(pre1: String, pre2: String): Int {
+        val parts1 = pre1.split(".")
+        val parts2 = pre2.split(".")
+        val minLen = minOf(parts1.size, parts2.size)
+
+        for (i in 0 until minLen) {
+            val id1 = parts1[i]
+            val id2 = parts2[i]
+
+            val num1 = id1.toLongOrNull()
+            val num2 = id2.toLongOrNull()
+
+            if (num1 != null && num2 != null) {
+                if (num1 > num2) return 1
+                if (num1 < num2) return -1
+            } else if (num1 != null && num2 == null) {
+                return -1
+            } else if (num1 == null && num2 != null) {
+                return 1
+            } else {
+                val cmp = id1.compareTo(id2)
+                if (cmp != 0) return if (cmp > 0) 1 else -1
+            }
+        }
+
+        if (parts1.size > parts2.size) return 1
+        if (parts1.size < parts2.size) return -1
+        return 0
     }
 }

@@ -27,6 +27,7 @@ type AppConfig struct {
 	DeviceName      string            `mapstructure:"device_name" yaml:"device_name"`
 	SaveLogsToDisk  bool              `mapstructure:"save_logs" yaml:"save_logs" json:"save_logs_to_disk"`
 	ShowDiagnostics bool              `mapstructure:"show_diagnostics" yaml:"show_diagnostics" json:"show_diagnostics"`
+	BetaChannel     bool              `mapstructure:"beta_channel" yaml:"beta_channel,omitempty" json:"beta_channel"`
 	AddressBook     map[string]string `mapstructure:"address_book" yaml:"address_book,omitempty"`
 	PublishInterval int               `mapstructure:"publish_interval" yaml:"publish_interval"`
 }
@@ -255,6 +256,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("app.publish_interval", 10)
 	v.SetDefault("app.save_logs", false)
 	v.SetDefault("app.show_diagnostics", false)
+	v.SetDefault("app.beta_channel", false)
 
 	v.SetDefault("web_ui.enabled", true)
 	v.SetDefault("web_ui.port", 8080)

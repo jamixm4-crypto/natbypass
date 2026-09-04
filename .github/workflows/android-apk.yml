@@ -102,12 +102,13 @@ jobs:
           fi
 
           VERSION_NAME="${TAG#v}"
-          V_MAJOR=$(echo "$VERSION_NAME" | cut -d. -f1)
-          V_MINOR=$(echo "$VERSION_NAME" | cut -d. -f2)
-          V_PATCH=$(echo "$VERSION_NAME" | cut -d. -f3)
+          V_CORE=$(echo "$VERSION_NAME" | cut -d- -f1)
+          V_MAJOR=$(echo "$V_CORE" | cut -d. -f1)
+          V_MINOR=$(echo "$V_CORE" | cut -d. -f2)
+          V_PATCH=$(echo "$V_CORE" | cut -d. -f3)
           V_MAJOR=${V_MAJOR:-1}
-          V_MINOR=${V_MINOR:-3}
-          V_PATCH=${V_PATCH:-9}
+          V_MINOR=${V_MINOR:-9}
+          V_PATCH=${V_PATCH:-221}
           VERSION_CODE=$((V_MAJOR * 10000 + V_MINOR * 100 + V_PATCH))
 
           echo "Building Android APK for version $VERSION_NAME (versionCode: $VERSION_CODE)..."
@@ -138,7 +139,15 @@ jobs:
           # Даем время параллельному воркфлоу релиза завершить публикацию
           sleep 5
           
-          gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --draft=false --latest || true
+          if echo "$TAG" | grep -q "-"; then
+            IS_PRERELEASE=true
+            RELEASE_FLAGS="--prerelease"
+          else
+            IS_PRERELEASE=false
+            RELEASE_FLAGS="--latest"
+          fi
+
+          gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --draft=false $RELEASE_FLAGS || true
           
           for apk in release_apk/*.apk; do
             if [ -f "$apk" ]; then
@@ -160,5 +169,10 @@ jobs:
               fi
             fi
           done
-          gh release edit "${TAG}" --draft=false --latest --title "NatBypass ${TAG}" 2>/dev/null || true
+
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            gh release edit "${TAG}" --draft=false --prerelease --title "NatBypass ${TAG}" 2>/dev/null || true
+          else
+            gh release edit "${TAG}" --draft=false --latest --title "NatBypass ${TAG}" 2>/dev/null || true
+          fi
 

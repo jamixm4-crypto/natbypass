@@ -21,6 +21,38 @@ func TestVersionCompare(t *testing.T) {
 	}
 }
 
+func TestSemVerCompare_BetaPrerelease(t *testing.T) {
+	// 1. Beta.1 of new version is newer than previous stable version
+	if !isNewer("v1.9.221-beta.1", "v1.9.220") {
+		t.Fatalf("expected v1.9.221-beta.1 > v1.9.220")
+	}
+
+	// 2. Beta.2 is newer than Beta.1
+	if !isNewer("v1.9.221-beta.2", "v1.9.221-beta.1") {
+		t.Fatalf("expected v1.9.221-beta.2 > v1.9.221-beta.1")
+	}
+
+	// 3. Stable 1.9.221 is newer than 1.9.221-beta.2
+	if !isNewer("v1.9.221", "v1.9.221-beta.2") {
+		t.Fatalf("expected v1.9.221 > v1.9.221-beta.2")
+	}
+
+	// 4. RC is newer than Beta with same version
+	if compareSemVer("v1.9.221-rc.1", "v1.9.221-beta.2") <= 0 {
+		t.Fatalf("expected v1.9.221-rc.1 > v1.9.221-beta.2")
+	}
+
+	// 5. Stable is not newer than itself
+	if isNewer("v1.9.220", "v1.9.220") {
+		t.Fatalf("expected v1.9.220 not newer than v1.9.220")
+	}
+
+	// 6. Old version is not newer than current
+	if isNewer("v1.9.220", "v1.9.221") {
+		t.Fatalf("expected v1.9.220 not newer than v1.9.221")
+	}
+}
+
 func TestUpdater_Ed25519Verification(t *testing.T) {
 	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

@@ -24,6 +24,10 @@ fun UpdateDialog(
     onCancelDownload: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    val prefs = androidx.compose.runtime.remember { context.getSharedPreferences("natbypass_prefs", android.content.Context.MODE_PRIVATE) }
+    var betaChannel by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(prefs.getBoolean("beta_channel", false)) }
 
     when (state) {
         is UpdateState.Idle -> {}
@@ -61,10 +65,28 @@ fun UpdateDialog(
                     )
                 },
                 title = {
-                    Text(
-                        text = if (state.isNewer) "Доступно обновление: v${state.version}" else "Переустановить билд v${state.version}",
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (state.isNewer) "Доступно обновление: v${state.version}" else "Текущий билд: v${state.version}",
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (state.isPrerelease) {
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.errorContainer
+                            ) {
+                                Text(
+                                    text = "BETA",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
                 },
                 text = {
                     Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -83,7 +105,7 @@ fun UpdateDialog(
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 240.dp)
+                                .heightIn(max = 200.dp)
                         ) {
                             Column(
                                 modifier = Modifier
@@ -95,6 +117,49 @@ fun UpdateDialog(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "🧪 Тестовые сборки (Beta)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Switch(
+                                        checked = betaChannel,
+                                        onCheckedChange = { checked ->
+                                            betaChannel = checked
+                                            prefs.edit().putBoolean("beta_channel", checked).apply()
+                                            val curVer = try {
+                                                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.3.0"
+                                            } catch (_: Exception) { "1.3.0" }
+                                            coroutineScope.launch {
+                                                AppUpdateManager.checkForUpdates(curVer, manual = true, includePrerelease = checked)
+                                            }
+                                        }
+                                    )
+                                }
+                                if (betaChannel) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "⚠️ Внимание: тестовые сборки содержат новейшие экспериментальные функции, но могут работать нестабильно.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
                             }
                         }
                     }

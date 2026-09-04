@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	GithubRepo = "jamixm4-crypto/natbypass"
-	GithubAPI  = "https://api.github.com/repos/" + GithubRepo + "/releases/latest"
+	GithubRepo        = "jamixm4-crypto/natbypass"
+	GithubAPI         = "https://api.github.com/repos/" + GithubRepo + "/releases/latest"
+	GithubAPIReleases = "https://api.github.com/repos/" + GithubRepo + "/releases?per_page=30"
 )
 
 type GitHubRelease struct {
@@ -26,6 +27,8 @@ type GitHubRelease struct {
 	Body        string        `json:"body"`
 	PublishedAt string        `json:"published_at"`
 	HTMLURL     string        `json:"html_url"`
+	Prerelease  bool          `json:"prerelease"`
+	Draft       bool          `json:"draft"`
 	Assets      []GitHubAsset `json:"assets"`
 }
 
@@ -35,10 +38,17 @@ type GitHubAsset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
+type CheckOptions struct {
+	IncludePrerelease bool
+	Channel           string // "stable" | "beta"
+}
+
 type ReleaseInfo struct {
 	CurrentVersion string `json:"current_version"`
 	LatestVersion  string `json:"latest_version"`
 	HasUpdate      bool   `json:"has_update"`
+	IsPrerelease   bool   `json:"is_prerelease"`
+	Channel        string `json:"channel"`
 	ReleaseNotes   string `json:"release_notes"`
 	PublishedAt    string `json:"published_at"`
 	AssetURL       string `json:"asset_url"`
@@ -160,9 +170,16 @@ func (u *Updater) DownloadAndVerify(release *ReleaseInfo) (string, error) {
 	return tmpFile.Name(), nil
 }
 
-// CheckUpdate проверяет наличие новой версии на GitHub Releases
-func CheckUpdate(ctx context.Context, currentVersion string) (*ReleaseInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", GithubAPI, nil)
+// CheckUpdateWithOptions проверяет наличие новой версии с учетом заданного канала (stable/beta).
+func CheckUpdateWithOptions(ctx context.Context, currentVersion string, opts CheckOptions) (*ReleaseInfo, error) {
+	includePrerelease := opts.IncludePrerelease || strings.EqualFold(opts.Channel, "beta")
+
+	apiURL := GithubAPI
+	if includePrerelease {
+		apiURL = GithubAPIReleases
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -180,35 +197,67 @@ func CheckUpdate(ctx context.Context, currentVersion string) (*ReleaseInfo, erro
 		return nil, fmt.Errorf("GitHub API вернул статус: %d", resp.StatusCode)
 	}
 
-	var rel GitHubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return nil, fmt.Errorf("ошибка парсинга релиза: %w", err)
+	var targetRelease *GitHubRelease
+
+	if includePrerelease {
+		var releases []GitHubRelease
+		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+			return nil, fmt.Errorf("ошибка парсинга списка релизов: %w", err)
+		}
+		// Находим релиз с максимальной семантической версией среди non-draft
+		for i := range releases {
+			rel := &releases[i]
+			if rel.Draft {
+				continue
+			}
+			if targetRelease == nil || compareSemVer(rel.TagName, targetRelease.TagName) > 0 {
+				targetRelease = rel
+			}
+		}
+		if targetRelease == nil {
+			return nil, fmt.Errorf("нет доступных релизов на GitHub")
+		}
+	} else {
+		var rel GitHubRelease
+		if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+			return nil, fmt.Errorf("ошибка парсинга релиза: %w", err)
+		}
+		targetRelease = &rel
 	}
 
-	latestVer := strings.TrimPrefix(rel.TagName, "v")
-	curVer := strings.TrimPrefix(currentVersion, "v")
-
-	hasUpdate := isNewer(latestVer, curVer)
+	hasUpdate := isNewer(targetRelease.TagName, currentVersion)
 
 	// Подбираем подходящий бинарник под текущую ОС и архитектуру
-	assetURL, assetName, assetSize := pickAsset(rel.Assets)
+	assetURL, assetName, assetSize := pickAsset(targetRelease.Assets)
+
+	channel := "stable"
+	if targetRelease.Prerelease {
+		channel = "beta"
+	}
 
 	info := &ReleaseInfo{
 		CurrentVersion: currentVersion,
-		LatestVersion:  rel.TagName,
+		LatestVersion:  targetRelease.TagName,
 		HasUpdate:      hasUpdate,
-		ReleaseNotes:   rel.Body,
-		PublishedAt:    rel.PublishedAt,
+		IsPrerelease:   targetRelease.Prerelease,
+		Channel:        channel,
+		ReleaseNotes:   targetRelease.Body,
+		PublishedAt:    targetRelease.PublishedAt,
 		AssetURL:       assetURL,
 		AssetName:      assetName,
 		AssetSize:      assetSize,
-		HTMLURL:        rel.HTMLURL,
+		HTMLURL:        targetRelease.HTMLURL,
 	}
 
 	return info, nil
 }
 
-// isNewer сравнивает семантические версии вида 1.1.8 vs 1.1.7, 1.1.10 vs 1.1.9
+// CheckUpdate проверяет наличие новой версии на GitHub Releases (стабильный канал по умолчанию)
+func CheckUpdate(ctx context.Context, currentVersion string) (*ReleaseInfo, error) {
+	return CheckUpdateWithOptions(ctx, currentVersion, CheckOptions{IncludePrerelease: false, Channel: "stable"})
+}
+
+// isNewer сравнивает семантические версии с поддержкой пре-релизов SemVer 2.0
 func isNewer(latest, current string) bool {
 	if latest == "" || current == "" || current == "dev" || current == "custom" {
 		return false
@@ -218,31 +267,50 @@ func isNewer(latest, current string) bool {
 	if latest == current {
 		return false
 	}
-	return compareVersions(latest, current) > 0
+	return compareSemVer(latest, current) > 0
 }
 
-func compareVersions(v1, v2 string) int {
-	parts1 := strings.Split(v1, ".")
-	parts2 := strings.Split(v2, ".")
-	maxLen := len(parts1)
-	if len(parts2) > maxLen {
-		maxLen = len(parts2)
+// compareSemVer сравнивает версии с полной поддержкой SemVer 2.0 (пре-релизы -beta, -rc)
+func compareSemVer(v1, v2 string) int {
+	v1 = strings.TrimPrefix(strings.TrimSpace(v1), "v")
+	v2 = strings.TrimPrefix(strings.TrimSpace(v2), "v")
+	if v1 == v2 {
+		return 0
+	}
+
+	// Отделяем метаданные сборки (+)
+	if idx := strings.Index(v1, "+"); idx != -1 {
+		v1 = v1[:idx]
+	}
+	if idx := strings.Index(v2, "+"); idx != -1 {
+		v2 = v2[:idx]
+	}
+
+	// Отделяем суффикс пре-релиза (-)
+	var pre1, pre2 string
+	if idx := strings.Index(v1, "-"); idx != -1 {
+		pre1 = v1[idx+1:]
+		v1 = v1[:idx]
+	}
+	if idx := strings.Index(v2, "-"); idx != -1 {
+		pre2 = v2[idx+1:]
+		v2 = v2[:idx]
+	}
+
+	// Сравнение основной версии Major.Minor.Patch...
+	p1 := strings.Split(v1, ".")
+	p2 := strings.Split(v2, ".")
+	maxLen := len(p1)
+	if len(p2) > maxLen {
+		maxLen = len(p2)
 	}
 	for i := 0; i < maxLen; i++ {
 		var n1, n2 int
-		if i < len(parts1) {
-			var err error
-			n1, err = parseLeadingInt(parts1[i])
-			if err != nil {
-				n1 = 0
-			}
+		if i < len(p1) {
+			_, _ = fmt.Sscanf(p1[i], "%d", &n1)
 		}
-		if i < len(parts2) {
-			var err error
-			n2, err = parseLeadingInt(parts2[i])
-			if err != nil {
-				n2 = 0
-			}
+		if i < len(p2) {
+			_, _ = fmt.Sscanf(p2[i], "%d", &n2)
 		}
 		if n1 > n2 {
 			return 1
@@ -251,25 +319,75 @@ func compareVersions(v1, v2 string) int {
 			return -1
 		}
 	}
+
+	// SemVer 2.0 §11.3: нормальный релиз имеет больший приоритет, чем пре-релиз
+	if pre1 == "" && pre2 != "" {
+		return 1 // например, 1.9.221 (stable) > 1.9.221-beta.1
+	}
+	if pre1 != "" && pre2 == "" {
+		return -1 // например, 1.9.221-beta.1 < 1.9.221 (stable)
+	}
+	if pre1 != "" && pre2 != "" {
+		return comparePrerelease(pre1, pre2)
+	}
+
 	return 0
 }
 
-func parseLeadingInt(s string) (int, error) {
-	var numStr string
-	for _, ch := range s {
-		if ch >= '0' && ch <= '9' {
-			numStr += string(ch)
+func comparePrerelease(p1, p2 string) int {
+	parts1 := strings.Split(p1, ".")
+	parts2 := strings.Split(p2, ".")
+	maxLen := len(parts1)
+	if len(parts2) > maxLen {
+		maxLen = len(parts2)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		if i >= len(parts1) {
+			return -1
+		}
+		if i >= len(parts2) {
+			return 1
+		}
+		s1, s2 := parts1[i], parts2[i]
+		if s1 == s2 {
+			continue
+		}
+
+		var n1, n2 int
+		_, err1 := fmt.Sscanf(s1, "%d", &n1)
+		_, err2 := fmt.Sscanf(s2, "%d", &n2)
+		isNum1 := (err1 == nil && fmt.Sprintf("%d", n1) == s1)
+		isNum2 := (err2 == nil && fmt.Sprintf("%d", n2) == s2)
+
+		// Числовой идентификатор имеет меньший приоритет, чем строковый
+		if isNum1 && isNum2 {
+			if n1 > n2 {
+				return 1
+			}
+			if n1 < n2 {
+				return -1
+			}
+		} else if isNum1 && !isNum2 {
+			return -1
+		} else if !isNum1 && isNum2 {
+			return 1
 		} else {
-			break
+			if s1 > s2 {
+				return 1
+			}
+			if s1 < s2 {
+				return -1
+			}
 		}
 	}
-	if numStr == "" {
-		return 0, fmt.Errorf("no digits")
-	}
-	var res int
-	fmt.Sscanf(numStr, "%d", &res)
-	return res, nil
+	return 0
 }
+
+func compareVersions(v1, v2 string) int {
+	return compareSemVer(v1, v2)
+}
+
 
 // pickAsset находит ассет для текущей операционной системы и архитектуры
 func pickAsset(assets []GitHubAsset) (string, string, int64) {

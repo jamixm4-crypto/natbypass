@@ -96,8 +96,8 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.220"
-	Commit  = "release"
+	Version = "1.9.221-beta.1"
+	Commit  = "beta"
 )
 
 
@@ -1645,7 +1645,13 @@ func handleCommand(id uint16) {
 				buttonLabels[ID_BTN_CHECK_UPDATE] = "🚀 Проверить обновления NatBypass на GitHub"
 				procInvalidateRect.Call(hBtnCheckUpdate, 0, 1)
 			}()
-			info, err := updater.CheckUpdate(context.Background(), Version)
+			includeBeta := false
+			if cfg != nil && cfg.App.BetaChannel {
+				includeBeta = true
+			}
+			info, err := updater.CheckUpdateWithOptions(context.Background(), Version, updater.CheckOptions{
+				IncludePrerelease: includeBeta,
+			})
 			if err != nil {
 				addLog("❌ Ошибка проверки обновлений: " + err.Error())
 				msg, _ := windows.UTF16PtrFromString("Не удалось проверить обновления:\n" + err.Error())
@@ -2815,7 +2821,11 @@ func showUpdateModal(info *updater.ReleaseInfo) {
 	darkMode := int32(1)
 	procDwmSetWindowAttribute.Call(hDlg, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
-	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("🚀 Доступно обновление NatBypass %s", info.LatestVersion), 24, 18, 470, 24, hFontBold)
+	titleText := fmt.Sprintf("🚀 Доступно обновление NatBypass %s", info.LatestVersion)
+	if info.IsPrerelease {
+		titleText = fmt.Sprintf("🧪 Тестовая сборка NatBypass %s [BETA]", info.LatestVersion)
+	}
+	_ = createLabelOn(hDlg, hInstance, titleText, 24, 18, 470, 24, hFontBold)
 	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("Текущая версия: v%s   ➜   Новая версия: %s", Version, info.LatestVersion), 24, 46, 470, 18, hFontNormal)
 
 	sizeMB := float64(info.AssetSize) / (1024 * 1024)
