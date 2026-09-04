@@ -172,19 +172,22 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	var err error
 	var lAddr *net.UDPAddr
 
-	// Use "udp" (dual-stack: IPv4 + IPv6) for full mobile and desktop support
+	// Bind IPv4 socket (udp4) first for maximum compatibility with Linux/router NAT stacks
 	if preferredPort > 0 {
-		lAddr, _ = net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", preferredPort))
-		conn, err = net.ListenUDP("udp", lAddr)
+		lAddr, _ = net.ResolveUDPAddr("udp4", fmt.Sprintf("0.0.0.0:%d", preferredPort))
+		conn, err = net.ListenUDP("udp4", lAddr)
+		if err != nil {
+			lAddr, _ = net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", preferredPort))
+			conn, err = net.ListenUDP("udp", lAddr)
+		}
 	}
 
 	if err != nil || conn == nil {
-		lAddr, _ = net.ResolveUDPAddr("udp", ":0")
-		conn, err = net.ListenUDP("udp", lAddr)
+		lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
+		conn, err = net.ListenUDP("udp4", lAddr4)
 		if err != nil {
-			// Fallback to udp4 if dual-stack is not supported by kernel
-			lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
-			conn, err = net.ListenUDP("udp4", lAddr4)
+			lAddr, _ = net.ResolveUDPAddr("udp", ":0")
+			conn, err = net.ListenUDP("udp", lAddr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to bind UDP socket: %w", err)
 			}
@@ -377,8 +380,8 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 		return nil, 0, fmt.Errorf("UDP socket closed")
 	}
 
-	if len(servers) > 4 {
-		servers = servers[:4]
+	if len(servers) > 6 {
+		servers = servers[:6]
 	}
 
 	// 2. Отправляем Binding Request параллельно на все топ STUN сервера
@@ -896,12 +899,12 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	// 4. Создаём новый контекст
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
-	// 5. Открываем новый сокет
-	lAddr, _ := net.ResolveUDPAddr("udp", ":0")
-	conn, err := net.ListenUDP("udp", lAddr)
+	// 5. Открываем новый сокет (предпочтительно udp4)
+	lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
+	conn, err := net.ListenUDP("udp4", lAddr4)
 	if err != nil {
-		lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
-		conn, err = net.ListenUDP("udp4", lAddr4)
+		lAddr, _ := net.ResolveUDPAddr("udp", ":0")
+		conn, err = net.ListenUDP("udp", lAddr)
 		if err != nil {
 			p.mu.Unlock()
 			return 0, fmt.Errorf("failed to re-bind port during hop: %w", err)

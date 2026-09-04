@@ -1063,7 +1063,22 @@ func publishLoop(
 		}
 
 		if uiServer != nil {
-			uiServer.SetAppState(deviceID, ip.String(), stunAddr)
+			pubIPStr := ""
+			if ip != nil && !ip.IsUnspecified() && !ip.IsLoopback() {
+				pubIPStr = ip.String()
+			}
+			if pubIPStr == "" || pubIPStr == "0.0.0.0" || pubIPStr == "<nil>" {
+				if localLAN := network.GetLocalLANIP(); localLAN != "" {
+					pubIPStr = localLAN
+				} else {
+					pubIPStr = "Локальная сеть (NAT)"
+				}
+			}
+			curStun := stunAddr
+			if curStun == "" {
+				curStun = "Недоступен (Relay / Symmetric NAT)"
+			}
+			uiServer.SetAppState(deviceID, pubIPStr, curStun)
 			uiServer.SetVirtualIP(virtualIP)
 			if puncher != nil {
 				uiServer.SetNATType(puncher.GetNATType().String())

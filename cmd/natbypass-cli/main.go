@@ -15,7 +15,7 @@ import (
 
 
 var (
-	Version   = "1.9.214"
+	Version   = "1.9.215"
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
@@ -31,6 +31,17 @@ var (
 
 
 func main() {
+	// Normalize common single-dash long flags for seamless CLI UX (-config -> --config)
+	for i, arg := range os.Args {
+		if arg == "-config" {
+			os.Args[i] = "--config"
+		} else if arg == "-port" {
+			os.Args[i] = "--port"
+		} else if arg == "-log-level" {
+			os.Args[i] = "--log-level"
+		}
+	}
+
 	// Embedded router optimization: reduce GC and OS thread pressure on MIPS/ARM
 	if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "arm" {
 		runtime.GOMAXPROCS(1)
