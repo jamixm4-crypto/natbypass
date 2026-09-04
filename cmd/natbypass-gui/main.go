@@ -760,27 +760,6 @@ func cleanStaleInstances() {
 	}
 }
 
-var (
-	dpiScale            float64 = 1.0
-	procGetDpiForWindow         = moduser32.NewProc("GetDpiForWindow")
-)
-
-func scale(val int) int {
-	if dpiScale <= 1.0 {
-		return val
-	}
-	return int(float64(val) * dpiScale)
-}
-
-func updateWindowDPI(hwnd uintptr) {
-	if procGetDpiForWindow.Find() == nil {
-		dpi, _, _ := procGetDpiForWindow.Call(hwnd)
-		if dpi > 0 {
-			dpiScale = float64(dpi) / 96.0
-		}
-	}
-}
-
 func setupDPI() {
 	defer func() { recover() }()
 	proc := moduser32.NewProc("SetProcessDpiAwarenessContext")
@@ -1022,7 +1001,6 @@ func main() {
 		0, 0, hInstance, 0,
 	)
 	hMainWnd = hwnd
-	updateWindowDPI(hMainWnd)
 	procDragAcceptFiles.Call(hMainWnd, 1)
 	writeDebug(fmt.Sprintf("Главное окно создано, HWND=0x%X", hMainWnd))
 
@@ -1080,21 +1058,6 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		return 1
 
 	case WM_SIZE:
-		procInvalidateRect.Call(hwnd, 0, 1)
-		return 0
-
-	case 0x02E0: // WM_DPICHANGED: adaptive resize when moved to high-DPI monitor
-		newDPI := LOWORD(wParam)
-		if newDPI > 0 {
-			dpiScale = float64(newDPI) / 96.0
-		}
-		newRect := (*RECT)(unsafe.Pointer(lParam))
-		if newRect != nil {
-			procSetWindowPos.Call(hwnd, 0,
-				uintptr(newRect.Left), uintptr(newRect.Top),
-				uintptr(newRect.Right-newRect.Left), uintptr(newRect.Bottom-newRect.Top),
-				0x0004 /* SWP_NOZORDER */ | 0x0010 /* SWP_NOACTIVATE */)
-		}
 		procInvalidateRect.Call(hwnd, 0, 1)
 		return 0
 
@@ -6254,7 +6217,7 @@ func createLabelOn(parent, hInstance uintptr, text string, x, y, w, h int, font 
 		uintptr(unsafe.Pointer(staticClass)),
 		uintptr(unsafe.Pointer(textPtr)),
 		WS_CHILD|WS_VISIBLE|SS_LEFT|SS_NOPREFIX,
-		uintptr(scale(x)), uintptr(scale(y)), uintptr(scale(w)), uintptr(scale(h)),
+		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 		parent, 0, hInstance, 0,
 	)
 	if font != 0 {
@@ -6280,7 +6243,7 @@ func createOwnerDrawButtonOn(parent, hInstance uintptr, text string, x, y, w, h 
 		uintptr(unsafe.Pointer(btnClass)),
 		uintptr(unsafe.Pointer(textPtr)),
 		WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,
-		uintptr(scale(x)), uintptr(scale(y)), uintptr(scale(w)), uintptr(scale(h)),
+		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 		parent, uintptr(id), hInstance, 0,
 	)
 	return hwnd
@@ -6309,7 +6272,7 @@ func createEditOn(parent, hInstance uintptr, text string, x, y, w, h int, multil
 		uintptr(unsafe.Pointer(editClass)),
 		uintptr(unsafe.Pointer(textPtr)),
 		uintptr(style),
-		uintptr(scale(x)), uintptr(scale(y)), uintptr(scale(w)), uintptr(scale(h)),
+		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 		parent, 0, hInstance, 0,
 	)
 	if font != 0 {
@@ -6335,7 +6298,7 @@ func createListBox(hInstance uintptr, x, y, w, h int, font uintptr) uintptr {
 		uintptr(unsafe.Pointer(lbClass)),
 		0,
 		WS_CHILD|WS_TABSTOP|WS_BORDER|WS_VSCROLL|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT,
-		uintptr(scale(x)), uintptr(scale(y)), uintptr(scale(w)), uintptr(scale(h)),
+		uintptr(x), uintptr(y), uintptr(w), uintptr(h),
 		hMainWnd, 0, hInstance, 0,
 	)
 	if font != 0 {
@@ -6352,8 +6315,7 @@ func addListBoxItem(hwnd uintptr, text string) {
 
 func createFont(name string, height int, weight int) uintptr {
 	namePtr, _ := windows.UTF16PtrFromString(name)
-	scaledH := scale(height)
-	h := scaledH
+	h := height
 	if h > 0 {
 		h = -h
 	}
