@@ -191,6 +191,13 @@ log_info "Таблица маршрутов:"
 if command -v ip >/dev/null 2>&1; then
     ip route show table main 2>/dev/null | grep -E 'nb0|10\.|100\.64' || ip route show 2>/dev/null | grep -E 'nb0|10\.|100\.64'
     ip route show table main >> "$REPORT_FILE" 2>&1
+    # Авто-очистка устаревших правил старых подсетей
+    if [ -n "$IP_ADDR" ] && ! echo "$IP_ADDR" | grep -q '^10\.123\.111\.'; then
+        if ip rule show 2>/dev/null | grep -q '10\.123\.111\.'; then
+            ip rule del to 10.123.111.0/24 2>/dev/null || true
+            ip rule del from 10.123.111.0/24 2>/dev/null || true
+        fi
+    fi
     log_info "Правила ip rule:"
     ip rule show 2>/dev/null | head -n 10
     ip rule show >> "$REPORT_FILE" 2>&1
@@ -266,34 +273,38 @@ if [ -n "$IP_ADDR" ]; then
     test_ping "$IP_ADDR" "Локальный узел (Self / nb0)"
 fi
 
-# 2. Динамический пинг всех пиров из API
-PING_COUNT=0
-if [ -n "$PEERS_JSON" ]; then
-    # Извлекаем пары virtual_ip и device_name / device_id
-    PEER_ENTRIES="$(echo "$PEERS_JSON" | grep -o '{"device_id":[^}]*' || echo '')"
-    if [ -n "$PEER_ENTRIES" ]; then
-        echo "$PEERS_JSON" | tr '}' '\n' | while read -r p_line; do
-            VIP="$(echo "$p_line" | grep -o '"virtual_ip":"[^"]*' | cut -d'"' -f4)"
-            DEV_NAME="$(echo "$p_line" | grep -o '"device_name":"[^"]*' | cut -d'"' -f4)"
-            DEV_ID="$(echo "$p_line" | grep -o '"device_id":"[^"]*' | cut -d'"' -f4)"
-            if [ -z "$DEV_NAME" ]; then
-                DEV_NAME="$DEV_ID"
-            fi
-            if [ -n "$VIP" ] && [ "$VIP" != "$IP_ADDR" ]; then
-                test_ping "$VIP" "$DEV_NAME"
-            fi
-        done
-        PING_COUNT=1
-    fi
+# 2. Динамический пинг всех зарегистрированных пиров из API
+PEERS_PINGED=0
+if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
+    TMP_PEERS="$(mktemp 2>/dev/null || echo "/tmp/nb_diag_peers_$$")"
+    echo "$PEERS_JSON" | tr '}' '\n' > "$TMP_PEERS"
+    while read -r p_line; do
+        VIP="$(echo "$p_line" | grep -o '"virtual_ip":"[^"]*' | cut -d'"' -f4)"
+        DEV_NAME="$(echo "$p_line" | grep -o '"device_name":"[^"]*' | cut -d'"' -f4)"
+        DEV_ID="$(echo "$p_line" | grep -o '"device_id":"[^"]*' | cut -d'"' -f4)"
+        [ -z "$DEV_NAME" ] && DEV_NAME="$DEV_ID"
+        CLEAN_VIP="$(echo "$VIP" | awk -F'/' '{print $1}' | tr -d ' ')"
+        if [ -n "$CLEAN_VIP" ] && [ "$CLEAN_VIP" != "$IP_ADDR" ] && [ "$CLEAN_VIP" != "0.0.0.0" ]; then
+            test_ping "$CLEAN_VIP" "$DEV_NAME"
+            PEERS_PINGED=$((PEERS_PINGED + 1))
+        fi
+    done < "$TMP_PEERS"
+    rm -f "$TMP_PEERS"
 fi
 
-# Fallback: если пиров в API пока нет, проверяем стандартные тестовые узлы
-if [ "$PING_COUNT" -eq 0 ]; then
-    for fallback_ip in "10.123.111.1" "10.123.111.2" "10.123.111.110" "100.64.200.1"; do
-        if [ "$fallback_ip" != "$IP_ADDR" ]; then
-            test_ping "$fallback_ip" "Mesh узел (Fallback)"
-        fi
-    done
+# Если удалённых пиров в API пока нет:
+if [ "$PEERS_PINGED" -eq 0 ]; then
+    log_info "Удалённые пиры в реестре API пока не зарегистрированы (ожидание маяков signaling)"
+    # Пингуем тестовый узел ТОЛЬКО из той же подсети, что и текущий узел (например, 10.11.12.1)
+    if [ -n "$IP_ADDR" ]; then
+        SUBNET_PREF="$(echo "$IP_ADDR" | awk -F'.' '{print $1"."$2"."$3}')"
+        for host_num in 1 2; do
+            CANDIDATE="${SUBNET_PREF}.${host_num}"
+            if [ "$CANDIDATE" != "$IP_ADDR" ]; then
+                test_ping "$CANDIDATE" "Узел подсети ${SUBNET_PREF}.0/24 (Fallback)"
+            fi
+        done
+    fi
 fi
 
 printf "\n%b======================================================================%b\n" "$C_GREEN$C_BOLD" "$C_RESET"

@@ -916,7 +916,8 @@ func publishLoop(
 			log.Info().Str("old_vip", virtualIP).Str("new_vip", currentVIP).Msg("Virtual IP dynamically updated on interface")
 		}
 
-		ip, _ := ipDisc.GetPublicIPCached(ctx, publishInterval/2)
+		var ip net.IP
+		var candidates []string
 
 		var awgParams *signaling.AWGParams
 		if cfg.WireGuard.AWG.Enabled || cfg.WireGuard.Enabled {
@@ -943,7 +944,6 @@ func publishLoop(
 			}
 		}
 
-		var candidates []string
 		if puncher != nil {
 			// On MIPS/ARM: cache STUN results to avoid 6 STUN queries every publish cycle.
 			// Re-query only when cache TTL expires or public IP has changed.
@@ -953,7 +953,8 @@ func publishLoop(
 				if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
 					stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
 					stunCachedAt = now
-					candidatesCached = puncher.DiscoverCandidates(ctx, ip.String())
+					ip = extIP
+					candidatesCached = puncher.DiscoverCandidates(ctx, extIP.String())
 				} else {
 					log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
 					if stunAddr == "" {
@@ -962,6 +963,19 @@ func publishLoop(
 				}
 			}
 			candidates = candidatesCached
+
+			if ip == nil || ip.IsUnspecified() || ip.IsLoopback() {
+				if ipDisc != nil {
+					hCtx, hCancel := context.WithTimeout(ctx, 2*time.Second)
+					if httpIP, err := ipDisc.GetPublicIPCached(hCtx, publishInterval/2); err == nil && httpIP != nil {
+						ip = httpIP
+					}
+					hCancel()
+				}
+			}
+			if ip == nil {
+				ip = net.IPv4(0, 0, 0, 0)
+			}
 
 			myNAT := puncher.GetNATType()
 			peers := registry.List()
