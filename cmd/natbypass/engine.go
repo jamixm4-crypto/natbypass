@@ -641,6 +641,15 @@ func startSignaling(ctx context.Context, cfg *config.Config, deviceID string) *s
 	if activeProf != nil {
 		cfg.SyncSignalingWithProfile(activeProf)
 	}
+	// Persist generated profile (MQTT topic, AWG params) so that
+	// subsequent config reloads don't regenerate a new random topic.
+	if configFile != "" {
+		if saveErr := config.Save(cfg, configFile, false); saveErr != nil {
+			log.Warn().Err(saveErr).Msg("Could not persist generated profile to config file")
+		} else {
+			log.Info().Str("config", configFile).Msg("Config saved after initial profile generation")
+		}
+	}
 
 	channels, err := buildSignalingChannels(cfg)
 	if err != nil {
@@ -886,6 +895,7 @@ func publishLoop(
 	var stunAddr string
 	var stunCachedAt time.Time         // STUN result cache timestamp for MIPS/ARM
 	var candidatesCached []string      // Cached ICE candidates
+	var cachedIP net.IP                // Cached public IP across publish cycles
 	stunCacheTTL := publishInterval * 4 // Refresh STUN at most once per 4 publish cycles
 	if isLowPowerArch() && stunCacheTTL < constants.LowPowerSTUNCacheInterval {
 		stunCacheTTL = constants.LowPowerSTUNCacheInterval
@@ -967,12 +977,22 @@ func publishLoop(
 					stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
 					stunCachedAt = now
 					ip = extIP
+					cachedIP = extIP
 					candidatesCached = puncher.DiscoverCandidates(ctx, extIP.String())
 				} else {
 					log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
 					if stunAddr == "" {
 						stunAddr = "Недоступен (Relay / Symmetric NAT)"
 					}
+					// Restore from cachedIP if available
+					if cachedIP != nil && !cachedIP.IsUnspecified() {
+						ip = cachedIP
+					}
+				}
+			} else {
+				// STUN cache still valid — reuse previously resolved IP
+				if cachedIP != nil && !cachedIP.IsUnspecified() {
+					ip = cachedIP
 				}
 			}
 			candidates = candidatesCached
