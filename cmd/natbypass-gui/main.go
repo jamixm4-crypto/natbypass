@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.219"
+	Version = "1.9.220"
 	Commit  = "release"
 )
 
@@ -3768,9 +3768,11 @@ func startEngineFromConfig(c *config.Config) {
 	uiServer.SetVirtualIP(myVirtualIP)
 	uiServer.SetAppState(myDevID, myPublicIP, mySTUNAddr, myVirtualIP)
 	uiServer.SetConfigPath(configPath)
+	uiServer.SetConfig(cfg)
 	uiServer.SetOnConfigChange(func() {
 		if reloaded, err := config.Load(configPath); err == nil && reloaded != nil {
 			cfg = reloaded
+			activeExitNodeID = cfg.Network.SelectedExitNode
 			applyActiveProfileLive(cfg.EnsureActiveProfile())
 		}
 		triggerPublish()
@@ -3992,8 +3994,12 @@ func startEngineFromConfig(c *config.Config) {
 							}
 
 							// 3. Маршрутизация через Exit Node
-							if targetPeer == nil && activeExitNodeID != "" {
-								if ep, ok := registry.Get(activeExitNodeID); ok && ep.Online {
+							exitID := activeExitNodeID
+							if exitID == "" && cfg != nil {
+								exitID = cfg.Network.SelectedExitNode
+							}
+							if targetPeer == nil && exitID != "" {
+								if ep, ok := registry.Get(exitID); ok && ep.Online {
 									targetPeer = ep
 								}
 							}

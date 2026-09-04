@@ -93,20 +93,7 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 		})
 	}
 
-	// Автоматический резервный брокер для максимальной надежности
-	if strings.Contains(brokerURL, "broker.emqx.io") {
-		if strings.HasPrefix(brokerURL, "ssl://") {
-			opts.AddBroker("ssl://broker.hivemq.com:8883")
-		} else {
-			opts.AddBroker("tcp://broker.hivemq.com:1883")
-		}
-	} else if strings.Contains(brokerURL, "broker.hivemq.com") {
-		if strings.HasPrefix(brokerURL, "ssl://") {
-			opts.AddBroker("ssl://broker.emqx.io:8883")
-		} else {
-			opts.AddBroker("tcp://broker.emqx.io:1883")
-		}
-	}
+	// Подключаемся строго к брокеру, указанному в профиле (не смешиваем несовместимые публичные брокеры)
 
 	opts.SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).
 		SetUsername(username).
@@ -251,8 +238,11 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 
 	if !m.client.IsConnected() {
 		tok := m.client.Connect()
-		if tok.WaitTimeout(4 * time.Second) && tok.Error() != nil {
-			return fmt.Errorf("MQTT reconnect: %w", tok.Error())
+		if !tok.WaitTimeout(4 * time.Second) {
+			return fmt.Errorf("MQTT reconnect timeout")
+		}
+		if err := tok.Error(); err != nil {
+			return fmt.Errorf("MQTT reconnect: %w", err)
 		}
 	}
 

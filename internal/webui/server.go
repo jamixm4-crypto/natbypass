@@ -75,6 +75,7 @@ type Server struct {
 	password   string
 	configPath string
 	version    string
+	cfg        *config.Config
 	registry   *peer.Registry
 	sigMgr     *signaling.FallbackManager
 	state      *AppState
@@ -183,6 +184,11 @@ func (s *Server) SetConfigPath(path string) {
 	if path != "" {
 		s.configPath = path
 	}
+}
+
+// SetConfig привязывает объект конфигурации рантайма
+func (s *Server) SetConfig(cfg *config.Config) {
+	s.cfg = cfg
 }
 
 // SetSignalingManager обновляет менеджер сигнальных каналов
@@ -742,7 +748,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.219"
+		ver = "1.9.220"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -871,59 +877,34 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Сохраняем в YAML
-		yamlData := fmt.Sprintf(`# ============================================================
-# NatBypass — Конфигурационный файл (Сохранено через Web UI)
-# ============================================================
-
-app:
-  name: "%s"
-  version: "1.0.0"
-  log_level: "%s"
-  publish_interval: %d
-
-web_ui:
-  enabled: %t
-  port: %d
-  username: "%s"
-  password: "%s"
-
-network:
-  upnp_enabled: %t
-  stun_servers:
-`, req.App.Name, req.App.LogLevel, req.App.PublishInterval, req.WebUI.Enabled, req.WebUI.Port, req.WebUI.Username, req.WebUI.Password, req.Network.UpnpEnabled)
-
-		for _, st := range req.Network.StunServers {
-			yamlData += fmt.Sprintf("    - \"%s\"\n", st)
-		}
-		yamlData += "  ip_apis:\n"
-		for _, ipa := range req.Network.IPApis {
-			yamlData += fmt.Sprintf("    - \"%s\"\n", ipa)
-		}
-
-		yamlData += "signaling:\n  channels:\n"
-		for _, ch := range req.Signaling.Channels {
-			yamlData += fmt.Sprintf("    - type: \"%s\"\n      priority: %d\n      enabled: %t\n      params:\n", ch.Type, ch.Priority, ch.Enabled)
-			for k, v := range ch.Params {
-				yamlData += fmt.Sprintf("        %s: \"%s\"\n", k, v)
-			}
-		}
-
-		yamlData += fmt.Sprintf(`wireguard:
-  enabled: %t
-  interface: "%s"
-  listen_port: %d
-  mtu: %d
-`, req.WireGuard.Enabled, req.WireGuard.Interface, req.WireGuard.ListenPort, req.WireGuard.MTU)
-
 		targetPath := s.configPath
 		if targetPath == "" {
 			targetPath = "config.yaml"
 		}
+
+		existingCfg, _ := config.Load(targetPath)
+		if existingCfg == nil {
+			existingCfg = &req
+		} else {
+			// Обновляем общие секции настроек, сохраняя секцию profiles и active_profile
+			existingCfg.App = req.App
+			existingCfg.WebUI = req.WebUI
+			existingCfg.Network = req.Network
+			existingCfg.Signaling = req.Signaling
+			existingCfg.WireGuard = req.WireGuard
+		}
+
 		_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
-		if err := os.WriteFile(targetPath, []byte(yamlData), 0644); err != nil {
+		if err := config.Save(existingCfg, targetPath, false); err != nil {
 			s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка записи файла: "+err.Error())
 			return
+		}
+
+		if s.cfg != nil {
+			*s.cfg = *existingCfg
+		}
+		if s.onConfigChange != nil {
+			s.onConfigChange()
 		}
 
 		if s.registry != nil {
@@ -1564,7 +1545,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.219"
+		ver = "1.9.220"
 	}
 
 	vip := s.state.VirtualIP
@@ -1806,7 +1787,11 @@ func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 		if req.AllowExitNode != nil {
 			cfg.Network.AllowExitNode = *req.AllowExitNode
 			if *req.AllowExitNode {
-				_ = tunnel.EnableHostIPForwardingSubnet(cfg.Network.Address)
+				subnet := cfg.Network.Address
+				if subnet == "" {
+					subnet = "100.64.200.0/24"
+				}
+				_ = tunnel.EnableHostIPForwardingSubnet(subnet)
 				s.AddEvent("info", "Режим Exit Node включен", "Активирован NAT Masquerade для доступа в интернет")
 			} else {
 				_ = tunnel.DisableHostIPForwarding()
@@ -1814,9 +1799,53 @@ func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if req.DefaultGatewayPeer != nil {
-			cfg.Network.SelectedExitNode = *req.DefaultGatewayPeer
+			oldExit := cfg.Network.SelectedExitNode
+			newExit := *req.DefaultGatewayPeer
+			cfg.Network.SelectedExitNode = newExit
+			if newExit != "" && newExit != oldExit {
+				var remoteEPs []string
+				vip := ""
+				if s.registry != nil {
+					if p, ok := s.registry.Get(newExit); ok && p != nil {
+						vip = p.VirtualIP
+						if p.ActiveEndpoint != "" {
+							remoteEPs = append(remoteEPs, p.ActiveEndpoint)
+						}
+						if p.STUNAddr != "" {
+							remoteEPs = append(remoteEPs, p.STUNAddr)
+						}
+						if p.PublicIP != "" {
+							remoteEPs = append(remoteEPs, p.PublicIP)
+						}
+						for _, cand := range p.Candidates {
+							if cand != "" {
+								remoteEPs = append(remoteEPs, cand)
+							}
+						}
+					}
+				}
+				for _, st := range cfg.Network.StunServers {
+					remoteEPs = append(remoteEPs, st)
+				}
+				for _, ch := range cfg.Signaling.Channels {
+					if ch.Type == "mqtt" && ch.Params["broker"] != "" {
+						remoteEPs = append(remoteEPs, ch.Params["broker"])
+					}
+				}
+				if cfg.Relay.Server != "" {
+					remoteEPs = append(remoteEPs, cfg.Relay.Server)
+				}
+				if vip != "" {
+					_ = tunnel.EnableExitNodeRouting(vip, remoteEPs...)
+				}
+			} else if newExit == "" && oldExit != "" {
+				_ = tunnel.DisableExitNodeRouting("")
+			}
 		}
 		_ = config.Save(cfg, s.configPath, true)
+		if s.cfg != nil {
+			*s.cfg = *cfg
+		}
 		if s.onConfigChange != nil {
 			s.onConfigChange()
 		}
@@ -2450,6 +2479,11 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 
 	cfg.SyncSignalingWithProfile(target)
 
+	if err := config.Save(cfg, s.configPath, false); err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения профиля на диск: "+err.Error())
+		return
+	}
+
 	if target.ID == cfg.ActiveProfileID {
 		cfg.SyncSignalingWithProfile(target)
 		if s.sigMgr != nil && target.MQTTTopic != "" {
@@ -2466,10 +2500,6 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := config.Save(cfg, s.configPath, false); err != nil {
-		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения профиля на диск: "+err.Error())
-		return
-	}
 	s.AddEvent("info", "Обновлен профиль сети: "+target.Name, "Топик: "+target.MQTTTopic)
 	if s.onConfigChange != nil {
 		s.onConfigChange()
@@ -2608,7 +2638,10 @@ func (s *Server) handleProfileExport(w http.ResponseWriter, r *http.Request) {
 	if target == nil {
 		target = cfg.EnsureActiveProfile()
 	}
-	if (!hadProfiles || err != nil) && target != nil {
+	if (!hadProfiles || err != nil || (target != nil && target.H1 == 0)) && target != nil {
+		if target.H1 == 0 {
+			cfg.EnsureActiveProfile()
+		}
 		_ = config.Save(cfg, s.configPath, false)
 	}
 
@@ -2654,14 +2687,26 @@ func (s *Server) handleProfileImport(w http.ResponseWriter, r *http.Request) {
 	saved := cfg.AddOrUpdateProfile(*parsed)
 	_ = config.Save(cfg, s.configPath, false)
 
-	if req.AutoSwitch && s.onProfileSwitch != nil {
-		_ = s.onProfileSwitch(saved)
+	if req.AutoSwitch {
+		cfg.SyncSignalingWithProfile(saved)
+		if s.sigMgr != nil && saved.MQTTTopic != "" {
+			s.sigMgr.UpdateMQTTTopic(saved.MQTTTopic)
+		}
+		if saved.VirtualIP != "" {
+			s.SetVirtualIP(strings.TrimSpace(strings.Split(saved.VirtualIP, "/")[0]))
+		}
+		if s.onProfileSwitch != nil {
+			_ = s.onProfileSwitch(saved)
+		}
 		if s.registry != nil {
 			s.registry.ClearAll()
 		}
-		s.AddEvent("channel_switch", "мпортирован и активирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
+		if s.onConfigChange != nil {
+			s.onConfigChange()
+		}
+		s.AddEvent("channel_switch", "Импортирован и активирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
 	} else {
-		s.AddEvent("info", "мпортирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
+		s.AddEvent("info", "Импортирован профиль сети: "+saved.Name, "Топик: "+saved.MQTTTopic)
 	}
 
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
@@ -2751,8 +2796,29 @@ func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Requ
 				if p.PublicIP != "" {
 					remoteEPs = append(remoteEPs, p.PublicIP)
 				}
+				for _, cand := range p.Candidates {
+					if cand != "" {
+						remoteEPs = append(remoteEPs, cand)
+					}
+				}
 			}
 		}
+
+		// Also bypass critical signaling infrastructure (MQTT broker, STUN servers, WSS relay)
+		if cfg != nil {
+			for _, st := range cfg.Network.StunServers {
+				remoteEPs = append(remoteEPs, st)
+			}
+			for _, ch := range cfg.Signaling.Channels {
+				if ch.Type == "mqtt" && ch.Params["broker"] != "" {
+					remoteEPs = append(remoteEPs, ch.Params["broker"])
+				}
+			}
+			if cfg.Relay.Server != "" {
+				remoteEPs = append(remoteEPs, cfg.Relay.Server)
+			}
+		}
+
 		if req.GatewayVIP == "" {
 			s.jsonResponse(w, http.StatusBadRequest, nil, "не указан виртуальный IP шлюза")
 			return
@@ -2765,11 +2831,23 @@ func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Requ
 
 		cfg.Network.SelectedExitNode = req.PeerID
 		_ = config.Save(cfg, s.configPath, false)
+		if s.cfg != nil {
+			s.cfg.Network.SelectedExitNode = cfg.Network.SelectedExitNode
+		}
+		if s.onConfigChange != nil {
+			s.onConfigChange()
+		}
 		s.AddEvent("info", "Активирован интернет-шлюз", "Весь интернет перенаправлен через "+req.GatewayVIP)
 	} else {
 		_ = tunnel.DisableExitNodeRouting(req.GatewayVIP)
 		cfg.Network.SelectedExitNode = ""
 		_ = config.Save(cfg, s.configPath, false)
+		if s.cfg != nil {
+			s.cfg.Network.SelectedExitNode = ""
+		}
+		if s.onConfigChange != nil {
+			s.onConfigChange()
+		}
 		s.AddEvent("info", "Отключен интернет-шлюз", "Восстановлено прямое подключение к интернету")
 	}
 

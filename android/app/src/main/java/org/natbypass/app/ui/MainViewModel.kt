@@ -452,9 +452,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // в”Ђв”Ђ Profile actions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
+    private fun notifyVpnReconfigure(context: Context) {
+        if (org.natbypass.app.service.NatBypassVpnService.isRunning) {
+            val intent = Intent(context, org.natbypass.app.service.NatBypassVpnService::class.java).apply {
+                action = org.natbypass.app.service.NatBypassVpnService.ACTION_RECONNECT
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+    }
+
     fun switchProfile(profileId: String, context: Context) {
         if (MobileBridge.switchProfile(profileId)) {
             saveConfigToDisk(context)
+            notifyVpnReconfigure(context)
             viewModelScope.launch { refreshStatus() }
         }
     }
@@ -475,6 +485,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             MobileBridge.setVirtualIP(virtualIp.trim())
         }
         saveConfigToDisk(context)
+        notifyVpnReconfigure(context)
         viewModelScope.launch { refreshStatus() }
     }
 
@@ -487,12 +498,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             MobileBridge.setProfileVirtualIP(id, virtualIp.trim())
         }
         saveConfigToDisk(context)
+        notifyVpnReconfigure(context)
         viewModelScope.launch { refreshStatus() }
     }
 
     fun deleteProfile(context: Context, profileId: String) {
         MobileBridge.deleteProfile(profileId)
         saveConfigToDisk(context)
+        notifyVpnReconfigure(context)
         viewModelScope.launch { refreshStatus() }
     }
 
@@ -500,6 +513,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val res = MobileBridge.importProfileURI(uri)
         return if (!res.startsWith("ERR:")) {
             saveConfigToDisk(context)
+            notifyVpnReconfigure(context)
             viewModelScope.launch { refreshStatus() }
             true
         } else false
@@ -513,6 +527,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val res = MobileBridge.importAllProfilesJSON(jsonStr)
         if (res == "OK") {
             saveConfigToDisk(context)
+            notifyVpnReconfigure(context)
             viewModelScope.launch { refreshStatus() }
             return true
         }

@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.219"
+const Version = "1.9.220"
 
 
 
@@ -678,15 +678,21 @@ func attachTUN(tunFd int) {
 	if tunFd <= 0 {
 		return
 	}
+	engineMu.Lock()
+	if globalTunFile != nil {
+		_ = globalTunFile.Close()
+		globalTunFile = nil
+	}
 	globalTunFile = os.NewFile(uintptr(tunFd), "tun")
+	engineMu.Unlock()
 
 	if globalPuncher != nil && globalTunFile != nil {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
 
-			// Write ALL packets directly to TUN fd.
-			// Android OS handles ICMP Echo Reply, TCP ACK, UDP natively — no userspace interception needed.
-			// Do NOT call respondICMPEcho here: it causes double-ICMP and corrupts the reply path.
+			// Юзерспейс-ответ на входящие ICMP Echo запросы (чтобы другие узлы могли пинговать Android)
+			respondICMPEcho(payload, srcAddr)
+
 			engineMu.Lock()
 			tf := globalTunFile
 			engineMu.Unlock()
@@ -2030,17 +2036,21 @@ func PingPeer(deviceID string) int64 {
 		return -1
 	}
 
-	vip := strings.TrimSpace(strings.Split(peerObj.VirtualIP, "/")[0])
-	if vip != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-		rtt, err := diagnostic.PingVirtualIP(ctx, vip, 1200*time.Millisecond)
-		cancel()
-		if err == nil && rtt > 0 {
-			peerObj.Latency = rtt
-			peerObj.PingMs = rtt.Milliseconds()
-			peerObj.DirectP2P = true
-			reg.Upsert(peerObj)
-			return peerObj.PingMs
+	// На Android системный exec("ping") блокируется SELinux (untrusted_app).
+	// На Android используем прямой UDP-зонд, а на других ОС — сначала пробуем PingVirtualIP.
+	if runtime.GOOS != "android" {
+		vip := strings.TrimSpace(strings.Split(peerObj.VirtualIP, "/")[0])
+		if vip != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			rtt, err := diagnostic.PingVirtualIP(ctx, vip, 1200*time.Millisecond)
+			cancel()
+			if err == nil && rtt > 0 {
+				peerObj.Latency = rtt
+				peerObj.PingMs = rtt.Milliseconds()
+				peerObj.DirectP2P = true
+				reg.Upsert(peerObj)
+				return peerObj.PingMs
+			}
 		}
 	}
 
@@ -2071,8 +2081,8 @@ func PingPeer(deviceID string) int64 {
 		}
 	}
 
-	// Ждем до 400мс реального эхо-ответа
-	for i := 0; i < 8; i++ {
+	// Ждем до 1000мс реального эхо-ответа
+	for i := 0; i < 20; i++ {
 		time.Sleep(50 * time.Millisecond)
 		if updated, exists := reg.Get(deviceID); exists {
 			if updated.LastSeen.After(initialTs) && updated.PingMs > 0 {

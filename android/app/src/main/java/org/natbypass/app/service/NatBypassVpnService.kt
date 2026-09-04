@@ -156,6 +156,9 @@ class NatBypassVpnService : VpnService() {
                 try { builder.setMetered(false) } catch (_: Throwable) {}
             }
 
+            val subnetParts = currentVip.split(".")
+            val meshSubnet = if (subnetParts.size == 4) "${subnetParts[0]}.${subnetParts[1]}.${subnetParts[2]}.0" else "100.64.200.0"
+
             if (useExitNode) {
                 try {
                     builder.addRoute("0.0.0.0", 0)
@@ -163,25 +166,19 @@ class NatBypassVpnService : VpnService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to add default IPv4 route: ${e.message}")
                 }
-                // Для Android 14/15/16: перехват IPv6 для исключения утечки через CLAT/IPv6-First
-                try {
-                    builder.allowFamily(android.system.OsConstants.AF_INET6)
-                    builder.addAddress("fd00:10:11:12::2", 64)
-                    builder.addRoute("::", 0)
-                    builder.addDnsServer("2606:4700:4700::1111")
-                    builder.addDnsServer("2001:4860:4860::8888")
-                    Log.i(TAG, "ExitNode default route ::/0 and IPv6 DNS added")
-                } catch (t: Throwable) {
-                    Log.w(TAG, "IPv6 route setup notice: ${t.message}")
+                // Гарантируем прямой маршрут к меш-подсети рядом с дефолтным шлюзом
+                try { builder.addRoute(meshSubnet, prefix) } catch (_: Exception) {}
+                if (meshSubnet != "100.64.200.0") {
+                    try { builder.addRoute("100.64.200.0", 24) } catch (_: Exception) {}
                 }
+
+                // Надежные IPv4 DNS (не добавляем ::/0 и IPv6 DNS, так как ядро меша обрабатывает только IPv4)
                 try {
                     builder.addDnsServer("1.1.1.1")
                     builder.addDnsServer("8.8.8.8")
                 } catch (e: Exception) { Log.w(TAG, "addDnsServer error: ${e.message}") }
             } else {
                 try {
-                    val subnetParts = currentVip.split(".")
-                    val meshSubnet = if (subnetParts.size == 4) "${subnetParts[0]}.${subnetParts[1]}.${subnetParts[2]}.0" else "100.64.200.0"
                     builder.addRoute(meshSubnet, prefix)
                     Log.i(TAG, "Mesh route $meshSubnet/$prefix added")
                     if (meshSubnet != "100.64.200.0") {

@@ -68,7 +68,7 @@ func ensureIptablesRule(ipt string, table string, chain string, args ...string) 
 func EnableHostIPForwardingSubnet(subnet string) error {
 	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.ip_forward=1")
 	if subnet == "" {
-		subnet = "10.11.12.0/24"
+		subnet = "100.64.200.0/24"
 	}
 	cleanSubnet := subnet
 	if !strings.Contains(cleanSubnet, "/") {
@@ -76,7 +76,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		if len(parts) >= 3 {
 			cleanSubnet = fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
 		} else {
-			cleanSubnet = "10.11.12.0/24"
+			cleanSubnet = "100.64.200.0/24"
 		}
 	}
 
@@ -167,7 +167,8 @@ func DisableHostIPForwarding() error {
 }
 
 var (
-	lastBypassedEndpointIP string
+	linuxBypassedMu             sync.Mutex
+	lastBypassedEndpointIPs []string
 )
 
 // getPhysicalGatewayLinux finds the physical default gateway IP
@@ -200,22 +201,33 @@ func extractHostIP(endpoint string) string {
 }
 
 // EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1),
-// with automatic routing-loop prevention by adding a bypass route to the remote endpoint.
+// with automatic routing-loop prevention by adding a bypass route to the remote endpoints and signaling servers.
 func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	if gatewayVIP == "" {
 		return fmt.Errorf("gateway VIP is required")
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
 
-	// 1. Bypass remote endpoint IP via physical default gateway to prevent routing loop
-	for _, ep := range remoteEndpoints {
-		if hostIP := extractHostIP(ep); hostIP != "" {
-			if physGW := getPhysicalGatewayLinux(); physGW != "" {
-				_ = runLinuxCmd("ip", "route", "add", hostIP+"/32", "via", physGW)
-				lastBypassedEndpointIP = hostIP
-				break
+	// 1. Bypass remote endpoint IPs via physical default gateway to prevent routing loop
+	physGW := getPhysicalGatewayLinux()
+	if physGW != "" {
+		linuxBypassedMu.Lock()
+		for _, ep := range remoteEndpoints {
+			if hostIP := extractHostIP(ep); hostIP != "" {
+				alreadyAdded := false
+				for _, prev := range lastBypassedEndpointIPs {
+					if prev == hostIP {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					_ = runLinuxCmd("ip", "route", "add", hostIP+"/32", "via", physGW)
+					lastBypassedEndpointIPs = append(lastBypassedEndpointIPs, hostIP)
+				}
 			}
 		}
+		linuxBypassedMu.Unlock()
 	}
 
 	// 2. Add def1 routes
@@ -230,7 +242,7 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	return nil
 }
 
-// DisableExitNodeRouting removes def1 routes and bypass route.
+// DisableExitNodeRouting removes def1 routes and bypass routes.
 func DisableExitNodeRouting(gatewayVIP string) error {
 	if gatewayVIP != "" {
 		cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
@@ -240,10 +252,13 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1")
 	_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1")
 
-	if lastBypassedEndpointIP != "" {
-		_ = runLinuxCmd("ip", "route", "del", lastBypassedEndpointIP+"/32")
-		lastBypassedEndpointIP = ""
+	linuxBypassedMu.Lock()
+	for _, hostIP := range lastBypassedEndpointIPs {
+		_ = runLinuxCmd("ip", "route", "del", hostIP+"/32")
 	}
+	lastBypassedEndpointIPs = nil
+	linuxBypassedMu.Unlock()
+
 	return nil
 }
 

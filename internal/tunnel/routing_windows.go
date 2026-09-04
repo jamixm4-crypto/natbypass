@@ -7,6 +7,7 @@ import (
 	"net"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/natbypass/natbypass/internal/network"
@@ -30,7 +31,7 @@ func runRouteCmd(name string, args ...string) error {
 // EnableHostIPForwardingSubnet sets IP forwarding and activates Windows NetNat for dynamic mesh subnet.
 func EnableHostIPForwardingSubnet(subnet string) error {
 	if subnet == "" {
-		subnet = "10.11.12.0/24"
+		subnet = "100.64.200.0/24"
 	}
 	cleanSubnet := subnet
 	if !strings.Contains(cleanSubnet, "/") {
@@ -38,7 +39,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		if len(parts) >= 3 {
 			cleanSubnet = fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
 		} else {
-			cleanSubnet = "10.11.12.0/24"
+			cleanSubnet = "100.64.200.0/24"
 		}
 	}
 
@@ -92,7 +93,8 @@ func DisableHostIPForwarding() error {
 }
 
 var (
-	lastBypassedEndpointIP string
+	bypassedMu             sync.Mutex
+	lastBypassedEndpointIPs []string
 )
 
 // getPhysicalGatewayWindows finds the current primary physical default gateway IP
@@ -134,15 +136,26 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
 
-	// 1. Routing loop prevention: bypass remote endpoint's public IP via physical default gateway
-	for _, ep := range remoteEndpoints {
-		if hostIP := extractHostIP(ep); hostIP != "" {
-			if physGW := getPhysicalGatewayWindows(); physGW != "" {
-				_ = runRouteCmd("route", "add", hostIP, "mask", "255.255.255.255", physGW, "metric", "1")
-				lastBypassedEndpointIP = hostIP
-				break
+	// 1. Routing loop prevention: bypass remote endpoints, MQTT broker, STUN servers via physical default gateway
+	physGW := getPhysicalGatewayWindows()
+	if physGW != "" {
+		bypassedMu.Lock()
+		for _, ep := range remoteEndpoints {
+			if hostIP := extractHostIP(ep); hostIP != "" {
+				alreadyAdded := false
+				for _, prev := range lastBypassedEndpointIPs {
+					if prev == hostIP {
+						alreadyAdded = true
+						break
+					}
+				}
+				if !alreadyAdded {
+					_ = runRouteCmd("route", "add", hostIP, "mask", "255.255.255.255", physGW, "metric", "1")
+					lastBypassedEndpointIPs = append(lastBypassedEndpointIPs, hostIP)
+				}
 			}
 		}
+		bypassedMu.Unlock()
 	}
 
 	// 2. Add WireGuard def1 /1 routes
@@ -161,7 +174,7 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	return nil
 }
 
-// DisableExitNodeRouting removes the default gateway /1 routes, bypass route, and restores DNS.
+// DisableExitNodeRouting removes the default gateway /1 routes, bypass routes, and restores DNS.
 func DisableExitNodeRouting(gatewayVIP string) error {
 	var errs []string
 	if gatewayVIP != "" {
@@ -172,11 +185,13 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
 	}
 
-	// Remove bypass route if was added
-	if lastBypassedEndpointIP != "" {
-		_ = runRouteCmd("route", "delete", lastBypassedEndpointIP, "mask", "255.255.255.255")
-		lastBypassedEndpointIP = ""
+	// Remove all bypass routes
+	bypassedMu.Lock()
+	for _, hostIP := range lastBypassedEndpointIPs {
+		_ = runRouteCmd("route", "delete", hostIP, "mask", "255.255.255.255")
 	}
+	lastBypassedEndpointIPs = nil
+	bypassedMu.Unlock()
 
 	// Reset DNS on adapter
 	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", "name=NatBypass", "source=dhcp")

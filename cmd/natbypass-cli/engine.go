@@ -193,6 +193,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				uiServer.SetVirtualIP(newVIP)
 			}
+			if cfg.Network.AllowExitNode {
+				currentVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+				subnet := "100.64.200.0/24"
+				if currentVIP != "" {
+					parts := strings.Split(currentVIP, ".")
+					if len(parts) == 4 {
+						subnet = fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
+					}
+				}
+				_ = tunnel.EnableHostIPForwardingSubnet(subnet)
+			}
 			triggerPublish()
 		}
 		uiServer.SetOnConfigChange(onCfgReload)
@@ -215,6 +226,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				log.Warn().Err(err).Msg("Failed to enable MSS clamping")
 			}
 			defer tunnel.DisableMSSClamping(adapterName)
+		}
+
+		if cfg.Network.AllowExitNode {
+			currentVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+			subnet := "100.64.200.0/24"
+			if currentVIP != "" {
+				parts := strings.Split(currentVIP, ".")
+				if len(parts) == 4 {
+					subnet = fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
+				}
+			}
+			if err := tunnel.EnableHostIPForwardingSubnet(subnet); err != nil {
+				log.Warn().Err(err).Msg("Failed to enable Exit Node IP forwarding/NAT masquerade")
+			} else {
+				log.Info().Str("subnet", subnet).Msg("✅ Exit Node IP forwarding & NAT masquerade activated")
+			}
 		}
 
 		// Self-check and self-ping of Virtual IP
@@ -734,6 +761,7 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 		uiServer.SetCustomAuth(customAuth)
 	}
 	uiServer.SetOnConfigChange(triggerPublish)
+	uiServer.SetConfig(cfg)
 	uiServer.SetConfigPath(configFile)
 	uiServer.SetAppState(deviceID, "Определяется...", "Определяется...")
 	uiServer.SetDeviceName(deviceID)
@@ -1276,6 +1304,11 @@ func receiveLoop(
 					if decErr == nil && decrypted != nil {
 						p = decrypted
 					}
+				}
+				if len(p.Encrypted) > 0 {
+					// Ключ шифрования не подошел — маяк от чужой сети/комнаты.
+					// Сбрасываем пакет, чтобы не отравлять реестр пустыми полями!
+					continue
 				}
 			}
 			if p.DeviceID == "" || p.DeviceID == deviceID {
