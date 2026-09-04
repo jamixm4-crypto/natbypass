@@ -15,7 +15,7 @@ import (
 
 
 var (
-	Version   = "1.9.211"
+	Version   = "1.9.212"
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
@@ -92,18 +92,18 @@ Supported platforms: Windows, Linux (amd64/arm64/mips/mipsle), Android, iOS.`, V
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			if runtime.GOOS == "windows" {
-				p := cfg.WebUI.Port
-				if webUIPort > 0 {
-					p = webUIPort
-				}
-				if p <= 0 {
-					p = constants.DefaultWebUIPort
-				}
-				if !acquireSingleInstanceMutex(configFile, p) {
-					return nil
-				}
+			p := cfg.WebUI.Port
+			if webUIPort > 0 {
+				p = webUIPort
 			}
+			if p <= 0 {
+				p = constants.DefaultWebUIPort
+			}
+			if !acquireSingleInstanceMutex(configFile, p) {
+				return nil
+			}
+			defer releaseSingleInstanceMutex()
+
 			return runEngine(ctx, cfg, runtime.GOOS == "windows")
 		},
 	}

@@ -118,6 +118,29 @@ func acquireSingleInstanceMutex(cfgPath string, port int) bool {
 		return true
 	}
 
+	// Also check global GUI mutex so CLI and GUI cannot run simultaneously and collide over Wintun/ports
+	guiMutexName, _ := windows.UTF16PtrFromString("Global\\NatBypass_SingleInstance_Mutex_App")
+	hGuiMutex, guiErr := windows.CreateMutex(nil, false, guiMutexName)
+	if errors.Is(guiErr, windows.ERROR_ALREADY_EXISTS) || guiErr == windows.ERROR_ALREADY_EXISTS {
+		client := http.Client{Timeout: 400 * time.Millisecond}
+		resp, httpErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/status", port))
+		if httpErr == nil && resp != nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == 200 {
+				fmt.Println("NatBypass GUI is already active. Closing duplicate instance to avoid Wintun adapter collision...")
+				if hGuiMutex != 0 {
+					_ = windows.CloseHandle(hGuiMutex)
+				}
+				_ = windows.CloseHandle(hMutex)
+				activateExistingWindow()
+				return false
+			}
+		}
+	}
+	if hGuiMutex != 0 {
+		_ = windows.CloseHandle(hGuiMutex)
+	}
+
 	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) || err == windows.ERROR_ALREADY_EXISTS {
 		// Check if running instance is active
 		client := http.Client{Timeout: 400 * time.Millisecond}
@@ -136,6 +159,13 @@ func acquireSingleInstanceMutex(cfgPath string, port int) bool {
 	singleInstanceMutex = hMutex
 	cleanupStaleBackups()
 	return true
+}
+
+func releaseSingleInstanceMutex() {
+	if singleInstanceMutex != 0 {
+		_ = windows.CloseHandle(singleInstanceMutex)
+		singleInstanceMutex = 0
+	}
 }
 
 func cleanupStaleBackups() {

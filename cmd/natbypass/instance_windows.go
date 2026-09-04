@@ -158,6 +158,13 @@ func acquireSingleInstanceMutex(cfgPath string, port int) bool {
 	return true
 }
 
+func releaseSingleInstanceMutex() {
+	if singleInstanceMutex != 0 {
+		_ = windows.CloseHandle(singleInstanceMutex)
+		singleInstanceMutex = 0
+	}
+}
+
 func cleanupStaleBackups() {
 	exeDir, err := os.Executable()
 	if err != nil {

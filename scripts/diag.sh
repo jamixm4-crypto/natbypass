@@ -74,10 +74,29 @@ fi
 # 2. Процессы NatBypass
 log_section "2. СОСТОЯНИЕ ПРОЦЕССА NATBYPASS"
 
-NB_PIDS="$(pgrep -f 'natbypass' 2>/dev/null || ps | grep '[n]atbypass' | awk '{print $1}')"
-if [ -n "$NB_PIDS" ]; then
-    log_ok "Процесс NatBypass активен (PID: $NB_PIDS)"
-    ps | grep '[n]atbypass' >> "$REPORT_FILE" 2>&1
+RAW_PIDS="$(pgrep -f 'natbypass' 2>/dev/null || ps | grep '[n]atbypass' | awk '{print $1}')"
+REAL_PIDS=""
+PID_COUNT=0
+for p in $RAW_PIDS; do
+    [ "$p" = "$$" ] && continue
+    CMD="$(tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null || ps -p $p -o comm= 2>/dev/null || echo "")"
+    if echo "$CMD" | grep -qiE 'diag\.sh|wget|curl|grep'; then
+        continue
+    fi
+    if [ -d "/proc/$p" ] || kill -0 "$p" 2>/dev/null; then
+        REAL_PIDS="$REAL_PIDS $p"
+        PID_COUNT=$((PID_COUNT + 1))
+    fi
+done
+REAL_PIDS="$(echo "$REAL_PIDS" | tr '\n' ' ' | xargs 2>/dev/null || echo "$REAL_PIDS")"
+
+if [ "$PID_COUNT" -eq 1 ]; then
+    log_ok "Процесс NatBypass активен (PID: $REAL_PIDS)"
+    ps | grep '[n]atbypass' | grep -v 'grep' >> "$REPORT_FILE" 2>&1
+elif [ "$PID_COUNT" -gt 1 ]; then
+    log_fail "ВНИМАНИЕ: Запущено НЕСКОЛЬКО экземпляров NatBypass (PID: $REAL_PIDS)!"
+    log_warn "Конфликт процессов приводит к сбоям MQTT и STUN. Завершите их: killall -9 natbypass"
+    ps | grep '[n]atbypass' | grep -v 'grep' >> "$REPORT_FILE" 2>&1
 else
     log_warn "Процесс NatBypass НЕ запущен!"
 fi
