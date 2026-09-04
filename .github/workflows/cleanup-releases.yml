@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +16,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete all previous releases except the single latest
+      - name: Delete superseded releases and their tags
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -26,17 +28,21 @@ jobs:
             });
 
             console.log(`Found ${releases.length} releases`);
+            const keepIds = new Set();
+            const keepTags = new Set();
+
             if (releases.length > 0) {
               const stables = releases.filter(r => !r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
               const betas = releases.filter(r => r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-              const keepIds = new Set();
               if (stables.length > 0) {
                 keepIds.add(stables[0].id);
+                keepTags.add(stables[0].tag_name);
                 console.log(`Keeping latest STABLE release: ${stables[0].tag_name} (ID: ${stables[0].id})`);
               }
-              for (const beta of betas.slice(0, 2)) {
+              for (const beta of betas.slice(0, 1)) {
                 keepIds.add(beta.id);
+                keepTags.add(beta.tag_name);
                 console.log(`Keeping latest BETA release: ${beta.tag_name} (ID: ${beta.id})`);
               }
 
@@ -53,6 +59,47 @@ jobs:
                 } catch (e) {
                   console.error(`Failed to delete release ${release.tag_name}: ${e.message}`);
                 }
+
+                try {
+                  await github.rest.git.deleteRef({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    ref: `tags/${release.tag_name}`,
+                  });
+                  console.log(`✓ Deleted git tag ${release.tag_name}`);
+                } catch (e) {
+                  console.warn(`Could not delete tag ${release.tag_name}: ${e.message}`);
+                }
+              }
+            }
+
+            // Prune unattached/superseded git tags (keeping only active stable and beta)
+            if (keepTags.size > 0) {
+              console.log('Checking repository git tags to prune unattached/superseded tags...');
+              try {
+                const allTags = await github.paginate(github.rest.repos.listTags, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  per_page: 100,
+                });
+                console.log(`Found ${allTags.length} tags in repository`);
+                for (const tag of allTags) {
+                  if (!keepTags.has(tag.name)) {
+                    console.log(`Pruning obsolete git tag: ${tag.name}`);
+                    try {
+                      await github.rest.git.deleteRef({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        ref: `tags/${tag.name}`,
+                      });
+                      console.log(`✓ Pruned tag ${tag.name}`);
+                    } catch (e) {
+                      console.warn(`Could not prune tag ${tag.name}: ${e.message}`);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn(`Tag pruning failed: ${e.message}`);
               }
             }
 
