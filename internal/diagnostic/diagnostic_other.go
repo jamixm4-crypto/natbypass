@@ -4,6 +4,7 @@ package diagnostic
 
 import (
 	"os"
+	"os/exec"
 )
 
 func CheckIsAdmin() bool {
@@ -36,3 +37,7 @@ func CheckWebView2Runtime() DiagnosticItem {
 		Message: "✓ В Linux веб-панель управления открывается через встроенный HTTP-сервер",
 	}
 }
+
+func setSysProcAttr(cmd *exec.Cmd) {
+}
+

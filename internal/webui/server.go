@@ -26,6 +26,7 @@ import (
 
 	"github.com/natbypass/natbypass/internal/autostart"
 	"github.com/natbypass/natbypass/internal/config"
+	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/updater"
@@ -406,6 +407,46 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Background real device ICMP ping worker: keeps dashboard latency authentic
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if s.registry == nil {
+					continue
+				}
+				for _, p := range s.registry.List() {
+					if !p.Online {
+						continue
+					}
+					if s.state != nil && p.DeviceID == s.state.DeviceID {
+						continue
+					}
+					vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+					if vip != "" {
+						pingCtx, pingCancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+						rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 1200*time.Millisecond)
+						pingCancel()
+						if err == nil && rtt > 0 {
+							if p.Latency > 0 {
+								p.Latency = time.Duration(float64(p.Latency)*0.6 + float64(rtt)*0.4)
+							} else {
+								p.Latency = rtt
+							}
+							p.PingMs = p.Latency.Milliseconds()
+							p.DirectP2P = true
+							s.registry.Upsert(p)
+						}
+					}
+				}
+			}
+		}
+	}()
+
 	slog.Info("WebUI server listening", "address", listener.Addr().String(), "port", s.port, "url", fmt.Sprintf("http://127.0.0.1:%d", s.port))
 	if err := s.srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("ошибка Web UI сервера: %w", err)
@@ -701,7 +742,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.218"
+		ver = "1.9.219"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1523,7 +1564,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.218"
+		ver = "1.9.219"
 	}
 
 	vip := s.state.VirtualIP
@@ -1648,7 +1689,7 @@ func (s *Server) handlePeerBookmark(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "device_id": req.DeviceID, "nickname": req.Nickname}, "")
 }
 
-// handlePeerPing — POST /api/peer/ping — измерение реального RTT пинга до пира
+// handlePeerPing — POST /api/peer/ping — измерение реального системного RTT пинга до пира
 func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
@@ -1663,62 +1704,45 @@ func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.registry != nil {
-		if p, ok := s.registry.Get(req.DeviceID); ok {
-			if p.Latency > 0 && p.Latency < 400*time.Millisecond {
-				s.jsonResponse(w, http.StatusOK, map[string]interface{}{
-					"device_id":  req.DeviceID,
-					"latency_ms": p.Latency.Milliseconds(),
-					"direct_p2p": p.DirectP2P,
-				}, "")
-				return
-			}
-
-			targetAddr := p.STUNAddr
-			if targetAddr == "" && p.PublicIP != "" && p.WGPort > 0 {
-				targetAddr = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
-			}
-			if targetAddr != "" {
-				start := time.Now()
-				conn, err := net.DialTimeout("udp4", targetAddr, 250*time.Millisecond)
-				if err == nil {
-					_ = conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
-					myDev := "local"
-					if s.state != nil && s.state.DeviceID != "" {
-						myDev = s.state.DeviceID
-					}
-					pingPayload := fmt.Sprintf("NATBYPASS:PING:%s:%d", myDev, time.Now().UnixNano())
-					_, _ = conn.Write([]byte(pingPayload))
-					buf := make([]byte, 128)
-					n, _ := conn.Read(buf)
-					conn.Close()
-					rtt := time.Since(start)
-					if n > 0 && strings.HasPrefix(string(buf[:n]), "NATBYPASS:PONG:") {
-						p.Latency = rtt
-						p.DirectP2P = true
-						s.jsonResponse(w, http.StatusOK, map[string]interface{}{
-							"device_id":  req.DeviceID,
-							"latency_ms": p.Latency.Milliseconds(),
-							"direct_p2p": true,
-						}, "")
-						return
-					}
+		if p, ok := s.registry.Get(req.DeviceID); ok && p != nil {
+			vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			if vip != "" {
+				ctx, cancel := context.WithTimeout(r.Context(), 2500*time.Millisecond)
+				defer cancel()
+				rtt, err := diagnostic.PingVirtualIP(ctx, vip, 2*time.Second)
+				if err == nil && rtt > 0 {
+					p.Latency = rtt
+					p.PingMs = rtt.Milliseconds()
+					p.DirectP2P = true
+					p.Online = true
+					s.registry.Upsert(p)
+					s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+						"device_id":  req.DeviceID,
+						"latency_ms": rtt.Milliseconds(),
+						"direct_p2p": true,
+						"vip":        vip,
+						"method":     "icmp",
+						"message":    fmt.Sprintf("✓ Пинг до %s (%s): %d ms", p.Nickname, vip, rtt.Milliseconds()),
+					}, "")
+					return
 				}
 			}
 
-			// Если пир в сети онлайн
-			latMs := int64(0)
-			if p.Latency > 0 {
-				latMs = p.Latency.Milliseconds()
-			}
+			// Если ICMP не ответил (например, таймаут), сбрасываем p.Latency в 0 и возвращаем ошибку
+			p.Latency = 0
+			p.PingMs = 0
+			s.registry.Upsert(p)
 			s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 				"device_id":  req.DeviceID,
-				"latency_ms": latMs,
-				"direct_p2p": p.DirectP2P,
+				"latency_ms": 0,
+				"direct_p2p": false,
+				"vip":        vip,
+				"error":      "узел не отвечает на пинг (превышен интервал ожидания)",
 			}, "")
 			return
 		}
 	}
-	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"device_id": req.DeviceID, "latency_ms": 0, "direct_p2p": false}, "")
+	s.jsonResponse(w, http.StatusNotFound, nil, "пир не найден в реестре сети")
 }
 
 // handleAWGParams — POST /api/awg/params — обновление параметров обфускации AWG 2.0

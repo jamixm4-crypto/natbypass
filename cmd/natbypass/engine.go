@@ -21,6 +21,7 @@ import (
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/daemon"
+	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/peer"
@@ -585,6 +586,42 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 							if p.PublicIP != "" && p.WGPort > 0 {
 								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+							}
+						}
+					}
+				}
+			}
+		}()
+	}
+
+	// Фоновый опрос реального ICMP пинга активных пиров (каждые 20 секунд)
+	if registry != nil {
+		go func() {
+			pingTicker := time.NewTicker(20 * time.Second)
+			defer pingTicker.Stop()
+			for {
+				select {
+				case <-engineCtx.Done():
+					return
+				case <-pingTicker.C:
+					for _, p := range registry.List() {
+						if !p.Online || p.DeviceID == deviceID {
+							continue
+						}
+						vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+						if vip != "" {
+							pingCtx, pingCancel := context.WithTimeout(engineCtx, 1500*time.Millisecond)
+							rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 1200*time.Millisecond)
+							pingCancel()
+							if err == nil && rtt > 0 {
+								if p.Latency > 0 {
+									p.Latency = time.Duration(float64(p.Latency)*0.6 + float64(rtt)*0.4)
+								} else {
+									p.Latency = rtt
+								}
+								p.PingMs = p.Latency.Milliseconds()
+								p.DirectP2P = true
+								registry.Upsert(p)
 							}
 						}
 					}

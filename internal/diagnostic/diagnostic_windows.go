@@ -1,4 +1,4 @@
-﻿//go:build windows
+//go:build windows
 
 package diagnostic
 
@@ -115,3 +115,11 @@ func CheckWebView2Runtime() DiagnosticItem {
 		Details: "Для встроенного окна установите 'Microsoft Edge WebView2 Evergreen Runtime' с сайта Microsoft.",
 	}
 }
+
+func setSysProcAttr(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
+}
+

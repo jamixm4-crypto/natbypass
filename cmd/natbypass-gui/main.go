@@ -28,9 +28,10 @@ import (
 	"github.com/natbypass/natbypass/internal/autostart"
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/crypto"
+	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/network"
-	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/peer"
+	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/updater"
@@ -95,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.218"
+	Version = "1.9.219"
 	Commit  = "release"
 )
 
@@ -3056,15 +3057,29 @@ func handlePingSelectedPeer() {
 		p := peers[idx]
 		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 		if vip != "" {
-			addLog(fmt.Sprintf("🧪 Запуск ICMP Ping до %s (%s)...", vip, p.Nickname))
+			addLog(fmt.Sprintf("🧪 Запуск реального ICMP Ping устройства до %s (%s)...", vip, p.Nickname))
 			go func() {
-				cmd := exec.Command("ping", "-n", "3", "-w", "1000", vip)
-				cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-				out, err := cmd.CombinedOutput()
-				if err == nil {
-					addLog(fmt.Sprintf("🟢 Результат Ping до %s:\r\n%s", p.Nickname, string(out)))
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				rtt, err := diagnostic.PingVirtualIP(ctx, vip, 2*time.Second)
+				if err == nil && rtt > 0 {
+					p.Latency = rtt
+					p.PingMs = rtt.Milliseconds()
+					p.DirectP2P = true
+					p.Online = true
+					registry.Upsert(p)
+					addLog(fmt.Sprintf("🟢 Реальный ICMP Ping до %s (%s): %v (успешно)", p.Nickname, vip, rtt.Round(time.Millisecond)))
+					updateData()
 				} else {
-					addLog(fmt.Sprintf("🔴 Ошибка Ping до %s: %s", p.Nickname, err.Error()))
+					p.Latency = 0
+					p.PingMs = 0
+					registry.Upsert(p)
+					if err != nil {
+						addLog(fmt.Sprintf("🔴 Ошибка реального ICMP Ping до %s (%s): %s", p.Nickname, vip, err.Error()))
+					} else {
+						addLog(fmt.Sprintf("🔴 Ошибка реального ICMP Ping до %s (%s): узел не отвечает (таймаут)", p.Nickname, vip))
+					}
+					updateData()
 				}
 			}()
 		}
@@ -4178,6 +4193,43 @@ func startEngineFromConfig(c *config.Config) {
 				if registry != nil {
 					registry.MarkOffline(120 * time.Second)
 					registry.Cleanup(24 * time.Hour)
+				}
+			}
+		}
+	}()
+
+	// Фоновый опрос реального ICMP пинга активных пиров (каждые 20 секунд)
+	go func() {
+		pingTicker := time.NewTicker(20 * time.Second)
+		defer pingTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-pingTicker.C:
+				if registry == nil {
+					continue
+				}
+				for _, p := range registry.List() {
+					if !p.Online || p.DeviceID == myDevID {
+						continue
+					}
+					vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+					if vip != "" {
+						pingCtx, pingCancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+						rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 1200*time.Millisecond)
+						pingCancel()
+						if err == nil && rtt > 0 {
+							if p.Latency > 0 {
+								p.Latency = time.Duration(float64(p.Latency)*0.6 + float64(rtt)*0.4)
+							} else {
+								p.Latency = rtt
+							}
+							p.PingMs = p.Latency.Milliseconds()
+							p.DirectP2P = true
+							registry.Upsert(p)
+						}
+					}
 				}
 			}
 		}

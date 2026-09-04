@@ -19,6 +19,7 @@ import (
 
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/crypto"
+	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
@@ -28,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.218"
+const Version = "1.9.219"
 
 
 
@@ -2013,19 +2014,37 @@ func rebuildSignalingInternal(p *config.Profile) {
 
 
 
-// PingPeer активно отправляет UDP зонд пиру и возвращает реальный RTT в миллисекундах (-1 при отсутствии ответа)
+// PingPeer активно отправляет системный ICMP эхо-запрос (или UDP зонд) пиру и возвращает реальный RTT в миллисекундах (-1 при отсутствии ответа)
 func PingPeer(deviceID string) int64 {
 	engineMu.Lock()
 	p := globalPuncher
 	reg := globalRegistry
 	engineMu.Unlock()
 
-	if p == nil || reg == nil {
+	if reg == nil {
 		return -1
 	}
 
 	peerObj, ok := reg.Get(deviceID)
 	if !ok || !peerObj.Online {
+		return -1
+	}
+
+	vip := strings.TrimSpace(strings.Split(peerObj.VirtualIP, "/")[0])
+	if vip != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		rtt, err := diagnostic.PingVirtualIP(ctx, vip, 1200*time.Millisecond)
+		cancel()
+		if err == nil && rtt > 0 {
+			peerObj.Latency = rtt
+			peerObj.PingMs = rtt.Milliseconds()
+			peerObj.DirectP2P = true
+			reg.Upsert(peerObj)
+			return peerObj.PingMs
+		}
+	}
+
+	if p == nil {
 		return -1
 	}
 
