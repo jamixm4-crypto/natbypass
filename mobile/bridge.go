@@ -839,10 +839,12 @@ func attachTUN(tunFd int) {
 							// Резервный транспорт через сигнальный MQTT брокер (Relay Fallback), если UDP заблокирован
 							if !sentDirect && globalSigMgr != nil {
 								dataToSend := pkt
-								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-									cKey := crypto.DeriveKey(activeProf.NetworkKey)
-									if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
-										dataToSend = enc
+								if globalConfig != nil {
+									if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+										cKey := crypto.DeriveKey(activeProf.NetworkKey)
+										if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+											dataToSend = enc
+										}
 									}
 								}
 								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, dataToSend)
