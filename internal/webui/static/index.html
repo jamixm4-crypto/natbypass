@@ -654,11 +654,69 @@
 
     .modal-box {
       width: 460px;
+      max-width: 95%;
+      box-sizing: border-box;
       background: #111624;
       border: 1px solid rgba(14, 165, 233, 0.3);
       border-radius: 20px;
       padding: 24px;
       box-shadow: 0 0 40px rgba(168, 85, 247, 0.3);
+    }
+
+    /* Custom Toggle Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 26px;
+      flex-shrink: 0;
+      cursor: pointer;
+      user-select: none;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+      margin: 0;
+      pointer-events: none;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(255, 255, 255, 0.16);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 26px;
+      display: block;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: #ffffff;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 50%;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+    }
+    input:checked + .slider {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      border-color: #f59e0b;
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.45);
+    }
+    input:checked + .slider:before {
+      transform: translateX(22px);
+      background-color: #ffffff;
+    }
+    .switch:hover .slider {
+      border-color: rgba(245, 158, 11, 0.65);
     }
 
     .toast {
@@ -1507,23 +1565,23 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         </div>
 
         <!-- Inline Beta Channel Switch in Settings Tab -->
-        <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:10px; padding:12px 16px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-            <div>
+        <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:10px; padding:14px 16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+            <div style="cursor:pointer; flex:1;" onclick="toggleBetaFromLabel('toggleBetaSettings')">
               <div style="font-size:0.88rem; font-weight:700; color:#fbbf24; display:flex; align-items:center; gap:6px;">
                 <span>🧪 Тестовые сборки (Beta / Pre-release)</span>
                 <span id="badgeBetaSettings" class="badge badge-warning" style="display:none; font-size:0.65rem;">АКТИВНО</span>
               </div>
-              <div style="font-size:0.76rem; color:var(--text-muted); margin-top:2px;">
+              <div style="font-size:0.76rem; color:var(--text-muted); margin-top:3px;">
                 Включите, чтобы получать предварительные сборки с новейшими оптимизациями и обходом блокировок
               </div>
             </div>
-            <label class="switch" style="position:relative; display:inline-block; width:46px; height:24px; flex-shrink:0; margin:0;">
-              <input type="checkbox" id="toggleBetaSettings" onchange="syncBetaToggle(this.checked)" style="opacity:0; width:0; height:0;">
+            <label class="switch" title="Переключить тестовые сборки (Beta)">
+              <input type="checkbox" id="toggleBetaSettings" onchange="syncBetaToggle(this.checked)">
               <span class="slider round"></span>
             </label>
           </div>
-          <div id="betaWarningSettings" style="display:none; margin-top:8px; font-size:0.75rem; color:#fde047;">
+          <div id="betaWarningSettings" style="display:none; margin-top:10px; font-size:0.75rem; color:#fde047;">
             ⚠️ <b>Внимание:</b> Тестовые сборки содержат новейшие экспериментальные функции и могут работать нестабильно.
           </div>
         </div>
@@ -2025,25 +2083,28 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <button onclick="closeUpdateModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;">✕</button>
       </div>
 
-      <div style="background:rgba(14,20,32,0.8); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:16px; margin-bottom:16px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <span style="font-size:0.85rem; color:var(--text-dim);">Текущая версия:</span>
-          <span id="lblCurrentVer" class="badge badge-cyan mono" style="font-weight:700;">v1.1.6</span>
+      <div style="background:rgba(14,20,32,0.8); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:14px 16px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;">
+          <span style="font-size:0.84rem; color:var(--text-dim); flex-shrink:0;">Текущая версия:</span>
+          <span id="lblCurrentVer" class="badge badge-cyan mono" style="font-weight:700;">v1.0.0</span>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <span style="font-size:0.85rem; color:var(--text-dim);">Последний релиз:</span>
-          <span id="lblLatestVer" class="badge badge-cyan mono" style="font-weight:700;">Проверка...</span>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; gap:10px;">
+          <span style="font-size:0.84rem; color:var(--text-dim); flex-shrink:0; padding-top:2px;">Последний релиз:</span>
+          <div style="text-align:right; max-width:72%; word-break:break-word;">
+            <div id="lblLatestVer" class="badge badge-cyan mono" style="font-weight:700; white-space:normal; display:inline-block; text-align:right;">Проверка...</div>
+            <div id="lblLatestMeta" style="font-size:0.72rem; color:var(--text-muted); margin-top:3px; line-height:1.3;"></div>
+          </div>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-size:0.85rem; color:var(--text-dim);">Файл для вашей ОС:</span>
-          <span id="lblAssetInfo" class="mono" style="font-size:0.8rem; color:var(--text-main); font-weight:600;">Определение...</span>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <span style="font-size:0.84rem; color:var(--text-dim); flex-shrink:0;">Файл для вашей ОС:</span>
+          <span id="lblAssetInfo" class="mono" style="font-size:0.76rem; color:var(--text-main); font-weight:600; text-align:right; max-width:68%; word-break:break-all;">Определение...</span>
         </div>
       </div>
 
       <!-- Переключатель канала обновлений (Stable / Beta) -->
       <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.25); border-radius:12px; padding:12px 16px; margin-bottom:16px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+          <div style="cursor:pointer; flex:1;" onclick="toggleBetaFromLabel('toggleBetaChannel')">
             <div style="font-size:0.86rem; font-weight:700; color:#fbbf24; display:flex; align-items:center; gap:6px;">
               <span>🧪 Тестовые сборки (Beta / Pre-release)</span>
               <span id="badgeBetaTag" class="badge badge-warning" style="display:none; font-size:0.65rem;">BETA</span>
@@ -2052,8 +2113,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               Получать предварительные версии с новыми функциями до официального релиза
             </div>
           </div>
-          <label class="switch" style="position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0; margin:0;">
-            <input type="checkbox" id="toggleBetaChannel" onchange="onBetaChannelToggle(this.checked)" style="opacity:0; width:0; height:0;">
+          <label class="switch" title="Переключить тестовые сборки (Beta)">
+            <input type="checkbox" id="toggleBetaChannel" onchange="onBetaChannelToggle(this.checked)">
             <span class="slider round"></span>
           </label>
         </div>
@@ -2361,6 +2422,14 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     let cachedUpdateInfo = null;
     let updatePollTimer = null;
 
+    function toggleBetaFromLabel(id) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.checked = !el.checked;
+        syncBetaToggle(el.checked);
+      }
+    }
+
     function syncBetaToggle(checked) {
       const mToggle = document.getElementById('toggleBetaChannel');
       const sToggle = document.getElementById('toggleBetaSettings');
@@ -2426,6 +2495,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     async function checkUpdateManual() {
       const lblLatest = document.getElementById('lblLatestVer');
+      const lblMeta = document.getElementById('lblLatestMeta');
       const lblCur = document.getElementById('lblCurrentVer');
       const lblAsset = document.getElementById('lblAssetInfo');
       const notesBox = document.getElementById('updateNotesBox');
@@ -2435,6 +2505,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       lblLatest.innerText = 'Проверка...';
       lblLatest.className = 'badge badge-cyan mono';
+      if (lblMeta) lblMeta.innerText = '';
       btnApply.style.display = 'none';
       btnCheck.disabled = true;
 
@@ -2448,7 +2519,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const d = json.data;
           cachedUpdateInfo = d;
           lblCur.innerText = d.current_version ? ('v' + d.current_version.replace(/^v/, '')) : 'v1.0.0';
-          lblLatest.innerText = d.latest_version ? ('v' + d.latest_version.replace(/^v/, '')) : '—';
           lblAsset.innerText = d.asset_name ? `${d.asset_name} (${Math.round((d.asset_size || 0)/1024/1024*10)/10} MB)` : 'Готов к сборке';
 
           const topLabel = document.getElementById('topUpdateLabel');
@@ -2463,7 +2533,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
           if (d.is_rollback) {
             lblLatest.className = 'badge badge-warning mono';
-            lblLatest.innerText = (d.latest_version || '—') + ' [STABLE] (Доступен откат на стабильную!)' + pubStr;
+            lblLatest.innerText = (d.latest_version || '—') + ' [STABLE]';
+            if (lblMeta) lblMeta.innerText = 'Доступен откат на стабильную версию' + pubStr;
             btnApply.innerText = '🔄 Откатиться на стабильную версию (' + (d.latest_version || '') + ')';
             btnApply.style.background = 'linear-gradient(135deg, #0284c7, #06b6d4)';
             if (topLabel) topLabel.innerText = 'Откат ' + d.latest_version;
@@ -2476,7 +2547,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           } else if (d.has_update) {
             const channelTag = d.is_prerelease ? ' [BETA]' : ' [STABLE]';
             lblLatest.className = d.is_prerelease ? 'badge badge-warning mono' : 'badge badge-success mono';
-            lblLatest.innerText = (d.latest_version || '—') + channelTag + ' (Новая версия!)' + pubStr;
+            lblLatest.innerText = (d.latest_version || '—') + channelTag;
+            if (lblMeta) lblMeta.innerText = 'Доступна новая версия!' + pubStr;
             btnApply.innerText = d.is_prerelease ? ('⚡ Скачать Beta-версию (' + (d.latest_version || '') + ')') : ('⚡ Скачать и обновить (' + (d.latest_version || '') + ')');
             btnApply.style.background = d.is_prerelease ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'linear-gradient(135deg, #a855f7, #6366f1)';
             if (topLabel) topLabel.innerText = 'Доступно ' + d.latest_version;
@@ -2487,8 +2559,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           } else {
             const channelTag = isBeta ? ' [BETA]' : ' [STABLE]';
             lblLatest.className = 'badge badge-cyan mono';
-            lblLatest.innerText = (d.latest_version || d.current_version || 'v1.0.0') + channelTag + ' (Билд актуален)' + pubStr;
-            btnApply.innerText = '🔄 Принудительно обновить (свежий билд)';
+            lblLatest.innerText = (d.latest_version || d.current_version || 'v1.0.0') + channelTag;
+            if (lblMeta) lblMeta.innerText = 'Билд актуален' + pubStr;
+            btnApply.innerText = '🔄 Принудительно обновить (переустановить)';
             btnApply.style.background = 'linear-gradient(135deg, #10b981, #06b6d4)';
             if (topLabel) topLabel.innerText = 'v' + (d.current_version || '1.0.0').replace(/^v/, '');
             if (d.release_notes) {
@@ -2500,9 +2573,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           }
         } else {
           lblLatest.innerText = 'Ошибка проверки';
+          if (lblMeta) lblMeta.innerText = '';
         }
       } catch (e) {
         lblLatest.innerText = 'Сервер недоступен';
+        if (lblMeta) lblMeta.innerText = '';
       }
       btnCheck.disabled = false;
     }
