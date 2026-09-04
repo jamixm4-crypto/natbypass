@@ -40,38 +40,46 @@ var (
 	keeneticRealmHttp     string
 )
 
-// IsKeeneticOS returns true if running on a Keenetic router.
+// IsKeeneticOS returns true if running on a genuine Keenetic router.
 func IsKeeneticOS() bool {
 	if runtime.GOOS != "linux" {
 		return false
 	}
-	indicators := []string{
-		"/var/ndm",
-		"/opt/etc/ndm",
-		"/bin/ndmq",
-		"/usr/bin/ndmq",
-		"/opt/bin/ndmq",
-		"/bin/ndmc",
-		"/usr/bin/ndmc",
-		"/opt/bin/ndmc",
-		"/etc/ndm",
-		"/storage/startup-config",
-		"/var/ndm/startup-config",
-		"/tmp/startup-config",
+	// Keenetic routers run solely on MIPS, MIPSEL, ARM, or ARM64 architectures (never x86 / amd64 / 386).
+	if runtime.GOARCH == "amd64" || runtime.GOARCH == "386" {
+		return false
 	}
-	for _, path := range indicators {
-		if _, err := os.Stat(path); err == nil {
+
+	// 1. Check for Keenetic native CLI management binaries
+	for _, p := range []string{"/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq", "/bin/ndmc", "/usr/bin/ndmc", "/opt/bin/ndmc"} {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 			return true
 		}
 	}
-	for _, f := range []string{"/etc/os-release", "/proc/version"} {
-		if data, err := os.ReadFile(f); err == nil {
-			lower := strings.ToLower(string(data))
-			if strings.Contains(lower, "keenetic") || strings.Contains(lower, "ndms") || strings.Contains(lower, "ndm") {
-				return true
-			}
+
+	// 2. Check for KeeneticOS firmware version descriptor
+	for _, f := range []string{"/etc/ndm/version", "/var/ndm/version"} {
+		if fi, err := os.Stat(f); err == nil && !fi.IsDir() {
+			return true
 		}
 	}
+
+	// 3. Check /proc/version for Keenetic / NDMS kernel signature
+	if data, err := os.ReadFile("/proc/version"); err == nil {
+		lower := strings.ToLower(string(data))
+		if strings.Contains(lower, "keenetic") || strings.Contains(lower, "ndms") || strings.Contains(lower, "(root@ndm)") {
+			return true
+		}
+	}
+
+	// 4. Check /etc/os-release for KeeneticOS distribution ID
+	if data, err := os.ReadFile("/etc/os-release"); err == nil {
+		lower := strings.ToLower(string(data))
+		if strings.Contains(lower, "keenetic") || strings.Contains(lower, "id=ndms") || strings.Contains(lower, "id=\"ndms\"") {
+			return true
+		}
+	}
+
 	return false
 }
 

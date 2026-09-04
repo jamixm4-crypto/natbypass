@@ -1030,7 +1030,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.217</span>
+          <span id="topUpdateLabel">v1.9.218</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1041,7 +1041,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.217</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.218</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1540,6 +1540,35 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <span>UPnP автоматический проброс порта на роутере</span>
           </label>
         </div>
+      </div>
+
+      <!-- Admin Password Change Card -->
+      <div id="cardAdminPassword" class="glass-card" style="margin-bottom: 24px;">
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px; display:flex; align-items:center; gap:8px;">
+          <span>🔑</span> Смена пароля администратора WebUI
+        </h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px;">
+          Задайте новый пароль для доступа к веб-панели управления NatBypass на этом устройстве.
+        </p>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 16px;">
+          <div class="form-group">
+            <label class="form-label">Текущий пароль:</label>
+            <input type="password" id="curAdminPass" class="form-input" placeholder="По умолчанию: admin">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Новый пароль:</label>
+            <input type="password" id="newAdminPass" class="form-input" placeholder="Минимум 3 символа">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Подтверждение нового пароля:</label>
+            <input type="password" id="confirmAdminPass" class="form-input" placeholder="Повторите новый пароль">
+          </div>
+        </div>
+
+        <button type="button" onclick="changeAdminPassword()" class="btn btn-primary" style="background: linear-gradient(135deg, #a855f7, #6366f1); font-size:0.88rem; padding: 10px 20px;">
+          🔒 Обновить пароль администратора
+        </button>
       </div>
 
       <div class="glass-card" style="margin-bottom: 24px;">
@@ -2842,10 +2871,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             if (setLog) setLog.style.display = 'block';
           }
 
-          // Password change card: Only on Linux / standard systems (NOT Keenetic, NOT Windows)
+          // Password change card: Visible on all devices except Keenetic (where router credentials manage it)
           const passCard = document.getElementById('cardAdminPassword');
           if (passCard) {
-            if (!isWin && !d.is_keenetic) {
+            if (!d.is_keenetic) {
               passCard.style.display = 'block';
             } else {
               passCard.style.display = 'none';

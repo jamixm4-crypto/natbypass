@@ -159,10 +159,8 @@ func (s *Server) SetOnProfileSwitch(cb func(p *config.Profile) error) {
 func NewServer(port int, user, password string, registry *peer.Registry, sigMgr *signaling.FallbackManager) *Server {
 	if user == "" && password == "" && !IsKeeneticOS() && runtime.GOOS != "windows" {
 		user = "admin"
-		var b [6]byte
-		_, _ = cryptoRandReader.Read(b[:])
-		password = fmt.Sprintf("nb-%x", b)
-		slog.Info("🔑 Сгенерирован безопасный пароль администратора WebUI", "username", user, "password", password)
+		password = "admin"
+		slog.Info("🔐 Web UI защищен авторизацией по умолчанию (admin/admin)", "username", user)
 	}
 	return &Server{
 		port:       port,
@@ -703,7 +701,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.217"
+		ver = "1.9.218"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1525,7 +1523,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.217"
+		ver = "1.9.218"
 	}
 
 	vip := s.state.VirtualIP
@@ -2921,8 +2919,14 @@ func (s *Server) handleAdminPasswordChange(w http.ResponseWriter, r *http.Reques
 	// Сохраняем в config.yaml
 	if s.configPath != "" {
 		if cfg, err := config.Load(s.configPath); err == nil && cfg != nil {
+			if cfg.WebUI.Username == "" {
+				cfg.WebUI.Username = s.user
+			}
 			cfg.WebUI.Password = req.NewPassword
-			_ = config.Save(cfg, s.configPath, false)
+			if err := config.Save(cfg, s.configPath, false); err != nil {
+				s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения настроек: "+err.Error())
+				return
+			}
 		}
 	}
 

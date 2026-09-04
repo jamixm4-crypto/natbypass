@@ -1,6 +1,9 @@
 package webui
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -69,5 +72,58 @@ func TestVerifyKeeneticAuth(t *testing.T) {
 
 	if VerifyKeeneticAuth("operator", "wrongpassword") {
 		t.Fatal("expected wrong password to fail")
+	}
+}
+
+func TestCheckCredentials_DefaultAdmin(t *testing.T) {
+	s := NewServer(0, "admin", "admin", nil, nil)
+	if !s.checkCredentials("admin", "admin") {
+		t.Fatal("expected admin/admin to be accepted by default")
+	}
+	if s.checkCredentials("admin", "wrong") {
+		t.Fatal("expected admin/wrong to be rejected")
+	}
+	if s.checkCredentials("user", "admin") {
+		t.Fatal("expected user/admin to be rejected")
+	}
+
+	// Server with empty password should also fallback to admin/admin
+	s2 := &Server{user: "admin", password: ""}
+	if !s2.checkCredentials("admin", "admin") {
+		t.Fatal("expected s2 fallback to accept admin/admin")
+	}
+}
+
+func TestAdminPasswordChange(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	s := NewServer(0, "admin", "admin", nil, nil)
+	s.SetConfigPath(cfgPath)
+
+	// 1. Wrong current password -> should fail
+	reqBodyBad := strings.NewReader(`{"current_password":"wrong","new_password":"mysecretpass"}`)
+	w1 := httptest.NewRecorder()
+	r1 := httptest.NewRequest("POST", "/api/admin/password", reqBodyBad)
+	s.handleAdminPasswordChange(w1, r1)
+	if w1.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for wrong current password, got %d", w1.Code)
+	}
+
+	// 2. Correct current password -> should succeed
+	reqBodyGood := strings.NewReader(`{"current_password":"admin","new_password":"mysecretpass"}`)
+	w2 := httptest.NewRecorder()
+	r2 := httptest.NewRequest("POST", "/api/admin/password", reqBodyGood)
+	s.handleAdminPasswordChange(w2, r2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid password change, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// Verify password updated in server memory
+	if !s.checkCredentials("admin", "mysecretpass") {
+		t.Fatal("expected new password to be accepted")
+	}
+	if s.checkCredentials("admin", "admin") {
+		t.Fatal("expected old password 'admin' to be rejected")
 	}
 }

@@ -145,6 +145,14 @@ func (s *Server) checkCredentials(username, password string) bool {
 		return true
 	}
 
+	// 4. Default fallback when no custom password set in config: admin / admin
+	if (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
+		if subtle.ConstantTimeCompare([]byte(username), []byte("admin")) == 1 &&
+			subtle.ConstantTimeCompare([]byte(password), []byte("admin")) == 1 {
+			return true
+		}
+	}
+
 	return false
 }
 
