@@ -415,13 +415,24 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
+// isAuthRequired checks if authentication is mandatory for this server instance.
+func (s *Server) isAuthRequired() bool {
+	if runtime.GOOS == "windows" {
+		return s.password != "" || s.customAuth != nil
+	}
+	return s.password != "" || s.customAuth != nil || IsKeeneticOS()
+}
+
 // csrfMiddleware validates CSRF tokens on mutating requests (POST, PUT, DELETE).
 func (s *Server) csrfMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CSRF cookie on initial GET if missing
+		// Set CSRF cookie and response header on GET so frontend can always access it
 		if r.Method == "GET" {
-			if _, err := r.Cookie("csrf_token"); err != nil {
-				token := generateCSRFToken()
+			token := ""
+			if c, err := r.Cookie("csrf_token"); err == nil && c.Value != "" {
+				token = c.Value
+			} else {
+				token = generateCSRFToken()
 				http.SetCookie(w, &http.Cookie{
 					Name:     "csrf_token",
 					Value:    token,
@@ -430,15 +441,38 @@ func (s *Server) csrfMiddleware(next http.Handler) http.Handler {
 					HttpOnly: false, // Accessible by JS frontend to send in header
 				})
 			}
+			w.Header().Set("X-CSRF-Token", token)
 		}
 
 		if r.Method == "POST" || r.Method == "PUT" || r.Method == "DELETE" {
-			// Exempt authentication endpoints from CSRF
+			// 1. Exempt authentication endpoints from CSRF
 			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/logout" || r.URL.Path == "/api/auth/check" {
 				next.ServeHTTP(w, r)
 				return
 			}
 
+			// 2. If authentication is not required for this instance (e.g. Windows desktop client), skip CSRF
+			if !s.isAuthRequired() {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// 3. Local desktop loopback (127.0.0.1 / ::1) without cross-site origin: skip CSRF
+			host, _, _ := net.SplitHostPort(r.RemoteAddr)
+			if host == "" {
+				host = r.RemoteAddr
+			}
+			ip := net.ParseIP(strings.TrimSpace(host))
+			origin := r.Header.Get("Origin")
+			referer := r.Header.Get("Referer")
+			isLocalOrigin := origin == "" || strings.HasPrefix(origin, "http://127.0.0.1") || strings.HasPrefix(origin, "http://localhost")
+			isLocalReferer := referer == "" || strings.HasPrefix(referer, "http://127.0.0.1") || strings.HasPrefix(referer, "http://localhost")
+			if ip != nil && ip.IsLoopback() && isLocalOrigin && isLocalReferer {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// 4. Validate CSRF token for remote / external mutating requests
 			csrfHeader := r.Header.Get("X-CSRF-Token")
 			cookie, err := r.Cookie("csrf_token")
 			if err != nil || cookie.Value == "" || csrfHeader == "" || subtle.ConstantTimeCompare([]byte(csrfHeader), []byte(cookie.Value)) != 1 {
@@ -492,13 +526,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Если авторизация не требуется (Windows локальный клиент без пароля в config)
-		var authRequired bool
-		if runtime.GOOS == "windows" {
-			authRequired = s.password != "" || s.customAuth != nil
-		} else {
-			authRequired = s.password != "" || s.customAuth != nil || IsKeeneticOS()
-		}
-		if !authRequired {
+		if !s.isAuthRequired() {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -545,8 +573,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+		w.Header().Set("Access-Control-Expose-Headers", "X-CSRF-Token")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
@@ -2415,7 +2444,10 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_ = config.Save(cfg, s.configPath, false)
+	if err := config.Save(cfg, s.configPath, false); err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения профиля на диск: "+err.Error())
+		return
+	}
 	s.AddEvent("info", "Обновлен профиль сети: "+target.Name, "Топик: "+target.MQTTTopic)
 	if s.onConfigChange != nil {
 		s.onConfigChange()
@@ -2510,7 +2542,10 @@ func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = config.Save(cfg, s.configPath, false)
+	if err := config.Save(cfg, s.configPath, false); err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения профиля на диск: "+err.Error())
+		return
+	}
 
 	if wasActive && s.onProfileSwitch != nil {
 		active := cfg.GetActiveProfile()

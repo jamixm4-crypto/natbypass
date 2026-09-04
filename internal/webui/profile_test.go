@@ -1,4 +1,4 @@
-﻿package webui
+package webui
 
 import (
 	"bytes"
@@ -142,8 +142,61 @@ func TestProfileCreateListAndSwitch(t *testing.T) {
 			ActiveID string           `json:"active_id"`
 		} `json:"data"`
 	}
-	_ = json.Unmarshal(wList3.Body.Bytes(), &listResp3)
+	if err := json.Unmarshal(wList3.Body.Bytes(), &listResp3); err != nil {
+		t.Fatalf("unmarshal profiles list 3 failed: %v", err)
+	}
 	if listResp3.Data.ActiveID != firstID {
 		t.Fatalf("expected active profile to be '%s', got '%s'", firstID, listResp3.Data.ActiveID)
+	}
+
+	// 7. Test Profile Update: rename second profile
+	secondID := listResp2.Data.Profiles[1].ID
+	updateReqBody := map[string]interface{}{
+		"id":         secondID,
+		"name":       "Renamed Mesh Network",
+		"mqtt_topic": "natbypass/mesh/renamed-topic",
+	}
+	updateJSON, _ := json.Marshal(updateReqBody)
+	wUpdate := httptest.NewRecorder()
+	rUpdate := httptest.NewRequest("POST", "/api/profiles/update", bytes.NewReader(updateJSON))
+	s.handleProfileUpdate(wUpdate, rUpdate)
+	if wUpdate.Code != http.StatusOK {
+		t.Fatalf("POST /api/profiles/update expected 200, got %d: %s", wUpdate.Code, wUpdate.Body.String())
+	}
+
+	wList4 := httptest.NewRecorder()
+	rList4 := httptest.NewRequest("GET", "/api/profiles", nil)
+	s.handleProfilesList(wList4, rList4)
+	var listResp4 struct {
+		Data struct {
+			Profiles []config.Profile `json:"profiles"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wList4.Body.Bytes(), &listResp4)
+	if len(listResp4.Data.Profiles) != 2 || listResp4.Data.Profiles[1].Name != "Renamed Mesh Network" {
+		t.Fatalf("expected renamed profile, got %+v", listResp4.Data.Profiles)
+	}
+
+	// 8. Test Profile Delete: delete second profile
+	delReqBody := map[string]string{"id": secondID}
+	delJSON, _ := json.Marshal(delReqBody)
+	wDel := httptest.NewRecorder()
+	rDel := httptest.NewRequest("POST", "/api/profiles/delete", bytes.NewReader(delJSON))
+	s.handleProfileDelete(wDel, rDel)
+	if wDel.Code != http.StatusOK {
+		t.Fatalf("POST /api/profiles/delete expected 200, got %d: %s", wDel.Code, wDel.Body.String())
+	}
+
+	wList5 := httptest.NewRecorder()
+	rList5 := httptest.NewRequest("GET", "/api/profiles", nil)
+	s.handleProfilesList(wList5, rList5)
+	var listResp5 struct {
+		Data struct {
+			Profiles []config.Profile `json:"profiles"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wList5.Body.Bytes(), &listResp5)
+	if len(listResp5.Data.Profiles) != 1 {
+		t.Fatalf("expected 1 profile after deletion, got %d", len(listResp5.Data.Profiles))
 	}
 }
