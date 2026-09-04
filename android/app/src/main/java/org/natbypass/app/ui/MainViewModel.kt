@@ -160,13 +160,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             rxBytes    = obj.optLong("rx_bytes", 0L)
 
             val now = System.currentTimeMillis()
-            val dt = if (lastStatsTimestamp > 0) (now - lastStatsTimestamp) / 1000f else 0f
-            if (dt >= 1.0f) {
-                lastTxSpeedBps = if (txBytes >= lastTxBytes) ((txBytes - lastTxBytes) / dt).toLong() else 0L
-                lastRxSpeedBps = if (rxBytes >= lastRxBytes) ((rxBytes - lastRxBytes) / dt).toLong() else 0L
+            if (lastStatsTimestamp == 0L) {
+                lastStatsTimestamp = now
                 lastTxBytes = txBytes
                 lastRxBytes = rxBytes
-                lastStatsTimestamp = now
+            } else {
+                val dt = (now - lastStatsTimestamp) / 1000f
+                if (dt >= 1.0f) {
+                    lastTxSpeedBps = if (txBytes >= lastTxBytes) ((txBytes - lastTxBytes) / dt).toLong() else 0L
+                    lastRxSpeedBps = if (rxBytes >= lastRxBytes) ((rxBytes - lastRxBytes) / dt).toLong() else 0L
+                    lastTxBytes = txBytes
+                    lastRxBytes = rxBytes
+                    lastStatsTimestamp = now
+                }
             }
         } catch (_: Exception) {}
 

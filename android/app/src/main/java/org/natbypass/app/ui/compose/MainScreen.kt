@@ -620,8 +620,8 @@ private fun MyDeviceInfoCard(
                 ) {
                     val txMb = txBytes / (1024f * 1024f)
                     val rxMb = rxBytes / (1024f * 1024f)
-                    val txSpd = if (txSpeedBps >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", txSpeedBps / (1024f * 1024f)) else String.format(Locale.US, "%d KB/s", txSpeedBps / 1024)
-                    val rxSpd = if (rxSpeedBps >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", rxSpeedBps / (1024f * 1024f)) else String.format(Locale.US, "%d KB/s", rxSpeedBps / 1024)
+                    val txSpd = formatSpeed(txSpeedBps)
+                    val rxSpd = formatSpeed(rxSpeedBps)
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -834,8 +834,8 @@ private fun BandwidthLiveChart(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    val txSpd = if (currentTxSpeed >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", currentTxSpeed / (1024f * 1024f)) else String.format(Locale.US, "%d KB/s", currentTxSpeed / 1024)
-                    val rxSpd = if (currentRxSpeed >= 1024 * 1024) String.format(Locale.US, "%.1f MB/s", currentRxSpeed / (1024f * 1024f)) else String.format(Locale.US, "%d KB/s", currentRxSpeed / 1024)
+                    val txSpd = formatSpeed(currentTxSpeed)
+                    val rxSpd = formatSpeed(currentRxSpeed)
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
@@ -955,5 +955,12 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSmoothCurve(
         color = color,
         style = Stroke(width = 2.5f, cap = StrokeCap.Round)
     )
+}
+
+private fun formatSpeed(bps: Long): String = when {
+    bps >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB/s", bps / (1024f * 1024f))
+    bps >= 1024 -> String.format(Locale.US, "%.1f KB/s", bps / 1024f)
+    bps > 0 -> "$bps B/s"
+    else -> "0 KB/s"
 }
 

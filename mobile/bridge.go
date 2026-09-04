@@ -28,7 +28,7 @@ import (
 )
 
 
-const Version = "1.9.206"
+const Version = "1.9.207"
 
 
 
@@ -439,7 +439,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             runtime.GOARCH,
-					Version:          "1.9.206",
+					Version:          "1.9.207",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
