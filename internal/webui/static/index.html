@@ -3067,9 +3067,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
         const bOff = document.getElementById('offlineBanner');
         if (bOff) bOff.style.display = 'none';
+        failedRefreshAttempts = 0;
       } catch (e) {
-        const bOff = document.getElementById('offlineBanner');
-        if (bOff) bOff.style.display = 'block';
+        failedRefreshAttempts++;
+        if (failedRefreshAttempts >= 3) {
+          const bOff = document.getElementById('offlineBanner');
+          if (bOff) bOff.style.display = 'block';
+        }
       }
     }
 

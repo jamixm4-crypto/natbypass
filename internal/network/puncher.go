@@ -718,8 +718,17 @@ func (p *UDPPuncher) getConn() (*net.UDPConn, context.Context, uint64) {
 	return p.conn, p.ctx, p.connID
 }
 
+var packetBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 65535)
+		return &b
+	},
+}
+
 func (p *UDPPuncher) readLoop() {
-	buf := make([]byte, 65535) // MTU-safe buffer for IP packets up to 65535 bytes
+	bufPtr := packetBufferPool.Get().(*[]byte)
+	defer packetBufferPool.Put(bufPtr)
+	buf := *bufPtr
 	for {
 		conn, ctx, currentID := p.getConn()
 		if conn == nil {

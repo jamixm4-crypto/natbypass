@@ -339,11 +339,14 @@ class NatBypassVpnService : VpnService() {
                     try { setUnderlyingNetworks(arrayOf(network)) } catch (_: Exception) {}
                 }
                 serviceScope.launch {
-                    delay(800)
+                    delay(500)
                     try {
-                        val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
-                        if (sockFd > 0) {
-                            protect(sockFd)
+                        val newFd = org.natbypass.app.util.MobileBridge.rebindSockets()
+                        if (newFd > 0) {
+                            protect(newFd)
+                        } else {
+                            val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
+                            if (sockFd > 0) protect(sockFd)
                         }
                     } catch (_: Throwable) {}
                     org.natbypass.app.util.MobileBridge.refreshPublicIP()

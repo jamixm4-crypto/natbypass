@@ -2,6 +2,7 @@ package signaling
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -79,17 +80,32 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 	}
 
 	if brokerURL == "" {
-		brokerURL = "tcp://broker.emqx.io:1883"
+		brokerURL = "ssl://broker.emqx.io:8883"
 	}
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(brokerURL)
 
+	// Настройка TLS для безопасного шифрования MQTT
+	if strings.HasPrefix(brokerURL, "ssl://") || strings.HasPrefix(brokerURL, "tls://") || strings.HasPrefix(brokerURL, "tcps://") || strings.HasPrefix(brokerURL, "wss://") {
+		opts.SetTLSConfig(&tls.Config{
+			InsecureSkipVerify: true, // Совместимость с роутерами без системных корневых CA
+		})
+	}
+
 	// Автоматический резервный брокер для максимальной надежности
 	if strings.Contains(brokerURL, "broker.emqx.io") {
-		opts.AddBroker("tcp://broker.hivemq.com:1883")
+		if strings.HasPrefix(brokerURL, "ssl://") {
+			opts.AddBroker("ssl://broker.hivemq.com:8883")
+		} else {
+			opts.AddBroker("tcp://broker.hivemq.com:1883")
+		}
 	} else if strings.Contains(brokerURL, "broker.hivemq.com") {
-		opts.AddBroker("tcp://broker.emqx.io:1883")
+		if strings.HasPrefix(brokerURL, "ssl://") {
+			opts.AddBroker("ssl://broker.emqx.io:8883")
+		} else {
+			opts.AddBroker("tcp://broker.emqx.io:1883")
+		}
 	}
 
 	opts.SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).

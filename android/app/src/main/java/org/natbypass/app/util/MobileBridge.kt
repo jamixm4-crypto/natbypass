@@ -363,6 +363,20 @@ object MobileBridge {
             -1
         }
     }
+
+    /** Переоткрыть сокет при роуминге (Wi-Fi <-> LTE) и получить новый дескриптор */
+    fun rebindSockets(): Int {
+        val method = getMethod("rebindSockets") ?: return -1
+        return try {
+            val res = method.invoke(null)
+            when (res) {
+                is Number -> res.toInt()
+                else -> -1
+            }
+        } catch (e: Exception) {
+            -1
+        }
+    }
 }
 
 

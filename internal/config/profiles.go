@@ -87,7 +87,7 @@ func GenerateDefaultProfile(name string) Profile {
 		ID:                  "p-" + GenerateRandomHex(4),
 		Name:                name,
 		NetworkKey:          GenerateRandomHex(16),
-		MQTTBroker:          "tcp://broker.emqx.io:1883",
+		MQTTBroker:          "ssl://broker.emqx.io:8883",
 		MQTTTopic:           "natbypass/mesh/" + topicID,
 		AWGPreset:           "custom",
 		Jc:                  jc,

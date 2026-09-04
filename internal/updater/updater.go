@@ -79,6 +79,9 @@ func setStatus(inProgress bool, percent int, msg string, err string, completed b
 	}
 }
 
+// DefaultReleasePublicKey — глобальный публичный ключ для проверки подписи обновлений
+var DefaultReleasePublicKey ed25519.PublicKey
+
 // Updater обеспечивает безопасную проверку и установку обновлений с GitHub Releases с верификацией Ed25519.
 type Updater struct {
 	currentVersion string
@@ -498,6 +501,26 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	}
 
 	_ = os.Chmod(tmpPath, 0755)
+
+	// Проверка цифровой подписи Ed25519 релиза (если доступен файл .sig)
+	sigURL := assetURL + ".sig"
+	sigReq, sErr := http.NewRequestWithContext(ctx, "GET", sigURL, nil)
+	if sErr == nil {
+		sigReq.Header.Set("User-Agent", "NatBypass-Updater")
+		if sigResp, err := client.Do(sigReq); err == nil && sigResp.StatusCode == http.StatusOK {
+			sigData, _ := io.ReadAll(sigResp.Body)
+			sigResp.Body.Close()
+			if len(sigData) == ed25519.SignatureSize && len(DefaultReleasePublicKey) == ed25519.PublicKeySize {
+				binData, _ := os.ReadFile(tmpPath)
+				if !ed25519.Verify(DefaultReleasePublicKey, binData, sigData) {
+					_ = os.Remove(tmpPath)
+					setStatus(false, 0, "", "КРИТИЧЕСКАЯ ОШИБКА: цифровая подпись Ed25519 не прошла проверку!", false)
+					return fmt.Errorf("Ed25519 signature verification failed")
+				}
+			}
+		}
+	}
+
 	setStatus(true, 85, "Применение обновления и замена исполняемого файла...", "", false)
 
 	// Атомарная замена исполняемого файла

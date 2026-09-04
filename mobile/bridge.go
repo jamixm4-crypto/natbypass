@@ -1270,6 +1270,19 @@ func GetUDPSocketFd() int {
 	return -1
 }
 
+// RebindSockets переоткрывает UDP-сокет при смене сети (Wi-Fi <-> 4G) и возвращает дескриптор нового сокета
+func RebindSockets() int {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalPuncher != nil {
+		if _, err := globalPuncher.HopPort(); err == nil {
+			return globalPuncher.SocketFd()
+		}
+		return globalPuncher.SocketFd()
+	}
+	return -1
+}
+
 // SetAllowExitNode разрешает другим устройствам выходить в интернет через этот узел
 func SetAllowExitNode(allow bool) {
 	engineMu.Lock()

@@ -156,6 +156,13 @@ func (s *Server) SetOnProfileSwitch(cb func(p *config.Profile) error) {
 
 // NewServer создаёт новый экземпляр Web UI сервера
 func NewServer(port int, user, password string, registry *peer.Registry, sigMgr *signaling.FallbackManager) *Server {
+	if user == "" && password == "" && !IsKeeneticOS() {
+		user = "admin"
+		var b [6]byte
+		_, _ = cryptoRandReader.Read(b[:])
+		password = fmt.Sprintf("nb-%x", b)
+		slog.Info("🔑 Сгенерирован безопасный пароль администратора WebUI", "username", user, "password", password)
+	}
 	return &Server{
 		port:       port,
 		user:       user,
