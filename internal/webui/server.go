@@ -705,6 +705,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"peers_count":     s.countRemotePeers(),
 		"active_profile":  activeProfileName,
 		"mqtt_topic":      mqttTopic,
+		"config_path":     s.configPath,
 	}
 	s.jsonResponse(w, http.StatusOK, status, "")
 }

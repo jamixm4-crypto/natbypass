@@ -4724,7 +4724,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         } else {
           showToast('❌ Ошибка: ' + json.error);
         }
-      } catch (e) {}
+      } catch (e) {
+        showToast('❌ Ошибка создания профиля: ' + (e.message || e));
+      }
     }
 
     function openImportProfileModal() {

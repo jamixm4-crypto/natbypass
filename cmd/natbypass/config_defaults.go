@@ -3,10 +3,27 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/constants"
 )
+
+// resolveConfigPath returns an absolute path for the config file.
+// If the given path is relative (default "config.yaml"), it is resolved
+// relative to the directory containing the running executable so that
+// the config is always found in the same place regardless of the working
+// directory at launch time (Windows Service, shortcut, etc.).
+func resolveConfigPath(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(filepath.Dir(exePath), path)
+}
 
 // loadConfigOrDefault loads configuration from path or initializes defaults if missing.
 func loadConfigOrDefault(path string, createIfMissing bool) (*config.Config, error) {
