@@ -42,6 +42,17 @@ func main() {
 		}
 	}
 
+	// Resolve configFile from os.Args early so services/background runs always resolve relative to exe
+	for i, arg := range os.Args {
+		if (arg == "--config" || arg == "-c") && i+1 < len(os.Args) {
+			configFile = resolveConfigPath(os.Args[i+1])
+			break
+		}
+	}
+	if configFile == "" {
+		configFile = resolveConfigPath("config.yaml")
+	}
+
 	// Embedded router optimization: reduce GC and OS thread pressure on MIPS/ARM
 	if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "arm" {
 		runtime.GOMAXPROCS(1)
@@ -119,7 +130,7 @@ Supported platforms: Windows, Linux (amd64/arm64/mips/mipsle), Android, iOS.`, V
 		},
 	}
 
-	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "config.yaml", "Path to configuration file")
+	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", configFile, "Path to configuration file")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level: debug/info/warn/error")
 	rootCmd.PersistentFlags().BoolVar(&noWebUI, "no-webui", false, "Disable embedded Web UI")
 	rootCmd.PersistentFlags().IntVar(&webUIPort, "port", 0, "Override Web UI HTTP port")

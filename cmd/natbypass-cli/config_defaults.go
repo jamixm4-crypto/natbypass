@@ -3,10 +3,23 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/constants"
 )
+
+// resolveConfigPath returns an absolute path for the config file.
+func resolveConfigPath(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(filepath.Dir(exePath), path)
+}
 
 // loadConfigOrDefault loads configuration from path or initializes defaults if missing.
 func loadConfigOrDefault(path string, createIfMissing bool) (*config.Config, error) {

@@ -304,90 +304,61 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 
 	// 6. Разрешение входящего и транзитного трафика в iptables / nftables / ufw
 	applyFirewallRules := func() {
-		// Поиск доступных бинарников iptables
-		var iptCandidates []string
-		for _, p := range []string{"/usr/sbin/iptables", "/sbin/iptables", "iptables", "/opt/sbin/iptables"} {
-			if path, err := exec.LookPath(p); err == nil {
-				// Avoid duplicate paths
-				found := false
-				for _, existing := range iptCandidates {
-					if existing == path {
-						found = true
-						break
-					}
-				}
-				if !found {
-					iptCandidates = append(iptCandidates, path)
-				}
+		ipt := findIptablesBinary()
+
+		ensureRule := func(table, chain string, args ...string) {
+			checkArgs := []string{"-w", "2"}
+			if table != "" {
+				checkArgs = append(checkArgs, "-t", table)
 			}
-		}
-		if len(iptCandidates) == 0 {
-			iptCandidates = []string{"/usr/sbin/iptables", "/sbin/iptables", "iptables"}
-		}
-
-		for _, ipt := range iptCandidates {
-			// Проверяем, поддерживает ли данная сборка iptables ключ -w (wait lock)
-			hasWait := exec.Command(ipt, "-w", "1", "-L", "INPUT", "-n").Run() == nil
-
-			runIpt := func(args ...string) {
-				var checkArgs, insertArgs []string
-				if hasWait {
-					checkArgs = append([]string{"-w", "2", "-C"}, args...)
-					insertArgs = append([]string{"-w", "2", "-I"}, append([]string{args[0], "1"}, args[1:]...)...)
-				} else {
-					checkArgs = append([]string{"-C"}, args...)
-					insertArgs = append([]string{"-I"}, append([]string{args[0], "1"}, args[1:]...)...)
-				}
-
-				if err := exec.Command(ipt, checkArgs...).Run(); err == nil {
-					return // Правило уже существует
-				}
-				_ = exec.Command(ipt, insertArgs...).Run()
+			checkArgs = append(checkArgs, "-C", chain)
+			checkArgs = append(checkArgs, args...)
+			if exec.Command(ipt, checkArgs...).Run() == nil {
+				return // Правило уже существует в ядре, повторно не добавляем
 			}
-
-			// 1. Стандартные цепочки ядра Linux
-			runIpt("INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
-			runIpt("INPUT", "-p", "icmp", "-j", "ACCEPT")
-			runIpt("FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
-			runIpt("FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
-			runIpt("OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
-
-			// 2. Специальные цепочки KeeneticOS (NDM Framework)
-			runIpt("_NDM_INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
-			runIpt("_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
-			runIpt("_NDM_FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
-			runIpt("_NDM_FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
-			runIpt("_NDM_OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
-
-			// 3. Таблица mangle: отключение blackhole-маркировки для пакетов mesh
-			if hasWait {
-				_ = exec.Command(ipt, "-w", "2", "-t", "mangle", "-I", "PREROUTING", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
-				_ = exec.Command(ipt, "-w", "2", "-t", "mangle", "-I", "OUTPUT", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
-			} else {
-				_ = exec.Command(ipt, "-t", "mangle", "-I", "PREROUTING", "1", "-i", d.AdapterName, "-j", "ACCEPT").Run()
-				_ = exec.Command(ipt, "-t", "mangle", "-I", "OUTPUT", "1", "-o", d.AdapterName, "-j", "ACCEPT").Run()
+			insertArgs := []string{"-w", "2"}
+			if table != "" {
+				insertArgs = append(insertArgs, "-t", table)
 			}
-
-			// 4. Разрешение входящих UDP-пакетов
-			runIpt("INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
-			runIpt("_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+			insertArgs = append(insertArgs, "-I", chain, "1")
+			insertArgs = append(insertArgs, args...)
+			_ = exec.Command(ipt, insertArgs...).Run()
 		}
 
-		// Прямой вызов через sh -c (на случай ограниченного окружения Entware на KeeneticOS)
-		shCmd := fmt.Sprintf(`iptables -I INPUT 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I INPUT 1 -i %s -j ACCEPT 2>/dev/null; iptables -I FORWARD 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I FORWARD 1 -i %s -j ACCEPT 2>/dev/null; iptables -I OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I OUTPUT 1 -o %s -j ACCEPT 2>/dev/null; iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null; iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null; iptables -I _NDM_OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I _NDM_OUTPUT 1 -o %s -j ACCEPT 2>/dev/null`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
-		_ = exec.Command("sh", "-c", shCmd).Run()
+		// 1. Стандартные цепочки ядра Linux
+		ensureRule("", "INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
+		ensureRule("", "INPUT", "-p", "icmp", "-j", "ACCEPT")
+		ensureRule("", "FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
+		ensureRule("", "FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
+		ensureRule("", "OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
+
+		// 2. Специальные цепочки KeeneticOS (NDM Framework)
+		if isKeeneticDevice() {
+			ensureRule("", "_NDM_INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
+			ensureRule("", "_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
+			ensureRule("", "_NDM_FORWARD", "-i", d.AdapterName, "-j", "ACCEPT")
+			ensureRule("", "_NDM_FORWARD", "-o", d.AdapterName, "-j", "ACCEPT")
+			ensureRule("", "_NDM_OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
+		}
+
+		// 3. Таблица mangle: отключение blackhole-маркировки для пакетов mesh
+		ensureRule("mangle", "PREROUTING", "-i", d.AdapterName, "-j", "ACCEPT")
+		ensureRule("mangle", "OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
+
+		// 4. Разрешение входящих UDP-пакетов
+		ensureRule("", "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+		if isKeeneticDevice() {
+			ensureRule("", "_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+		}
 
 		// 5. nftables (Ubuntu 22.04+, Debian 12+): добавляем разрешение для nb0 через nft напрямую
 		if nft, err := exec.LookPath("nft"); err == nil {
-			// Разрешаем весь трафик через TUN интерфейс в nftables (если таблица inet filter существует)
 			_ = exec.Command(nft, "add", "rule", "inet", "filter", "input", "iifname", d.AdapterName, "accept").Run()
 			_ = exec.Command(nft, "add", "rule", "inet", "filter", "forward", "iifname", d.AdapterName, "accept").Run()
 			_ = exec.Command(nft, "add", "rule", "inet", "filter", "forward", "oifname", d.AdapterName, "accept").Run()
 			_ = exec.Command(nft, "add", "rule", "inet", "filter", "output", "oifname", d.AdapterName, "accept").Run()
-			// Разрешение ICMP глобально
 			_ = exec.Command(nft, "add", "rule", "inet", "filter", "input", "ip", "protocol", "icmp", "accept").Run()
 		}
-
 
 		// 6. ufw (Ubuntu): разрешение через профиль ufw если доступен
 		if ufw, err := exec.LookPath("ufw"); err == nil {
@@ -399,16 +370,7 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 
 	// Автоматическое создание/обновление системного хука брандмауэра KeeneticOS
 	// NDM автоматически вызывает скрипты из /opt/etc/ndm/netfilter.d/ при любых сетевых изменениях
-	isKeenetic := false
-	if _, err := os.Stat("/bin/ndmq"); err == nil {
-		isKeenetic = true
-	} else if _, err := os.Stat("/usr/bin/ndmq"); err == nil {
-		isKeenetic = true
-	} else if _, err := os.Stat("/etc/ndm"); err == nil {
-		isKeenetic = true
-	}
-
-	if isKeenetic {
+	if isKeeneticDevice() {
 		if _, err := os.Stat("/opt/etc"); err == nil {
 			_ = os.MkdirAll("/opt/etc/ndm/netfilter.d", 0755)
 			hookContent := fmt.Sprintf(`#!/bin/sh
@@ -461,10 +423,13 @@ fi
 							_ = d.SetVirtualIP(vip)
 						}
 					}
-					// 2. Быстрая проверка правил iptables
-					chk := exec.Command("iptables", "-C", "INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
-					if chk.Run() != nil {
-						applyFirewallRules()
+					// 2. Проверка правил iptables ТОЛЬКО для KeeneticOS (где NDM сбрасывает цепочки при переключении WAN)
+					if isKeeneticDevice() {
+						ipt := findIptablesBinary()
+						chk := exec.Command(ipt, "-w", "2", "-C", "INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
+						if chk.Run() != nil {
+							applyFirewallRules()
+						}
 					}
 				}
 			}

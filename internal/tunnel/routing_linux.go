@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -23,6 +24,46 @@ func runLinuxCmd(name string, args ...string) error {
 	return nil
 }
 
+// isKeeneticDevice checks if running on KeeneticOS.
+func isKeeneticDevice() bool {
+	for _, p := range []string{"/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq"} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// findIptablesBinary finds the preferred iptables executable.
+func findIptablesBinary() string {
+	for _, p := range []string{"/usr/sbin/iptables", "/sbin/iptables", "iptables", "/opt/sbin/iptables"} {
+		if path, err := exec.LookPath(p); err == nil {
+			return path
+		}
+	}
+	return "iptables"
+}
+
+// ensureIptablesRule checks if a rule exists in iptables; if not, appends it.
+func ensureIptablesRule(ipt string, table string, chain string, args ...string) {
+	checkArgs := []string{"-w", "2"}
+	if table != "" {
+		checkArgs = append(checkArgs, "-t", table)
+	}
+	checkArgs = append(checkArgs, "-C", chain)
+	checkArgs = append(checkArgs, args...)
+	if exec.Command(ipt, checkArgs...).Run() == nil {
+		return // Rule already exists, do not duplicate!
+	}
+	insertArgs := []string{"-w", "2"}
+	if table != "" {
+		insertArgs = append(insertArgs, "-t", table)
+	}
+	insertArgs = append(insertArgs, "-A", chain)
+	insertArgs = append(insertArgs, args...)
+	_ = exec.Command(ipt, insertArgs...).Run()
+}
+
 // EnableHostIPForwardingSubnet enables kernel IPv4 forwarding and adds iptables NAT masquerading for mesh subnet.
 func EnableHostIPForwardingSubnet(subnet string) error {
 	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.ip_forward=1")
@@ -38,35 +79,32 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			cleanSubnet = "10.11.12.0/24"
 		}
 	}
-	iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
-	for _, ipt := range iptablesPaths {
-		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", cleanSubnet, "-j", "MASQUERADE")
-		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", cleanSubnet, "-j", "MASQUERADE")
-		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", cleanSubnet, "!", "-o", "nb0", "-j", "MASQUERADE")
-		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", cleanSubnet, "!", "-o", "nb0", "-j", "MASQUERADE")
-		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "10.0.0.0/8", "-j", "MASQUERADE")
-		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", "10.0.0.0/8", "-j", "MASQUERADE")
-		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE")
-		_ = runLinuxCmd(ipt, "-t", "nat", "-A", "POSTROUTING", "-s", "100.64.0.0/10", "-j", "MASQUERADE")
 
-		// Forwarding rules for nb0
-		_ = runLinuxCmd(ipt, "-C", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
-		_ = runLinuxCmd(ipt, "-I", "FORWARD", "1", "-i", "nb0", "-j", "ACCEPT")
-		_ = runLinuxCmd(ipt, "-C", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
-		_ = runLinuxCmd(ipt, "-I", "FORWARD", "1", "-o", "nb0", "-j", "ACCEPT")
-		_ = runLinuxCmd(ipt, "-I", "_NDM_FORWARD", "1", "-i", "nb0", "-j", "ACCEPT")
-		_ = runLinuxCmd(ipt, "-I", "_NDM_FORWARD", "1", "-o", "nb0", "-j", "ACCEPT")
+	ipt := findIptablesBinary()
 
-		// Bi-directional TCP MSS Clamping to prevent MTU Blackhole on 4G/PPPoE
-		_ = runLinuxCmd(ipt, "-t", "mangle", "-D", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
-		_ = runLinuxCmd(ipt, "-t", "mangle", "-I", "FORWARD", "1", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+	// 1. NAT Masquerading for mesh subnet ONLY when not exiting back to nb0
+	ensureIptablesRule(ipt, "nat", "POSTROUTING", "-s", cleanSubnet, "!", "-o", "nb0", "-j", "MASQUERADE")
+
+	// 2. Forwarding rules for nb0
+	ensureIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
+	ensureIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
+
+	// Keenetic NDM chains if present
+	if isKeeneticDevice() {
+		ensureIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "nb0", "-j", "ACCEPT")
+		ensureIptablesRule(ipt, "", "_NDM_FORWARD", "-o", "nb0", "-j", "ACCEPT")
 	}
 
-	// Keenetic / OpenWrt: ensure forwarded traffic from mesh subnet can lookup default WAN table
-	_ = runLinuxCmd("ip", "rule", "del", "from", cleanSubnet, "lookup", "default")
-	_ = runLinuxCmd("ip", "rule", "add", "from", cleanSubnet, "lookup", "default", "priority", "60")
+	// 3. Bi-directional TCP MSS Clamping
+	ensureIptablesRule(ipt, "mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
 
-	StartLinuxNATWatchdog(context.Background(), cleanSubnet)
+	// Keenetic / OpenWrt: ensure forwarded traffic from mesh subnet can lookup default WAN table
+	if isKeeneticDevice() {
+		_ = runLinuxCmd("ip", "rule", "del", "from", cleanSubnet, "lookup", "default")
+		_ = runLinuxCmd("ip", "rule", "add", "from", cleanSubnet, "lookup", "default", "priority", "60")
+		StartLinuxNATWatchdog(context.Background(), cleanSubnet)
+	}
+
 	return nil
 }
 
@@ -75,8 +113,11 @@ var (
 	natWatchdogMu     sync.Mutex
 )
 
-// StartLinuxNATWatchdog запускает фоновый сторож целостности правил iptables на Keenetic/Linux (каждые 25 сек).
+// StartLinuxNATWatchdog запускает фоновый сторож целостности правил iptables ТОЛЬКО на KeeneticOS (каждые 60 сек).
 func StartLinuxNATWatchdog(ctx context.Context, subnet string) {
+	if !isKeeneticDevice() {
+		return
+	}
 	natWatchdogMu.Lock()
 	if natWatchdogCancel != nil {
 		natWatchdogCancel()
@@ -86,14 +127,15 @@ func StartLinuxNATWatchdog(ctx context.Context, subnet string) {
 	natWatchdogMu.Unlock()
 
 	go func() {
-		ticker := time.NewTicker(25 * time.Second)
+		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
+		ipt := findIptablesBinary()
 		for {
 			select {
 			case <-wCtx.Done():
 				return
 			case <-ticker.C:
-				cmd := exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", subnet, "-j", "MASQUERADE")
+				cmd := exec.Command(ipt, "-w", "2", "-t", "nat", "-C", "POSTROUTING", "-s", subnet, "!", "-o", "nb0", "-j", "MASQUERADE")
 				if err := cmd.Run(); err != nil {
 					// Правило исчезло (сброс цепочек NDM при смене WAN) -> восстанавливаем
 					_ = EnableHostIPForwardingSubnet(subnet)

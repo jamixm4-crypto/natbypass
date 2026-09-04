@@ -812,6 +812,11 @@ func main() {
 
 	flag.Parse()
 	configPath = *cfgFile
+	if !filepath.IsAbs(configPath) {
+		if exe, err := os.Executable(); err == nil {
+			configPath = filepath.Join(filepath.Dir(exe), configPath)
+		}
+	}
 	writeDebug("Загрузка конфигурации: " + configPath)
 
 	// 2. Инициализация Common Controls

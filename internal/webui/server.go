@@ -2267,7 +2267,10 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	saved := cfg.AddOrUpdateProfile(newProf)
-	_ = config.Save(cfg, s.configPath, false)
+	if err := config.Save(cfg, s.configPath, false); err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения профиля на диск: "+err.Error())
+		return
+	}
 
 	if req.AutoSwitch {
 		cfg.SyncSignalingWithProfile(saved)
@@ -2451,7 +2454,10 @@ func (s *Server) handleProfileSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = config.Save(cfg, s.configPath, false)
+	if err := config.Save(cfg, s.configPath, false); err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения профиля на диск: "+err.Error())
+		return
+	}
 
 	cfg.SyncSignalingWithProfile(active)
 	if s.sigMgr != nil && active.MQTTTopic != "" {

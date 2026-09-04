@@ -813,8 +813,9 @@ func (p *UDPPuncher) readLoop() {
 				if hasCKey {
 					if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
 						p.handleTunnelPacket(dec, remoteAddr)
-						continue
 					}
+					// If cipherKey is set, drop packets that fail decryption
+					continue
 				}
 				p.handleTunnelPacket(rawPayload, remoteAddr)
 			}
@@ -827,10 +828,12 @@ func (p *UDPPuncher) readLoop() {
 			if hasCKey {
 				if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
 					p.handleTunnelPacket(dec, remoteAddr)
-					continue
 				}
+				// If cipherKey is set, drop packets that fail decryption
+				continue
 			}
-			p.handleTunnelPacket(rawPayload, remoteAddr)
+			// TunEncryptedHeader received but no cipherKey configured: drop
+			continue
 		case n > constants.TunHeaderSize && string(buf[:constants.TunHeaderSize]) == constants.TunHeader:
 			rawPayload := buf[constants.TunHeaderSize:n]
 			p.cipherMu.RLock()
@@ -840,8 +843,9 @@ func (p *UDPPuncher) readLoop() {
 			if hasCKey {
 				if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
 					p.handleTunnelPacket(dec, remoteAddr)
-					continue
 				}
+				// If cipherKey is set, drop packets that fail decryption or plaintext leak
+				continue
 			}
 			p.handleTunnelPacket(rawPayload, remoteAddr)
 		default:

@@ -197,9 +197,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		uiServer.SetOnConfigChange(onCfgReload)
 		uiServer.SetOnProfileSwitch(func(p *config.Profile) error {
 			if p != nil {
-				if configFile != "" {
-					_ = config.Save(cfg, configFile, false)
-				}
 				onCfgReload()
 			}
 			return nil
