@@ -377,32 +377,30 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 		return nil, 0, fmt.Errorf("UDP socket closed")
 	}
 
+	if len(servers) > 4 {
+		servers = servers[:4]
+	}
+
+	// 2. Отправляем Binding Request параллельно на все топ STUN сервера
+	msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
 	for _, srv := range servers {
-		srvAddr, err := net.ResolveUDPAddr("udp4", srv)
-		if err != nil {
-			srvAddr, err = net.ResolveUDPAddr("udp", srv)
-			if err != nil {
-				continue
-			}
+		if rAddr, err := p.resolveAddr(srv); err == nil && rAddr != nil {
+			_, _ = conn.WriteToUDP(msg.Raw, rAddr)
 		}
+	}
 
-		msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
-		if _, err := conn.WriteToUDP(msg.Raw, srvAddr); err != nil {
-			continue
+	// 3. Ждём ответа из stunRespCh с таймаутом до 1200 мс
+	select {
+	case <-p.stunRespCh:
+		p.mu.Lock()
+		ip, port := p.mappedIP, p.mappedPort
+		p.mu.Unlock()
+		if ip != nil && port > 0 {
+			return ip, port, nil
 		}
-
-		select {
-		case <-p.stunRespCh:
-			p.mu.Lock()
-			ip, port := p.mappedIP, p.mappedPort
-			p.mu.Unlock()
-			if ip != nil && port > 0 {
-				return ip, port, nil
-			}
-		case <-time.After(400 * time.Millisecond):
-		case <-ctx.Done():
-			return nil, 0, ctx.Err()
-		}
+	case <-time.After(1200 * time.Millisecond):
+	case <-ctx.Done():
+		return nil, 0, ctx.Err()
 	}
 
 	p.mu.Lock()

@@ -161,10 +161,14 @@ if ($peers -and $peers.data) {
 
 # Fallback: если пиров в API пока нет
 if (-not $pingedAny) {
-    $fallbacks = @("10.123.111.1", "10.123.111.2", "10.123.111.110", "100.64.200.1")
-    foreach ($fb in $fallbacks) {
-        if ($fb -ne ($status.virtual_ip -split '/')[0]) {
-            Test-PeerPing $fb "Mesh узел (Fallback)"
+    $myIP = ($status.virtual_ip -split '/')[0].Trim()
+    if ($myIP -match '^(\d+\.\d+\.\d+)\.\d+$') {
+        $subnetPref = $Matches[1]
+        $fallbacks = @("$subnetPref.1", "$subnetPref.2")
+        foreach ($fb in $fallbacks) {
+            if ($fb -ne $myIP) {
+                Test-PeerPing $fb "Mesh узел (Fallback $fb)"
+            }
         }
     }
 }

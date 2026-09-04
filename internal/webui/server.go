@@ -674,11 +674,23 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.213"
+		ver = "1.9.214"
 	}
 
 	cfg, _ := config.Load(s.configPath)
 	vip := config.ResolveVirtualIP(cfg, s.state.DeviceID)
+
+	activeProfileName := ""
+	mqttTopic := ""
+	if cfg != nil {
+		if prof := cfg.EnsureActiveProfile(); prof != nil {
+			activeProfileName = prof.Name
+			mqttTopic = prof.MQTTTopic
+		}
+		if mqttTopic == "" {
+			mqttTopic = cfg.Signaling.MQTTTopic
+		}
+	}
 
 	status := map[string]interface{}{
 		"version":         ver,
@@ -691,6 +703,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"started_at":      s.state.StartedAt,
 		"current_channel": currentChannel,
 		"peers_count":     s.countRemotePeers(),
+		"active_profile":  activeProfileName,
+		"mqtt_topic":      mqttTopic,
 	}
 	s.jsonResponse(w, http.StatusOK, status, "")
 }
@@ -1481,7 +1495,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.213"
+		ver = "1.9.214"
 	}
 
 	vip := s.state.VirtualIP

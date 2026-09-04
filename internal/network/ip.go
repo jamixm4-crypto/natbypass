@@ -44,40 +44,75 @@ func NewDiscoverer(apis []string, timeout time.Duration) *Discoverer {
 }
 
 func (d *Discoverer) GetPublicIP(ctx context.Context) (net.IP, error) {
+	apis := d.apis
+	if len(apis) == 0 {
+		apis = defaultIPAPIs
+	}
+	if len(apis) > 4 {
+		apis = apis[:4]
+	}
+
+	type ipRes struct {
+		ip  net.IP
+		err error
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+	defer cancel()
+
+	ch := make(chan ipRes, len(apis))
+
+	for _, api := range apis {
+		go func(url string) {
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+			if err != nil {
+				ch <- ipRes{err: err}
+				return
+			}
+			resp, err := d.client.Do(req)
+			if err != nil {
+				ch <- ipRes{err: err}
+				return
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 128))
+			if err != nil {
+				ch <- ipRes{err: err}
+				return
+			}
+			ipStr := strings.TrimSpace(string(body))
+			ip := net.ParseIP(ipStr)
+			if ip != nil && ip.To4() != nil {
+				ch <- ipRes{ip: ip.To4()}
+				return
+			}
+			ch <- ipRes{err: fmt.Errorf("invalid IP: %s", ipStr)}
+		}(api)
+	}
+
 	var lastErr error
-
-	for _, api := range d.apis {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, api, nil)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		resp, err := d.client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		ipStr := strings.TrimSpace(string(body))
-		ip := net.ParseIP(ipStr)
-		if ip != nil {
-			return ip, nil
+	for i := 0; i < len(apis); i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-reqCtx.Done():
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, errors.New("timeout discovering public IP")
+		case res := <-ch:
+			if res.err == nil && res.ip != nil {
+				cancel()
+				return res.ip, nil
+			}
+			lastErr = res.err
 		}
 	}
 
 	if lastErr != nil {
 		return nil, lastErr
 	}
-
-	return nil, errors.New("failed to discover public IP")
+	return nil, errors.New("failed to discover public IP from all providers")
 }
 
 func (d *Discoverer) GetPublicIPCached(ctx context.Context, maxAge time.Duration) (net.IP, error) {

@@ -811,9 +811,11 @@ func initialDiscovery(ctx context.Context, puncher *network.UDPPuncher, ipDisc *
 	var publicIP net.IP = net.IPv4(0, 0, 0, 0)
 	var stunAddr string
 
-	// 1. Fast STUN Discovery first (UDP roundtrip takes ~50-200ms vs 10-60s for HTTP)
+	// 1. Fast STUN Discovery first (UDP roundtrip takes ~50-200ms)
 	if puncher != nil {
-		extIP, port, err := puncher.DiscoverMappedAddress(ctx)
+		sCtx, sCancel := context.WithTimeout(ctx, 2*time.Second)
+		extIP, port, err := puncher.DiscoverMappedAddress(sCtx)
+		sCancel()
 		if err == nil && extIP != nil && port > 0 {
 			stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
 			publicIP = extIP
@@ -824,21 +826,32 @@ func initialDiscovery(ctx context.Context, puncher *network.UDPPuncher, ipDisc *
 		}
 	}
 
-	if uiServer != nil {
-		uiServer.SetAppState(deviceID, publicIP.String(), stunAddr)
-		if puncher != nil {
-			uiServer.SetNATType(puncher.GetNATType().String())
-		}
-	}
-
 	// 2. HTTP Public IP discovery as fallback/supplement if STUN didn't get public IP
 	if ipDisc != nil && (publicIP.IsUnspecified() || publicIP.IsLoopback()) {
-		if ip, err := ipDisc.GetPublicIPCached(ctx, 5*time.Minute); err == nil && ip != nil {
+		hCtx, hCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+		if ip, err := ipDisc.GetPublicIPCached(hCtx, 5*time.Minute); err == nil && ip != nil {
 			publicIP = ip
 			log.Info().Str("ip", publicIP.String()).Msg("Public IP discovered via HTTP fallback")
-			if uiServer != nil {
-				uiServer.SetAppState(deviceID, publicIP.String(), stunAddr)
-			}
+		}
+		hCancel()
+	}
+
+	pubIPStr := publicIP.String()
+	if publicIP.IsUnspecified() || publicIP.IsLoopback() {
+		if localLAN := network.GetLocalLANIP(); localLAN != "" {
+			pubIPStr = localLAN
+		} else {
+			pubIPStr = "Локальная сеть (NAT)"
+		}
+	}
+	if stunAddr == "" {
+		stunAddr = "Недоступен (Relay / Symmetric NAT)"
+	}
+
+	if uiServer != nil {
+		uiServer.SetAppState(deviceID, pubIPStr, stunAddr)
+		if puncher != nil {
+			uiServer.SetNATType(puncher.GetNATType().String())
 		}
 	}
 }

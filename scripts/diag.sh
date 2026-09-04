@@ -238,6 +238,12 @@ HTTP_GET() {
 STATUS_JSON="$(HTTP_GET "http://127.0.0.1:8080/api/status")"
 if [ -n "$STATUS_JSON" ]; then
     log_ok "Локальный API отвечает (HTTP 200)"
+    ACT_PROF="$(echo "$STATUS_JSON" | grep -o '"active_profile":"[^"]*' | cut -d'"' -f4)"
+    MQTT_TOPIC="$(echo "$STATUS_JSON" | grep -o '"mqtt_topic":"[^"]*' | cut -d'"' -f4)"
+    PEERS_CNT="$(echo "$STATUS_JSON" | grep -o '"peers_count":[0-9]*' | cut -d':' -f2)"
+    [ -n "$ACT_PROF" ] && log_info "Активный профиль сети: $ACT_PROF"
+    [ -n "$MQTT_TOPIC" ] && log_info "Сигнальный MQTT топик: $MQTT_TOPIC"
+    [ -n "$PEERS_CNT" ] && log_info "Количество обнаруженных пиров: $PEERS_CNT"
     echo "API Status: $STATUS_JSON" >> "$REPORT_FILE"
     PEERS_JSON="$(HTTP_GET "http://127.0.0.1:8080/api/peers")"
     if [ -n "$PEERS_JSON" ]; then
