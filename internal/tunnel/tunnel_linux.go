@@ -175,27 +175,31 @@ func (d *Device) WritePacket(packet []byte) error {
 	return err
 }
 
+func findIPBinary() string {
+	for _, p := range []string{"/sbin/ip", "/usr/sbin/ip", "/bin/ip", "/usr/bin/ip", "ip"} {
+		if path, err := exec.LookPath(p); err == nil {
+			return path
+		}
+	}
+	return "ip"
+}
+
 func (d *Device) SetVirtualIP(virtualIP string) error {
 	d.mu.Lock()
 	d.VirtualIP = virtualIP
 	d.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
-
-	// 1. Попытка через утилиту ip
-	_ = exec.CommandContext(ctx, "ip", "addr", "flush", "dev", d.AdapterName).Run()
-	cmd := exec.CommandContext(ctx, "ip", "addr", "add", cleanVIP+"/24", "dev", d.AdapterName)
-	if err := cmd.Run(); err != nil {
-		// 2. Fallback через ifconfig
-		_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, cleanVIP, "netmask", "255.255.255.0", "up").Run()
-	} else {
-		_ = exec.CommandContext(ctx, "ip", "link", "set", d.AdapterName, "up").Run()
+	if cleanVIP == "" {
+		return nil
 	}
 
-	// 3. Установка MTU и MSS Clamping
+	ipBin := findIPBinary()
+
+	// 1. Установка MTU
 	mtu := 1420
 	d.mu.Lock()
 	if d.MTU > 0 {
@@ -203,25 +207,78 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	}
 	d.mu.Unlock()
 	mtuStr := strconv.Itoa(mtu)
-	_ = exec.CommandContext(ctx, "ip", "link", "set", "dev", d.AdapterName, "mtu", mtuStr).Run()
-	_ = exec.CommandContext(ctx, "ifconfig", d.AdapterName, "mtu", mtuStr).Run()
+
+	// 2. ГАРАНТИРОВАННО поднимаем интерфейс первым делом (LINK UP + MTU)
+	_ = exec.CommandContext(ctx, ipBin, "link", "set", "dev", d.AdapterName, "mtu", mtuStr).Run()
+	_ = exec.CommandContext(ctx, ipBin, "link", "set", d.AdapterName, "up").Run()
+
+	// 3. Очистка старых IP-адресов на интерфейсе
+	_ = exec.CommandContext(ctx, ipBin, "addr", "flush", "dev", d.AdapterName).Run()
+
+	// 4. Многоступенчатое назначение IP-адреса на интерфейс
+	addrAssigned := false
+
+	// Шаг 4a: Стандартный /24 CIDR
+	if err := exec.CommandContext(ctx, ipBin, "addr", "add", cleanVIP+"/24", "dev", d.AdapterName).Run(); err == nil {
+		addrAssigned = true
+	}
+
+	// Шаг 4b: Point-to-Point TUN с указанием peer
+	if !addrAssigned {
+		if err := exec.CommandContext(ctx, ipBin, "addr", "add", cleanVIP+"/24", "peer", cleanVIP, "dev", d.AdapterName).Run(); err == nil {
+			addrAssigned = true
+		}
+	}
+
+	// Шаг 4c: С вычисленным broadcast адресом
+	if !addrAssigned {
+		parts := strings.Split(cleanVIP, ".")
+		if len(parts) == 4 {
+			brd := fmt.Sprintf("%s.%s.%s.255", parts[0], parts[1], parts[2])
+			if err := exec.CommandContext(ctx, ipBin, "addr", "add", cleanVIP+"/24", "broadcast", brd, "dev", d.AdapterName).Run(); err == nil {
+				addrAssigned = true
+			}
+		}
+	}
+
+	// Шаг 4d: Назначение как /32 хост
+	if !addrAssigned {
+		if err := exec.CommandContext(ctx, ipBin, "addr", "add", cleanVIP+"/32", "dev", d.AdapterName).Run(); err == nil {
+			addrAssigned = true
+		}
+	}
+
+	// Шаг 4e: Fallback через ifconfig (если ip недоступен или вернул ошибку)
+	if !addrAssigned {
+		ifconfigBin := "ifconfig"
+		for _, icp := range []string{"/sbin/ifconfig", "/usr/sbin/ifconfig", "/bin/ifconfig", "ifconfig"} {
+			if path, err := exec.LookPath(icp); err == nil {
+				ifconfigBin = path
+				break
+			}
+		}
+		_ = exec.CommandContext(ctx, ifconfigBin, d.AdapterName, cleanVIP, "netmask", "255.255.255.0", "up").Run()
+	}
+
+	// Финальное подтверждение статуса UP
+	_ = exec.CommandContext(ctx, ipBin, "link", "set", d.AdapterName, "up").Run()
 	_ = EnableMSSClamping(d.AdapterName, mtu)
 
-	// 4. Маршрутизация подсети через адаптер
+	// 5. Маршрутизация подсети через адаптер (используем replace, чтобы маршрут не падал с File exists)
 	prefix := "100.64.200"
 	parts := strings.Split(cleanVIP, ".")
 	if len(parts) >= 3 {
 		prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
 	}
-	_ = exec.CommandContext(ctx, "ip", "route", "add", prefix+".0/24", "dev", d.AdapterName).Run()
-	_ = exec.CommandContext(ctx, "ip", "route", "add", prefix+".0/24", "dev", d.AdapterName, "table", "main").Run()
-	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName).Run()
-	_ = exec.CommandContext(ctx, "ip", "route", "add", "100.64.200.0/24", "dev", d.AdapterName, "table", "main").Run()
+	_ = exec.CommandContext(ctx, ipBin, "route", "replace", prefix+".0/24", "dev", d.AdapterName).Run()
+	_ = exec.CommandContext(ctx, ipBin, "route", "replace", prefix+".0/24", "dev", d.AdapterName, "table", "main").Run()
+	_ = exec.CommandContext(ctx, ipBin, "route", "replace", "100.64.200.0/24", "dev", d.AdapterName).Run()
+	_ = exec.CommandContext(ctx, ipBin, "route", "replace", "100.64.200.0/24", "dev", d.AdapterName, "table", "main").Run()
 
 	// Приоритетные правила маршрутизации для KeeneticOS (обход blackhole таблиц 4096-4101)
-	_ = exec.CommandContext(ctx, "ip", "rule", "add", "pref", "50", "to", prefix+".0/24", "lookup", "main").Run()
-	_ = exec.CommandContext(ctx, "ip", "rule", "add", "pref", "50", "from", prefix+".0/24", "lookup", "main").Run()
-	_ = exec.CommandContext(ctx, "ip", "rule", "add", "pref", "50", "iif", d.AdapterName, "lookup", "main").Run()
+	_ = exec.CommandContext(ctx, ipBin, "rule", "add", "pref", "50", "to", prefix+".0/24", "lookup", "main").Run()
+	_ = exec.CommandContext(ctx, ipBin, "rule", "add", "pref", "50", "from", prefix+".0/24", "lookup", "main").Run()
+	_ = exec.CommandContext(ctx, ipBin, "rule", "add", "pref", "50", "iif", d.AdapterName, "lookup", "main").Run()
 
 	// 5. Прямая запись в /proc/sys/net/ipv4 (100% совместимо со всеми Linux/Keenetic даже без утилиты sysctl)
 	_ = os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1\n"), 0644)
@@ -339,9 +396,19 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 
 	// Автоматическое создание/обновление системного хука брандмауэра KeeneticOS
 	// NDM автоматически вызывает скрипты из /opt/etc/ndm/netfilter.d/ при любых сетевых изменениях
-	if _, err := os.Stat("/opt/etc"); err == nil {
-		_ = os.MkdirAll("/opt/etc/ndm/netfilter.d", 0755)
-		hookContent := fmt.Sprintf(`#!/bin/sh
+	isKeenetic := false
+	if _, err := os.Stat("/bin/ndmq"); err == nil {
+		isKeenetic = true
+	} else if _, err := os.Stat("/usr/bin/ndmq"); err == nil {
+		isKeenetic = true
+	} else if _, err := os.Stat("/etc/ndm"); err == nil {
+		isKeenetic = true
+	}
+
+	if isKeenetic {
+		if _, err := os.Stat("/opt/etc"); err == nil {
+			_ = os.MkdirAll("/opt/etc/ndm/netfilter.d", 0755)
+			hookContent := fmt.Sprintf(`#!/bin/sh
 [ "$type" = "ip6tables" ] && exit 0
 
 if [ "$table" = "filter" ]; then
@@ -358,19 +425,18 @@ if [ "$table" = "mangle" ]; then
     iptables -t mangle -C OUTPUT -o %s -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || true
 fi
 `, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
-		hookPath := "/opt/etc/ndm/netfilter.d/010-natbypass.sh"
-		if cur, rErr := os.ReadFile(hookPath); rErr != nil || string(cur) != hookContent {
-			_ = os.WriteFile(hookPath, []byte(hookContent), 0755)
-			_ = exec.Command("chmod", "+x", hookPath).Run()
+			hookPath := "/opt/etc/ndm/netfilter.d/010-natbypass.sh"
+			if cur, rErr := os.ReadFile(hookPath); rErr != nil || string(cur) != hookContent {
+				_ = os.WriteFile(hookPath, []byte(hookContent), 0755)
+				_ = exec.Command("chmod", "+x", hookPath).Run()
+			}
 		}
 	}
 
-
-	// Фоновый сторожевой таймер: проверяет правила мягко (раз в 45 сек), без нагрузки на CPU.
-	// Если правило на месте — команды НЕ выполняются (0 forks).
+	// Фоновый сторожевой таймер: проверяет статус интерфейса, IP-адрес и правила брандмауэра (раз в 30 сек)
 	d.watchdogOnce.Do(func() {
 		go func() {
-			ticker := time.NewTicker(45 * time.Second)
+			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
 			for {
 				select {
@@ -380,7 +446,19 @@ fi
 					if atomic.LoadInt32(&d.isClosed) == 1 {
 						return
 					}
-					// Быстрая проверка: если правило INPUT для nb0 уже активно, ничего не делаем
+					// 1. Проверка статуса интерфейса и IP адреса
+					ipPath := findIPBinary()
+					out, _ := exec.Command(ipPath, "addr", "show", "dev", d.AdapterName).Output()
+					outStr := string(out)
+					if !strings.Contains(outStr, "UP") || !strings.Contains(outStr, "inet ") {
+						d.mu.Lock()
+						vip := d.VirtualIP
+						d.mu.Unlock()
+						if vip != "" {
+							_ = d.SetVirtualIP(vip)
+						}
+					}
+					// 2. Быстрая проверка правил iptables
 					chk := exec.Command("iptables", "-C", "INPUT", "-i", d.AdapterName, "-j", "ACCEPT")
 					if chk.Run() != nil {
 						applyFirewallRules()

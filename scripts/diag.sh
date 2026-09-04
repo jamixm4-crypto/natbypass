@@ -60,7 +60,7 @@ else
 fi
 
 IS_KEENETIC=0
-if [ -d "/opt/etc/ndm" ] || grep -qi "keenetic" /proc/version 2>/dev/null; then
+if grep -qi "keenetic" /proc/version 2>/dev/null || [ -x "/bin/ndmq" ] || [ -x "/usr/bin/ndmq" ] || [ -f "/etc/ndm/version" ]; then
     IS_KEENETIC=1
     log_info "Обнаружена платформа: KeeneticOS (NDM Framework)"
 fi
@@ -114,6 +114,27 @@ if [ -n "$NB_IF" ]; then
         log_ok "Статус интерфейса: UP (Активен)"
     else
         log_fail "Статус интерфейса: DOWN!"
+    fi
+
+    # Автоматическое восстановление интерфейса nb0 если он DOWN или без IP
+    if ! echo "$IF_INFO" | grep -q "UP" || [ -z "$IP_ADDR" ]; then
+        VIP_CANDIDATE="$(curl -s --max-time 1 http://127.0.0.1:8080/api/status 2>/dev/null | grep -o '"virtual_ip":"[^"]*"' | cut -d'"' -f4)"
+        if [ -n "$VIP_CANDIDATE" ]; then
+            log_warn "Авто-восстановление: подъем интерфейса $NB_IF и назначение $VIP_CANDIDATE..."
+            ip link set dev "$NB_IF" mtu 1420 up 2>/dev/null
+            ip addr flush dev "$NB_IF" 2>/dev/null
+            ip addr add "$VIP_CANDIDATE/24" dev "$NB_IF" 2>/dev/null || ip addr add "$VIP_CANDIDATE/24" peer "$VIP_CANDIDATE" dev "$NB_IF" 2>/dev/null || ip addr add "$VIP_CANDIDATE/32" dev "$NB_IF" 2>/dev/null
+            ip link set dev "$NB_IF" up 2>/dev/null
+            SUBNET_PREF="$(echo "$VIP_CANDIDATE" | cut -d'.' -f1-3)"
+            ip route replace "${SUBNET_PREF}.0/24" dev "$NB_IF" 2>/dev/null
+            ip route replace "${SUBNET_PREF}.0/24" dev "$NB_IF" table main 2>/dev/null
+            # Повторная проверка
+            IF_INFO="$(ip addr show dev "$NB_IF" 2>/dev/null || ifconfig "$NB_IF" 2>/dev/null)"
+            IP_ADDR="$(echo "$IF_INFO" | grep -o 'inet [0-9.]*' | awk '{print $2}' || echo '')"
+            if echo "$IF_INFO" | grep -q "UP" && [ -n "$IP_ADDR" ]; then
+                log_ok "Интерфейс $NB_IF успешно восстановлен: IP $IP_ADDR [UP]"
+            fi
+        fi
     fi
 else
     log_fail "Виртуальный интерфейс nb0 НЕ существует!"
