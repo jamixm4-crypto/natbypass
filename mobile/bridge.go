@@ -28,7 +28,7 @@ import (
 )
 
 
-const Version = "1.9.208"
+const Version = "1.9.209"
 
 
 
@@ -439,7 +439,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					OS:               "android",
 					Platform:         "Android",
 					Arch:             runtime.GOARCH,
-					Version:          "1.9.208",
+					Version:          "1.9.209",
 					IsKeenetic:       false,
 					Topic:            activeTopic,
 				}
@@ -1999,6 +1999,10 @@ func rebuildSignalingInternal(p *config.Profile) {
 
 	if p.AWGPreset != "" {
 		globalAWGPreset = p.AWGPreset
+	}
+
+	if globalPuncher != nil && p.NetworkKey != "" {
+		globalPuncher.SetCipherKey(p.NetworkKey)
 	}
 
 	if globalConfig != nil && globalDevID != "" {

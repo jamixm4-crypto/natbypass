@@ -134,6 +134,7 @@ type UDPPuncher struct {
 func (p *UDPPuncher) SetCipherKey(key string) {
 	p.cipherMu.Lock()
 	defer p.cipherMu.Unlock()
+	p.addrCache.Range(func(k, v any) bool { p.addrCache.Delete(k); return true })
 	if key == "" {
 		p.hasCipherKey = false
 		p.cipherKey = [32]byte{}

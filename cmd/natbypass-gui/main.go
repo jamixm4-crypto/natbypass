@@ -95,7 +95,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.208"
+	Version = "1.9.209"
 	Commit  = "release"
 )
 
@@ -2233,6 +2233,47 @@ func onProfileSelectionChange() {
 	setControlText(hEditProfVIP, p.VirtualIP)
 }
 
+func applyActiveProfileLive(target *config.Profile) {
+	if target == nil || cfg == nil {
+		return
+	}
+	cfg.ActiveProfileID = target.ID
+	for i := range cfg.Profiles {
+		cfg.Profiles[i].IsActive = (cfg.Profiles[i].ID == target.ID)
+	}
+	cfg.SyncAWGWithProfile(target)
+	_ = config.Save(cfg, configPath, false)
+	applyAWGProfileToGUI(target)
+	if udpPuncher != nil && target.NetworkKey != "" {
+		udpPuncher.SetCipherKey(target.NetworkKey)
+	}
+	setControlText(hEditMqttBr, target.MQTTBroker)
+	setControlText(hEditMqttTp, target.MQTTTopic)
+	myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
+	cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+	if tunDev != nil {
+		_ = tunDev.SetVirtualIP(cleanVIP)
+	}
+	if uiServer != nil {
+		uiServer.SetVirtualIP(cleanVIP)
+	}
+	if registry != nil {
+		registry.ClearAll()
+	}
+	lastPeersHash = ""
+	procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
+	if engineCtx != nil {
+		go func() {
+			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
+			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
+			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, target.MQTTBroker, target.MQTTTopic)
+			triggerPublish()
+		}()
+	}
+	refreshProfilesUI()
+	triggerPublish()
+}
+
 func handleProfileSwitch() {
 	if cfg == nil || len(cfg.Profiles) == 0 {
 		return
@@ -2248,38 +2289,7 @@ func handleProfileSwitch() {
 		addLog("❌ Ошибка переключения: " + err.Error())
 		return
 	}
-	cfg.SyncAWGWithProfile(target)
-	_ = config.Save(cfg, configPath, false)
-	applyAWGProfileToGUI(target)
-	setControlText(hEditMqttBr, target.MQTTBroker)
-	setControlText(hEditMqttTp, target.MQTTTopic)
-	myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
-	cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-	if tunDev != nil {
-		_ = tunDev.SetVirtualIP(cleanVIP)
-	}
-	if uiServer != nil {
-		uiServer.SetVirtualIP(cleanVIP)
-	}
-	triggerPublish()
-
-	if registry != nil {
-		registry.ClearAll()
-	}
-	lastPeersHash = ""
-	procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
-
-	if engineCtx != nil {
-		go func() {
-			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
-			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
-			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, target.MQTTBroker, target.MQTTTopic)
-			triggerPublish()
-		}()
-	}
-
-
-	refreshProfilesUI()
+	applyActiveProfileLive(target)
 	addLog(fmt.Sprintf("🟢 Активный профиль переключен на «%s» (Топик: %s)", target.Name, target.MQTTTopic))
 }
 
@@ -2298,23 +2308,7 @@ func handleProfileCreate() {
 		CreatedAt:  time.Now(),
 	}
 	saved := cfg.AddOrUpdateProfile(newProf)
-	_ = config.Save(cfg, configPath, false)
-
-	if registry != nil {
-		registry.ClearAll()
-	}
-	lastPeersHash = ""
-	procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
-
-	if vpnConnected && engineCtx != nil {
-		go func() {
-			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
-			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
-			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, saved.MQTTBroker, saved.MQTTTopic)
-		}()
-	}
-
-	refreshProfilesUI()
+	applyActiveProfileLive(saved)
 	addLog(fmt.Sprintf("✅ Создан и подключен новый профиль сети «%s»", saved.Name))
 }
 
@@ -2349,37 +2343,10 @@ func handleProfileSave() {
 	_ = config.Save(cfg, configPath, false)
 
 	if p.ID == cfg.ActiveProfileID {
-		setControlText(hEditMqttBr, p.MQTTBroker)
-		setControlText(hEditMqttTp, p.MQTTTopic)
-		if p.VirtualIP != "" {
-			cleanVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-			cfg.Network.Address = cleanVIP
-			myVirtualIP = cleanVIP
-			if tunDev != nil {
-				_ = tunDev.SetVirtualIP(myVirtualIP)
-			}
-			if uiServer != nil {
-				uiServer.SetVirtualIP(myVirtualIP)
-			}
-			triggerPublish()
-		}
-		if registry != nil {
-			registry.ClearAll()
-		}
-		lastPeersHash = ""
-		procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
-		if engineCtx != nil {
-			go func() {
-				tgToken := strings.TrimSpace(getControlText(hEditTgToken))
-				tgChat := strings.TrimSpace(getControlText(hEditTgChat))
-				rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, p.MQTTBroker, p.MQTTTopic)
-				triggerPublish()
-			}()
-		}
+		applyActiveProfileLive(p)
+	} else {
+		refreshProfilesUI()
 	}
-
-
-	refreshProfilesUI()
 	addLog(fmt.Sprintf("💾 Настройки профиля «%s» сохранены", p.Name))
 }
 
@@ -2413,24 +2380,11 @@ func handleProfileDelete() {
 	if wasActive {
 		active := cfg.GetActiveProfile()
 		if active != nil {
-			setControlText(hEditMqttBr, active.MQTTBroker)
-			setControlText(hEditMqttTp, active.MQTTTopic)
-			if registry != nil {
-				registry.ClearAll()
-			}
-			lastPeersHash = ""
-			procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
-			if vpnConnected && engineCtx != nil {
-				go func() {
-					tgToken := strings.TrimSpace(getControlText(hEditTgToken))
-					tgChat := strings.TrimSpace(getControlText(hEditTgChat))
-					rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, active.MQTTBroker, active.MQTTTopic)
-				}()
-			}
+			applyActiveProfileLive(active)
 		}
+	} else {
+		refreshProfilesUI()
 	}
-
-	refreshProfilesUI()
 	addLog(fmt.Sprintf("🗑️ Профиль «%s» успешно удален", p.Name))
 }
 
@@ -2474,40 +2428,8 @@ func handleProfileImport() {
 	}
 	parsed.IsActive = true
 	saved := cfg.AddOrUpdateProfile(*parsed)
-	cfg.SyncAWGWithProfile(saved)
-	_ = config.Save(cfg, configPath, false)
-	applyAWGProfileToGUI(saved)
-
-	myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
-	cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-	if tunDev != nil {
-		_ = tunDev.SetVirtualIP(cleanVIP)
-	}
-	if uiServer != nil {
-		uiServer.SetVirtualIP(cleanVIP)
-	}
-	setControlText(hEditMqttBr, saved.MQTTBroker)
-	setControlText(hEditMqttTp, saved.MQTTTopic)
-
-	if registry != nil {
-		registry.ClearAll()
-	}
-	lastPeersHash = ""
-	procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
-
-	if engineCtx != nil {
-		go func() {
-			tgToken := strings.TrimSpace(getControlText(hEditTgToken))
-			tgChat := strings.TrimSpace(getControlText(hEditTgChat))
-			rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, saved.MQTTBroker, saved.MQTTTopic)
-			triggerPublish()
-		}()
-	}
-
-
-	refreshProfilesUI()
-	triggerPublish()
-	addLog(fmt.Sprintf("📥 Успешно импортирован и активирован профиль «%s» (VIP: %s, Топик: %s)", saved.Name, cleanVIP, saved.MQTTTopic))
+	applyActiveProfileLive(saved)
+	addLog(fmt.Sprintf("📥 Успешно импортирован и активирован профиль «%s» (Топик: %s)", saved.Name, saved.MQTTTopic))
 }
 
 func handleDroppedFile(filePath string) {
@@ -2530,36 +2452,7 @@ func handleDroppedFile(filePath string) {
 			}
 			parsed.IsActive = true
 			saved := cfg.AddOrUpdateProfile(*parsed)
-			cfg.SyncAWGWithProfile(saved)
-			_ = config.Save(cfg, configPath, false)
-			applyAWGProfileToGUI(saved)
-
-			myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
-			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-			if tunDev != nil {
-				_ = tunDev.SetVirtualIP(cleanVIP)
-			}
-			if uiServer != nil {
-				uiServer.SetVirtualIP(cleanVIP)
-			}
-			setControlText(hEditMqttBr, saved.MQTTBroker)
-			setControlText(hEditMqttTp, saved.MQTTTopic)
-
-			if registry != nil {
-				registry.ClearAll()
-			}
-			lastPeersHash = ""
-			procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
-
-			if engineCtx != nil {
-				go func() {
-					tgToken := strings.TrimSpace(getControlText(hEditTgToken))
-					tgChat := strings.TrimSpace(getControlText(hEditTgChat))
-					rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, saved.MQTTBroker, saved.MQTTTopic)
-					triggerPublish()
-				}()
-			}
-			refreshProfilesUI()
+			applyActiveProfileLive(saved)
 			addLog(fmt.Sprintf("📥 Успешно импортирован профиль «%s» из перетащенного файла", saved.Name))
 			return
 		}
@@ -2569,45 +2462,8 @@ func handleDroppedFile(filePath string) {
 	newCfg, err := config.LoadFromString(content)
 	if err == nil && newCfg != nil {
 		cfg = newCfg
-		_ = config.Save(cfg, configPath, false)
 		active := cfg.EnsureActiveProfile()
-		cfg.SyncAWGWithProfile(active)
-		applyAWGProfileToGUI(active)
-
-		myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
-		cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-		if tunDev != nil {
-			_ = tunDev.SetVirtualIP(cleanVIP)
-		}
-		if uiServer != nil {
-			uiServer.SetVirtualIP(cleanVIP)
-		}
-		if active != nil {
-			setControlText(hEditMqttBr, active.MQTTBroker)
-			setControlText(hEditMqttTp, active.MQTTTopic)
-		}
-
-		if registry != nil {
-			registry.ClearAll()
-		}
-		lastPeersHash = ""
-		procSendMessageW.Call(hListPeers, 0x0184 /* LB_RESETCONTENT */, 0, 0)
-
-		if engineCtx != nil {
-			go func() {
-				tgToken := strings.TrimSpace(getControlText(hEditTgToken))
-				tgChat := strings.TrimSpace(getControlText(hEditTgChat))
-				mqBroker := ""
-				mqTopic := ""
-				if active != nil {
-					mqBroker = active.MQTTBroker
-					mqTopic = active.MQTTTopic
-				}
-				rebuildSignalingInternal(engineCtx, chosenModeStr, tgToken, tgChat, mqBroker, mqTopic)
-				triggerPublish()
-			}()
-		}
-		refreshProfilesUI()
+		applyActiveProfileLive(active)
 		addLog("📥 Конфигурация успешно обновлена из файла " + filepath.Base(filePath))
 		return
 	}
@@ -3892,7 +3748,19 @@ func startEngineFromConfig(c *config.Config) {
 	uiServer.SetVirtualIP(myVirtualIP)
 	uiServer.SetAppState(myDevID, myPublicIP, mySTUNAddr, myVirtualIP)
 	uiServer.SetConfigPath(configPath)
-	uiServer.SetOnConfigChange(triggerPublish)
+	uiServer.SetOnConfigChange(func() {
+		if reloaded, err := config.Load(configPath); err == nil && reloaded != nil {
+			cfg = reloaded
+			applyActiveProfileLive(cfg.EnsureActiveProfile())
+		}
+		triggerPublish()
+	})
+	uiServer.SetOnProfileSwitch(func(p *config.Profile) error {
+		if p != nil {
+			applyActiveProfileLive(p)
+		}
+		return nil
+	})
 	go func() {
 		if err := uiServer.Start(ctx); err != nil {
 			writeDebug("Web UI сервер: " + err.Error())

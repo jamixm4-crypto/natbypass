@@ -175,6 +175,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				activeProf := cfg.EnsureActiveProfile()
 				if activeProf != nil {
 					cfg.SyncSignalingWithProfile(activeProf)
+					if puncher != nil && activeProf.NetworkKey != "" {
+						puncher.SetCipherKey(activeProf.NetworkKey)
+					}
 				}
 				targetTopic := ""
 				if activeProf != nil && activeProf.MQTTTopic != "" {
@@ -196,6 +199,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				newVIP := resolveVirtualIP(cfg, deviceID)
 				if newVIP != "" {
+					myVirtualIP = newVIP
 					if tunDev != nil {
 						_ = tunDev.SetVirtualIP(newVIP)
 					}
@@ -204,6 +208,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				triggerPublish()
 			}
 			uiServer.SetOnConfigChange(onCfgReload)
+			uiServer.SetOnProfileSwitch(func(p *config.Profile) error {
+				if p != nil {
+					if configFile != "" {
+						_ = config.Save(cfg, configFile, false)
+					}
+					onCfgReload()
+				}
+				return nil
+			})
 		}
 
 		// Self-check and self-ping of Virtual IP
