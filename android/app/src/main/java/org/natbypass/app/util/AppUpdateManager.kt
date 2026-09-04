@@ -25,6 +25,7 @@ sealed class UpdateState {
         val sizeBytes: Long,
         val isNewer: Boolean,
         val isPrerelease: Boolean = false,
+        val isRollback: Boolean = false,
     ) : UpdateState()
     data class Downloading(
         val version: String,
@@ -102,7 +103,12 @@ object AppUpdateManager {
                     }
                 }
 
-                val isNewer = isNewerVersion(currentVersion, tagName)
+                val isCurrentBeta = currentVersion.contains("beta", ignoreCase = true) ||
+                    currentVersion.contains("rc", ignoreCase = true) ||
+                    currentVersion.contains("-")
+                val isRollback = !includePrerelease && isCurrentBeta && (tagName != currentVersion.removePrefix("v"))
+                val isNewer = isNewerVersion(currentVersion, tagName) || isRollback
+
                 if (apkDownloadUrl.isNotEmpty()) {
                     val state = UpdateState.Available(
                         version      = tagName,
@@ -110,7 +116,8 @@ object AppUpdateManager {
                         apkUrl       = apkDownloadUrl,
                         sizeBytes    = apkSize,
                         isNewer      = isNewer,
-                        isPrerelease = isPrerelease
+                        isPrerelease = isPrerelease,
+                        isRollback   = isRollback
                     )
                     _updateState.value = state
                     return@withContext state

@@ -482,6 +482,7 @@ var (
 	hBtnToggleAutostart      uintptr
 	hBtnToggleMinimizeToTray uintptr
 	hBtnToggleLogs           uintptr
+	hBtnToggleBetaChannel    uintptr
 	hBtnSaveCfg              uintptr
 	hBtnCheckUpdate          uintptr
 	lblUpdateStatus          uintptr
@@ -607,6 +608,7 @@ const (
 	ID_BTN_MQ_ECL          = 4054
 	ID_BTN_CHECK_UPDATE      = 4055
 	ID_BTN_EXIT_NODE_DISABLE = 4056
+	ID_BTN_TOGGLE_BETA       = 4057
 	WM_CHECK_UPDATE_DONE     = 0x8000 + 105
 
 	// Профили
@@ -1097,15 +1099,26 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 			if lblUpdateStatus != 0 {
 				setControlText(lblUpdateStatus, fmt.Sprintf("✅ У вас установлена самая свежая версия (v%s)", Version))
 			}
-			msg, _ := windows.UTF16PtrFromString(fmt.Sprintf("У вас установлена самая свежая версия NatBypass (v%s).\nОбновлений не требуется.", Version))
+			channelDesc := "стабильном"
+			if cfg != nil && cfg.App.BetaChannel {
+				channelDesc = "тестовом (Beta)"
+			}
+			msg, _ := windows.UTF16PtrFromString(fmt.Sprintf("У вас установлена актуальная версия NatBypass (v%s) в %s канале.\nОбновлений не требуется.", Version, channelDesc))
 			title, _ := windows.UTF16PtrFromString("Обновление NatBypass")
 			procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x40 /* MB_ICONINFORMATION */)
 			return 0
 		}
 
-		addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Открытие окна обновления...", info.LatestVersion))
-		if lblUpdateStatus != 0 {
-			setControlText(lblUpdateStatus, fmt.Sprintf("🚀 Доступна новая версия: %s! Нажмите для обновления", info.LatestVersion))
+		if info.IsRollback {
+			addLog(fmt.Sprintf("🔄 Доступен откат на стабильную версию: %s (текущая: v%s [BETA])", info.LatestVersion, Version))
+			if lblUpdateStatus != 0 {
+				setControlText(lblUpdateStatus, fmt.Sprintf("🔄 Доступен откат на стабильную версию: %s! Нажмите для отката", info.LatestVersion))
+			}
+		} else {
+			addLog(fmt.Sprintf("🚀 Доступна новая версия: %s! Открытие окна обновления...", info.LatestVersion))
+			if lblUpdateStatus != 0 {
+				setControlText(lblUpdateStatus, fmt.Sprintf("🚀 Доступна новая версия: %s! Нажмите для обновления", info.LatestVersion))
+			}
 		}
 		showUpdateModal(info)
 		return 0
@@ -1686,6 +1699,24 @@ func handleCommand(id uint16) {
 	case ID_BTN_SAVE_CFG:
 		saveConfig()
 
+	case ID_BTN_TOGGLE_BETA:
+		if cfg != nil {
+			cfg.App.BetaChannel = !cfg.App.BetaChannel
+			_ = config.Save(cfg, configPath, false)
+			if cfg.App.BetaChannel {
+				buttonLabels[ID_BTN_TOGGLE_BETA] = "🧪 Канал обновлений: Тестовые (Beta)"
+				buttonTypes[ID_BTN_TOGGLE_BETA] = "green"
+				addLog("🧪 Включен канал обновлений: Тестовые сборки (Beta / Pre-release)")
+			} else {
+				buttonLabels[ID_BTN_TOGGLE_BETA] = "📦 Канал обновлений: Стабильные (Stable)"
+				buttonTypes[ID_BTN_TOGGLE_BETA] = "normal"
+				addLog("📦 Включен канал обновлений: Стабильные релизы (Stable)")
+			}
+			if hBtnToggleBetaChannel != 0 {
+				procInvalidateRect.Call(hBtnToggleBetaChannel, 0, 1)
+			}
+		}
+
 	case ID_BTN_CHECK_UPDATE:
 		updateCheckMu.Lock()
 		if isCheckingUpdate {
@@ -1700,14 +1731,17 @@ func handleCommand(id uint16) {
 		procInvalidateRect.Call(hBtnCheckUpdate, 0, 1)
 		go func() {
 			includeBeta := false
+			channel := "stable"
 			if cfg != nil && cfg.App.BetaChannel {
 				includeBeta = true
+				channel = "beta"
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 			defer cancel()
 
 			info, err := updater.CheckUpdateWithOptions(ctx, Version, updater.CheckOptions{
 				IncludePrerelease: includeBeta,
+				Channel:           channel,
 			})
 
 			updateCheckMu.Lock()
@@ -2838,7 +2872,7 @@ func showUpdateModal(info *updater.ReleaseInfo) {
 	var parentRc RECT
 	procGetWindowRect.Call(hMainWnd, uintptr(unsafe.Pointer(&parentRc)))
 	dlgW := int32(520)
-	dlgH := int32(310)
+	dlgH := int32(360)
 	dlgX := parentRc.Left + (parentRc.Right-parentRc.Left-dlgW)/2
 	dlgY := parentRc.Top + (parentRc.Bottom-parentRc.Top-dlgH)/2
 	if dlgX < 0 {
@@ -2861,11 +2895,25 @@ func showUpdateModal(info *updater.ReleaseInfo) {
 	procDwmSetWindowAttribute.Call(hDlg, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
 	titleText := fmt.Sprintf("🚀 Доступно обновление NatBypass %s", info.LatestVersion)
-	if info.IsPrerelease {
+	btnStartText := "⚡ Начать обновление"
+	btnStartType := "primary"
+	if info.IsRollback {
+		titleText = fmt.Sprintf("🔄 Откат на стабильный релиз NatBypass %s", info.LatestVersion)
+		btnStartText = fmt.Sprintf("🔄 Откатиться на v%s", strings.TrimPrefix(info.LatestVersion, "v"))
+		btnStartType = "green"
+	} else if info.IsPrerelease {
 		titleText = fmt.Sprintf("🧪 Тестовая сборка NatBypass %s [BETA]", info.LatestVersion)
+		btnStartText = fmt.Sprintf("🧪 Обновить до Beta (v%s)", strings.TrimPrefix(info.LatestVersion, "v"))
+		btnStartType = "primary"
 	}
+
 	_ = createLabelOn(hDlg, hInstance, titleText, 24, 18, 470, 24, hFontBold)
-	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("Текущая версия: v%s   ➜   Новая версия: %s", Version, info.LatestVersion), 24, 46, 470, 18, hFontNormal)
+
+	verDesc := fmt.Sprintf("Текущая версия: v%s   ➜   Новая версия: %s", Version, info.LatestVersion)
+	if info.IsRollback {
+		verDesc = fmt.Sprintf("Текущая: v%s [BETA]   ➜   Стабильный релиз: %s", Version, info.LatestVersion)
+	}
+	_ = createLabelOn(hDlg, hInstance, verDesc, 24, 46, 470, 18, hFontNormal)
 
 	sizeMB := float64(info.AssetSize) / (1024 * 1024)
 	sizeStr := ""
@@ -2874,10 +2922,20 @@ func showUpdateModal(info *updater.ReleaseInfo) {
 	}
 	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("Файл: %s%s • GitHub Releases", info.AssetName, sizeStr), 24, 68, 470, 18, hFontNormal)
 
-	hDlgUpdateStatus = createLabelOn(hDlg, hInstance, "Нажмите «Начать обновление» для загрузки и установки.", 24, 156, 470, 20, hFontNormal)
+	statusPrompt := "Нажмите кнопку для загрузки и установки."
+	if info.IsRollback {
+		statusPrompt = "Будет выполнен возврат с тестовой сборки на стабильный релиз."
+	}
+	hDlgUpdateStatus = createLabelOn(hDlg, hInstance, statusPrompt, 24, 156, 470, 20, hFontNormal)
 
-	hDlgUpdateBtnStart = createOwnerDrawButtonOn(hDlg, hInstance, "⚡ Начать обновление", 24, 200, 240, 42, 6001, "primary")
+	hDlgUpdateBtnStart = createOwnerDrawButtonOn(hDlg, hInstance, btnStartText, 24, 200, 240, 42, 6001, btnStartType)
 	hDlgUpdateBtnCancel = createOwnerDrawButtonOn(hDlg, hInstance, "Отмена", 274, 200, 220, 42, 6002, "normal")
+
+	channelSwitchText := "Канал: 📦 Стабильный  [Нажмите для переключения на 🧪 Beta]"
+	if cfg != nil && cfg.App.BetaChannel {
+		channelSwitchText = "Канал: 🧪 Тестовый (Beta)  [Нажмите для отката на 📦 Stable]"
+	}
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, channelSwitchText, 24, 254, 470, 36, 6003, "normal")
 
 	procShowWindow.Call(hDlg, SW_SHOW)
 	procSetForegroundWindow.Call(hDlg)
@@ -3051,6 +3109,28 @@ func updateDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 			return 0
 		} else if id == 6002 { // Отмена / Закрыть
 			dlgFinished = true
+			return 0
+		} else if id == 6003 { // Переключить канал обновлений (Beta / Stable)
+			if dlgUpdateStarted {
+				return 0
+			}
+			if cfg != nil {
+				cfg.App.BetaChannel = !cfg.App.BetaChannel
+				_ = config.Save(cfg, configPath, false)
+				if hBtnToggleBetaChannel != 0 {
+					if cfg.App.BetaChannel {
+						buttonLabels[ID_BTN_TOGGLE_BETA] = "🧪 Канал обновлений: Тестовые (Beta)"
+						buttonTypes[ID_BTN_TOGGLE_BETA] = "green"
+					} else {
+						buttonLabels[ID_BTN_TOGGLE_BETA] = "📦 Канал обновлений: Стабильные (Stable)"
+						buttonTypes[ID_BTN_TOGGLE_BETA] = "normal"
+					}
+					procInvalidateRect.Call(hBtnToggleBetaChannel, 0, 1)
+				}
+				dlgFinished = true
+				// Запуск повторной проверки обновлений в новом канале
+				procPostMessageW.Call(hMainWnd, WM_COMMAND, ID_BTN_CHECK_UPDATE, 0)
+			}
 			return 0
 		}
 
@@ -3663,6 +3743,14 @@ func buildModernUI(hInstance uintptr) {
 	}
 	hBtnToggleLogs = createOwnerDrawButton(hInstance, logsText, cx, 204, 415, 38, ID_BTN_TOGGLE_LOGS, logsType)
 
+	betaText := "🧪 Канал обновлений: Тестовые (Beta)"
+	betaType := "green"
+	if cfg == nil || !cfg.App.BetaChannel {
+		betaText = "📦 Канал обновлений: Стабильные (Stable)"
+		betaType = "normal"
+	}
+	hBtnToggleBetaChannel = createOwnerDrawButton(hInstance, betaText, cx+425, 204, 415, 38, ID_BTN_TOGGLE_BETA, betaType)
+
 	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx, 260, cw, 42, ID_BTN_SAVE_CFG, "primary")
 	hBtnCheckUpdate = createOwnerDrawButton(hInstance, "🚀 Проверить обновления NatBypass на GitHub", cx, 310, cw, 38, ID_BTN_CHECK_UPDATE, "green")
 	lblUpdateStatus = createLabel(hInstance, fmt.Sprintf("Текущая версия: v%s • Нажмите для проверки наличия обновлений с GitHub Releases", Version), cx, 354, cw, 20, hFontNormal)
@@ -3670,6 +3758,7 @@ func buildModernUI(hInstance uintptr) {
 	tabPages[7] = []uintptr{
 		lblSetTitle, lblSetDesc, lblNick, hEditMyNick, lblNickHint,
 		lblSysHead, hBtnToggleAutostart, hBtnToggleMinimizeToTray, hBtnToggleLogs,
+		hBtnToggleBetaChannel,
 		hBtnSaveCfg, hBtnCheckUpdate, lblUpdateStatus,
 	}
 
@@ -5808,6 +5897,17 @@ func fillConfigFields() {
 	if cfg != nil {
 		if hEditMyNick != 0 {
 			setControlText(hEditMyNick, cfg.App.DeviceName)
+		}
+
+		if hBtnToggleBetaChannel != 0 {
+			if cfg.App.BetaChannel {
+				buttonLabels[ID_BTN_TOGGLE_BETA] = "🧪 Канал обновлений: Тестовые (Beta)"
+				buttonTypes[ID_BTN_TOGGLE_BETA] = "green"
+			} else {
+				buttonLabels[ID_BTN_TOGGLE_BETA] = "📦 Канал обновлений: Стабильные (Stable)"
+				buttonTypes[ID_BTN_TOGGLE_BETA] = "normal"
+			}
+			procInvalidateRect.Call(hBtnToggleBetaChannel, 0, 1)
 		}
 
 		active := cfg.EnsureActiveProfile()

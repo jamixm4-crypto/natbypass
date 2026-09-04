@@ -47,6 +47,7 @@ type ReleaseInfo struct {
 	CurrentVersion string `json:"current_version"`
 	LatestVersion  string `json:"latest_version"`
 	HasUpdate      bool   `json:"has_update"`
+	IsRollback     bool   `json:"is_rollback"`
 	IsPrerelease   bool   `json:"is_prerelease"`
 	Channel        string `json:"channel"`
 	ReleaseNotes   string `json:"release_notes"`
@@ -226,6 +227,18 @@ func CheckUpdateWithOptions(ctx context.Context, currentVersion string, opts Che
 	}
 
 	hasUpdate := isNewer(targetRelease.TagName, currentVersion)
+	isRollback := false
+
+	// Если текущая версия — бета/пре-релиз, а запрошен стабильный канал,
+	// то стабильный релиз отличается от текущей версии, и мы предлагаем откат на стабильную версию:
+	isCurrentBeta := strings.Contains(strings.ToLower(currentVersion), "beta") ||
+		strings.Contains(strings.ToLower(currentVersion), "rc") ||
+		strings.Contains(currentVersion, "-")
+
+	if !includePrerelease && isCurrentBeta && strings.TrimPrefix(targetRelease.TagName, "v") != strings.TrimPrefix(currentVersion, "v") {
+		hasUpdate = true
+		isRollback = true
+	}
 
 	// Подбираем подходящий бинарник под текущую ОС и архитектуру
 	assetURL, assetName, assetSize := pickAsset(targetRelease.Assets)
@@ -239,6 +252,7 @@ func CheckUpdateWithOptions(ctx context.Context, currentVersion string, opts Che
 		CurrentVersion: currentVersion,
 		LatestVersion:  targetRelease.TagName,
 		HasUpdate:      hasUpdate,
+		IsRollback:     isRollback,
 		IsPrerelease:   targetRelease.Prerelease,
 		Channel:        channel,
 		ReleaseNotes:   targetRelease.Body,

@@ -70,8 +70,13 @@ fun UpdateDialog(
                 },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        val titleStr = when {
+                            state.isRollback -> "Откат на стабильную: v${state.version}"
+                            state.isNewer -> "Доступно обновление: v${state.version}"
+                            else -> "Текущий билд: v${state.version}"
+                        }
                         Text(
-                            text = if (state.isNewer) "Доступно обновление: v${state.version}" else "Текущий билд: v${state.version}",
+                            text = titleStr,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f, fill = false)
                         )
@@ -192,7 +197,12 @@ fun UpdateDialog(
                         } else {
                             Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Скачать и обновить")
+                            val btnLabel = when {
+                                state.isRollback -> "Откатиться на стабильную"
+                                state.isPrerelease -> "Скачать Beta-версию"
+                                else -> "Скачать и обновить"
+                            }
+                            Text(btnLabel)
                         }
                     }
                 },

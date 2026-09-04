@@ -2439,9 +2439,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       btnCheck.disabled = true;
 
       const isBeta = document.getElementById('toggleBetaChannel') ? document.getElementById('toggleBetaChannel').checked : false;
+      const channel = isBeta ? 'beta' : 'stable';
 
       try {
-        const res = await fetch('/api/update/check?include_prerelease=' + isBeta);
+        const res = await fetch('/api/update/check?channel=' + channel + '&include_prerelease=' + isBeta);
         const json = await res.json();
         if (json.ok && json.data) {
           const d = json.data;
@@ -2460,12 +2461,23 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             } catch(e) {}
           }
 
-          const channelTag = d.is_prerelease ? ' [BETA]' : ' [STABLE]';
-
-          if (d.has_update) {
+          if (d.is_rollback) {
+            lblLatest.className = 'badge badge-warning mono';
+            lblLatest.innerText = (d.latest_version || '—') + ' [STABLE] (Доступен откат на стабильную!)' + pubStr;
+            btnApply.innerText = '🔄 Откатиться на стабильную версию (' + (d.latest_version || '') + ')';
+            btnApply.style.background = 'linear-gradient(135deg, #0284c7, #06b6d4)';
+            if (topLabel) topLabel.innerText = 'Откат ' + d.latest_version;
+            if (d.release_notes) {
+              notesBox.style.display = 'block';
+              txtNotes.innerText = "ℹ️ Вы используете тестовую сборку. Нажмите кнопку ниже для безопасного возврата на стабильный релиз:\n\n" + d.release_notes;
+            } else {
+              notesBox.style.display = 'none';
+            }
+          } else if (d.has_update) {
+            const channelTag = d.is_prerelease ? ' [BETA]' : ' [STABLE]';
             lblLatest.className = d.is_prerelease ? 'badge badge-warning mono' : 'badge badge-success mono';
             lblLatest.innerText = (d.latest_version || '—') + channelTag + ' (Новая версия!)' + pubStr;
-            btnApply.innerText = '⚡ Скачать и обновить (' + (d.latest_version || '') + ')';
+            btnApply.innerText = d.is_prerelease ? ('⚡ Скачать Beta-версию (' + (d.latest_version || '') + ')') : ('⚡ Скачать и обновить (' + (d.latest_version || '') + ')');
             btnApply.style.background = d.is_prerelease ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'linear-gradient(135deg, #a855f7, #6366f1)';
             if (topLabel) topLabel.innerText = 'Доступно ' + d.latest_version;
             if (d.release_notes) {
@@ -2473,6 +2485,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               txtNotes.innerText = d.release_notes;
             }
           } else {
+            const channelTag = isBeta ? ' [BETA]' : ' [STABLE]';
             lblLatest.className = 'badge badge-cyan mono';
             lblLatest.innerText = (d.latest_version || d.current_version || 'v1.0.0') + channelTag + ' (Билд актуален)' + pubStr;
             btnApply.innerText = '🔄 Принудительно обновить (свежий билд)';
@@ -4386,13 +4399,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         const json = await res.json();
         if (json.ok && json.data) {
           const c = json.data;
+          const app = c.app || {};
+          const webui = c.webui || {};
           if (c.app) {
             document.getElementById('cfgNick').value = c.app.device_name || '';
             document.getElementById('cfgInterval').value = c.app.publish_interval || 8;
             const saveLogs = (app.save_logs_to_disk !== undefined) ? app.save_logs_to_disk : (app.save_logs ?? app.SaveLogsToDisk ?? false);
             document.getElementById('chkSaveLogs').checked = !!saveLogs;
-            const showDiag = (webui && webui.show_diagnostics !== undefined) ? webui.show_diagnostics : 
-              ((app && app.show_diagnostics !== undefined) ? app.show_diagnostics : (app.ShowDiagnostics ?? false));
+            const showDiag = (webui.show_diagnostics !== undefined) ? webui.show_diagnostics : 
+              ((app.show_diagnostics !== undefined) ? app.show_diagnostics : (app.ShowDiagnostics ?? false));
             document.getElementById('chkShowDiag').checked = !!showDiag;
             toggleDiagVisibility(showDiag);
           }
