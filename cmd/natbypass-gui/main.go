@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.221-beta.5"
+	Version = "1.9.221-beta.6"
 	Commit  = "beta"
 )
 
@@ -5031,10 +5031,18 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				preservedLat := time.Duration(0)
 				preservedPingMs := int64(0)
 				if existingPeer != nil {
-					preservedEP = existingPeer.ActiveEndpoint
-					preservedDirect = existingPeer.DirectP2P
-					preservedLat = existingPeer.Latency
-					preservedPingMs = existingPeer.PingMs
+					if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
+						// Peer roamed to a new network/IP (e.g. Wi-Fi -> Cellular)
+						preservedEP = p.STUNAddr
+						preservedDirect = false
+						preservedLat = 0
+						preservedPingMs = 0
+					} else {
+						preservedEP = existingPeer.ActiveEndpoint
+						preservedDirect = existingPeer.DirectP2P
+						preservedLat = existingPeer.Latency
+						preservedPingMs = existingPeer.PingMs
+					}
 				}
 				if p.ActiveEndpoint != "" {
 					preservedEP = p.ActiveEndpoint

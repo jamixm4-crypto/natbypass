@@ -415,6 +415,97 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 	return nil, 0, fmt.Errorf("STUN discovery timeout")
 }
 
+// InvalidateMappedAddress clears cached STUN mapping (e.g. after network roaming).
+func (p *UDPPuncher) InvalidateMappedAddress() {
+	p.mu.Lock()
+	p.mappedIP = nil
+	p.mappedPort = 0
+	p.mu.Unlock()
+}
+
+// ForceDiscoverMappedAddress bypasses cache and performs a fresh STUN query.
+func (p *UDPPuncher) ForceDiscoverMappedAddress(ctx context.Context) (net.IP, int, error) {
+	p.InvalidateMappedAddress()
+	return p.DiscoverMappedAddress(ctx)
+}
+
+// GetSocketFd returns the raw OS file descriptor of the UDP socket (used for Android VpnService.protect).
+func (p *UDPPuncher) GetSocketFd() int {
+	p.mu.Lock()
+	conn := p.conn
+	p.mu.Unlock()
+	if conn == nil {
+		return -1
+	}
+	rawConn, err := conn.SyscallConn()
+	if err != nil {
+		return -1
+	}
+	sockFd := -1
+	_ = rawConn.Control(func(fd uintptr) {
+		sockFd = int(fd)
+	})
+	return sockFd
+}
+
+// ResetSocket re-binds the UDP socket to a new socket, useful for network roaming (Wi-Fi <-> Cellular).
+// It returns the new raw socket file descriptor so it can be protected by VpnService.protect().
+func (p *UDPPuncher) ResetSocket() (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.mappedIP = nil
+	p.mappedPort = 0
+	p.lastProbeMap = make(map[string]time.Time)
+	p.mappedEndpoints = make(map[string]struct{})
+
+	preferredPort := p.localPort
+	var newConn *net.UDPConn
+	var err error
+
+	if preferredPort > 0 {
+		lAddr, _ := net.ResolveUDPAddr("udp4", fmt.Sprintf("0.0.0.0:%d", preferredPort))
+		newConn, err = net.ListenUDP("udp4", lAddr)
+		if err != nil {
+			lAddr, _ = net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", preferredPort))
+			newConn, err = net.ListenUDP("udp", lAddr)
+		}
+	}
+	if err != nil || newConn == nil {
+		lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
+		newConn, err = net.ListenUDP("udp4", lAddr4)
+		if err != nil {
+			lAddrGen, _ := net.ResolveUDPAddr("udp", ":0")
+			newConn, err = net.ListenUDP("udp", lAddrGen)
+			if err != nil {
+				return -1, fmt.Errorf("failed to re-bind UDP socket: %w", err)
+			}
+		}
+	}
+
+	oldConn := p.conn
+	p.conn = newConn
+	p.localPort = newConn.LocalAddr().(*net.UDPAddr).Port
+	p.connID++
+
+	if oldConn != nil {
+		_ = oldConn.Close()
+	}
+
+	// Start reading on the new socket
+	go p.readLoop()
+
+	rawConn, err := newConn.SyscallConn()
+	if err != nil {
+		return -1, nil
+	}
+	sockFd := -1
+	_ = rawConn.Control(func(fd uintptr) {
+		sockFd = int(fd)
+	})
+	return sockFd, nil
+}
+
 // candidatePorts calculates predicted port numbers for Symmetric NAT traversal.
 func (p *UDPPuncher) candidatePorts(base int) []int {
 	ports := []int{base}

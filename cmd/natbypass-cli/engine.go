@@ -706,12 +706,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								registry.Upsert(p)
 							} else {
 								p.ProbeCount++
-								if p.ProbeCount >= 2 {
-									p.DirectP2P = false
-									p.Latency = 0
-									p.PingMs = 0
-									registry.Upsert(p)
-								}
+								// DirectP2P is transport-level health (UDP hole punch/keepalive),
+								// not application-level ICMP ping. Do NOT revoke DirectP2P on ICMP drops,
+								// otherwise firewall/battery-saver packet drops will spuriously switch
+								// nodes to MQTT relay and break direct P2P mesh connectivity.
 							}
 						}
 					}

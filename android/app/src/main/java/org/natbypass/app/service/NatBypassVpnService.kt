@@ -379,34 +379,65 @@ class NatBypassVpnService : VpnService() {
         } catch (_: Throwable) {}
     }
 
+    private var lastNetworkChangeTs = 0L
+
+    private fun handleNetworkChange(network: Network?) {
+        if (!isRunning) return
+        val now = System.currentTimeMillis()
+        if (now - lastNetworkChangeTs < 800) return
+        lastNetworkChangeTs = now
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1 && network != null) {
+            try { setUnderlyingNetworks(arrayOf(network)) } catch (_: Exception) {}
+        }
+        serviceScope.launch {
+            delay(350)
+            try {
+                val newFd = org.natbypass.app.util.MobileBridge.rebindSockets()
+                if (newFd > 0) {
+                    val ok = protect(newFd)
+                    Log.i(TAG, "🔄 Роуминг сети: перепривязан и защищен UDP сокет fd=$newFd ($ok)")
+                } else {
+                    val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
+                    if (sockFd > 0) protect(sockFd)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Ошибка перепривязки сокета при смене сети: ${t.message}")
+            }
+            org.natbypass.app.util.MobileBridge.refreshPublicIP()
+        }
+    }
+
     private fun registerNetworkCallback() {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 super.onAvailable(network)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                    try { setUnderlyingNetworks(arrayOf(network)) } catch (_: Exception) {}
-                }
+                handleNetworkChange(network)
+            }
+
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                super.onCapabilitiesChanged(network, networkCapabilities)
+                handleNetworkChange(network)
+            }
+
+            override fun onLost(network: Network) {
+                super.onLost(network)
                 serviceScope.launch {
-                    delay(500)
-                    try {
-                        val newFd = org.natbypass.app.util.MobileBridge.rebindSockets()
-                        if (newFd > 0) {
-                            protect(newFd)
-                        } else {
-                            val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
-                            if (sockFd > 0) protect(sockFd)
-                        }
-                    } catch (_: Throwable) {}
-                    org.natbypass.app.util.MobileBridge.refreshPublicIP()
+                    delay(300)
+                    handleNetworkChange(null)
                 }
             }
         }
         try {
-            cm.registerNetworkCallback(request, cb)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                cm.registerDefaultNetworkCallback(cb)
+            } else {
+                val request = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                cm.registerNetworkCallback(request, cb)
+            }
             networkCallback = cb
         } catch (e: Exception) { Log.w(TAG, "registerNetworkCallback error: ${e.message}") }
     }

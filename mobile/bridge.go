@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.221-beta.5"
+const Version = "1.9.221-beta.6"
 
 
 
@@ -297,7 +297,9 @@ func StartEngine(configYAML string, tunFd int) string {
 		if p, ok := globalRegistry.Get(remoteDevID); ok {
 			p.DirectP2P = true
 			p.ActiveEndpoint = fromAddr
-			p.STUNAddr = fromAddr
+			if p.STUNAddr == "" {
+				p.STUNAddr = fromAddr
+			}
 			p.LastSeen = time.Now() // ВСЕГДА обновляем LastSeen!
 			p.Online = true
 			if rtt > 0 {
@@ -545,11 +547,18 @@ func StartEngine(configYAML string, tunFd int) string {
 					latency := time.Duration(0)
 					pingMs := p.PingMs
 					if hasExisting && existingPeer != nil {
-						directP2P = existingPeer.DirectP2P
-						activeEP = existingPeer.ActiveEndpoint
-						latency = existingPeer.Latency
-						if existingPeer.PingMs > 0 {
-							pingMs = existingPeer.PingMs
+						if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
+							activeEP = p.STUNAddr
+							directP2P = false
+							latency = 0
+							pingMs = 0
+						} else {
+							directP2P = existingPeer.DirectP2P
+							activeEP = existingPeer.ActiveEndpoint
+							latency = existingPeer.Latency
+							if existingPeer.PingMs > 0 {
+								pingMs = existingPeer.PingMs
+							}
 						}
 					}
 					globalRegistry.Upsert(&peer.Peer{
@@ -773,16 +782,20 @@ func attachTUNLocked(tunFd int) {
 
 						var targetPeer *peer.Peer
 						if globalRegistry != nil {
-							for _, p := range globalRegistry.List() {
-								pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-								if pVIP != "" && pVIP == destIP.String() {
-									targetPeer = p
-									break
-								}
-								for _, route := range p.AdvertisedRoutes {
-									if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
+							if best, ok := globalRegistry.GetByVirtualIP(destIP.String()); ok && best != nil {
+								targetPeer = best
+							} else {
+								for _, p := range globalRegistry.List() {
+									pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+									if pVIP != "" && pVIP == destIP.String() {
 										targetPeer = p
 										break
+									}
+									for _, route := range p.AdvertisedRoutes {
+										if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
+											targetPeer = p
+											break
+										}
 									}
 								}
 							}
@@ -1059,6 +1072,35 @@ func RestartEngine(configYAML string) string {
 	return StartEngine(configYAML, 0)
 }
 
+// GetUDPSocketFd returns the raw file descriptor of the UDP puncher socket for Android VpnService.protect().
+func GetUDPSocketFd() int {
+	engineMu.Lock()
+	puncher := globalPuncher
+	engineMu.Unlock()
+	if puncher == nil {
+		return -1
+	}
+	return puncher.GetSocketFd()
+}
+
+// RebindSockets closes the old UDP socket and binds a new one, returning the new raw file descriptor.
+// Must be called on network switch (Wi-Fi <-> Mobile data) so the new socket routes through the new network.
+func RebindSockets() int {
+	engineMu.Lock()
+	puncher := globalPuncher
+	engineMu.Unlock()
+	if puncher == nil {
+		return -1
+	}
+	fd, err := puncher.ResetSocket()
+	if err != nil {
+		logger.Warn().Err(err).Msg("Ошибка перепривязки UDP сокета")
+		return -1
+	}
+	logger.Info().Int("new_fd", fd).Msg("🔄 UDP сокет успешно перепривязан на новый сетевой интерфейс")
+	return fd
+}
+
 // RefreshPublicIP вызывается Android NetworkCallback при смене сети (Wi-Fi → LTE и обратно)
 // или по нажатию кнопки «Синхронизация»/«Обновить» в интерфейсе.
 // Принудительно пересматривает публичный IP и STUN-mapped адрес, затем публикует обновлённый маяк.
@@ -1082,9 +1124,9 @@ func RefreshPublicIP() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		// 1. Опрос STUN через puncher сокет (наиболее точный UDP-маппинг)
+		// 1. Принудительный опрос STUN через puncher сокет (без устаревшего кэша)
 		if puncher != nil {
-			if sIP, sPort, err := puncher.DiscoverMappedAddress(ctx); err == nil && sIP != nil {
+			if sIP, sPort, err := puncher.ForceDiscoverMappedAddress(ctx); err == nil && sIP != nil {
 				engineMu.Lock()
 				globalSTUN = fmt.Sprintf("%s:%d", sIP.String(), sPort)
 				globalPublicIP = sIP.String()
