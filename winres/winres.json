@@ -16,7 +16,7 @@
       "0409": {
         "identity": {
           "name": "NatBypass",
-          "version": "1.9.221.2"
+          "version": "1.9.221.3"
         },
         "description": "NatBypass Mesh VPN & DPI Bypass",
         "minimum-os": "win7",
@@ -40,19 +40,19 @@
     "#1": {
       "0000": {
         "fixed": {
-          "file_version": "1.9.221.2",
-          "product_version": "1.9.221.2"
+          "file_version": "1.9.221.3",
+          "product_version": "1.9.221.3"
         },
         "info": {
           "0409": {
             "CompanyName": "NatBypass Project",
             "FileDescription": "NatBypass Mesh VPN & DPI Bypass",
-            "FileVersion": "1.9.221.2",
+            "FileVersion": "1.9.221.3",
             "InternalName": "natbypass",
             "LegalCopyright": "Copyright © 2026 NatBypass Project",
             "OriginalFilename": "NatBypass.exe",
             "ProductName": "NatBypass",
-            "ProductVersion": "1.9.221-beta.2"
+            "ProductVersion": "1.9.221-beta.3"
           }
         }
       }

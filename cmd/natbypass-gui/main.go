@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.221-beta.2"
+	Version = "1.9.221-beta.3"
 	Commit  = "beta"
 )
 
@@ -1098,7 +1098,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 			return 0
 		}
 
-		if info == nil || !info.HasUpdate {
+		if info == nil {
 			addLog(fmt.Sprintf("✅ У вас установлена самая свежая версия (v%s)", Version))
 			if lblUpdateStatus != 0 {
 				setControlText(lblUpdateStatus, fmt.Sprintf("✅ У вас установлена самая свежая версия (v%s)", Version))
@@ -1107,13 +1107,18 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 			if cfg != nil && cfg.App.BetaChannel {
 				channelDesc = "тестовом (Beta)"
 			}
-			msg, _ := windows.UTF16PtrFromString(fmt.Sprintf("У вас установлена актуальная версия NatBypass (v%s) в %s канале.\nОбновлений не требуется.", Version, channelDesc))
+			msg, _ := windows.UTF16PtrFromString(fmt.Sprintf("У вас установлена актуальная версия NatBypass (v%s) в %s канале.\nРелизов не найдено на GitHub.", Version, channelDesc))
 			title, _ := windows.UTF16PtrFromString("Обновление NatBypass")
 			procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x40 /* MB_ICONINFORMATION */)
 			return 0
 		}
 
-		if info.IsRollback {
+		if !info.HasUpdate {
+			addLog(fmt.Sprintf("✅ У вас установлена актуальная версия %s. Открытие окна обновления для проверки или переустановки...", info.LatestVersion))
+			if lblUpdateStatus != 0 {
+				setControlText(lblUpdateStatus, fmt.Sprintf("✅ Актуальная версия: %s (нажмите для переустановки)", info.LatestVersion))
+			}
+		} else if info.IsRollback {
 			addLog(fmt.Sprintf("🔄 Доступен откат на стабильную версию: %s (текущая: v%s [BETA])", info.LatestVersion, Version))
 			if lblUpdateStatus != 0 {
 				setControlText(lblUpdateStatus, fmt.Sprintf("🔄 Доступен откат на стабильную версию: %s! Нажмите для отката", info.LatestVersion))
@@ -2941,7 +2946,11 @@ func showUpdateModal(info *updater.ReleaseInfo) {
 	titleText := fmt.Sprintf("🚀 Доступно обновление NatBypass %s", info.LatestVersion)
 	btnStartText := "⚡ Начать обновление"
 	btnStartType := "primary"
-	if info.IsRollback {
+	if !info.HasUpdate {
+		titleText = fmt.Sprintf("✅ Установлена актуальная версия %s", info.LatestVersion)
+		btnStartText = "🔄 Переустановить текущую сборку"
+		btnStartType = "normal"
+	} else if info.IsRollback {
 		titleText = fmt.Sprintf("🔄 Откат на стабильный релиз NatBypass %s", info.LatestVersion)
 		btnStartText = fmt.Sprintf("🔄 Откатиться на v%s", strings.TrimPrefix(info.LatestVersion, "v"))
 		btnStartType = "green"
@@ -2954,7 +2963,9 @@ func showUpdateModal(info *updater.ReleaseInfo) {
 	_ = createLabelOn(hDlg, hInstance, titleText, 24, 18, 470, 24, hFontBold)
 
 	verDesc := fmt.Sprintf("Текущая версия: v%s   ➜   Новая версия: %s", Version, info.LatestVersion)
-	if info.IsRollback {
+	if !info.HasUpdate {
+		verDesc = fmt.Sprintf("Текущая версия: v%s (актуальная)", Version)
+	} else if info.IsRollback {
 		verDesc = fmt.Sprintf("Текущая: v%s [BETA]   ➜   Стабильный релиз: %s", Version, info.LatestVersion)
 	}
 	_ = createLabelOn(hDlg, hInstance, verDesc, 24, 46, 470, 18, hFontNormal)
@@ -2964,10 +2975,16 @@ func showUpdateModal(info *updater.ReleaseInfo) {
 	if sizeMB > 0 {
 		sizeStr = fmt.Sprintf(" • Размер: %.1f MB", sizeMB)
 	}
-	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("Файл: %s%s • GitHub Releases", info.AssetName, sizeStr), 24, 68, 470, 18, hFontNormal)
+	assetDisplay := info.AssetName
+	if assetDisplay == "" {
+		assetDisplay = "NatBypass-GUI.exe"
+	}
+	_ = createLabelOn(hDlg, hInstance, fmt.Sprintf("Файл: %s%s • GitHub Releases", assetDisplay, sizeStr), 24, 68, 470, 18, hFontNormal)
 
 	statusPrompt := "Нажмите кнопку для загрузки и установки."
-	if info.IsRollback {
+	if !info.HasUpdate {
+		statusPrompt = "У вас установлена последняя версия. Вы можете переустановить её при необходимости."
+	} else if info.IsRollback {
 		statusPrompt = "Будет выполнен возврат с тестовой сборки на стабильный релиз."
 	}
 	hDlgUpdateStatus = createLabelOn(hDlg, hInstance, statusPrompt, 24, 156, 470, 20, hFontNormal)
@@ -3135,6 +3152,13 @@ func updateDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		if id == 6001 { // Начать обновление
 			if dlgUpdateCompleted {
 				dlgFinished = true
+				return 0
+			}
+			if dlgUpdateInfo == nil || dlgUpdateInfo.AssetURL == "" {
+				addLog("❌ Ошибка: для версии " + dlgUpdateInfo.LatestVersion + " не найден исполняемый файл для Windows.")
+				msg, _ := windows.UTF16PtrFromString("Для версии " + dlgUpdateInfo.LatestVersion + " не найден исполняемый файл NatBypass-GUI.exe на GitHub Releases.\nПопробуйте позже или выберите другой канал.")
+				title, _ := windows.UTF16PtrFromString("Ошибка обновления")
+				procMessageBoxW.Call(hwnd, uintptr(unsafe.Pointer(msg)), uintptr(unsafe.Pointer(title)), 0x10 /* MB_ICONERROR */)
 				return 0
 			}
 			dlgUpdateStarted = true

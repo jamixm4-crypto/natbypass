@@ -32,6 +32,11 @@ func TestSemVerCompare_BetaPrerelease(t *testing.T) {
 		t.Fatalf("expected v1.9.221-beta.2 > v1.9.221-beta.1")
 	}
 
+	// 2b. Beta.3 is newer than Beta.2
+	if !isNewer("v1.9.221-beta.3", "v1.9.221-beta.2") {
+		t.Fatalf("expected v1.9.221-beta.3 > v1.9.221-beta.2")
+	}
+
 	// 3. Stable 1.9.221 is newer than 1.9.221-beta.2
 	if !isNewer("v1.9.221", "v1.9.221-beta.2") {
 		t.Fatalf("expected v1.9.221 > v1.9.221-beta.2")
