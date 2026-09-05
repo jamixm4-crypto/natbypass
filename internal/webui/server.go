@@ -693,6 +693,11 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			// BUG-07 FIX: Copy *Peer before mutating display fields to avoid data race.
+			// The *Peer from List() is a shared pointer; other goroutines may read it concurrently.
+			pCopy := *p
+			p = &pCopy
+
 			if time.Since(p.LastSeen) > constants.PeerOfflineThreshold {
 				p.Online = false
 			}
@@ -808,7 +813,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.9"
+		ver = "1.9.221-beta.10"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1605,7 +1610,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.9"
+		ver = "1.9.221-beta.10"
 	}
 
 	vip := s.state.VirtualIP

@@ -254,6 +254,8 @@ func (r *Registry) Upsert(p *Peer) {
 
 	// 🛡️ Автоматическое вытеснение зависших пиров (Ghost Peers) с одинаковым Virtual IP или Public Key.
 	// В меш-сети один виртуальный IP (например 10.11.12.225) может принадлежать только одному активному узлу.
+	// BUG-10 FIX: Evict only truly stale peers — check freshness before evicting to avoid
+	// a delayed MQTT beacon destroying an actively-connected peer.
 	cleanPVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 	var staleConflictingIDs []string
 	for id, existing := range r.peers {
@@ -264,21 +266,34 @@ func (r *Registry) Upsert(p *Peer) {
 
 		// 1. Конфликт одного и того же Virtual IP:
 		if cleanPVIP != "" && cleanExistingVIP != "" && cleanPVIP == cleanExistingVIP {
-			// Если старый узел был зафиксирован раньше или не имеет прямого P2P — вытесняем старый призрак
-			staleConflictingIDs = append(staleConflictingIDs, id)
+			// BUG-10 FIX: Only evict if existing peer is stale (not seen recently or newer beacon arrived)
+			existingIsStale := existing.LastSeen.IsZero() ||
+				now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold ||
+				(!p.LastSeen.IsZero() && p.LastSeen.After(existing.LastSeen))
+			if existingIsStale {
+				staleConflictingIDs = append(staleConflictingIDs, id)
+			}
 			continue
 		}
 
 		// 2. Совпадение Public Key (тот же криптографический узел, перезапустившийся с новым ID):
 		if p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey {
-			staleConflictingIDs = append(staleConflictingIDs, id)
+			existingIsStale := existing.LastSeen.IsZero() ||
+				now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold
+			if existingIsStale {
+				staleConflictingIDs = append(staleConflictingIDs, id)
+			}
 			continue
 		}
 
 		// 3. Переподключающийся Android с меняющимся DeviceID:
 		if strings.HasPrefix(p.DeviceID, "Android-") && strings.HasPrefix(id, "Android-") {
 			if cleanPVIP != "" && cleanExistingVIP == cleanPVIP {
-				staleConflictingIDs = append(staleConflictingIDs, id)
+				existingIsStale := existing.LastSeen.IsZero() ||
+					now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold
+				if existingIsStale {
+					staleConflictingIDs = append(staleConflictingIDs, id)
+				}
 				continue
 			}
 		}
@@ -294,8 +309,12 @@ func (r *Registry) Upsert(p *Peer) {
 		if p.Latency > 0 {
 			p.PingMs = p.Latency.Milliseconds()
 		}
-		p.Online = true
-		p.LastSeen = now
+		// Only force Online=true and reset LastSeen when the peer has no explicit timestamp.
+		// Peers arriving from signaling have their own LastSeen from the beacon timestamp.
+		if p.LastSeen.IsZero() {
+			p.Online = true
+			p.LastSeen = now
+		}
 		r.peers[p.DeviceID] = p
 	}
 
@@ -418,7 +437,8 @@ func (r *Registry) Cleanup(maxAge time.Duration) {
 
 	threshold := time.Now().Add(-maxAge)
 	for id, p := range r.peers {
-		if p.LastSeen.Before(threshold) {
+		// BUG-12 FIX: Guard against zero LastSeen — newly created peers should not be evicted
+		if !p.LastSeen.IsZero() && p.LastSeen.Before(threshold) {
 			delete(r.peers, id)
 		}
 	}

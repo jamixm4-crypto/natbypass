@@ -46,35 +46,44 @@ func NewFallbackManager(channels []SignalingChannel) *FallbackManager {
 }
 
 func (m *FallbackManager) Send(ctx context.Context, payload *Payload) error {
+	// BUG-08 FIX: Do not hold mu.Lock() during network I/O (can block up to 600ms).
+	// Strategy: try each channel without holding the lock; update statistics briefly.
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	n := len(m.channels)
+	startIdx := m.currentIdx
+	m.mu.Unlock()
 
-	for i := 0; i < len(m.channels); i++ {
-		idx := (m.currentIdx + i) % len(m.channels)
+	for i := 0; i < n; i++ {
+		m.mu.Lock()
+		idx := (startIdx + i) % n
 		ch := m.channels[idx]
 		name := ch.Name()
 
 		if breakerTime, ok := m.circuitBreaker[name]; ok {
-			if len(m.channels) > 1 && time.Since(breakerTime) < 20*time.Second {
+			if n > 1 && time.Since(breakerTime) < 20*time.Second {
+				m.mu.Unlock()
 				continue
 			}
 			delete(m.circuitBreaker, name)
 			m.consecFailures[name] = 0
 		}
-
 		m.statuses[name].LastUsed = time.Now()
+		m.mu.Unlock()
 
+		// Perform network I/O without holding mu
 		err := m.sendWithRetry(ctx, ch, payload)
+
+		m.mu.Lock()
 		if err == nil {
 			m.currentIdx = idx
 			m.consecFailures[name] = 0
 			m.statuses[name].Available = true
 			m.statuses[name].LastError = nil
+			m.mu.Unlock()
 			return nil
 		}
 
 		log.Warn().Str("channel", name).Err(err).Msg("Failed to send on channel")
-		
 		m.consecFailures[name]++
 		m.statuses[name].LastError = err
 
@@ -83,6 +92,7 @@ func (m *FallbackManager) Send(ctx context.Context, payload *Payload) error {
 			m.circuitBreaker[name] = time.Now()
 			m.statuses[name].Available = false
 		}
+		m.mu.Unlock()
 	}
 
 	return fmt.Errorf("all signaling channels failed")

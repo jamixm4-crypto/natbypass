@@ -565,8 +565,12 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if p.GetNATType().IsSymmetric() {
 		targetIP := rAddr.IP
 		candidates := []int{rAddr.Port + 1, rAddr.Port + 2, rAddr.Port - 1, rAddr.Port - 2}
-		if p.portDelta != 0 {
-			candidates = append(candidates, rAddr.Port+p.portDelta, rAddr.Port+2*p.portDelta)
+		// BUG-02 FIX: portDelta is written under natTypeMu in handlePong — read it under RLock
+		p.natTypeMu.RLock()
+		pd := p.portDelta
+		p.natTypeMu.RUnlock()
+		if pd != 0 {
+			candidates = append(candidates, rAddr.Port+pd, rAddr.Port+2*pd)
 		}
 		for _, port := range candidates {
 			if port > 1024 && port < 65535 && port != rAddr.Port {
@@ -1009,19 +1013,25 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	p.conn = conn
 	p.addrCache.Range(func(k, v any) bool { p.addrCache.Delete(k); return true })
 	p.localPort = conn.LocalAddr().(*net.UDPAddr).Port
+	// BUG-13 FIX: capture localPort before releasing lock to avoid stale read
+	newPort := p.localPort
 	p.mu.Unlock()
 
 	// 6. Перезапуск цикла чтения
 	go p.readLoop()
 
-	// 6. Обновляем STUN mapping
+	// BUG-03 FIX: HopPort() creates a new ctx; old keepalive goroutine is already dead
+	// (it listened on the old cancelled ctx). Restart keepalive explicitly.
+	p.StartKeepAliveLoop()
+
+	// 7. Обновляем STUN mapping
 	go func() {
 		ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
 		defer cancel()
 		_, _, _ = p.DiscoverMappedAddress(ctx)
 	}()
 
-	return p.localPort, nil
+	return newPort, nil
 }
 
 func (p *UDPPuncher) Close() error {

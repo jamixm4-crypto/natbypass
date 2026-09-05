@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.221-beta.9"
+const Version = "1.9.221-beta.10"
 
 
 
@@ -171,16 +171,24 @@ func deriveInitialVirtualIP(devID string) string {
 }
 
 func negotiateVirtualIP() {
-	if globalRegistry == nil || globalConfig == nil {
+	// BUG-09 FIX: globalConfig, globalRegistry, globalDevID are protected by engineMu.
+	// This function is called from signaling goroutines without the lock — fix that.
+	engineMu.Lock()
+	cfg := globalConfig
+	reg := globalRegistry
+	devID := globalDevID
+	engineMu.Unlock()
+
+	if reg == nil || cfg == nil {
 		return
 	}
 	// Если IP явно задан в конфигурации или активном профиле - НЕ изменяем его автоматически!
-	if globalConfig.Network.Address != "" || (globalConfig.EnsureActiveProfile() != nil && globalConfig.EnsureActiveProfile().VirtualIP != "") {
+	if cfg.Network.Address != "" || (cfg.EnsureActiveProfile() != nil && cfg.EnsureActiveProfile().VirtualIP != "") {
 		return
 	}
 
 	usedIPs := make(map[string]string)
-	for _, p := range globalRegistry.List() {
+	for _, p := range reg.List() {
 		pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 		if p.Online && pVIP != "" {
 			usedIPs[pVIP] = p.DeviceID
@@ -189,9 +197,9 @@ func negotiateVirtualIP() {
 
 	conflictDev, hasConflict := usedIPs[atomicGetVIP()]
 	if hasConflict && conflictDev != "" {
-		if globalDevID > conflictDev {
+		if devID > conflictDev {
 			prefix := "100.64.200"
-			if active := globalConfig.EnsureActiveProfile(); active != nil && active.Subnet != "" {
+			if active := cfg.EnsureActiveProfile(); active != nil && active.Subnet != "" {
 				prefix = config.ExtractSubnetPrefix(active.Subnet)
 			}
 			for i := 10; i <= 250; i++ {
@@ -646,53 +654,60 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
-	// Фоновый цикл постоянного пробития NAT и удержания мобильного CGNAT (каждые 3 секунды)
+	// BUG-04 FIX: Previously one probeTicker.C channel was read by TWO goroutines simultaneously,
+	// causing ~50% tick loss. Split into two independent goroutines with separate tickers.
+
+	// Goroutine A: Active hole punch probes (every 4 seconds)
 	go func() {
-		probeTicker := time.NewTicker(3 * time.Second)
+		probeTicker := time.NewTicker(4 * time.Second)
 		defer probeTicker.Stop()
-
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-probeTicker.C:
-					if puncher != nil && globalRegistry != nil {
-						for _, peerItem := range globalRegistry.List() {
-							if peerItem.Online {
-								if peerItem.STUNAddr != "" {
-									_ = puncher.SendHolePunchProbe(peerItem.STUNAddr)
-								}
-								if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr {
-									_ = puncher.SendHolePunchProbe(peerItem.LocalAddr)
-								}
-							}
-						}
-					}
-				}
-			}
-		}()
-
-		// Логируем NAT тип через 6 секунд после старта
-		time.AfterFunc(6*time.Second, func() {
-			if puncher != nil {
-				natType := puncher.GetNATType()
-				switch natType {
-				case network.NATTypeSymmetric:
-					logger.Warn().Str("nat_type", natType.String()).Msg("🔴 Обнаружен Symmetric NAT (CGNAT оператора)")
-				case network.NATTypeFullCone:
-					logger.Info().Str("nat_type", natType.String()).Msg("🟢 Обнаружен Full Cone / Restricted NAT — прямое P2P доступно")
-				default:
-					logger.Info().Str("nat_type", natType.String()).Msg("🔍 Тип NAT: " + natType.String())
-				}
-			}
-		})
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-probeTicker.C:
+				if puncher != nil && globalRegistry != nil {
+					for _, peerItem := range globalRegistry.List() {
+						if peerItem.Online {
+							if peerItem.STUNAddr != "" {
+								_ = puncher.SendHolePunchProbe(peerItem.STUNAddr)
+							}
+							if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr {
+								_ = puncher.SendHolePunchProbe(peerItem.LocalAddr)
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	// Логируем NAT тип через 6 секунд после старта
+	time.AfterFunc(6*time.Second, func() {
+		if puncher != nil {
+			natType := puncher.GetNATType()
+			switch natType {
+			case network.NATTypeSymmetric:
+				logger.Warn().Str("nat_type", natType.String()).Msg("🔴 Обнаружен Symmetric NAT (CGNAT оператора)")
+			case network.NATTypeFullCone:
+				logger.Info().Str("nat_type", natType.String()).Msg("🟢 Обнаружен Full Cone / Restricted NAT — прямое P2P доступно")
+			default:
+				logger.Info().Str("nat_type", natType.String()).Msg("🔍 Тип NAT: " + natType.String())
+			}
+		}
+	})
+
+	// Goroutine B: Keepalive + fallback probes for peers without direct P2P (every 3 seconds)
+	go func() {
+		keepAliveTicker := time.NewTicker(3 * time.Second)
+		defer keepAliveTicker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-keepAliveTicker.C:
 				if puncher != nil && globalRegistry != nil {
 					for _, p := range globalRegistry.List() {
 						go func(peer *peer.Peer) {
@@ -1173,8 +1188,11 @@ func RefreshPublicIP() {
 				engineMu.Lock()
 				globalSTUN = fmt.Sprintf("%s:%d", sIP.String(), sPort)
 				globalPublicIP = sIP.String()
+				// BUG-11 FIX: capture values before Unlock to avoid reading globals outside lock
+				stunSnap := globalSTUN
+				ipSnap := globalPublicIP
 				engineMu.Unlock()
-				logger.Info().Str("stun", globalSTUN).Str("ip", globalPublicIP).Msg("✅ STUN и внешний IP обновлены после смены сети")
+				logger.Info().Str("stun", stunSnap).Str("ip", ipSnap).Msg("✅ STUN и внешний IP обновлены после смены сети")
 			}
 		}
 

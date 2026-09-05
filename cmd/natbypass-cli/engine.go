@@ -370,16 +370,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					targetPeer = p
 				} else {
 					// 2. Dynamic Auto-learning: Match peer by sender socket address (STUNAddr, ActiveEndpoint, Candidates, LocalAddr)
+					// BUG-01 FIX: copy *Peer before mutation to avoid data race with concurrent readers
 					for _, item := range registry.List() {
 						if item.ActiveEndpoint == fromAddrStr || item.STUNAddr == fromAddrStr || item.LocalAddr == fromAddrStr {
-							targetPeer = item
-							targetPeer.VirtualIP = srcIP
+							cp := *item
+							cp.VirtualIP = srcIP
+							targetPeer = &cp
 							break
 						}
 						for _, c := range item.Candidates {
 							if c == fromAddrStr {
-								targetPeer = item
-								targetPeer.VirtualIP = srcIP
+								cp := *item
+								cp.VirtualIP = srcIP
+								targetPeer = &cp
 								break
 							}
 						}
@@ -387,22 +390,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							break
 						}
 					}
-					// 3. Fallback: if only 1 peer is connected in mesh, map srcIP directly
-					if targetPeer == nil {
-						pList := registry.List()
-						if len(pList) == 1 {
-							targetPeer = pList[0]
-							targetPeer.VirtualIP = srcIP
-						}
-					}
+					// BUG-05 FIX: Fallback-3 removed — assigning VirtualIP based solely on being
+					// the only peer in registry is unsafe and allows VirtualIP hijack by any
+					// external UDP sender with a spoofed source IP. Removed entirely.
 				}
 
 				if targetPeer != nil {
+					// BUG-01 FIX: targetPeer is already a copy (set above), safe to mutate
 					oldEP := targetPeer.ActiveEndpoint
 					targetPeer.DirectP2P = true
 					targetPeer.ActiveEndpoint = fromAddrStr
 					targetPeer.Online = true
 					targetPeer.LastSeen = time.Now()
+					targetPeer.ProbeCount = 0 // Reset backoff on successful direct packet
 					registry.Upsert(targetPeer)
 					if magicSock != nil {
 						magicSock.RecordProbeSuccess(targetPeer.DeviceID, fromAddrStr, 0)

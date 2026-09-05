@@ -153,7 +153,7 @@ func TestRegistryUpsert_AWGPreservationAndUpdate(t *testing.T) {
 func TestRegistry_GhostPeerPruning(t *testing.T) {
 	reg := NewRegistry()
 
-	// 1. Старый узел Android с VIP 10.11.12.225
+	// 1. Старый узел Android с VIP 10.11.12.225 — помечен давно не видимым (stale)
 	pOld := &Peer{
 		DeviceID:       "Android-cd979911",
 		Nickname:       "Android Phone",
@@ -163,7 +163,7 @@ func TestRegistry_GhostPeerPruning(t *testing.T) {
 		STUNAddr:       "37.212.27.76:1558",
 		Online:         false,
 		DirectP2P:      false,
-		LastSeen:       time.Now().Add(-60 * time.Second),
+		LastSeen:       time.Now().Add(-120 * time.Second), // BUG-10: > PeerOfflineThreshold(90s) → truly stale
 	}
 	reg.Upsert(pOld)
 
