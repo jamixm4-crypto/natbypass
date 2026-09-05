@@ -63,6 +63,13 @@ object MobileBridge {
         } catch (e: Exception) {}
     }
 
+    fun sendOfflineBeacon() {
+        val method = getMethod("sendOfflineBeacon") ?: return
+        try {
+            method.invoke(null)
+        } catch (e: Exception) {}
+    }
+
     fun setVirtualIP(vip: String) {
         val method = getMethod("setVirtualIP") ?: return
         try {

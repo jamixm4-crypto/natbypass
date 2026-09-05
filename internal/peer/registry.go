@@ -251,6 +251,42 @@ func (r *Registry) Upsert(p *Peer) {
 	} else if p.DeviceName == "" && p.Nickname != "" {
 		p.DeviceName = p.Nickname
 	}
+
+	// 🛡️ Автоматическое вытеснение зависших пиров (Ghost Peers) с одинаковым Virtual IP или Public Key.
+	// В меш-сети один виртуальный IP (например 10.11.12.225) может принадлежать только одному активному узлу.
+	cleanPVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+	var staleConflictingIDs []string
+	for id, existing := range r.peers {
+		if id == p.DeviceID || existing == nil {
+			continue
+		}
+		cleanExistingVIP := strings.TrimSpace(strings.Split(existing.VirtualIP, "/")[0])
+
+		// 1. Конфликт одного и того же Virtual IP:
+		if cleanPVIP != "" && cleanExistingVIP != "" && cleanPVIP == cleanExistingVIP {
+			// Если старый узел был зафиксирован раньше или не имеет прямого P2P — вытесняем старый призрак
+			staleConflictingIDs = append(staleConflictingIDs, id)
+			continue
+		}
+
+		// 2. Совпадение Public Key (тот же криптографический узел, перезапустившийся с новым ID):
+		if p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey {
+			staleConflictingIDs = append(staleConflictingIDs, id)
+			continue
+		}
+
+		// 3. Переподключающийся Android с меняющимся DeviceID:
+		if strings.HasPrefix(p.DeviceID, "Android-") && strings.HasPrefix(id, "Android-") {
+			if cleanPVIP != "" && cleanExistingVIP == cleanPVIP {
+				staleConflictingIDs = append(staleConflictingIDs, id)
+				continue
+			}
+		}
+	}
+	for _, staleID := range staleConflictingIDs {
+		delete(r.peers, staleID)
+	}
+
 	if existing, ok := r.peers[p.DeviceID]; ok {
 		existing.MergeFrom(p)
 		r.peers[p.DeviceID] = p // ✅ Сохраняем обогащенный объект
@@ -306,7 +342,8 @@ func (r *Registry) Get(deviceID string) (*Peer, bool) {
 	return p, ok
 }
 
-// GetByVirtualIP retrieves a peer by its VirtualIP (ignoring /CIDR mask).
+// GetByVirtualIP retrieves the best active peer by its VirtualIP (ignoring /CIDR mask).
+// Гарантированно выбирает живой узел (Online + DirectP2P + свежий LastSeen), исключая зависшие фантомные сессии.
 func (r *Registry) GetByVirtualIP(vip string) (*Peer, bool) {
 	if vip == "" {
 		return nil, false
@@ -315,11 +352,39 @@ func (r *Registry) GetByVirtualIP(vip string) (*Peer, bool) {
 	defer r.mu.RUnlock()
 
 	targetIP := strings.TrimSpace(strings.Split(vip, "/")[0])
+	var bestPeer *Peer
 	for _, p := range r.peers {
+		if p == nil {
+			continue
+		}
 		pIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 		if pIP == targetIP && pIP != "" {
-			return p, true
+			if bestPeer == nil {
+				bestPeer = p
+				continue
+			}
+			// Приоритет 1: Узел в сети (Online)
+			if p.Online && !bestPeer.Online {
+				bestPeer = p
+				continue
+			} else if !p.Online && bestPeer.Online {
+				continue
+			}
+			// Приоритет 2: Прямое подтвержденное P2P-соединение (DirectP2P)
+			if p.DirectP2P && !bestPeer.DirectP2P {
+				bestPeer = p
+				continue
+			} else if !p.DirectP2P && bestPeer.DirectP2P {
+				continue
+			}
+			// Приоритет 3: Более свежий маяк активности (LastSeen)
+			if p.LastSeen.After(bestPeer.LastSeen) {
+				bestPeer = p
+			}
 		}
+	}
+	if bestPeer != nil {
+		return bestPeer, true
 	}
 	return nil, false
 }
@@ -328,7 +393,7 @@ func (r *Registry) GetByVirtualIP(vip string) (*Peer, bool) {
 
 // MarkOffline sets the Online flag to false for peers not seen within maxAge.
 func (r *Registry) MarkOffline(maxAge time.Duration) {
-	if maxAge < 60*time.Second {
+	if maxAge <= 0 {
 		maxAge = constants.PeerOfflineThreshold
 	}
 	r.mu.Lock()

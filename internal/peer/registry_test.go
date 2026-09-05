@@ -149,3 +149,89 @@ func TestRegistryUpsert_AWGPreservationAndUpdate(t *testing.T) {
 		t.Errorf("AWG was not updated: got %+v, want %+v", got3.AWG, awg2)
 	}
 }
+
+func TestRegistry_GhostPeerPruning(t *testing.T) {
+	reg := NewRegistry()
+
+	// 1. Старый узел Android с VIP 10.11.12.225
+	pOld := &Peer{
+		DeviceID:       "Android-cd979911",
+		Nickname:       "Android Phone",
+		VirtualIP:      "10.11.12.225/24",
+		PublicKey:      "pub_old",
+		PublicIP:       "37.212.27.76",
+		STUNAddr:       "37.212.27.76:1558",
+		Online:         false,
+		DirectP2P:      false,
+		LastSeen:       time.Now().Add(-60 * time.Second),
+	}
+	reg.Upsert(pOld)
+
+	if !reg.Exists("Android-cd979911") {
+		t.Fatalf("expected Android-cd979911 to exist in registry")
+	}
+
+	// 2. Новый узел Android с тем же VIP 10.11.12.225
+	pNew := &Peer{
+		DeviceID:       "Android-c3f2027a",
+		Nickname:       "Android Phone",
+		VirtualIP:      "10.11.12.225",
+		PublicKey:      "pub_new",
+		PublicIP:       "37.212.27.76",
+		STUNAddr:       "37.212.27.76:1548",
+		Online:         true,
+		DirectP2P:      true,
+		PingMs:         157,
+		LastSeen:       time.Now(),
+	}
+	reg.Upsert(pNew)
+
+	// Старый фантом должен быть автоматически вытеснен из реестра
+	if reg.Exists("Android-cd979911") {
+		t.Errorf("expected stale peer Android-cd979911 to be pruned from registry on VIP conflict")
+	}
+	if !reg.Exists("Android-c3f2027a") {
+		t.Errorf("expected active peer Android-c3f2027a to exist in registry")
+	}
+
+	// 3. GetByVirtualIP должен возвращать активный узел
+	best, ok := reg.GetByVirtualIP("10.11.12.225")
+	if !ok || best == nil {
+		t.Fatalf("expected GetByVirtualIP to find peer for 10.11.12.225")
+	}
+	if best.DeviceID != "Android-c3f2027a" {
+		t.Errorf("expected best peer Android-c3f2027a, got %s", best.DeviceID)
+	}
+}
+
+func TestRegistry_GetByVirtualIP_Ranking(t *testing.T) {
+	reg := NewRegistry()
+
+	// Намеренно добавляем напрямую 2 пира с одинаковым VIP в map
+	reg.mu.Lock()
+	reg.peers["ghost-1"] = &Peer{
+		DeviceID:  "ghost-1",
+		VirtualIP: "10.11.12.100",
+		Online:    false,
+		DirectP2P: false,
+		LastSeen:  time.Now().Add(-120 * time.Second),
+	}
+	reg.peers["live-1"] = &Peer{
+		DeviceID:  "live-1",
+		VirtualIP: "10.11.12.100",
+		Online:    true,
+		DirectP2P: true,
+		PingMs:    45,
+		LastSeen:  time.Now(),
+	}
+	reg.mu.Unlock()
+
+	// GetByVirtualIP обязан выбрать live-1
+	p, ok := reg.GetByVirtualIP("10.11.12.100")
+	if !ok || p == nil {
+		t.Fatalf("expected to find peer for 10.11.12.100")
+	}
+	if p.DeviceID != "live-1" {
+		t.Errorf("expected live-1, got %s", p.DeviceID)
+	}
+}

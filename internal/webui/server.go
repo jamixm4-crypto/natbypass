@@ -26,6 +26,7 @@ import (
 
 	"github.com/natbypass/natbypass/internal/autostart"
 	"github.com/natbypass/natbypass/internal/config"
+	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
@@ -686,7 +687,12 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			if time.Since(p.LastSeen) > 90*time.Second {
+			if time.Since(p.LastSeen) > constants.PeerCleanupInterval {
+				// Узел давно не появлялся в сети — пропускаем зависший фантом
+				continue
+			}
+
+			if time.Since(p.LastSeen) > constants.PeerOfflineThreshold {
 				p.Online = false
 				p.DirectP2P = false
 			}
@@ -727,6 +733,32 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 			activePeers = append(activePeers, p)
 		}
+
+		// Дедупликация по Virtual IP (чтобы в WebUI не дублировались фантомы одного устройства)
+		vipMap := make(map[string]*peer.Peer)
+		var uniquePeers []*peer.Peer
+		for _, p := range activePeers {
+			cleanVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			if cleanVIP == "" {
+				uniquePeers = append(uniquePeers, p)
+				continue
+			}
+			existing, exists := vipMap[cleanVIP]
+			if !exists {
+				vipMap[cleanVIP] = p
+				continue
+			}
+			// При коллизии Virtual IP выбираем узел с DirectP2P / Online / более свежим LastSeen
+			if (!existing.Online && p.Online) ||
+				(!existing.DirectP2P && p.DirectP2P) ||
+				p.LastSeen.After(existing.LastSeen) {
+				vipMap[cleanVIP] = p
+			}
+		}
+		for _, p := range vipMap {
+			uniquePeers = append(uniquePeers, p)
+		}
+		activePeers = uniquePeers
 	}
 	if activePeers == nil {
 		activePeers = []*peer.Peer{}
@@ -749,7 +781,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.3"
+		ver = "1.9.221-beta.4"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1546,7 +1578,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.3"
+		ver = "1.9.221-beta.4"
 	}
 
 	vip := s.state.VirtualIP

@@ -211,10 +211,12 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 }
 
 
-// CryptoConfig — настройки шифрования NaCl
+// CryptoConfig — настройки шифрования NaCl и WireGuard
 type CryptoConfig struct {
 	PublicKey    string   `mapstructure:"public_key" yaml:"public_key,omitempty"`
 	PrivateKey   string   `mapstructure:"private_key" yaml:"private_key,omitempty"`
+	WGPublicKey  string   `mapstructure:"wg_public_key" yaml:"wg_public_key,omitempty"`
+	WGPrivateKey string   `mapstructure:"wg_private_key" yaml:"wg_private_key,omitempty"`
 	KeysFile     string   `mapstructure:"keys_file" yaml:"keys_file,omitempty"`
 	TrustedKeys  []string `mapstructure:"trusted_keys" yaml:"trusted_keys,omitempty"`
 }

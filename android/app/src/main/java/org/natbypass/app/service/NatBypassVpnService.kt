@@ -266,6 +266,10 @@ class NatBypassVpnService : VpnService() {
             val configFile = File(filesDir, "config.yaml")
             val configYaml = if (configFile.exists()) configFile.readText() else "{}"
             org.natbypass.app.util.MobileBridge.startEngine(configYaml, fd)
+            val updatedYaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
+            if (updatedYaml.isNotEmpty() && updatedYaml != "{}") {
+                try { configFile.writeText(updatedYaml) } catch (_: Throwable) {}
+            }
             if (selectedExitNode.isNotEmpty()) {
                 org.natbypass.app.util.MobileBridge.selectExitNode(selectedExitNode)
             }
@@ -341,6 +345,7 @@ class NatBypassVpnService : VpnService() {
         serviceJob?.cancel()
         serviceJob = null
 
+        try { org.natbypass.app.util.MobileBridge.sendOfflineBeacon() } catch (_: Throwable) {}
         try { org.natbypass.app.util.MobileBridge.detachTUN() } catch (_: Throwable) {}
 
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Throwable) {}

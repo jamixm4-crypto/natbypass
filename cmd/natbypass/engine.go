@@ -1362,6 +1362,18 @@ func receiveLoop(
 
 			// Маяки внутри одной сигнальной комнаты принимаются безусловно
 
+			if p.Offline || p.Leave {
+				nameInfo := p.DeviceID
+				if p.Nickname != "" {
+					nameInfo = fmt.Sprintf("%s (%s)", p.Nickname, p.DeviceID)
+				}
+				log.Info().Str("peer", nameInfo).Msg("🔴 Узел отключился от сети (Leave/Offline beacon)")
+				if registry != nil {
+					registry.Delete(p.DeviceID)
+				}
+				continue
+			}
+
 			// MDAR: Синхронизация эпохи адаптации сети от удаленного узла
 			if p.AdaptationEpoch > currentAdaptEpoch {
 				mdarMu.Lock()

@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.221-beta.3"
+const Version = "1.9.221-beta.4"
 
 
 
@@ -224,15 +224,20 @@ func StartEngine(configYAML string, tunFd int) string {
 	globalStarted = time.Now()
 
 	// NaCl ключи
-	pubKey, _, err := loadOrGenKeys(cfg)
+	pubKey, privKey, err := loadOrGenKeys(cfg)
 	if err != nil {
 		cancel()
 		return fmt.Sprintf("ошибка генерации ключей: %v", err)
+	}
+	if cfg.Crypto.PublicKey == "" {
+		cfg.Crypto.PublicKey = crypto.KeyToHex(pubKey)
+		cfg.Crypto.PrivateKey = crypto.KeyToHex(privKey)
 	}
 
 	devID := cfg.App.DeviceID
 	if devID == "" {
 		devID = "Android-" + crypto.KeyToHex(pubKey)[:8]
+		cfg.App.DeviceID = devID
 	}
 	globalDevID = devID
 	globalVirtualIP = config.ResolveVirtualIP(cfg, devID)
@@ -240,6 +245,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		globalDevName = cfg.App.DeviceName
 	} else if globalDevName == "" {
 		globalDevName = devID
+		cfg.App.DeviceName = devID
 	}
 
 	// Реестр пиров
@@ -347,10 +353,18 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
-	// WireGuard ключи
-	wgKey, err := wireguard.GenerateKeyPair()
-	if err != nil {
-		wgKey = &wireguard.KeyPair{PublicKey: "", PrivateKey: ""}
+	// WireGuard ключи (сохраняем в cfg для стабильности pubkey)
+	var wgKey *wireguard.KeyPair
+	if cfg.Crypto.WGPublicKey != "" && cfg.Crypto.WGPrivateKey != "" {
+		wgKey = &wireguard.KeyPair{PublicKey: cfg.Crypto.WGPublicKey, PrivateKey: cfg.Crypto.WGPrivateKey}
+	} else {
+		wgKey, err = wireguard.GenerateKeyPair()
+		if err != nil {
+			wgKey = &wireguard.KeyPair{PublicKey: "", PrivateKey: ""}
+		} else {
+			cfg.Crypto.WGPublicKey = wgKey.PublicKey
+			cfg.Crypto.WGPrivateKey = wgKey.PrivateKey
+		}
 	}
 
 	// Цикл публикации в сигнальный канал (каждые 8 секунд)
@@ -497,6 +511,12 @@ func StartEngine(configYAML string, tunFd int) string {
 					}
 				}
 				if p != nil && p.DeviceID != devID {
+					if p.Offline || p.Leave {
+						if globalRegistry != nil {
+							globalRegistry.Delete(p.DeviceID)
+						}
+						continue
+					}
 					var activeProf *config.Profile
 					if globalConfig != nil {
 						activeProf = globalConfig.EnsureActiveProfile()
@@ -953,6 +973,39 @@ func DetachTUN() {
 	logger.Info().Msg("TUN интерфейс безопасно отключен")
 }
 
+// SendOfflineBeacon публикует сигнал отключения узла, чтобы удаленные пиры мгновенно удалили его из реестра
+func SendOfflineBeacon() {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+
+	if !engineRunning || globalSigMgr == nil || globalDevID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+
+	payload := &signaling.Payload{
+		DeviceID:  globalDevID,
+		VirtualIP: globalVirtualIP,
+		Offline:   true,
+		Leave:     true,
+		Timestamp: time.Now(),
+	}
+	activeKey := ""
+	if globalConfig != nil {
+		if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil {
+			activeKey = activeProf.NetworkKey
+		}
+	}
+	toSend := payload
+	if activeKey != "" {
+		if enc, err := signaling.EncryptPayloadWithKey(payload, activeKey); err == nil && enc != nil {
+			toSend = enc
+		}
+	}
+	_ = globalSigMgr.Send(ctx, toSend)
+}
+
 // StopEngine останавливает фоновый движок
 func StopEngine() {
 	engineMu.Lock()
@@ -961,6 +1014,33 @@ func StopEngine() {
 	if !engineRunning {
 		return
 	}
+
+	// Отправляем Leave-маяк, чтобы другие узлы мгновенно очистили данный узел из реестра
+	if globalSigMgr != nil && globalDevID != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		leavePayload := &signaling.Payload{
+			DeviceID:  globalDevID,
+			VirtualIP: globalVirtualIP,
+			Offline:   true,
+			Leave:     true,
+			Timestamp: time.Now(),
+		}
+		activeKey := ""
+		if globalConfig != nil {
+			if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil {
+				activeKey = activeProf.NetworkKey
+			}
+		}
+		toSend := leavePayload
+		if activeKey != "" {
+			if enc, err := signaling.EncryptPayloadWithKey(leavePayload, activeKey); err == nil && enc != nil {
+				toSend = enc
+			}
+		}
+		_ = globalSigMgr.Send(ctx, toSend)
+		cancel()
+	}
+
 	if engineCancel != nil {
 		engineCancel()
 	}
@@ -1743,7 +1823,7 @@ func parseConfigFromString(data string) (*config.Config, error) {
 }
 
 func loadOrGenKeys(cfg *config.Config) ([32]byte, [32]byte, error) {
-	if cfg.Crypto.PublicKey != "" && cfg.Crypto.PrivateKey != "" {
+	if cfg != nil && cfg.Crypto.PublicKey != "" && cfg.Crypto.PrivateKey != "" {
 		pub, err := crypto.HexToKey(cfg.Crypto.PublicKey)
 		if err == nil {
 			priv, err := crypto.HexToKey(cfg.Crypto.PrivateKey)
@@ -1752,7 +1832,12 @@ func loadOrGenKeys(cfg *config.Config) ([32]byte, [32]byte, error) {
 			}
 		}
 	}
-	return crypto.GenerateKeyPair()
+	pub, priv, err := crypto.GenerateKeyPair()
+	if err == nil && cfg != nil {
+		cfg.Crypto.PublicKey = crypto.KeyToHex(pub)
+		cfg.Crypto.PrivateKey = crypto.KeyToHex(priv)
+	}
+	return pub, priv, err
 }
 
 func buildChannels(cfg *config.Config, deviceID string) ([]signaling.SignalingChannel, error) {
