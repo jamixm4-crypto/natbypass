@@ -455,8 +455,8 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 				continue
 			}
 		} else if osName == "linux" {
-			// На Linux исключаем файлы .exe и .apk
-			if strings.HasSuffix(nl, ".exe") || strings.HasSuffix(nl, ".apk") {
+			// На Linux исключаем файлы .exe, .apk, скрипты, конфиги, dll, подписи и резервные копии
+			if strings.HasSuffix(nl, ".exe") || strings.HasSuffix(nl, ".apk") || strings.HasSuffix(nl, ".ps1") || strings.HasSuffix(nl, ".yaml") || strings.HasSuffix(nl, ".dll") || strings.HasSuffix(nl, ".sig") || strings.HasSuffix(nl, ".pem") || strings.Contains(nl, ".old") {
 				continue
 			}
 		} else if osName == "android" {
@@ -506,9 +506,11 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 		if arch == "arm64" {
 			candidates = []string{"-linux-arm64", "linux-arm64", "arm64"}
 		} else if arch == "mipsle" {
-			candidates = []string{"-router-mipsle", "-linux-mipsle", "mipsle", "mipsel"}
+			candidates = []string{"-keenetic-mipsle", "-router-mipsle", "-linux-mipsle", "keenetic", "mipsle", "mipsel"}
 		} else if arch == "mips" {
 			candidates = []string{"-router-mips", "-linux-mips", "mips"}
+		} else if arch == "arm" {
+			candidates = []string{"-openwrt-armv7", "openwrt-armv7", "armv7", "-linux-arm", "arm"}
 		} else {
 			candidates = []string{"-linux-amd64", "linux-amd64", "amd64"}
 		}
@@ -589,6 +591,22 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 		for _, mu := range mirrorURLs {
 			if mu != assetURL && IsValidAssetURL(mu) {
 				downloadURLs = append(downloadURLs, mu)
+			}
+		}
+	}
+	// Fallback mirrors: для любых файлов с GitHub всегда добавляем скоростные зеркала ghproxy (актуально для РФ)
+	if strings.Contains(assetURL, "github.com/"+GithubRepo+"/releases/download/") {
+		for _, proxyPrefix := range []string{"https://ghproxy.net/", "https://gh-proxy.com/"} {
+			proxyURL := proxyPrefix + assetURL
+			alreadyIn := false
+			for _, u := range downloadURLs {
+				if u == proxyURL {
+					alreadyIn = true
+					break
+				}
+			}
+			if !alreadyIn {
+				downloadURLs = append(downloadURLs, proxyURL)
 			}
 		}
 	}
@@ -710,7 +728,9 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	_ = os.Chmod(tmpPath, 0755)
 
 	// Проверка контрольной суммы SHA-256 (если манифест зеркала содержит эталонный хеш)
-	if lastMirrorManifest != nil {
+	// ВАЖНО: сверяем хеш только если версия манифеста совпадает с версией скачиваемого релиза
+	// (чтобы избежать ложных ошибок из-за кэширования CDN старого манифеста).
+	if lastMirrorManifest != nil && (lastMirrorManifest.Version == "" || strings.Contains(assetURL, "/"+lastMirrorManifest.Version+"/")) {
 		exeName := currentExeName()
 		assetKey := mirrorAssetKey(runtime.GOOS, runtime.GOARCH, exeName)
 		if ma, ok := lastMirrorManifest.Assets[assetKey]; ok && ma.SHA256 != "" {

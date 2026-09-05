@@ -52,6 +52,8 @@ ASSET_KEY_MAP = {
     "natbypass-keenetic-mipsle":   "linux/mipsle",
     "natbypass-router-mipsle":     "linux/mipsle",
     "natbypass-router-mips":       "linux/mips",
+    "natbypass-openwrt-armv7":     "linux/arm",
+    "natbypass-router-armv7":      "linux/arm",
 }
 
 

@@ -2271,16 +2271,29 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	channel := r.URL.Query().Get("channel")
+	hasExplicitChannel := r.URL.Query().Has("channel")
 	includePre := r.URL.Query().Get("include_prerelease") == "true" || strings.EqualFold(channel, "beta")
 
-	if channel == "" && !includePre {
-		if s.cfg != nil && s.cfg.App.BetaChannel {
+	isCurrentBeta := strings.Contains(strings.ToLower(ver), "beta") ||
+		strings.Contains(strings.ToLower(ver), "rc") ||
+		strings.Contains(ver, "-")
+
+	if !hasExplicitChannel || channel == "" {
+		if (s.cfg != nil && s.cfg.App.BetaChannel) || isCurrentBeta {
 			includePre = true
 			channel = "beta"
 		} else if cfg, err := config.Load(s.configPath); err == nil && cfg != nil && cfg.App.BetaChannel {
 			includePre = true
 			channel = "beta"
+		} else {
+			channel = "stable"
 		}
+	} else if channel == "stable" && !includePre && isCurrentBeta && r.URL.Query().Get("force_stable") != "true" {
+		// Защита: если клиент работает на тестовой сборке (например, v1.9.222-beta.13),
+		// но UI передал дефолтный channel=stable без явного намерения отката (force_stable=true),
+		// остаёмся на beta-ветке, чтобы автоматически находить beta.14+!
+		includePre = true
+		channel = "beta"
 	}
 
 	opts := updater.CheckOptions{
@@ -2317,9 +2330,13 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 		if ver == "" {
 			ver = "1.0.0"
 		}
+		isCurrentBeta := strings.Contains(strings.ToLower(ver), "beta") ||
+			strings.Contains(strings.ToLower(ver), "rc") ||
+			strings.Contains(ver, "-")
 		includePre := req.IncludePrerelease || strings.EqualFold(req.Channel, "beta")
-		if !includePre && s.cfg != nil && s.cfg.App.BetaChannel {
+		if !includePre && ((s.cfg != nil && s.cfg.App.BetaChannel) || isCurrentBeta) {
 			includePre = true
+			req.Channel = "beta"
 		}
 		info, err := updater.CheckUpdateWithOptions(r.Context(), ver, updater.CheckOptions{
 			IncludePrerelease: includePre,

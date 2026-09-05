@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -69,6 +70,14 @@ func TestSemVerCompare_BetaPrerelease(t *testing.T) {
 	if isNewer("v1.9.220", "v1.9.222-beta.12") {
 		t.Fatalf("expected v1.9.220 not newer than v1.9.222-beta.12")
 	}
+
+	// 7. Beta.14 is newer than Beta.13
+	if !isNewer("v1.9.222-beta.14", "v1.9.222-beta.13") {
+		t.Fatalf("expected v1.9.222-beta.14 > v1.9.222-beta.13")
+	}
+	if !isNewer("v1.9.222-beta.14", "1.9.222-beta.13") {
+		t.Fatalf("expected v1.9.222-beta.14 > 1.9.222-beta.13")
+	}
 }
 
 
@@ -118,3 +127,25 @@ func TestUpdater_RejectsUnsignedUpdate(t *testing.T) {
 		t.Fatalf("expected DownloadAndVerify to reject unsigned update when public key is configured")
 	}
 }
+
+func TestPickAsset_Logic(t *testing.T) {
+	assets := []GitHubAsset{
+		{Name: "NatBypass.exe", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/NatBypass.exe", Size: 13414400},
+		{Name: "NatBypass-GUI.exe", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/NatBypass-GUI.exe", Size: 10266624},
+		{Name: "natbypass-cli.exe", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/natbypass-cli.exe", Size: 13414400},
+		{Name: "NatBypass-Diag.exe", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/NatBypass-Diag.exe", Size: 7759360},
+		{Name: "natbypass-linux-amd64", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/natbypass-linux-amd64", Size: 11976856},
+		{Name: "natbypass-linux-arm64", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/natbypass-linux-arm64", Size: 11534488},
+		{Name: "natbypass-keenetic-mipsle", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/natbypass-keenetic-mipsle", Size: 13041847},
+		{Name: "natbypass-router-mipsle", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/natbypass-router-mipsle", Size: 13041847},
+		{Name: "natbypass-router-mips", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/natbypass-router-mips", Size: 13041847},
+		{Name: "NatBypass-v1.9.222-beta.14.apk", BrowserDownloadURL: "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.222-beta.14/NatBypass-v1.9.222-beta.14.apk", Size: 83527646},
+	}
+
+	url, name, size := pickAsset(assets)
+	t.Logf("Running pickAsset on %s/%s -> name=%s, size=%d, url=%s", runtime.GOOS, runtime.GOARCH, name, size, url)
+	if url == "" || name == "" {
+		t.Fatalf("expected pickAsset to find an asset for current platform, got empty")
+	}
+}
+

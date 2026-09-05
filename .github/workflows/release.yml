@@ -40,7 +40,8 @@ jobs:
           GOOS: windows
           GOARCH: amd64
         run: |
-          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" -Force | Out-Null }
+          if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
+          New-Item -ItemType Directory -Path "build" -Force | Out-Null
           $VERSION = "${{ github.ref_name }}"
           go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$VERSION" -o build/NatBypass.exe ./cmd/natbypass
           go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$VERSION" -o build/NatBypass-GUI.exe ./cmd/natbypass-gui
@@ -75,6 +76,11 @@ jobs:
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-router-mips ./cmd/natbypass
+
+          $env:GOARCH = "arm"
+          $env:GOARM = "7"
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-openwrt-armv7 ./cmd/natbypass
+          Copy-Item build/natbypass-openwrt-armv7 build/natbypass-router-armv7 -Force
 
       - name: Upload Release Assets via GitHub CLI
         env:

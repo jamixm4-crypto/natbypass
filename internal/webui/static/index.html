@@ -2474,7 +2474,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     function openUpdateModal() {
       document.getElementById('updateModal').classList.add('active');
-      const isBeta = localStorage.getItem('natbypass_beta_channel') === '1';
+      const curVer = document.getElementById('lblCurrentVer') ? document.getElementById('lblCurrentVer').innerText.toLowerCase() : '';
+      const isBetaBuild = curVer.includes('beta') || curVer.includes('rc') || curVer.includes('-');
+      const savedBeta = localStorage.getItem('natbypass_beta_channel');
+      // По умолчанию: если сохранено явно в localStorage — используем сохранённое значение;
+      // если не сохранено — для тестовых сборок (beta/rc) по умолчанию включаем Beta-канал!
+      const isBeta = savedBeta !== null ? (savedBeta === '1') : (isBetaBuild || false);
+
       const toggle = document.getElementById('toggleBetaChannel');
       if (toggle) toggle.checked = isBeta;
       const sToggle = document.getElementById('toggleBetaSettings');

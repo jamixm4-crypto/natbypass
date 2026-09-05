@@ -101,6 +101,8 @@ func mirrorAssetKey(osName, arch, exeName string) string {
 		switch arch {
 		case "arm64":
 			return "linux/arm64"
+		case "arm":
+			return "linux/arm"
 		case "mipsle":
 			return "linux/mipsle"
 		case "mips":
@@ -119,12 +121,20 @@ func mirrorAssetKey(osName, arch, exeName string) string {
 // ---------------------------------------------------------------------------
 
 // fetchWithFallback пробует URLs из списка по порядку (каждый с таймаутом perTimeout).
+// Автоматически добавляет параметр ?_t=<timestamp> для предотвращения устаревания кэша CDN (jsDelivr).
 // Возвращает тело первого успешного ответа (200 OK).
 func fetchWithFallback(ctx context.Context, urls []string, perTimeout time.Duration) ([]byte, string, error) {
 	var lastErr error
+	nowSec := time.Now().Unix()
 	for _, u := range urls {
+		fetchU := u
+		if strings.Contains(u, "?") {
+			fetchU = fmt.Sprintf("%s&_t=%d", u, nowSec)
+		} else {
+			fetchU = fmt.Sprintf("%s?_t=%d", u, nowSec)
+		}
 		reqCtx, cancel := context.WithTimeout(ctx, perTimeout)
-		data, err := fetchURL(reqCtx, u)
+		data, err := fetchURL(reqCtx, fetchU)
 		cancel()
 		if err == nil {
 			return data, u, nil
