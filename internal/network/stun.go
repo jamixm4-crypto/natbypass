@@ -45,9 +45,9 @@ func (n NATType) IsSymmetric() bool {
 
 // defaultSTUNServers вЂ” diverse list across vendors so at least one works on any operator.
 var defaultSTUNServers = []string{
+	"stun.cloudflare.com:3478",
 	"stun.l.google.com:19302",
 	"stun1.l.google.com:19302",
-	"stun.cloudflare.com:3478",
 	"stun.nextcloud.com:443",
 	"stun.twilio.com:3478",
 	"relay.webwormhole.io:3478",

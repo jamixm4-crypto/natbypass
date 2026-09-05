@@ -741,11 +741,11 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 				if curCfg, _ := config.Load(s.configPath); curCfg != nil {
 					loc := curCfg.GetAWGParams()
 					if p.AWG != nil && (p.AWG.H1 != "" || loc.H1 != 0) {
-						locH1 := fmt.Sprintf("%d", loc.H1)
-						locH2 := fmt.Sprintf("%d", loc.H2)
-						locH3 := fmt.Sprintf("%d", loc.H3)
-						locH4 := fmt.Sprintf("%d", loc.H4)
-						if p.AWG.H1 != locH1 || p.AWG.H2 != locH2 || p.AWG.H3 != locH3 || p.AWG.H4 != locH4 ||
+						remH1 := parseAWGHeaderUint32(p.AWG.H1)
+						remH2 := parseAWGHeaderUint32(p.AWG.H2)
+						remH3 := parseAWGHeaderUint32(p.AWG.H3)
+						remH4 := parseAWGHeaderUint32(p.AWG.H4)
+						if remH1 != loc.H1 || remH2 != loc.H2 || remH3 != loc.H3 || remH4 != loc.H4 ||
 							p.AWG.S1 != loc.S1 || p.AWG.S2 != loc.S2 || p.AWG.Jc != loc.Jc {
 							p.AWGMismatch = true
 						}
@@ -815,7 +815,25 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, activePeers, "")
 }
 
-// handleStatus — GET /api/status — статус приложения
+func parseAWGHeaderUint32(s string) uint32 {
+	clean := strings.TrimSpace(s)
+	if clean == "" {
+		return 0
+	}
+	if strings.HasPrefix(clean, "0x") || strings.HasPrefix(clean, "0X") {
+		if v, err := strconv.ParseUint(clean[2:], 16, 32); err == nil {
+			return uint32(v)
+		}
+	}
+	if v, err := strconv.ParseUint(clean, 10, 32); err == nil {
+		return uint32(v)
+	}
+	if iv, err := strconv.ParseInt(clean, 10, 32); err == nil {
+		return uint32(iv)
+	}
+	return 0
+}
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
@@ -830,7 +848,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.222-beta.14"
+		ver = "1.9.222-beta.15"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -853,21 +871,28 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"pid":                  os.Getpid(),
 		"disk_binary_updated":  s.isDiskBinaryUpdated(),
 		"device_id":            s.state.DeviceID,
-		"device_name":     s.deviceName,
-		"virtual_ip":      vip,
-		"public_ip":       s.state.PublicIP,
-		"stun_addr":       s.state.STUNAddr,
-		"uptime":          uptime,
-		"started_at":      s.state.StartedAt,
-		"current_channel": currentChannel,
-		"peers_count":     s.countRemotePeers(),
-		"active_profile":  activeProfileName,
-		"mqtt_topic":      mqttTopic,
-		"config_path":     s.configPath,
+		"device_name":          s.deviceName,
+		"virtual_ip":           vip,
+		"public_ip":            s.state.PublicIP,
+		"stun_addr":            s.state.STUNAddr,
+		"uptime":               uptime,
+		"started_at":           s.state.StartedAt,
+		"current_channel":      currentChannel,
+		"peers_count":          s.countRemotePeers(),
+		"active_profile":       activeProfileName,
+		"mqtt_topic":           mqttTopic,
+		"config_path":          s.configPath,
 	}
+
+	awgEnabled := false
 	if cfg != nil {
-		status["awg"] = cfg.GetAWGParams()
+		awgEnabled = cfg.WireGuard.Enabled || cfg.WireGuard.AWG.Enabled
+		if awgEnabled {
+			status["awg"] = cfg.GetAWGParams()
+		}
 	}
+	status["awg_enabled"] = awgEnabled
+
 	s.jsonResponse(w, http.StatusOK, status, "")
 }
 
@@ -1632,7 +1657,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.222-beta.14"
+		ver = "1.9.222-beta.15"
 	}
 
 	vip := s.state.VirtualIP

@@ -38,6 +38,7 @@ type Peer struct {
 	ExitRevoked      bool                 `json:"exit_revoked,omitempty"`
 	AdvertisedRoutes []string             `json:"advertised_routes,omitempty"`
 	LastSeen         time.Time            `json:"last_seen"`
+	LastDirectSeen   time.Time            `json:"last_direct_seen,omitempty"`
 	Online           bool                 `json:"online"`
 	Latency          time.Duration        `json:"latency"`
 	Channel          string               `json:"channel,omitempty"`
@@ -72,13 +73,30 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
+	if newer.LastDirectSeen.IsZero() {
+		newer.LastDirectSeen = existing.LastDirectSeen
+	}
+
+	// Dynamic P2P health check: if direct UDP packets haven't been seen for 15 seconds,
+	// demote DirectP2P to false so traffic immediately falls back to parallel relay.
+	directP2PExpired := false
+	if existing.DirectP2P && !existing.LastDirectSeen.IsZero() && time.Since(existing.LastDirectSeen) > 15*time.Second {
+		directP2PExpired = true
+	}
+
 	// Unconditional preservation of measured latency and ping across periodic signaling beacons
 	stunChanged := newer.STUNAddr != "" && existing.STUNAddr != "" && newer.STUNAddr != existing.STUNAddr
-	if stunChanged {
-		newer.ActiveEndpoint = newer.STUNAddr
+	if stunChanged || directP2PExpired {
+		if stunChanged {
+			newer.ActiveEndpoint = newer.STUNAddr
+		} else if newer.ActiveEndpoint == "" {
+			newer.ActiveEndpoint = existing.ActiveEndpoint
+		}
 		newer.DirectP2P = false
-		newer.Latency = 0
-		newer.PingMs = 0
+		if stunChanged {
+			newer.Latency = 0
+			newer.PingMs = 0
+		}
 	} else {
 		if newer.ActiveEndpoint == "" {
 			newer.ActiveEndpoint = existing.ActiveEndpoint

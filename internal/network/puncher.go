@@ -561,9 +561,10 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	// 1. Отправляем stealth пробу без открытой сигнатуры NATBYPASS (защита от фильтров ТСПУ/DPI)
 	if len(stealthProbe) > 0 {
 		_, _ = p.conn.WriteToUDP(stealthProbe, rAddr)
+	} else {
+		// Без ключа шифрования отправляем стандартную пробу
+		_, _ = p.conn.WriteToUDP(probeData, rAddr)
 	}
-	// 2. Для обратной совместимости со старыми клиентами отправляем также стандартную пробу
-	_, _ = p.conn.WriteToUDP(probeData, rAddr)
 
 	// Targeted probing for Symmetric NAT
 	if p.GetNATType().IsSymmetric() {
@@ -581,8 +582,9 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 				cAddr := &net.UDPAddr{IP: targetIP, Port: port}
 				if len(stealthProbe) > 0 {
 					_, _ = p.conn.WriteToUDP(stealthProbe, cAddr)
+				} else {
+					_, _ = p.conn.WriteToUDP(probeData, cAddr)
 				}
-				_, _ = p.conn.WriteToUDP(probeData, cAddr)
 			}
 		}
 	}
@@ -694,38 +696,43 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 	hasCKey := p.hasCipherKey
 	p.cipherMu.RUnlock()
 
-	dataToSend := payload
-	header := []byte(constants.TunHeader)
 	if hasCKey {
-		if enc, encErr := crypto.EncryptSelf(payload, cKey); encErr == nil && len(enc) > 0 {
-			dataToSend = enc
-			header = []byte(constants.TunEncryptedHeader)
+		payloadToEncrypt := payload
+		if pmax > 0 && pmax >= pmin {
+			padLen := pmin
+			if diff := pmax - pmin; diff > 0 {
+				var b [1]byte
+				_, _ = rand.Read(b[:])
+				padLen += int(b[0]) % (diff + 1)
+			}
+			if padLen > 0 {
+				pLen := uint16(len(payload))
+				padded := make([]byte, 2+len(payload)+padLen)
+				binary.BigEndian.PutUint16(padded[:2], pLen)
+				copy(padded[2:], payload)
+				_, _ = rand.Read(padded[2+len(payload):])
+				payloadToEncrypt = padded
+			}
 		}
-	}
 
-	if pmax > 0 && pmax >= pmin {
-		padLen := pmin
-		if diff := pmax - pmin; diff > 0 {
-			var b [1]byte
-			_, _ = rand.Read(b[:])
-			padLen += int(b[0]) % (diff + 1)
-		}
-		if padLen > 0 {
-			pHeader := []byte(constants.TunPaddedHeader)
-			pLen := uint16(len(dataToSend))
-			fullPkt := make([]byte, len(pHeader)+2+len(dataToSend)+padLen)
-			copy(fullPkt, pHeader)
-			binary.BigEndian.PutUint16(fullPkt[len(pHeader):len(pHeader)+2], pLen)
-			copy(fullPkt[len(pHeader)+2:], dataToSend)
-			_, _ = rand.Read(fullPkt[len(pHeader)+2+len(dataToSend):])
-			_, err = p.conn.WriteToUDP(fullPkt, rAddr)
+		if enc, encErr := crypto.EncryptSelf(payloadToEncrypt, cKey); encErr == nil && len(enc) > 0 {
+			p.mu.Lock()
+			shaper := p.trafficShaper
+			p.mu.Unlock()
+
+			if shaper != nil && shaper.IsEnabled() {
+				return shaper.SendPacket(p.conn, rAddr, enc)
+			}
+
+			_, err = p.conn.WriteToUDP(enc, rAddr)
 			return err
 		}
 	}
 
-	fullPkt := make([]byte, len(header)+len(dataToSend))
+	header := []byte(constants.TunHeader)
+	fullPkt := make([]byte, len(header)+len(payload))
 	copy(fullPkt, header)
-	copy(fullPkt[len(header):], dataToSend)
+	copy(fullPkt[len(header):], payload)
 
 	p.mu.Lock()
 	shaper := p.trafficShaper
@@ -796,8 +803,9 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 		if enc, encErr := crypto.EncryptSelf(pongMsg, cKey); encErr == nil && len(enc) > 0 {
 			_, _ = p.conn.WriteToUDP(enc, remoteAddr)
 		}
+	} else {
+		_, _ = p.conn.WriteToUDP(pongMsg, remoteAddr)
 	}
-	_, _ = p.conn.WriteToUDP(pongMsg, remoteAddr)
 
 	// Отправляем встречный PING (ограничен 1 разом в 2 секунды на пир) для взаимного сквозного пробития NAT сокет-в-сокет
 	now := time.Now()
@@ -808,8 +816,9 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 			if enc, encErr := crypto.EncryptSelf(reversePing, cKey); encErr == nil && len(enc) > 0 {
 				_, _ = p.conn.WriteToUDP(enc, remoteAddr)
 			}
+		} else {
+			_, _ = p.conn.WriteToUDP(reversePing, remoteAddr)
 		}
-		_, _ = p.conn.WriteToUDP(reversePing, remoteAddr)
 	}
 
 	// Inbound PING confirms that the remote peer reached us directly over UDP
@@ -993,9 +1002,28 @@ func (p *UDPPuncher) readLoop() {
 					} else if strings.HasPrefix(decStr, constants.PongPrefix) {
 						p.handlePong(decStr, remoteAddr)
 						continue
+					} else if len(dec) >= 3 && (dec[2]>>4 == 4 || dec[2]>>4 == 6) {
+						// Stealth tunnel IP packet with 2-byte length prefix from dynamic padding
+						realLen := int(binary.BigEndian.Uint16(dec[:2]))
+						if realLen > 0 && 2+realLen <= len(dec) {
+							p.handleTunnelPacket(dec[2:2+realLen], remoteAddr)
+							continue
+						}
 					} else if (dec[0]>>4) == 4 || (dec[0]>>4) == 6 {
-						// Stealth tunnel IP packet without plaintext NATBYPASS header!
-						p.handleTunnelPacket(dec, remoteAddr)
+						// Direct unpadded stealth tunnel IP packet
+						payloadToSend := dec
+						if (dec[0]>>4) == 4 && len(dec) >= 20 {
+							totLen := int(binary.BigEndian.Uint16(dec[2:4]))
+							if totLen >= 20 && totLen <= len(dec) {
+								payloadToSend = dec[:totLen]
+							}
+						} else if (dec[0]>>4) == 6 && len(dec) >= 40 {
+							totLen := 40 + int(binary.BigEndian.Uint16(dec[4:6]))
+							if totLen >= 40 && totLen <= len(dec) {
+								payloadToSend = dec[:totLen]
+							}
+						}
+						p.handleTunnelPacket(payloadToSend, remoteAddr)
 						continue
 					}
 				}

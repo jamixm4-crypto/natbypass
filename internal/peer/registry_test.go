@@ -235,3 +235,28 @@ func TestRegistry_GetByVirtualIP_Ranking(t *testing.T) {
 		t.Errorf("expected live-1, got %s", p.DeviceID)
 	}
 }
+
+func TestRegistry_DynamicP2PDemotion(t *testing.T) {
+	existing := &Peer{
+		DeviceID:       "dev-p2p",
+		DirectP2P:      true,
+		ActiveEndpoint: "198.51.100.1:47832",
+		LastDirectSeen: time.Now().Add(-20 * time.Second), // Stale direct UDP > 15s
+		LastSeen:       time.Now(),
+	}
+
+	newer := &Peer{
+		DeviceID: "dev-p2p",
+		Channel:  "mqtt",
+		LastSeen: time.Now(),
+	}
+
+	existing.MergeFrom(newer)
+
+	if newer.DirectP2P {
+		t.Errorf("expected DirectP2P to be demoted to false after 20s of inactivity")
+	}
+	if newer.ActiveEndpoint != "198.51.100.1:47832" {
+		t.Errorf("expected ActiveEndpoint to be preserved for background hole punch, got %s", newer.ActiveEndpoint)
+	}
+}

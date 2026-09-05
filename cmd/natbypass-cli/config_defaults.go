@@ -86,9 +86,9 @@ func applyBuiltinDefaults(cfg *config.Config) {
 	}
 	if len(cfg.Network.StunServers) == 0 {
 		cfg.Network.StunServers = []string{
+			"stun.cloudflare.com:3478",
 			"stun.l.google.com:19302",
 			"stun1.l.google.com:19302",
-			"stun.cloudflare.com:3478",
 		}
 	}
 	if len(cfg.Network.IPApis) == 0 {

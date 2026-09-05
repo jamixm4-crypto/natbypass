@@ -119,6 +119,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		defer daemon.RemovePID(cfg.Daemon.PidFile)
 	}
 
+	if unlockProcess, err := daemon.AcquireProcessLock(); err != nil {
+		log.Error().Err(err).Msg("❌ Не удалось запустить NatBypass: обнаружен уже работающий процесс")
+		return err
+	} else {
+		defer unlockProcess()
+	}
+
 	log.Info().
 		Str("version", Version).
 		Str("commit", Commit).
@@ -408,6 +415,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					targetPeer.ActiveEndpoint = fromAddrStr
 					targetPeer.Online = true
 					targetPeer.LastSeen = time.Now()
+					targetPeer.LastDirectSeen = time.Now()
 					targetPeer.ProbeCount = 0 // Reset backoff on successful direct packet
 					registry.Upsert(targetPeer)
 					if magicSock != nil {
@@ -1004,6 +1012,7 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		if p, ok := registry.Get(remoteDevID); ok && p != nil {
 			oldEP := p.ActiveEndpoint
 			p.DirectP2P = true
+			p.LastDirectSeen = time.Now()
 			if rtt > 0 {
 				p.Latency = rtt
 				p.PingMs = rtt.Milliseconds()
@@ -1040,6 +1049,7 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			if p, ok := registry.Get(devID); ok && p != nil {
 				p.ActiveEndpoint = newPath
 				p.DirectP2P = true
+				p.LastDirectSeen = time.Now()
 				registry.Upsert(p)
 				if oldPath != "" && oldPath != newPath && puncher != nil {
 					puncher.RemoveKeepAliveTarget(oldPath)

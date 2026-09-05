@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.222-beta.14"
+	Version = "1.9.222-beta.15"
 	Commit  = "beta"
 )
 
@@ -4125,6 +4125,7 @@ func startEngineFromConfig(c *config.Config) {
 		}
 		if p, ok := registry.Get(remoteDevID); ok {
 			p.DirectP2P = true
+			p.LastDirectSeen = time.Now()
 			if rtt > 0 && rtt <= 1500*time.Millisecond {
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.70 + float64(rtt)*0.30)
@@ -4202,6 +4203,7 @@ func startEngineFromConfig(c *config.Config) {
 					targetPeer.ActiveEndpoint = fromAddrStr
 					targetPeer.Online = true
 					targetPeer.LastSeen = time.Now()
+					targetPeer.LastDirectSeen = time.Now()
 					registry.Upsert(targetPeer)
 					if guiMagicSock != nil {
 						guiMagicSock.RecordProbeSuccess(targetPeer.DeviceID, fromAddrStr, 0)
@@ -4766,27 +4768,62 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						Jmax:                    jmax,
 						S1:                      s1,
 						S2:                      s2,
+						S3:                      20,
+						S4:                      20,
 						H1:                      h1Str,
 						H2:                      h2Str,
 						H3:                      h3Str,
 						H4:                      h4Str,
+						Pmax:                    100,
 						Version:                 "3.1",
 						Preset:                  cfg.WireGuard.AWGPreset,
-						HeaderProtectionEnabled: cfg.WireGuard.AWG.HeaderProtectionKey != "",
+						HeaderProtectionEnabled: true,
 						RandomTrailers:          cfg.WireGuard.AWG.RandomTrailers,
 						DisableCookies:          cfg.WireGuard.AWG.DisableCookies,
 					}
 				} else if cachedAWGParams.Enabled {
+					awgVer := string(cachedAWGParams.Version)
+					if awgVer == "" {
+						awgVer = "3.1"
+					}
+					awgPreset := ""
+					if cfg != nil {
+						awgPreset = cfg.WireGuard.AWGPreset
+					}
+					if awgPreset == "" {
+						awgPreset = "awg31_strict"
+					}
+					s3 := cachedAWGParams.S3
+					if s3 == 0 {
+						s3 = 20
+					}
+					s4 := cachedAWGParams.S4
+					if s4 == 0 {
+						s4 = 20
+					}
+					pmax := cachedAWGParams.ContentPaddingAdditionMax
+					if pmax == 0 {
+						pmax = 100
+					}
 					awgParams = &signaling.AWGParams{
-						Jc:   cachedAWGParams.Jc,
-						Jmin: cachedAWGParams.Jmin,
-						Jmax: cachedAWGParams.Jmax,
-						S1:   cachedAWGParams.S1,
-						S2:   cachedAWGParams.S2,
-						H1:   fmt.Sprintf("%d", cachedAWGParams.H1),
-						H2:   fmt.Sprintf("%d", cachedAWGParams.H2),
-						H3:   fmt.Sprintf("%d", cachedAWGParams.H3),
-						H4:   fmt.Sprintf("%d", cachedAWGParams.H4),
+						Jc:                      cachedAWGParams.Jc,
+						Jmin:                    cachedAWGParams.Jmin,
+						Jmax:                    cachedAWGParams.Jmax,
+						S1:                      cachedAWGParams.S1,
+						S2:                      cachedAWGParams.S2,
+						S3:                      s3,
+						S4:                      s4,
+						H1:                      fmt.Sprintf("%d", cachedAWGParams.H1),
+						H2:                      fmt.Sprintf("%d", cachedAWGParams.H2),
+						H3:                      fmt.Sprintf("%d", cachedAWGParams.H3),
+						H4:                      fmt.Sprintf("%d", cachedAWGParams.H4),
+						Pmin:                    cachedAWGParams.ContentPaddingAdditionMin,
+						Pmax:                    pmax,
+						Version:                 awgVer,
+						Preset:                  awgPreset,
+						HeaderProtectionEnabled: true,
+						RandomTrailers:          cachedAWGParams.RandomTrailers,
+						DisableCookies:          cachedAWGParams.DisableCookies,
 					}
 				}
 				activeKey := ""
@@ -5408,27 +5445,65 @@ func publishCurrentState(ctx context.Context) {
 			H4:      uint32(h4),
 		}
 		awgParams = &signaling.AWGParams{
-			Jc:   jc,
-			Jmin: jmin,
-			Jmax: jmax,
-			S1:   s1,
-			S2:   s2,
-			H1:   h1Str,
-			H2:   h2Str,
-			H3:   h3Str,
-			H4:   h4Str,
+			Jc:                      jc,
+			Jmin:                    jmin,
+			Jmax:                    jmax,
+			S1:                      s1,
+			S2:                      s2,
+			S3:                      20,
+			S4:                      20,
+			H1:                      h1Str,
+			H2:                      h2Str,
+			H3:                      h3Str,
+			H4:                      h4Str,
+			Pmax:                    100,
+			Version:                 "3.1",
+			Preset:                  "awg31_strict",
+			HeaderProtectionEnabled: true,
 		}
 	} else if cachedAWGParams.Enabled {
+		awgVer := string(cachedAWGParams.Version)
+		if awgVer == "" {
+			awgVer = "3.1"
+		}
+		awgPreset := ""
+		if cfg != nil {
+			awgPreset = cfg.WireGuard.AWGPreset
+		}
+		if awgPreset == "" {
+			awgPreset = "awg31_strict"
+		}
+		s3 := cachedAWGParams.S3
+		if s3 == 0 {
+			s3 = 20
+		}
+		s4 := cachedAWGParams.S4
+		if s4 == 0 {
+			s4 = 20
+		}
+		pmax := cachedAWGParams.ContentPaddingAdditionMax
+		if pmax == 0 {
+			pmax = 100
+		}
 		awgParams = &signaling.AWGParams{
-			Jc:   cachedAWGParams.Jc,
-			Jmin: cachedAWGParams.Jmin,
-			Jmax: cachedAWGParams.Jmax,
-			S1:   cachedAWGParams.S1,
-			S2:   cachedAWGParams.S2,
-			H1:   fmt.Sprintf("%d", cachedAWGParams.H1),
-			H2:   fmt.Sprintf("%d", cachedAWGParams.H2),
-			H3:   fmt.Sprintf("%d", cachedAWGParams.H3),
-			H4:   fmt.Sprintf("%d", cachedAWGParams.H4),
+			Jc:                      cachedAWGParams.Jc,
+			Jmin:                    cachedAWGParams.Jmin,
+			Jmax:                    cachedAWGParams.Jmax,
+			S1:                      cachedAWGParams.S1,
+			S2:                      cachedAWGParams.S2,
+			S3:                      s3,
+			S4:                      s4,
+			H1:                      fmt.Sprintf("%d", cachedAWGParams.H1),
+			H2:                      fmt.Sprintf("%d", cachedAWGParams.H2),
+			H3:                      fmt.Sprintf("%d", cachedAWGParams.H3),
+			H4:                      fmt.Sprintf("%d", cachedAWGParams.H4),
+			Pmin:                    cachedAWGParams.ContentPaddingAdditionMin,
+			Pmax:                    pmax,
+			Version:                 awgVer,
+			Preset:                  awgPreset,
+			HeaderProtectionEnabled: true,
+			RandomTrailers:          cachedAWGParams.RandomTrailers,
+			DisableCookies:          cachedAWGParams.DisableCookies,
 		}
 	}
 
@@ -6249,28 +6324,38 @@ func saveConfigFromUI() {
 		h4, _ := strconv.ParseUint(strings.TrimSpace(getControlText(hEditAwgH4)), 10, 32)
 
 		cachedAWGParams = wireguard.AWGParams{
-			Enabled: true,
-			Jc:      jc,
-			Jmin:    jmin,
-			Jmax:    jmax,
-			S1:      s1,
-			S2:      s2,
-			H1:      uint32(h1),
-			H2:      uint32(h2),
-			H3:      uint32(h3),
-			H4:      uint32(h4),
+			Enabled:                   true,
+			Version:                   wireguard.AWGVersion31,
+			Jc:                        jc,
+			Jmin:                      jmin,
+			Jmax:                      jmax,
+			S1:                        s1,
+			S2:                        s2,
+			S3:                        20,
+			S4:                        20,
+			ContentPaddingAdditionMax: 100,
+			H1:                        uint32(h1),
+			H2:                        uint32(h2),
+			H3:                        uint32(h3),
+			H4:                        uint32(h4),
+			HeaderProtectionEnabled:   true,
 		}
 		cfg.WireGuard.AWG = config.AWGConfig{
-			Enabled: true,
-			Jc:      jc,
-			Jmin:    jmin,
-			Jmax:    jmax,
-			S1:      s1,
-			S2:      s2,
-			H1:      uint32(h1),
-			H2:      uint32(h2),
-			H3:      uint32(h3),
-			H4:      uint32(h4),
+			Enabled:                 true,
+			Version:                 "3.1",
+			Preset:                  "awg31_strict",
+			Jc:                      jc,
+			Jmin:                    jmin,
+			Jmax:                    jmax,
+			S1:                      s1,
+			S2:                      s2,
+			S3:                      20,
+			S4:                      20,
+			H1:                      uint32(h1),
+			H2:                      uint32(h2),
+			H3:                      uint32(h3),
+			H4:                      uint32(h4),
+			HeaderProtectionEnabled: true,
 		}
 	}
 

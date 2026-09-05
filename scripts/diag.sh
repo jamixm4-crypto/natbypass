@@ -331,9 +331,15 @@ if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
         fi
         
         # Проверка 5: Несовпадение AmneziaWG
-        P_HAS_AWG="$(echo "$p_line" | grep -o '"awg":' || echo "")"
-        MY_HAS_AWG="$(echo "$STATUS_JSON" | grep -o '"awg":' || echo "")"
-        if [ -n "$P_HAS_AWG" ] && [ -z "$MY_HAS_AWG" ]; then
+        P_HAS_AWG="$(echo "$p_line" | grep -o '"h1":' || echo "")"
+        MY_HAS_AWG="$(echo "$STATUS_JSON" | grep -o '"awg_enabled":true' || echo "")"
+        if [ -z "$MY_HAS_AWG" ]; then
+            MY_HAS_AWG="$(echo "$STATUS_JSON" | grep -o '"h1":' || echo "")"
+        fi
+        P_MISMATCH="$(echo "$p_line" | grep -o '"awg_mismatch":true' || echo "")"
+        if [ -n "$P_MISMATCH" ]; then
+            log_warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: параметры обфускации AWG 3.1 различаются!"
+        elif [ -n "$P_HAS_AWG" ] && [ -z "$MY_HAS_AWG" ]; then
             log_warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: на удаленном узле AWG включен, а на локальном выключен!"
         elif [ -z "$P_HAS_AWG" ] && [ -n "$MY_HAS_AWG" ]; then
             log_warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: на локальном узле AWG включен, а на удаленном выключен!"

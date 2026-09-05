@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # NatBypass Universal Diagnostic Script for Windows 10 / 11 / Server
 # ==============================================================================
 # Usage:
@@ -227,9 +227,12 @@ if ($peers -and $peers.data) {
         }
         
         # Check 5: AmneziaWG Mismatch
-        $pHasAwg = ($p.awg -ne $null)
-        $myHasAwg = ($status.awg -ne $null)
-        if ($pHasAwg -ne $myHasAwg) {
+        $pHasAwg = ($p.awg -ne $null -and $p.awg.h1 -ne $null -and $p.awg.h1 -ne "" -and $p.awg.h1 -ne "0")
+        $myHasAwg = ($status.awg_enabled -eq $true) -or ($status.awg -ne $null -and $status.awg.h1 -ne $null -and $status.awg.h1 -ne 0 -and $status.awg.h1 -ne "")
+        if ($p.awg_mismatch -eq $true) {
+            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]:"
+            Log-Warn "      Параметры обфускации (H1-H4/S1-S2) различаются между узлами. Пакеты WireGuard не расшифруются!"
+        } elseif ($pHasAwg -ne $myHasAwg) {
             Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]:"
             Log-Warn "      На одном узле обфускация AWG включена, на втором выключена. Зашифрованные пакеты не распознаются!"
         }
