@@ -813,7 +813,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.10"
+		ver = "1.9.222-beta.13"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -845,6 +845,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"active_profile":  activeProfileName,
 		"mqtt_topic":      mqttTopic,
 		"config_path":     s.configPath,
+	}
+	if cfg != nil {
+		status["awg"] = cfg.GetAWGParams()
 	}
 	s.jsonResponse(w, http.StatusOK, status, "")
 }
@@ -1610,7 +1613,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.10"
+		ver = "1.9.222-beta.13"
 	}
 
 	vip := s.state.VirtualIP

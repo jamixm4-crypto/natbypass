@@ -345,26 +345,61 @@ class NatBypassVpnService : VpnService() {
     }
 
     private fun disconnect() {
+        if (!isRunning && tunRawFd <= 0 && vpnInterface == null) return
         isRunning = false
         serviceJob?.cancel()
         serviceJob = null
 
-        try { org.natbypass.app.util.MobileBridge.sendOfflineBeacon() } catch (_: Throwable) {}
+        // 1. Мгновенно отключаем TUN в Go
         try { org.natbypass.app.util.MobileBridge.detachTUN() } catch (_: Throwable) {}
 
-        // BUG-A1 fix: явное закрытие raw TUN fd через системный вызов.
-        // vpnInterface == null после detachFd(), поэтому vpnInterface?.close() ничего не делает.
-        // Os.close() позволяет закрыть fd напрямую, освобождая ресурс TUN-устройства Android.
+        // 2. Явно закрываем raw TUN fd через системный ParcelFileDescriptor
         try {
             val rawFd = tunRawFd
             if (rawFd > 0) {
-                android.system.Os.close(android.os.ParcelFileDescriptor.fromFd(rawFd).fileDescriptor)
-                Log.i(TAG, "TUN fd=$rawFd closed via Os.close (BUG-A1 fix)")
+                try {
+                    android.os.ParcelFileDescriptor.adoptFd(rawFd).close()
+                } catch (_: Throwable) {
+                    try {
+                        val fdObj = java.io.FileDescriptor()
+                        val field = java.io.FileDescriptor::class.java.getDeclaredField("descriptor")
+                        field.isAccessible = true
+                        field.setInt(fdObj, rawFd)
+                        android.system.Os.close(fdObj)
+                    } catch (_: Throwable) {}
+                }
+                Log.i(TAG, "TUN fd=$rawFd closed via adoptFd (BUG-A1 fix)")
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "Os.close tunRawFd failed: ${e.message}")
+            Log.w(TAG, "Close tunRawFd failed: ${e.message}")
         }
         tunRawFd = -1
+
+        try { vpnInterface?.close() } catch (_: Throwable) {}
+        vpnInterface = null
+
+        // 3. МГНОВЕННО снимаем Foreground и гасим уведомление (значок VPN в шторке исчезает сразу)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .cancel(NOTIFICATION_ID)
+            Log.i(TAG, "Notification $NOTIFICATION_ID cancelled immediately")
+        } catch (_: Throwable) {}
+
+        // 4. Оповещаем UI
+        try {
+            sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
+                putExtra("state", "disconnected")
+            })
+        } catch (_: Throwable) {}
 
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Throwable) {}
         try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Throwable) {}
@@ -378,31 +413,10 @@ class NatBypassVpnService : VpnService() {
         } catch (_: Throwable) {}
         networkCallback = null
 
-        try { vpnInterface?.close() } catch (_: Throwable) {}
-        vpnInterface = null
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(true)
-            }
-        } catch (_: Throwable) {}
-
-        // BUG-A3 fix: явная отмена нотификации — на MIUI/HyperOS/ColorOS значок VPN
-        // может зависать даже после stopForeground(STOP_FOREGROUND_REMOVE).
-        try {
-            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-                .cancel(NOTIFICATION_ID)
-            Log.i(TAG, "Notification $NOTIFICATION_ID cancelled (BUG-A3 fix)")
-        } catch (_: Throwable) {}
-
-        try {
-            sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
-                putExtra("state", "disconnected")
-            })
-        } catch (_: Throwable) {}
+        // 5. Отправляем Leave-маяк асинхронно в фоне, чтобы задержки сети не подвешивали UI/отключение
+        serviceScope.launch(Dispatchers.IO) {
+            try { org.natbypass.app.util.MobileBridge.sendOfflineBeacon() } catch (_: Throwable) {}
+        }
     }
 
     private var lastNetworkChangeTs = 0L

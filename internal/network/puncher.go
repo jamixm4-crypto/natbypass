@@ -274,10 +274,12 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 	p.mu.Unlock()
 
 	// Query first 3 STUN servers to harvest possible multi-NAT mapped endpoints
+	// and detect Symmetric NAT on the active socket!
 	serversToQuery := p.stunServers
 	if len(serversToQuery) > 3 {
 		serversToQuery = serversToQuery[:3]
 	}
+	var observedMappedPorts []int
 	for _, srv := range serversToQuery {
 		srvAddr, err := net.ResolveUDPAddr("udp4", srv)
 		if err != nil {
@@ -293,13 +295,35 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 				p.mu.Lock()
 				if p.mappedIP != nil && p.mappedPort > 0 {
 					candidateSet[fmt.Sprintf("%s:%d", p.mappedIP.String(), p.mappedPort)] = struct{}{}
+					observedMappedPorts = append(observedMappedPorts, p.mappedPort)
 				}
 				p.mu.Unlock()
-			case <-time.After(250 * time.Millisecond):
+			case <-time.After(350 * time.Millisecond):
 			case <-ctx.Done():
 				break
 			}
 		}
+	}
+
+	// Точный детект Symmetric NAT на боевом сокете:
+	// Если разные STUN-серверы вернули разные внешние порты для одного и того же сокета p.conn,
+	// это 100% подтвержденный Symmetric NAT (провайдерский CGNAT).
+	if len(observedMappedPorts) >= 2 {
+		firstPort := observedMappedPorts[0]
+		isSymmetric := false
+		for _, port := range observedMappedPorts[1:] {
+			if port != firstPort {
+				isSymmetric = true
+				break
+			}
+		}
+		p.natTypeMu.Lock()
+		if isSymmetric {
+			p.NATType = NATTypeSymmetric
+		} else if p.NATType == NATTypeUnknown {
+			p.NATType = NATTypeFullCone
+		}
+		p.natTypeMu.Unlock()
 	}
 
 	// 2. Public IP + localPort (only if mappedPort matches localPort or mappedPort is not yet discovered)
@@ -312,46 +336,11 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 		}
 	}
 
-	// 3. Local LAN addresses (only physical Ethernet/Wi-Fi interfaces, skip TUN/TAP/Mesh/Docker/VPN)
-	if ifaces, err := net.Interfaces(); err == nil {
-		for _, iface := range ifaces {
-			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagPointToPoint != 0 {
-				continue
-			}
-			nameLower := strings.ToLower(iface.Name)
-			if strings.HasPrefix(nameLower, "nb") || strings.Contains(nameLower, "natbypass") || strings.Contains(nameLower, "wintun") ||
-				strings.HasPrefix(nameLower, "tun") || strings.HasPrefix(nameLower, "tap") || strings.HasPrefix(nameLower, "nwg") ||
-				strings.HasPrefix(nameLower, "wg") || strings.HasPrefix(nameLower, "docker") || strings.HasPrefix(nameLower, "veth") ||
-				strings.Contains(nameLower, "virtual") || strings.Contains(nameLower, "tailscale") || strings.Contains(nameLower, "zerotier") {
-				continue
-			}
-			addrs, err := iface.Addrs()
-			if err != nil {
-				continue
-			}
-			for _, addr := range addrs {
-				var ip net.IP
-				switch v := addr.(type) {
-				case *net.IPNet:
-					ip = v.IP
-				case *net.IPAddr:
-					ip = v.IP
-				}
-				if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-					continue
-				}
-				if ip4 := ip.To4(); ip4 != nil {
-					// Exclude default CGNAT mesh range 100.64.0.0/10 from candidate discovery
-					if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
-						continue
-					}
-					if ip4.IsPrivate() {
-						candidateSet[fmt.Sprintf("%s:%d", ip4.String(), localPort)] = struct{}{}
-					}
-				}
-			}
-
-		}
+	// 3. Основной физический LAN-адрес шлюза по умолчанию (Default Gateway)
+	// Добавляем ТОЛЬКО реальный локальный IP адаптера, выходящего в интернет,
+	// исключая виртуальные адаптеры Hyper-V, WSL, VMware, VirtualBox.
+	if primaryLAN := GetLocalLANIP(); primaryLAN != "" {
+		candidateSet[fmt.Sprintf("%s:%d", primaryLAN, localPort)] = struct{}{}
 	}
 
 	var res []string

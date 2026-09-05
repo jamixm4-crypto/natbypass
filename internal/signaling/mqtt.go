@@ -217,14 +217,19 @@ func (m *MQTTChannel) UpdateTopic(newTopic string) {
 
 	m.tunnelMu.Lock()
 	if m.tunnelHandler != nil && m.myDevID != "" {
+		oldTunnelTopic := m.tunnelTopic
 		newTunnelTopic := fmt.Sprintf("%s/tunnel/%s", newTopic, m.myDevID)
 		m.tunnelTopic = newTunnelTopic
 		if m.client != nil && m.client.IsConnected() {
+			if oldTunnelTopic != "" && oldTunnelTopic != newTunnelTopic {
+				m.client.Unsubscribe(oldTunnelTopic)
+			}
 			m.client.Subscribe(newTunnelTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
 				if len(msg.Payload()) >= 20 && m.tunnelHandler != nil {
 					m.tunnelHandler(msg.Payload())
 				}
 			})
+			log.Info().Str("old_tunnel", oldTunnelTopic).Str("new_tunnel", newTunnelTopic).Msg("MQTT туннельный топик динамически обновлен")
 		}
 	}
 	m.tunnelMu.Unlock()
@@ -292,14 +297,14 @@ func (m *MQTTChannel) PublishTunnelData(targetDevID string, pkt []byte) error {
 	if !m.client.IsConnected() {
 		return fmt.Errorf("MQTT client not connected")
 	}
-	topic := fmt.Sprintf("%s/tunnel/%s", m.topic, targetDevID)
+	topic := fmt.Sprintf("%s/tunnel/%s", m.GetTopic(), targetDevID)
 	tok := m.client.Publish(topic, 0, false, pkt)
 	return tok.Error()
 }
 
 // SubscribeTunnelData подписывается на входящие пакеты туннеля для текущего узла
 func (m *MQTTChannel) SubscribeTunnelData(myDevID string, onPkt func(pkt []byte)) {
-	topic := fmt.Sprintf("%s/tunnel/%s", m.topic, myDevID)
+	topic := fmt.Sprintf("%s/tunnel/%s", m.GetTopic(), myDevID)
 	m.tunnelMu.Lock()
 	m.myDevID = myDevID
 	m.tunnelTopic = topic

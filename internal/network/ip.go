@@ -241,8 +241,28 @@ func extractIPv4Subnet(addr net.Addr) string {
 	return fmt.Sprintf("%s/%d", networkIP.String(), ones)
 }
 
-// GetLocalLANIP возвращает основной физический локальный IPv4-адрес устройства
+// GetLocalLANIP возвращает основной физический локальный IPv4-адрес устройства,
+// подключенный к основному шлюзу по умолчанию (Default Gateway) в интернет.
 func GetLocalLANIP() string {
+	// 1. Приоритетный способ: опрос таблицы маршрутизации ядра ОС через фиктивный UDP-сокет
+	// без фактической отправки данных в сеть. Мгновенно возвращает IP физического адаптера шлюза.
+	for _, target := range []string{"8.8.8.8:53", "1.1.1.1:53", "77.88.8.8:53"} {
+		conn, err := net.Dial("udp4", target)
+		if err == nil {
+			localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
+			_ = conn.Close()
+			if ok && localAddr != nil && localAddr.IP != nil {
+				if ip4 := localAddr.IP.To4(); ip4 != nil && !ip4.IsLoopback() && !ip4.IsUnspecified() {
+					// Исключаем CGNAT меш-диапазон 100.64.0.0/10
+					if !(ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127) && ip4.IsPrivate() {
+						return ip4.String()
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Резервный перебор сетевых интерфейсов (только если опрос шлюза не сработал)
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return ""
@@ -255,7 +275,9 @@ func GetLocalLANIP() string {
 		if strings.HasPrefix(nameLower, "nb") || strings.Contains(nameLower, "natbypass") || strings.Contains(nameLower, "wintun") ||
 			strings.HasPrefix(nameLower, "tun") || strings.HasPrefix(nameLower, "tap") || strings.HasPrefix(nameLower, "nwg") ||
 			strings.HasPrefix(nameLower, "wg") || strings.HasPrefix(nameLower, "docker") || strings.HasPrefix(nameLower, "veth") ||
-			strings.Contains(nameLower, "virtual") || strings.Contains(nameLower, "tailscale") || strings.Contains(nameLower, "zerotier") {
+			strings.Contains(nameLower, "virtual") || strings.Contains(nameLower, "tailscale") || strings.Contains(nameLower, "zerotier") ||
+			strings.Contains(nameLower, "hyper-v") || strings.Contains(nameLower, "vmnet") || strings.Contains(nameLower, "vethernet") ||
+			strings.Contains(nameLower, "wsl") {
 			continue
 		}
 		addrs, err := iface.Addrs()

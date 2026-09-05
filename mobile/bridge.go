@@ -309,6 +309,9 @@ func StartEngine(configYAML string, tunFd int) string {
 				dataToProcess = dec
 			}
 		}
+		// Юзерспейс-ответ на входящие ICMP Echo запросы через Relay
+		respondICMPEcho(dataToProcess, nil)
+
 		engineMu.Lock()
 		tf := globalTunFile
 		engineMu.Unlock()
@@ -916,8 +919,8 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// Резервный транспорт через сигнальный MQTT брокер (Relay Fallback), если UDP заблокирован
-							if !sentDirect && globalSigMgr != nil {
+							// Резервный транспорт через сигнальный MQTT брокер (Relay Fallback), если прямой P2P не подтвержден или UDP заблокирован
+							if (!sentDirect || !targetPeer.DirectP2P) && globalSigMgr != nil {
 								dataToSend := pkt
 								if globalConfig != nil {
 									if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
@@ -986,13 +989,38 @@ func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
 	reply[ihl+3] = byte(icmpCS)
 
 	// Send reply back directly via UDP puncher socket
+	sent := false
 	if fromAddr != nil && globalPuncher != nil {
-		_ = globalPuncher.SendDataPacket(fromAddr.String(), reply)
+		if err := globalPuncher.SendDataPacket(fromAddr.String(), reply); err == nil {
+			sent = true
+		}
 	} else if globalPuncher != nil && globalRegistry != nil {
 		for _, p := range globalRegistry.List() {
 			pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 			if (pVIP == srcIP.String() || p.VirtualIP == srcIP.String()) && p.ActiveEndpoint != "" {
-				_ = globalPuncher.SendDataPacket(p.ActiveEndpoint, reply)
+				if err := globalPuncher.SendDataPacket(p.ActiveEndpoint, reply); err == nil {
+					sent = true
+				}
+				break
+			}
+		}
+	}
+
+	// Если через прямой UDP не отправлено (или узел в Relay) — шлём через сигнальный MQTT-канал
+	if !sent && globalSigMgr != nil && globalRegistry != nil {
+		for _, p := range globalRegistry.List() {
+			pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			if pVIP == srcIP.String() || p.VirtualIP == srcIP.String() {
+				replyToSend := reply
+				if globalConfig != nil {
+					if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+						cKey := crypto.DeriveKey(activeProf.NetworkKey)
+						if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
+							replyToSend = enc
+						}
+					}
+				}
+				_ = globalSigMgr.PublishTunnelData(p.DeviceID, replyToSend)
 				break
 			}
 		}
@@ -1025,12 +1053,15 @@ func AttachTUN(tunFd int) {
 func DetachTUN() {
 	engineMu.Lock()
 	defer engineMu.Unlock()
-	if globalTunFile == nil {
-		return
+	if globalTunCancel != nil {
+		globalTunCancel()
+		globalTunCancel = nil
 	}
-	tf := globalTunFile
-	globalTunFile = nil
-	_ = tf.Close()
+	if globalTunFile != nil {
+		tf := globalTunFile
+		globalTunFile = nil
+		_ = tf.Close()
+	}
 	logger.Info().Msg("TUN интерфейс безопасно отключен")
 }
 

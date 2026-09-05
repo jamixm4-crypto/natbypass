@@ -116,7 +116,7 @@ if [ -n "$NB_IF" ]; then
     IF_INFO="$(ip addr show dev "$NB_IF" 2>/dev/null || ifconfig "$NB_IF" 2>/dev/null)"
     echo "$IF_INFO" >> "$REPORT_FILE"
     
-    IP_ADDR="$(echo "$IF_INFO" | grep -o 'inet [0-9.]*' | awk '{print $2}' || echo '')"
+    IP_ADDR="$(echo "$IF_INFO" | grep -o 'inet [0-9.]*' | awk '{print $2}' | head -n1 || echo '')"
     MTU_VAL="$(echo "$IF_INFO" | grep -o 'mtu [0-9]*' | awk '{print $2}' || echo '')"
     
     if [ -n "$IP_ADDR" ]; then
@@ -349,7 +349,7 @@ log_section "10. СКВОЗНОЙ ТЕСТ ICMP PING ДО ВСЕХ ОБНАРУ�
 test_ping() {
     TARGET_IP="$1"
     NAME="$2"
-    CLEAN_IP="$(echo "$TARGET_IP" | awk -F'/' '{print $1}' | tr -d ' ')"
+    CLEAN_IP="$(echo "$TARGET_IP" | tr -s ' \t\r\n' ' ' | cut -d' ' -f1 | cut -d'/' -f1 | tr -d ' ')"
     if [ -z "$CLEAN_IP" ] || [ "$CLEAN_IP" = "0.0.0.0" ] || [ "$CLEAN_IP" = "<nil>" ]; then
         return
     fi
