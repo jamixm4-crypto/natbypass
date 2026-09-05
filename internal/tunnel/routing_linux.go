@@ -91,7 +91,13 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	// 2. Forwarding rules for nb0
 	ensureIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
 	ensureIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
-	ensureIptablesRule(ipt, "", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT")
+	// Try conntrack module first; fall back to 'state' module if conntrack not available (MIPS routers)
+	if exec.Command(ipt, "-w", "2", "-C", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run() != nil {
+		if err2 := exec.Command(ipt, "-w", "2", "-A", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run(); err2 != nil {
+			// conntrack module not available — use legacy 'state' module
+			_ = exec.Command(ipt, "-w", "2", "-A", "FORWARD", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run()
+		}
+	}
 
 	// Keenetic NDM chains if present
 	if isKeeneticDevice() {
@@ -383,6 +389,21 @@ func FlushAllRouting(gatewayVIP string, subnets []string) {
 	for _, s := range subnets {
 		_ = RemoveSubnetRoute(s, gatewayVIP)
 	}
+}
+
+// EnsurePeerHostRoute adds a /32 host route for a peer's VirtualIP via the nb0 TUN interface.
+// Required on Linux routers (Keenetic/OpenWrt/mipsle) so the kernel routes ICMP replies and
+// forwarded return traffic back through nb0 instead of escaping via the WAN interface.
+// Idempotent — "file exists" errors (route already present) are silently ignored.
+func EnsurePeerHostRoute(peerVIP string) {
+	if peerVIP == "" {
+		return
+	}
+	cleanVIP := strings.TrimSpace(strings.Split(peerVIP, "/")[0])
+	if net.ParseIP(cleanVIP) == nil {
+		return
+	}
+	_ = runLinuxCmd("ip", "route", "add", cleanVIP+"/32", "dev", "nb0", "onlink")
 }
 
 // EnableMSSClamping принудительно снижает MSS для TCP-соединений через TUN.

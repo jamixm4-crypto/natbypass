@@ -477,6 +477,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 				log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 				_ = tunDev.WritePacket(payload)
+				// FIX-A: Ensure Linux kernel has a /32 host route back to peer VIP via nb0
+				// Without this, kernel ICMP replies and NAT return packets escape via WAN
+				if runtime.GOOS == "linux" && inSrcIP != "" {
+					tunnel.EnsurePeerHostRoute(inSrcIP)
+				}
 			}
 		}
 
@@ -667,7 +672,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
 							}
 						} else {
-							log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no endpoint or puncher")
+							// FIX-B: No direct P2P endpoint — try relay as fallback
+							log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no direct endpoint, trying relay fallback")
+							if sigMgr != nil {
+								dataToSend := pkt
+								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+									cKey := crypto.DeriveKey(activeProf.NetworkKey)
+									if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+										dataToSend = enc
+									}
+								}
+								_ = sigMgr.PublishTunnelData(p.DeviceID, dataToSend)
+							}
 						}
 
 						// Fallback: relay via MQTT/Signaling ТОЛЬКО когда прямой UDP провалился (S1: убираем double-send)

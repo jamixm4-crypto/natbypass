@@ -43,6 +43,10 @@ func RemoveSubnetRoute(subnetCIDR string, gatewayVIP string) error {
 // FlushAllRouting stub.
 func FlushAllRouting(gatewayVIP string, subnets []string) {}
 
+// EnsurePeerHostRoute is a no-op on non-Linux platforms.
+func EnsurePeerHostRoute(peerVIP string) {}
+
+
 // GetLocalSubnets returns a unique list of local IPv4 subnet CIDRs.
 func GetLocalSubnets() []string {
 	return network.GetLocalSubnets()

@@ -90,6 +90,10 @@ func EnableHostIPForwarding() error {
 	return EnableHostIPForwardingSubnet("100.64.200.0/24")
 }
 
+// EnsurePeerHostRoute is a no-op on Windows — the kernel manages routes automatically via NetNat.
+func EnsurePeerHostRoute(peerVIP string) {}
+
+
 // DisableHostIPForwarding disables IP forwarding and cleans up NetNat rule.
 func DisableHostIPForwarding() error {
 	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "interface", "NatBypass", "forwarding=disabled")
