@@ -99,3 +99,34 @@ jobs:
             build/natbypass-keenetic-mipsle
             build/natbypass-router-mipsle
             build/natbypass-router-mips
+
+      # --- Зеркало обновлений: генерация манифеста и публикация на Cloudflare Pages ---
+      # Позволяет клиентам в РФ проверять и скачивать обновления даже при блокировке GitHub.
+      # Требует секреты: CF_API_TOKEN, CF_ACCOUNT_ID, CF_PAGES_PROJECT (опционально)
+      - name: Setup Python for manifest generator
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate mirror manifest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MIRROR_BASE_URL: "https://nb-mirror.pages.dev/files"
+        run: |
+          python scripts/gen_mirror_manifest.py `
+            --tag "${{ github.ref_name }}" `
+            --out-dir dist/mirror/releases `
+            --mirror-base "$env:MIRROR_BASE_URL"
+
+      - name: Publish mirror manifest to Cloudflare Pages
+        if: ${{ secrets.CF_API_TOKEN != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          $project = if ("${{ secrets.CF_PAGES_PROJECT }}" -ne "") { "${{ secrets.CF_PAGES_PROJECT }}" } else { "nb-mirror" }
+          npx wrangler@latest pages deploy dist/mirror `
+            --project-name $project `
+            --commit-dirty=true `
+            --branch main
+        continue-on-error: true

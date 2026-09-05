@@ -171,10 +171,44 @@ func (u *Updater) DownloadAndVerify(release *ReleaseInfo) (string, error) {
 	return tmpFile.Name(), nil
 }
 
-// CheckUpdateWithOptions проверяет наличие новой версии с учетом заданного канала (stable/beta).
+// lastMirrorManifest хранит последний успешно загруженный манифест зеркала.
+// Используется в ApplyUpdate для fallback-скачивания файлов с зеркал.
+var lastMirrorManifest *MirrorManifest
+
+// CheckUpdateWithOptions проверяет наличие новой версии с учётом заданного канала (stable/beta).
+// При недоступности GitHub API автоматически использует зеркала (актуально для РФ).
 func CheckUpdateWithOptions(ctx context.Context, currentVersion string, opts CheckOptions) (*ReleaseInfo, error) {
 	includePrerelease := opts.IncludePrerelease || strings.EqualFold(opts.Channel, "beta")
 
+	// --- Попытка 1: GitHub API ---
+	info, githubErr := checkUpdateFromGitHub(ctx, currentVersion, includePrerelease)
+	if githubErr == nil {
+		return info, nil
+	}
+
+	// --- Попытка 2: Mirror manifest (fallback для РФ и других регионов с блокировками) ---
+	mirrorURLs := MirrorManifestURLsStable
+	if includePrerelease {
+		mirrorURLs = MirrorManifestURLsBeta
+	}
+
+	manifest, mirrorErr := fetchMirrorManifest(ctx, mirrorURLs)
+	if mirrorErr != nil {
+		// Оба источника недоступны — возвращаем исходную ошибку GitHub
+		return nil, fmt.Errorf("GitHub API: %w; зеркала: %v", githubErr, mirrorErr)
+	}
+
+	// Сохраняем манифест для использования в ApplyUpdate
+	lastMirrorManifest = manifest
+
+	// Определяем ключ ассета для текущей платформы
+	exeName := currentExeName()
+	assetKey := mirrorAssetKey(runtime.GOOS, runtime.GOARCH, exeName)
+	return mirrorManifestToReleaseInfo(manifest, currentVersion, assetKey), nil
+}
+
+// checkUpdateFromGitHub выполняет запрос к GitHub API.
+func checkUpdateFromGitHub(ctx context.Context, currentVersion string, includePrerelease bool) (*ReleaseInfo, error) {
 	apiURL := GithubAPI
 	if includePrerelease {
 		apiURL = GithubAPIReleases
@@ -187,7 +221,7 @@ func CheckUpdateWithOptions(ctx context.Context, currentVersion string, opts Che
 	req.Header.Set("User-Agent", "NatBypass-Updater/"+currentVersion)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 8 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка запроса к GitHub API: %w", err)
@@ -248,7 +282,7 @@ func CheckUpdateWithOptions(ctx context.Context, currentVersion string, opts Che
 		channel = "beta"
 	}
 
-	info := &ReleaseInfo{
+	return &ReleaseInfo{
 		CurrentVersion: currentVersion,
 		LatestVersion:  targetRelease.TagName,
 		HasUpdate:      hasUpdate,
@@ -261,9 +295,7 @@ func CheckUpdateWithOptions(ctx context.Context, currentVersion string, opts Che
 		AssetName:      assetName,
 		AssetSize:      assetSize,
 		HTMLURL:        targetRelease.HTMLURL,
-	}
-
-	return info, nil
+	}, nil
 }
 
 // CheckUpdate проверяет наличие новой версии на GitHub Releases (стабильный канал по умолчанию)
@@ -511,14 +543,27 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	return "", "", 0
 }
 
-// IsValidAssetURL проверяет, что URL обновления исходит исключительно из доверенного официального репозитория GitHub.
+// IsValidAssetURL проверяет, что URL обновления исходит из доверенного источника.
+// Доверенные источники: официальный GitHub CDN и зеркала NatBypass.
 func IsValidAssetURL(urlStr string) bool {
 	if urlStr == "" {
 		return false
 	}
-	// Разрешаем только официальные релизы репозитория или подписанный CDN GitHub
-	return strings.HasPrefix(urlStr, "https://github.com/"+GithubRepo+"/releases/download/") ||
-		strings.HasPrefix(urlStr, "https://objects.githubusercontent.com/github-production-release-asset-")
+	// Официальные GitHub CDN
+	if strings.HasPrefix(urlStr, "https://github.com/"+GithubRepo+"/releases/download/") ||
+		strings.HasPrefix(urlStr, "https://objects.githubusercontent.com/github-production-release-asset-") {
+		return true
+	}
+	// Доверенные зеркала NatBypass
+	return IsMirrorURL(urlStr)
+}
+
+// currentExeName возвращает имя текущего исполняемого файла (без пути).
+func currentExeName() string {
+	if ep, err := os.Executable(); err == nil {
+		return filepath.Base(ep)
+	}
+	return ""
 }
 
 // ApplyUpdate выполняет скачивание, атомарную замену бинарника и перезапуск
@@ -533,6 +578,19 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 		return err
 	}
 
+	// Формируем список URLs для скачивания: основной + зеркала (если манифест загружен)
+	downloadURLs := []string{assetURL}
+	if lastMirrorManifest != nil {
+		exeName := currentExeName()
+		assetKey := mirrorAssetKey(runtime.GOOS, runtime.GOARCH, exeName)
+		mirrorURLs := GetMirrorAssetURLs(lastMirrorManifest, assetKey)
+		for _, mu := range mirrorURLs {
+			if mu != assetURL && IsValidAssetURL(mu) {
+				downloadURLs = append(downloadURLs, mu)
+			}
+		}
+	}
+
 	setStatus(true, 5, "Инициализация скачивания...", "", false)
 
 	execPath, err := os.Executable()
@@ -545,24 +603,39 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	tmpPath := execPath + ".new"
 	_ = os.Remove(tmpPath)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", assetURL, nil)
-	if err != nil {
-		setStatus(false, 0, "", "Ошибка запроса: "+err.Error(), false)
-		return err
-	}
-	req.Header.Set("User-Agent", "NatBypass-Updater")
-
 	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
-	if err != nil {
-		setStatus(false, 0, "", "Ошибка скачивания: "+err.Error(), false)
-		return err
+
+	// Пробуем скачать с каждого URL из списка (основной + зеркала)
+	var resp *http.Response
+	var usedURL string
+	for i, dlURL := range downloadURLs {
+		if i > 0 {
+			setStatus(true, 7, fmt.Sprintf("Основной источник недоступен, пробуем зеркало %d/%d...", i, len(downloadURLs)-1), "", false)
+		}
+		req, reqErr := http.NewRequestWithContext(ctx, "GET", dlURL, nil)
+		if reqErr != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "NatBypass-Updater")
+		r, dlErr := client.Do(req)
+		if dlErr != nil {
+			continue
+		}
+		if r.StatusCode != http.StatusOK {
+			r.Body.Close()
+			continue
+		}
+		resp = r
+		usedURL = dlURL
+		break
+	}
+	if resp == nil {
+		setStatus(false, 0, "", "Ошибка скачивания: все источники (GitHub + зеркала) недоступны", false)
+		return fmt.Errorf("все источники скачивания недоступны")
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		setStatus(false, 0, "", fmt.Sprintf("Сервер вернул ошибку скачивания: %d", resp.StatusCode), false)
-		return fmt.Errorf("download failed status: %d", resp.StatusCode)
+	if usedURL != assetURL {
+		setStatus(true, 8, fmt.Sprintf("Скачивание с зеркала: %s", usedURL), "", false)
 	}
 
 	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
