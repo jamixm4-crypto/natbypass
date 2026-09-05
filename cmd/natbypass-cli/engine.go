@@ -38,6 +38,7 @@ import (
 
 var (
 	magicSock        *network.MagicSock
+	tcpDirectMgr     *network.TCPDirectManager
 	wssClient        *relay.WSSRelayClient
 	udpRelay         *relay.UDPRelayClient
 	triggerPublishCh = make(chan struct{}, 10)
@@ -678,7 +679,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							} else {
 								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
 							}
-						} else {
+						}
+						// Direct TCP Simultaneous Open fallback path
+						if !sentDirect && tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID) {
+							if tcpErr := tcpDirectMgr.SendPacket(p.DeviceID, pkt); tcpErr == nil {
+								sentDirect = true
+							}
+						} else if !sentDirect && targetEP == "" {
 							// FIX-B: No direct P2P endpoint — try relay as fallback
 							log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no direct endpoint, trying relay fallback")
 							if sigMgr != nil {
@@ -801,6 +808,40 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 							if p.PublicIP != "" && p.WGPort > 0 {
 								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+							}
+
+							// Trigger TCP Simultaneous Open fallback when UDP is persistently dropped (> 12 probes)
+							if p.ProbeCount > 12 && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && puncher != nil {
+								tcpTarget := p.STUNAddr
+								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
+									tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
+								}
+								if tcpTarget != "" {
+									go func(devID, target string, lPort int) {
+										tCtx, tCancel := context.WithTimeout(engineCtx, 4*time.Second)
+										defer tCancel()
+										conn, err := network.AttemptTCPSimultaneousOpen(tCtx, lPort, target)
+										if err == nil && conn != nil {
+											log.Info().Str("peer", devID).Str("target", target).Msg("⚡ TCP Simultaneous Open SUCCEEDED: established P2P TCP fallback")
+											tcpDirectMgr.RegisterConn(devID, conn, func(remoteAddr *net.UDPAddr, payload []byte) {
+												if tunDev != nil {
+													_ = tunDev.WritePacket(payload)
+												}
+												if regPeer, ok := registry.Get(devID); ok && regPeer != nil {
+													regPeer.LastDirectSeen = time.Now()
+													regPeer.DirectP2P = true
+													registry.Upsert(regPeer)
+												}
+											})
+											if regPeer, ok := registry.Get(devID); ok && regPeer != nil {
+												regPeer.DirectP2P = true
+												regPeer.ActiveEndpoint = target
+												regPeer.LastDirectSeen = time.Now()
+												registry.Upsert(regPeer)
+											}
+										}
+									}(p.DeviceID, tcpTarget, puncher.LocalPort())
+								}
 							}
 						}
 					}
@@ -1060,6 +1101,7 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			}
 		})
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDP puncher active on persistent socket with MagicSock and KeepAlive")
+		tcpDirectMgr = network.NewTCPDirectManager(ctx)
 	}
 
 	return puncher, ipDisc
@@ -1582,7 +1624,13 @@ func receiveLoop(
 				}
 			}
 			if magicSock != nil {
-				magicSock.RegisterPeerEndpoints(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr, p.Candidates...)
+				myPub := ""
+				if puncher != nil {
+					if myIP, _, err := puncher.DiscoverMappedAddress(ctx); err == nil && myIP != nil {
+						myPub = myIP.String()
+					}
+				}
+				magicSock.RegisterPeerWithTopology(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr, myPub, "", p.PublicIP, "", p.Candidates...)
 			}
 
 			preservedEP := ""

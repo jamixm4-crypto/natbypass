@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -114,6 +115,10 @@ type UDPPuncher struct {
 	// portDelta tracks the observed consecutive port increment for Symmetric NAT prediction.
 	lastMappedPort int
 	portDelta      int
+
+	// stunMappedPortSamples and cgnatProfile track multi-STUN triangulation & PBA blocks
+	stunMappedPortSamples []int
+	cgnatProfile          CGNATProfile
 
 	probeMu          sync.Mutex
 	lastProbeMap     map[string]time.Time
@@ -318,6 +323,9 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 			}
 		}
 		p.natTypeMu.Lock()
+		p.stunMappedPortSamples = make([]int, len(observedMappedPorts))
+		copy(p.stunMappedPortSamples, observedMappedPorts)
+		p.cgnatProfile = FingerprintCGNAT(observedMappedPorts)
 		if isSymmetric {
 			p.NATType = NATTypeSymmetric
 		} else if p.NATType == NATTypeUnknown {
@@ -495,45 +503,405 @@ func (p *UDPPuncher) ResetSocket() (int, error) {
 	return sockFd, nil
 }
 
-// candidatePorts calculates predicted port numbers for Symmetric NAT traversal.
+// CGNATProfile describes port allocation behavior of the Carrier-Grade NAT (RFC 4787 / RFC 6888).
+type CGNATProfile struct {
+	IsSequential    bool
+	ParityPreserved bool
+	Parity          int // 0 (even) or 1 (odd)
+	BlockSize       int // 0 if not blocked, else 64, 128, 256, 512
+	BlockBase       int
+	Delta           int
+}
+
+// FingerprintCGNAT analyzes consecutive port samples from different STUN servers.
+func FingerprintCGNAT(samples []int) CGNATProfile {
+	prof := CGNATProfile{Delta: 1}
+	if len(samples) < 2 {
+		return prof
+	}
+
+	p1 := samples[0]
+	p2 := samples[1]
+
+	if len(samples) >= 3 {
+		p3 := samples[2]
+		// 1. Parity preservation (RFC 4787 Section 4.2.2)
+		if (p1%2 == p2%2) && (p2%2 == p3%2) {
+			prof.ParityPreserved = true
+			prof.Parity = p1 % 2
+			prof.Delta = 2
+		}
+
+		// 2. Port Block Allocation detection (RFC 6888 Section 5)
+		blockSizes := []int{64, 128, 256, 512}
+		for _, size := range blockSizes {
+			mask := ^(size - 1)
+			if (p1&mask) == (p2&mask) && (p2&mask) == (p3&mask) {
+				prof.BlockSize = size
+				prof.BlockBase = p1 & mask
+				break
+			}
+		}
+
+		// 3. Linear sequence analysis
+		d1 := p2 - p1
+		d2 := p3 - p2
+		if d1 > 0 && d1 == d2 {
+			prof.IsSequential = true
+			prof.Delta = d1
+		}
+	} else {
+		if p1%2 == p2%2 {
+			prof.ParityPreserved = true
+			prof.Parity = p1 % 2
+			prof.Delta = 2
+		}
+		d := p2 - p1
+		if d > 0 && d < 512 {
+			prof.Delta = d
+		}
+	}
+
+	return prof
+}
+
+// candidatePorts calculates predicted port numbers for Symmetric NAT traversal using CGNAT profile.
 func (p *UDPPuncher) candidatePorts(base int) []int {
-	ports := []int{base}
 	p.natTypeMu.RLock()
+	prof := p.cgnatProfile
+	samples := make([]int, len(p.stunMappedPortSamples))
+	copy(samples, p.stunMappedPortSamples)
 	d := p.portDelta
 	p.natTypeMu.RUnlock()
-	if d <= 0 {
-		d = 1
+
+	if len(samples) >= 2 && (prof.BlockSize == 0 && !prof.ParityPreserved && !prof.IsSequential) {
+		prof = FingerprintCGNAT(samples)
 	}
 
-	// 1. Delta series prediction (+/- 1*d .. 16*d)
+	return p.CandidatePortsAdvanced(base, samples, prof, d)
+}
+
+// CandidatePortsAdvanced calculates predicted port numbers with full support for PBA blocks and parity.
+func (p *UDPPuncher) CandidatePortsAdvanced(base int, samples []int, prof CGNATProfile, fallbackDelta int) []int {
+	seen := make(map[int]bool)
+	var ports []int
+
+	add := func(pt int) {
+		if pt > 1024 && pt < 65535 && !seen[pt] {
+			seen[pt] = true
+			ports = append(ports, pt)
+		}
+	}
+
+	add(base)
+
+	// Strategy A: Port Block Allocation (PBA) spray inside operator's assigned block
+	if prof.BlockSize > 0 {
+		for port := prof.BlockBase; port < prof.BlockBase+prof.BlockSize; port++ {
+			if prof.ParityPreserved && (port%2 != prof.Parity) {
+				continue
+			}
+			add(port)
+		}
+		if len(ports) > 1 {
+			return ports
+		}
+	}
+
+	// Strategy B: Parity-aware and delta-based prediction
+	delta := prof.Delta
+	if delta <= 0 {
+		delta = fallbackDelta
+	}
+	if delta <= 0 {
+		delta = 1
+	}
+	if prof.ParityPreserved && delta%2 != 0 {
+		delta *= 2
+	}
+
+	// 1. Delta series prediction (+/- 1*delta .. 16*delta)
 	for i := 1; i <= 16; i++ {
-		p1 := base + i*d
-		p2 := base - i*d
-		if p1 > 1024 && p1 < 65535 {
-			ports = append(ports, p1)
-		}
-		if p2 > 1024 && p2 < 65535 {
-			ports = append(ports, p2)
-		}
+		add(base + i*delta)
+		add(base - i*delta)
 	}
 
-	// 2. Sequential neighbor spray (+/- 1 .. 8)
+	// 2. Sequential neighbor spray
+	step := 1
+	if prof.ParityPreserved {
+		step = 2
+	}
 	for i := 1; i <= 8; i++ {
-		p1 := base + i
-		p2 := base - i
-		if p1 > 1024 && p1 < 65535 {
-			ports = append(ports, p1)
-		}
-		if p2 > 1024 && p2 < 65535 {
-			ports = append(ports, p2)
-		}
+		add(base + i*step)
+		add(base - i*step)
 	}
 
 	return ports
 }
 
+const (
+	QUICVersion1   = uint32(0x00000001)
+	QUICHeaderLong = byte(0xC0) // Header Form=1, Fixed Bit=1, Type=0 (Initial)
+)
 
-// SendHolePunchProbe отправляет probe пакеты без rate limiter для максимальной отзывчивости пинга
+func putQUICVarint(val int) []byte {
+	if val < 64 {
+		return []byte{byte(val)}
+	}
+	b0 := byte(0x40 | ((val >> 8) & 0x3f))
+	b1 := byte(val & 0xff)
+	return []byte{b0, b1}
+}
+
+func readQUICVarint(data []byte) (int, int, error) {
+	if len(data) < 1 {
+		return 0, 0, errors.New("short varint")
+	}
+	first := data[0]
+	switch first >> 6 {
+	case 0:
+		return int(first & 0x3f), 1, nil
+	case 1:
+		if len(data) < 2 {
+			return 0, 0, errors.New("short varint 2-byte")
+		}
+		val := (int(first&0x3f) << 8) | int(data[1])
+		return val, 2, nil
+	default:
+		return int(first & 0x3f), 1, nil
+	}
+}
+
+// BuildQUICChameleonProbe formats a hole punching probe as a valid QUIC v1 Initial Packet (RFC 9000).
+func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
+	nowNano := time.Now().UnixNano()
+	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, myDevID, nowNano))
+	encPayload, err := crypto.EncryptSelf(probeData, cKey)
+	if err != nil {
+		return nil, err
+	}
+
+	buf := make([]byte, 0, 256)
+	buf = append(buf, QUICHeaderLong)
+
+	// Version 1 (4 bytes)
+	var verBuf [4]byte
+	binary.BigEndian.PutUint32(verBuf[:], QUICVersion1)
+	buf = append(buf, verBuf[:]...)
+
+	// DCID: 8 random bytes
+	dcid := make([]byte, 8)
+	_, _ = rand.Read(dcid)
+	buf = append(buf, byte(len(dcid)))
+	buf = append(buf, dcid...)
+
+	// SCID: 8 random bytes
+	scid := make([]byte, 8)
+	_, _ = rand.Read(scid)
+	buf = append(buf, byte(len(scid)))
+	buf = append(buf, scid...)
+
+	// Token: our encrypted payload
+	buf = append(buf, putQUICVarint(len(encPayload))...)
+	buf = append(buf, encPayload...)
+
+	// Length varint + dummy packet payload
+	buf = append(buf, putQUICVarint(16)...)
+	buf = append(buf, 0x00, 0x01)
+	pad := make([]byte, 14)
+	_, _ = rand.Read(pad)
+	buf = append(buf, pad...)
+
+	return buf, nil
+}
+
+// BuildQUICPongChameleonProbe formats a PONG response as a valid QUIC v1 Initial Packet.
+func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte, error) {
+	pongData := []byte(fmt.Sprintf("%s%s:%s", constants.PongPrefix, myDevID, sentTs))
+	encPayload, err := crypto.EncryptSelf(pongData, cKey)
+	if err != nil {
+		return nil, err
+	}
+
+	buf := make([]byte, 0, 256)
+	buf = append(buf, QUICHeaderLong)
+
+	var verBuf [4]byte
+	binary.BigEndian.PutUint32(verBuf[:], QUICVersion1)
+	buf = append(buf, verBuf[:]...)
+
+	dcid := make([]byte, 8)
+	_, _ = rand.Read(dcid)
+	buf = append(buf, byte(len(dcid)))
+	buf = append(buf, dcid...)
+
+	scid := make([]byte, 8)
+	_, _ = rand.Read(scid)
+	buf = append(buf, byte(len(scid)))
+	buf = append(buf, scid...)
+
+	buf = append(buf, putQUICVarint(len(encPayload))...)
+	buf = append(buf, encPayload...)
+
+	buf = append(buf, putQUICVarint(16)...)
+	buf = append(buf, 0x00, 0x01)
+	pad := make([]byte, 14)
+	_, _ = rand.Read(pad)
+	buf = append(buf, pad...)
+
+	return buf, nil
+}
+
+// ParseQUICChameleonProbe parses a QUIC v1 Initial Packet probe and extracts decrypted payload.
+func ParseQUICChameleonProbe(packet []byte, cKey [32]byte) ([]byte, error) {
+	if len(packet) < 25 {
+		return nil, errors.New("packet too short")
+	}
+	if packet[0]&0xC0 != 0xC0 {
+		return nil, errors.New("not a long header")
+	}
+	if binary.BigEndian.Uint32(packet[1:5]) != QUICVersion1 {
+		return nil, errors.New("not quic v1")
+	}
+
+	idx := 5
+	if idx >= len(packet) {
+		return nil, errors.New("truncated dcid len")
+	}
+	dcidLen := int(packet[idx])
+	idx += 1 + dcidLen
+	if idx >= len(packet) {
+		return nil, errors.New("truncated dcid")
+	}
+
+	scidLen := int(packet[idx])
+	idx += 1 + scidLen
+	if idx >= len(packet) {
+		return nil, errors.New("truncated scid")
+	}
+
+	tokenLen, vLen, err := readQUICVarint(packet[idx:])
+	if err != nil {
+		return nil, err
+	}
+	idx += vLen
+	if idx+tokenLen > len(packet) {
+		return nil, errors.New("truncated token")
+	}
+
+	encToken := packet[idx : idx+tokenLen]
+	return crypto.DecryptSelf(encToken, cKey)
+}
+
+// ProbeFeedback represents feedback signals received during hole punching.
+type ProbeFeedback int
+
+const (
+	FeedbackNone ProbeFeedback = iota
+	FeedbackPortUnreachable // ICMP Type 3 Code 3 received
+	FeedbackSuccess         // Echo response received
+	FeedbackTimeout         // Silent drop
+)
+
+// AdaptiveProbeEngine manages reinforcement probing state with dynamic search tree.
+type AdaptiveProbeEngine struct {
+	basePort    int
+	targetIP    string
+	cKey        [32]byte
+	hasCKey     bool
+	feedbacks   chan ProbeFeedback
+	activeDelta int
+	mu          sync.Mutex
+}
+
+func NewAdaptiveProbeEngine(targetIP string, basePort int, cKey [32]byte, hasCKey bool) *AdaptiveProbeEngine {
+	return &AdaptiveProbeEngine{
+		basePort:    basePort,
+		targetIP:    targetIP,
+		cKey:        cKey,
+		hasCKey:     hasCKey,
+		feedbacks:   make(chan ProbeFeedback, 16),
+		activeDelta: 1,
+	}
+}
+
+func (e *AdaptiveProbeEngine) NotifyFeedback(fb ProbeFeedback) {
+	select {
+	case e.feedbacks <- fb:
+	default:
+	}
+}
+
+// ExecuteAdaptiveProbing runs multi-phase probing: rapid scout -> bracket zoom on ICMP -> block jump on drop.
+func (p *UDPPuncher) ExecuteAdaptiveProbing(ctx context.Context, engine *AdaptiveProbeEngine) bool {
+	if engine == nil || engine.targetIP == "" || engine.basePort <= 0 {
+		return false
+	}
+
+	// Phase 1: Rapid 3-probe scout
+	initialPorts := []int{engine.basePort, engine.basePort + 1, engine.basePort + 2}
+	for _, port := range initialPorts {
+		target := fmt.Sprintf("%s:%d", engine.targetIP, port)
+		_ = p.SendHolePunchProbe(target)
+	}
+
+	// Wait 250ms for feedback or echo
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case fb := <-engine.feedbacks:
+		if fb == FeedbackSuccess {
+			return true
+		}
+		if fb == FeedbackPortUnreachable {
+			// Port unreachable proves NAT mapping is open! Zoom immediately in basePort +/- 4
+			return p.probePortRange(ctx, engine.targetIP, engine.basePort-4, engine.basePort+4, 1)
+		}
+	case <-timer.C:
+		// Silent drop timeout: switch to Phase 3 (Block boundary jumping)
+	}
+
+	// Phase 3: Block boundary jumping (+/- 8, 16, 32, 64)
+	blockJumps := []int{8, -8, 16, -16, 32, -32, 64, -64}
+	for _, jump := range blockJumps {
+		select {
+		case <-ctx.Done():
+			return false
+		case fb := <-engine.feedbacks:
+			if fb == FeedbackSuccess {
+				return true
+			}
+		default:
+		}
+		target := fmt.Sprintf("%s:%d", engine.targetIP, engine.basePort+jump)
+		_ = p.SendHolePunchProbe(target)
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	return false
+}
+
+func (p *UDPPuncher) probePortRange(ctx context.Context, ip string, start, end, step int) bool {
+	for port := start; port <= end; port += step {
+		if port <= 1024 || port >= 65535 {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+		target := fmt.Sprintf("%s:%d", ip, port)
+		_ = p.SendHolePunchProbe(target)
+		time.Sleep(15 * time.Millisecond)
+	}
+	return true
+}
+
+// SendHolePunchProbe отправляет probe пакеты с маскировкой QUIC Initial (RFC 9000) для обхода ТСПУ/DPI
 func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
@@ -551,36 +919,35 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	hasCKey := p.hasCipherKey
 	p.cipherMu.RUnlock()
 
+	var chameleonProbe []byte
 	var stealthProbe []byte
 	if hasCKey {
-		if enc, err := crypto.EncryptSelf(probeData, cKey); err == nil && len(enc) > 0 {
+		if qProbe, err := BuildQUICChameleonProbe(p.myDevID, cKey); err == nil && len(qProbe) > 0 {
+			chameleonProbe = qProbe
+		} else if enc, err := crypto.EncryptSelf(probeData, cKey); err == nil && len(enc) > 0 {
 			stealthProbe = enc
 		}
 	}
 
-	// 1. Отправляем stealth пробу без открытой сигнатуры NATBYPASS (защита от фильтров ТСПУ/DPI)
-	if len(stealthProbe) > 0 {
+	// 1. Отправляем пробу: приоритет отдается QUIC Chameleon probe (неотличим от HTTP/3 трафика для ТСПУ)
+	if len(chameleonProbe) > 0 {
+		_, _ = p.conn.WriteToUDP(chameleonProbe, rAddr)
+	} else if len(stealthProbe) > 0 {
 		_, _ = p.conn.WriteToUDP(stealthProbe, rAddr)
 	} else {
-		// Без ключа шифрования отправляем стандартную пробу
 		_, _ = p.conn.WriteToUDP(probeData, rAddr)
 	}
 
-	// Targeted probing for Symmetric NAT
+	// Targeted probing for Symmetric NAT using advanced CGNAT heuristics (Parity, PBA, Delta)
 	if p.GetNATType().IsSymmetric() {
 		targetIP := rAddr.IP
-		candidates := []int{rAddr.Port + 1, rAddr.Port + 2, rAddr.Port - 1, rAddr.Port - 2}
-		// BUG-02 FIX: portDelta is written under natTypeMu in handlePong — read it under RLock
-		p.natTypeMu.RLock()
-		pd := p.portDelta
-		p.natTypeMu.RUnlock()
-		if pd != 0 {
-			candidates = append(candidates, rAddr.Port+pd, rAddr.Port+2*pd)
-		}
+		candidates := p.candidatePorts(rAddr.Port)
 		for _, port := range candidates {
-			if port > 1024 && port < 65535 && port != rAddr.Port {
+			if port != rAddr.Port {
 				cAddr := &net.UDPAddr{IP: targetIP, Port: port}
-				if len(stealthProbe) > 0 {
+				if len(chameleonProbe) > 0 {
+					_, _ = p.conn.WriteToUDP(chameleonProbe, cAddr)
+				} else if len(stealthProbe) > 0 {
 					_, _ = p.conn.WriteToUDP(stealthProbe, cAddr)
 				} else {
 					_, _ = p.conn.WriteToUDP(probeData, cAddr)
@@ -800,7 +1167,9 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 	p.cipherMu.RUnlock()
 
 	if hasCKey {
-		if enc, encErr := crypto.EncryptSelf(pongMsg, cKey); encErr == nil && len(enc) > 0 {
+		if qPong, qErr := BuildQUICPongChameleonProbe(p.myDevID, sentTs, cKey); qErr == nil && len(qPong) > 0 {
+			_, _ = p.conn.WriteToUDP(qPong, remoteAddr)
+		} else if enc, encErr := crypto.EncryptSelf(pongMsg, cKey); encErr == nil && len(enc) > 0 {
 			_, _ = p.conn.WriteToUDP(enc, remoteAddr)
 		}
 	} else {
@@ -813,7 +1182,9 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 		p.lastReversePing.Store(senderID, now)
 		reversePing := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, now.UnixNano()))
 		if hasCKey {
-			if enc, encErr := crypto.EncryptSelf(reversePing, cKey); encErr == nil && len(enc) > 0 {
+			if qPing, qErr := BuildQUICChameleonProbe(p.myDevID, cKey); qErr == nil && len(qPing) > 0 {
+				_, _ = p.conn.WriteToUDP(qPing, remoteAddr)
+			} else if enc, encErr := crypto.EncryptSelf(reversePing, cKey); encErr == nil && len(enc) > 0 {
 				_, _ = p.conn.WriteToUDP(enc, remoteAddr)
 			}
 		} else {
@@ -936,6 +1307,23 @@ func (p *UDPPuncher) readLoop() {
 			// Двусторонний ответ KeepAlive для поддержания исходящей трансляции NAT
 			if remoteAddr != nil && conn != nil {
 				_, _ = conn.WriteToUDP([]byte(constants.KeepAlivePayload), remoteAddr)
+			}
+		case n >= 25 && (buf[0]&0xC0 == 0xC0) && binary.BigEndian.Uint32(buf[1:5]) == QUICVersion1:
+			p.cipherMu.RLock()
+			cKey := p.cipherKey
+			hasCKey := p.hasCipherKey
+			p.cipherMu.RUnlock()
+			if hasCKey {
+				if dec, err := ParseQUICChameleonProbe(buf[:n], cKey); err == nil && len(dec) > 0 {
+					decStr := string(dec)
+					if strings.HasPrefix(decStr, constants.PingPrefix) {
+						p.handlePing(decStr, remoteAddr)
+						continue
+					} else if strings.HasPrefix(decStr, constants.PongPrefix) {
+						p.handlePong(decStr, remoteAddr)
+						continue
+					}
+				}
 			}
 		case strings.HasPrefix(string(buf[:n]), constants.PingPrefix):
 			p.handlePing(string(buf[:n]), remoteAddr)

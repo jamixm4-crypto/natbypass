@@ -46,6 +46,8 @@ func isLocalSubnet(targetIP net.IP) bool {
 	return false
 }
 
+var _, cgnatNet, _ = net.ParseCIDR("100.64.0.0/10")
+
 func classifyAddress(addrStr string) (PathType, int) {
 	host := addrStr
 	if h, _, err := net.SplitHostPort(addrStr); err == nil {
@@ -61,10 +63,14 @@ func classifyAddress(addrStr string) (PathType, int) {
 	if isLocalSubnet(ip) {
 		return PathTypeLAN, 1
 	}
+	if cgnatNet != nil && cgnatNet.Contains(ip) {
+		// Carrier-Grade NAT internal pool (RFC 6598) - high priority for same-carrier peers
+		return PathTypeCGNAT, 2
+	}
 	if ip.IsPrivate() {
 		return PathTypeRelay, 4
 	}
-	return PathTypeWAN, 2
+	return PathTypeWAN, 3
 }
 
 // PathType represents the classification of a network transport candidate.
@@ -72,10 +78,52 @@ type PathType string
 
 const (
 	PathTypeLAN   PathType = "LAN"   // Sub-millisecond direct local network
+	PathTypeCGNAT PathType = "CGNAT" // Shared ISP/Carrier-Grade NAT subnet (100.64.0.0/10)
 	PathTypeIPv6  PathType = "IPv6"  // Global IPv6 direct route
 	PathTypeWAN   PathType = "P2P"   // STUN-discovered hole-punched UDP WAN route
+	PathTypeTCP   PathType = "TCP"   // Direct TCP Simultaneous Open route
 	PathTypeRelay PathType = "Relay" // Fallback encrypted TLS/WSS or signaling relay
 )
+
+// WANHairpin represents the relative network location of two peers with respect to NAT.
+type WANHairpin int
+
+const (
+	HairpinStandard WANHairpin = iota // Different public WAN addresses
+	HairpinSameWAN                    // Identical Public IP (risk of blocked loopback on router)
+	HairpinSameLAN                    // Identical Default Gateway
+)
+
+// AnalyzeHairpinning detects whether two nodes are behind the same router or CGNAT (RFC 4787 / RFC 5382).
+func AnalyzeHairpinning(myPublicIP, myGateway, peerPublicIP, peerGateway string, peerLocalIPs []string) (WANHairpin, []string) {
+	var prioritizedCandidates []string
+
+	samePublic := (myPublicIP != "" && peerPublicIP != "" && myPublicIP == peerPublicIP)
+	sameGateway := (myGateway != "" && peerGateway != "" && myGateway == peerGateway)
+
+	if sameGateway {
+		for _, lip := range peerLocalIPs {
+			prioritizedCandidates = append(prioritizedCandidates, lip)
+		}
+		return HairpinSameLAN, prioritizedCandidates
+	}
+
+	if samePublic {
+		for _, lip := range peerLocalIPs {
+			host := lip
+			if h, _, err := net.SplitHostPort(lip); err == nil {
+				host = h
+			}
+			pip := net.ParseIP(host)
+			if pip != nil && ((cgnatNet != nil && cgnatNet.Contains(pip)) || isLocalSubnet(pip)) {
+				prioritizedCandidates = append(prioritizedCandidates, lip)
+			}
+		}
+		return HairpinSameWAN, prioritizedCandidates
+	}
+
+	return HairpinStandard, nil
+}
 
 // EndpointCandidate represents a single discovered route to a peer.
 type EndpointCandidate struct {
@@ -166,6 +214,33 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 			pType, _ := classifyAddress(localAddr)
 			pr.ActiveEndpoint = localAddr
 			pr.ActiveType = pType
+		}
+	}
+}
+
+// RegisterPeerWithTopology updates candidate endpoints taking into account NAT hairpinning and topology.
+func (ms *MagicSock) RegisterPeerWithTopology(deviceID, stunAddr, localAddr, ipv6Addr, myPublicIP, myGateway, peerPublicIP, peerGateway string, extraCandidates ...string) {
+	allLocal := []string{localAddr}
+	for _, c := range extraCandidates {
+		allLocal = append(allLocal, c)
+	}
+	hairpin, prioritized := AnalyzeHairpinning(myPublicIP, myGateway, peerPublicIP, peerGateway, allLocal)
+
+	ms.RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Addr, extraCandidates...)
+
+	if hairpin == HairpinSameLAN || hairpin == HairpinSameWAN {
+		ms.mu.RLock()
+		pr := ms.peerRoutes[deviceID]
+		ms.mu.RUnlock()
+		if pr != nil {
+			pr.mu.Lock()
+			for _, addr := range prioritized {
+				if cand, exists := pr.Candidates[addr]; exists {
+					// Promote local/CGNAT candidate over WAN STUN (bypassing dead router loopback)
+					cand.Priority = 1
+				}
+			}
+			pr.mu.Unlock()
 		}
 	}
 }

@@ -1,10 +1,16 @@
 package network
 
 import (
+	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/natbypass/natbypass/internal/constants"
+	"github.com/natbypass/natbypass/internal/crypto"
 )
 
 func TestHopPort_NoRace(t *testing.T) {
@@ -145,3 +151,139 @@ func TestUDPPuncher_EncryptedTunnelData_WrongKeyRejection(t *testing.T) {
 		// Expected: packet was not accepted or could not be decrypted as IPv4
 	}
 }
+
+func TestFingerprintCGNAT_ParityAndPBA(t *testing.T) {
+	// 1. Test Port Block Allocation (PBA 64): ports 24578, 24580, 24602 all share upper bits (24576 base)
+	samplesPBA := []int{24578, 24580, 24602}
+	profPBA := FingerprintCGNAT(samplesPBA)
+	if profPBA.BlockSize != 64 {
+		t.Fatalf("expected BlockSize 64, got %d", profPBA.BlockSize)
+	}
+	if profPBA.BlockBase != 24576 {
+		t.Fatalf("expected BlockBase 24576, got %d", profPBA.BlockBase)
+	}
+	if !profPBA.ParityPreserved || profPBA.Parity != 0 {
+		t.Fatalf("expected even parity preserved, got preserved=%v parity=%d", profPBA.ParityPreserved, profPBA.Parity)
+	}
+
+	p, err := NewUDPPuncher(0, "test-cgnat", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	candidates := p.CandidatePortsAdvanced(24578, samplesPBA, profPBA, 1)
+	if len(candidates) != 32 { // 64 / 2 (only even ports)
+		t.Fatalf("expected 32 even candidates within PBA block, got %d", len(candidates))
+	}
+	for _, port := range candidates {
+		if port < 24576 || port >= 24640 {
+			t.Fatalf("candidate %d outside block [24576, 24640)", port)
+		}
+		if port%2 != 0 {
+			t.Fatalf("candidate %d violates even parity", port)
+		}
+	}
+
+	// 2. Test Linear Sequential CGNAT
+	samplesLinear := []int{30000, 30004, 30008}
+	profLinear := FingerprintCGNAT(samplesLinear)
+	if !profLinear.IsSequential || profLinear.Delta != 4 {
+		t.Fatalf("expected IsSequential with Delta 4, got isSeq=%v delta=%d", profLinear.IsSequential, profLinear.Delta)
+	}
+}
+
+func TestQUICChameleonProbe_BuildAndParse(t *testing.T) {
+	cKey := crypto.DeriveKey("quic-secret-key-999")
+	devID := "node-alpha-test"
+
+	probeBytes, err := BuildQUICChameleonProbe(devID, cKey)
+	if err != nil {
+		t.Fatalf("BuildQUICChameleonProbe failed: %v", err)
+	}
+
+	if len(probeBytes) < 30 {
+		t.Fatalf("probe too short: %d bytes", len(probeBytes))
+	}
+	if probeBytes[0]&0xC0 != 0xC0 {
+		t.Fatalf("expected Long Header 0xC0, got 0x%02x", probeBytes[0])
+	}
+	if binary.BigEndian.Uint32(probeBytes[1:5]) != QUICVersion1 {
+		t.Fatalf("expected QUIC Version 1, got 0x%08x", binary.BigEndian.Uint32(probeBytes[1:5]))
+	}
+
+	// Parse and verify decryption
+	decrypted, err := ParseQUICChameleonProbe(probeBytes, cKey)
+	if err != nil {
+		t.Fatalf("ParseQUICChameleonProbe failed: %v", err)
+	}
+	decStr := string(decrypted)
+	if !strings.HasPrefix(decStr, constants.PingPrefix) {
+		t.Fatalf("expected PingPrefix, got %s", decStr)
+	}
+	if !strings.Contains(decStr, devID) {
+		t.Fatalf("expected devID in payload, got %s", decStr)
+	}
+
+	// PONG probe
+	pongBytes, err := BuildQUICPongChameleonProbe(devID, "123456789", cKey)
+	if err != nil {
+		t.Fatalf("BuildQUICPongChameleonProbe failed: %v", err)
+	}
+	decPong, err := ParseQUICChameleonProbe(pongBytes, cKey)
+	if err != nil {
+		t.Fatalf("ParseQUICPongChameleonProbe failed: %v", err)
+	}
+	if !strings.HasPrefix(string(decPong), constants.PongPrefix) {
+		t.Fatalf("expected PongPrefix, got %s", string(decPong))
+	}
+}
+
+func TestHairpinning_Detection(t *testing.T) {
+	// Case 1: Same Gateway (Home/Office LAN)
+	hp1, prio1 := AnalyzeHairpinning("198.51.100.1", "192.168.1.1", "198.51.100.1", "192.168.1.1", []string{"192.168.1.55:4000"})
+	if hp1 != HairpinSameLAN {
+		t.Fatalf("expected HairpinSameLAN, got %v", hp1)
+	}
+	if len(prio1) != 1 || prio1[0] != "192.168.1.55:4000" {
+		t.Fatalf("unexpected prioritized candidates: %v", prio1)
+	}
+
+	// Case 2: Same Public IP, Different Gateway (Operator CGNAT Cluster)
+	hp2, prio2 := AnalyzeHairpinning("198.51.100.1", "100.64.1.1", "198.51.100.1", "100.64.2.1", []string{"100.64.2.55:4000", "192.168.0.10:4000"})
+	if hp2 != HairpinSameWAN {
+		t.Fatalf("expected HairpinSameWAN, got %v", hp2)
+	}
+	if len(prio2) != 1 || prio2[0] != "100.64.2.55:4000" {
+		t.Fatalf("expected carrier subnet 100.64.2.55:4000 to be prioritized, got: %v", prio2)
+	}
+
+	// Case 3: Different Public IPs
+	hp3, _ := AnalyzeHairpinning("198.51.100.1", "192.168.1.1", "203.0.113.5", "192.168.0.1", []string{"192.168.0.5:4000"})
+	if hp3 != HairpinStandard {
+		t.Fatalf("expected HairpinStandard, got %v", hp3)
+	}
+}
+
+func TestAdaptiveProbeEngine_Feedback(t *testing.T) {
+	cKey := crypto.DeriveKey("adaptive-key")
+	engine := NewAdaptiveProbeEngine("127.0.0.1", 34500, cKey, true)
+
+	p, err := NewUDPPuncher(0, "test-adaptive", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// Simulate Port Unreachable trigger
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		engine.NotifyFeedback(FeedbackPortUnreachable)
+	}()
+
+	_ = p.ExecuteAdaptiveProbing(ctx, engine)
+}
+
