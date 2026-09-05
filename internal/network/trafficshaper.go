@@ -96,11 +96,13 @@ func (s *TrafficShaper) SendPacket(conn *net.UDPConn, addr *net.UDPAddr, payload
 		_, sendErr = conn.WriteToUDP(payload, addr)
 	}
 
-	// 3. Генерация Fake ACK пакета (30% вероятность для имитации двустороннего RTP-видеопотока)
+	// 3. Генерация Fake ACK пакета (30% вероятность для имитации двустороннего RTP/RTCP видеопотока)
 	nRand, err := rand.Int(rand.Reader, big.NewInt(100))
 	if err == nil && float32(nRand.Int64())/100.0 < ackProb {
 		var fakeAck [16]byte
-		copy(fakeAck[:], []byte("NATBYPASS:FACK:"))
+		_, _ = rand.Read(fakeAck[:])
+		fakeAck[0] = 0x80 // RTP version 2
+		fakeAck[1] = 0xc8 // RTCP Sender Report marker
 		binary.BigEndian.PutUint16(fakeAck[14:], uint16(len(payload)))
 		_, _ = conn.WriteToUDP(fakeAck[:], addr)
 	}

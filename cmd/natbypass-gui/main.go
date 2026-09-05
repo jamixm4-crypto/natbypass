@@ -890,6 +890,11 @@ func main() {
 		go func() {
 			_ = tunnel.EnableHostIPForwarding()
 		}()
+	} else {
+		// Очищаем зависшие маршруты Exit Node от возможных предыдущих аварийных завершений
+		go func() {
+			_ = tunnel.DisableExitNodeRouting("")
+		}()
 	}
 	// Восстанавливаем активный Exit Node из сохранённого конфига
 	// Маршруты будут пересозданы после подключения к пиру в handleExitNodeSelect()
@@ -1373,11 +1378,16 @@ func exitApp() {
 	// 3. Отправляем прощальный маяк выхода другим узлам сети
 	broadcastGoodbye()
 
-	// 4. Быстрая остановка сокетов и моментальный выход
+	// 4. Остановка сетевого движка с ожиданием завершения очистки маршрутов и адаптера Wintun
+	done := make(chan struct{})
 	go func() {
 		stopEngine()
+		close(done)
 	}()
-	time.Sleep(300 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(1500 * time.Millisecond):
+	}
 	os.Exit(0)
 }
 
@@ -1981,9 +1991,6 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 	if targetPeer == nil {
 		return
 	}
-	if activeExitVIP != "" {
-		_ = tunnel.DisableExitNodeRouting(activeExitVIP)
-	}
 	targetVIP := strings.TrimSpace(strings.Split(targetPeer.VirtualIP, "/")[0])
 	if targetVIP == "" {
 		targetVIP = "100.64.200.2"
@@ -1991,30 +1998,58 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 	activeExitNodeID = targetPeer.DeviceID
 	activeExitVIP = targetVIP
 
-	if err := tunnel.EnableExitNodeRouting(targetVIP, targetPeer.ActiveEndpoint, targetPeer.STUNAddr, targetPeer.PublicIP); err != nil {
-		addLog("❌ Ошибка настройки маршрутизации через Exit Node: " + err.Error())
-		writeDebug("EnableExitNodeRouting error: " + err.Error())
-	} else {
-		peerDisplay := targetPeer.Nickname
-		if peerDisplay == "" {
-			peerDisplay = targetPeer.DeviceID
+	peerDisplay := targetPeer.Nickname
+	if peerDisplay == "" {
+		peerDisplay = targetPeer.DeviceID
+	}
+	buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("⏳ Подключение: [%s]...", peerDisplay)
+	buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
+	if hBtnExitNodeSelect != 0 {
+		procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
+	}
+
+	go func() {
+		if activeExitVIP != "" && activeExitVIP != targetVIP {
+			_ = tunnel.DisableExitNodeRouting(activeExitVIP)
 		}
-		msg := fmt.Sprintf("🌐 Весь интернет направлен через Exit Node: [%s] (%s)", peerDisplay, targetVIP)
-		addLog(msg)
-		writeDebug(msg)
-		buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("🟢 Шлюз: [%s] (%s)", peerDisplay, targetVIP)
-		buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "green"
+		bypassIPs := []string{targetPeer.ActiveEndpoint, targetPeer.STUNAddr, targetPeer.PublicIP}
+		for _, cand := range targetPeer.Candidates {
+			bypassIPs = append(bypassIPs, cand)
+		}
+		if cfg != nil {
+			for _, stunURL := range cfg.Network.StunServers {
+				bypassIPs = append(bypassIPs, stunURL)
+			}
+			if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.MQTTBroker != "" {
+				bypassIPs = append(bypassIPs, activeProf.MQTTBroker)
+			}
+			if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TGToken != "" {
+				bypassIPs = append(bypassIPs, "api.telegram.org")
+			}
+		}
+
+		err := tunnel.EnableExitNodeRouting(targetVIP, bypassIPs...)
+		if err != nil {
+			addLog("❌ Ошибка настройки маршрутизации через Exit Node: " + err.Error())
+			writeDebug("EnableExitNodeRouting error: " + err.Error())
+			buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Ошибка)"
+			buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "red"
+		} else {
+			msg := fmt.Sprintf("🌐 Весь интернет направлен через Exit Node: [%s] (%s)", peerDisplay, targetVIP)
+			addLog(msg)
+			writeDebug(msg)
+			buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("🟢 Шлюз: [%s] (%s)", peerDisplay, targetVIP)
+			buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "green"
+		}
 		if hBtnExitNodeSelect != 0 {
 			procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 		}
 		updateData()
-	}
+	}()
 }
 
 func disableExitNode() {
-	if activeExitVIP != "" {
-		_ = tunnel.DisableExitNodeRouting(activeExitVIP)
-	}
+	vipToClean := activeExitVIP
 	activeExitNodeID = ""
 	activeExitVIP = ""
 	buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
@@ -2023,8 +2058,16 @@ func disableExitNode() {
 		procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 	}
 	addLog("🌐 Выход в интернет через Exit Node отключен. Восстановлен стандартный интернет-шлюз.")
-	writeDebug("Exit Node disabled, restored default gateway")
 	updateData()
+
+	go func() {
+		if vipToClean != "" {
+			_ = tunnel.DisableExitNodeRouting(vipToClean)
+		} else {
+			_ = tunnel.DisableExitNodeRouting("")
+		}
+		writeDebug("Exit Node disabled, restored default gateway")
+	}()
 }
 
 func handleExitNodeSelect() {
@@ -3276,7 +3319,6 @@ func handlePingTargetPeer(p *peer.Peer) {
 		if err == nil && rtt > 0 {
 			p.Latency = rtt
 			p.PingMs = rtt.Milliseconds()
-			p.DirectP2P = true
 			p.Online = true
 			if registry != nil {
 				registry.Upsert(p)
@@ -4291,6 +4333,11 @@ func startEngineFromConfig(c *config.Config) {
 									targetEP = targetPeer.LocalAddr
 								}
 
+								// B1: Динамический обход физического шлюза для Exit Node / roaming peer в GUI
+								if targetEP != "" && (exitID != "" || activeExitNodeID != "") {
+									_ = tunnel.BypassEndpoint(targetEP)
+								}
+
 								pmin := 0
 								pmax := 0
 								if targetPeer.AWG != nil {
@@ -4521,7 +4568,6 @@ func startEngineFromConfig(c *config.Config) {
 								p.Latency = rtt
 							}
 							p.PingMs = p.Latency.Milliseconds()
-							p.DirectP2P = true
 							registry.Upsert(p)
 						}
 					}

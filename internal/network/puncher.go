@@ -546,8 +546,23 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
 
-	// Send dual burst probes for high resilience against packet loss
-	_, _ = p.conn.WriteToUDP(probeData, rAddr)
+	p.cipherMu.RLock()
+	cKey := p.cipherKey
+	hasCKey := p.hasCipherKey
+	p.cipherMu.RUnlock()
+
+	var stealthProbe []byte
+	if hasCKey {
+		if enc, err := crypto.EncryptSelf(probeData, cKey); err == nil && len(enc) > 0 {
+			stealthProbe = enc
+		}
+	}
+
+	// 1. Отправляем stealth пробу без открытой сигнатуры NATBYPASS (защита от фильтров ТСПУ/DPI)
+	if len(stealthProbe) > 0 {
+		_, _ = p.conn.WriteToUDP(stealthProbe, rAddr)
+	}
+	// 2. Для обратной совместимости со старыми клиентами отправляем также стандартную пробу
 	_, _ = p.conn.WriteToUDP(probeData, rAddr)
 
 	// Targeted probing for Symmetric NAT
@@ -564,6 +579,9 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 		for _, port := range candidates {
 			if port > 1024 && port < 65535 && port != rAddr.Port {
 				cAddr := &net.UDPAddr{IP: targetIP, Port: port}
+				if len(stealthProbe) > 0 {
+					_, _ = p.conn.WriteToUDP(stealthProbe, cAddr)
+				}
 				_, _ = p.conn.WriteToUDP(probeData, cAddr)
 			}
 		}
@@ -633,6 +651,18 @@ func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 	}
 	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
+
+	p.cipherMu.RLock()
+	cKey := p.cipherKey
+	hasCKey := p.hasCipherKey
+	p.cipherMu.RUnlock()
+
+	if hasCKey {
+		if enc, encErr := crypto.EncryptSelf(probeData, cKey); encErr == nil && len(enc) > 0 {
+			_, _ = p.conn.WriteToUDP(enc, rAddr)
+		}
+	}
+
 	_, err = p.conn.WriteToUDP(probeData, rAddr)
 	return err
 }
@@ -755,15 +785,31 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 		return
 	}
 	sentTs := parts[len(parts)-1]
-	pongMsg := fmt.Sprintf("%s%s:%s", constants.PongPrefix, p.myDevID, sentTs)
-	_, _ = p.conn.WriteToUDP([]byte(pongMsg), remoteAddr)
+	pongMsg := []byte(fmt.Sprintf("%s%s:%s", constants.PongPrefix, p.myDevID, sentTs))
+
+	p.cipherMu.RLock()
+	cKey := p.cipherKey
+	hasCKey := p.hasCipherKey
+	p.cipherMu.RUnlock()
+
+	if hasCKey {
+		if enc, encErr := crypto.EncryptSelf(pongMsg, cKey); encErr == nil && len(enc) > 0 {
+			_, _ = p.conn.WriteToUDP(enc, remoteAddr)
+		}
+	}
+	_, _ = p.conn.WriteToUDP(pongMsg, remoteAddr)
 
 	// Отправляем встречный PING (ограничен 1 разом в 2 секунды на пир) для взаимного сквозного пробития NAT сокет-в-сокет
 	now := time.Now()
 	if last, ok := p.lastReversePing.Load(senderID); !ok || now.Sub(last.(time.Time)) > 2*time.Second {
 		p.lastReversePing.Store(senderID, now)
-		reversePing := fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, now.UnixNano())
-		_, _ = p.conn.WriteToUDP([]byte(reversePing), remoteAddr)
+		reversePing := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, now.UnixNano()))
+		if hasCKey {
+			if enc, encErr := crypto.EncryptSelf(reversePing, cKey); encErr == nil && len(enc) > 0 {
+				_, _ = p.conn.WriteToUDP(enc, remoteAddr)
+			}
+		}
+		_, _ = p.conn.WriteToUDP(reversePing, remoteAddr)
 	}
 
 	// Inbound PING confirms that the remote peer reached us directly over UDP
@@ -933,6 +979,28 @@ func (p *UDPPuncher) readLoop() {
 			}
 			p.handleTunnelPacket(rawPayload, remoteAddr)
 		default:
+			p.cipherMu.RLock()
+			cKey := p.cipherKey
+			hasCKey := p.hasCipherKey
+			p.cipherMu.RUnlock()
+
+			if hasCKey && n >= 40 {
+				if dec, err := crypto.DecryptSelf(buf[:n], cKey); err == nil && len(dec) > 0 {
+					decStr := string(dec)
+					if strings.HasPrefix(decStr, constants.PingPrefix) {
+						p.handlePing(decStr, remoteAddr)
+						continue
+					} else if strings.HasPrefix(decStr, constants.PongPrefix) {
+						p.handlePong(decStr, remoteAddr)
+						continue
+					} else if (dec[0]>>4) == 4 || (dec[0]>>4) == 6 {
+						// Stealth tunnel IP packet without plaintext NATBYPASS header!
+						p.handleTunnelPacket(dec, remoteAddr)
+						continue
+					}
+				}
+			}
+
 			p.mu.Lock()
 			handler := p.awgHandler
 			p.mu.Unlock()

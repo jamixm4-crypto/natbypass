@@ -4,8 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -44,6 +46,7 @@ class NatBypassVpnService : VpnService() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var screenReceiver: BroadcastReceiver? = null
 
     companion object {
         const val TAG = "NatBypassVpn"
@@ -172,6 +175,28 @@ class NatBypassVpnService : VpnService() {
             }
 
             registerNetworkCallback()
+
+            if (screenReceiver == null) {
+                val receiver = object : BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        if (intent?.action == Intent.ACTION_SCREEN_ON && isRunning) {
+                            serviceScope.launch {
+                                try {
+                                    val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
+                                    if (sockFd > 0) protect(sockFd)
+                                    org.natbypass.app.util.MobileBridge.refreshPublicIP()
+                                } catch (_: Throwable) {}
+                            }
+                        }
+                    }
+                }
+                try {
+                    registerReceiver(receiver, IntentFilter(Intent.ACTION_SCREEN_ON))
+                    screenReceiver = receiver
+                } catch (e: Throwable) {
+                    Log.w(TAG, "registerReceiver SCREEN_ON error: ${e.message}")
+                }
+            }
 
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
@@ -412,6 +437,11 @@ class NatBypassVpnService : VpnService() {
             }
         } catch (_: Throwable) {}
         networkCallback = null
+
+        try {
+            screenReceiver?.let { unregisterReceiver(it) }
+        } catch (_: Throwable) {}
+        screenReceiver = null
 
         // 5. Отправляем Leave-маяк асинхронно в фоне, чтобы задержки сети не подвешивали UI/отключение
         serviceScope.launch(Dispatchers.IO) {

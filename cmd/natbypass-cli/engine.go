@@ -287,6 +287,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					// S3: Собираем все IP которые должны идти через физический шлюз (не через VPN)
 					// чтобы не разорвать соединение с сигналинговыми серверами при активации exit node
 					bypassIPs := []string{exitPeer.ActiveEndpoint, exitPeer.STUNAddr, exitPeer.PublicIP}
+					for _, cand := range exitPeer.Candidates {
+						bypassIPs = append(bypassIPs, cand)
+					}
 					// Добавляем STUN-серверы из конфига
 					for _, stunURL := range cfg.Network.StunServers {
 						bypassIPs = append(bypassIPs, stunURL)
@@ -294,6 +297,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					// Добавляем MQTT-брокер из активного профиля
 					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.MQTTBroker != "" {
 						bypassIPs = append(bypassIPs, activeProf.MQTTBroker)
+					}
+					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TGToken != "" {
+						bypassIPs = append(bypassIPs, "api.telegram.org")
 					}
 					if err := tunnel.EnableExitNodeRouting(exitVIP, bypassIPs...); err != nil {
 						log.Warn().Err(err).Str("exit_vip", exitVIP).Msg("Failed to enable exit node routing")
@@ -507,14 +513,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		// Signaling is strictly for control plane / peer discovery.
 		// All data plane traffic flows strictly peer-to-peer over direct UDP.
 
-		// sync.Pool for zero-allocation packet buffers in the hot-path
-		tunPktPool := &sync.Pool{
-			New: func() any {
-				b := make([]byte, 65536)
-				return &b
-			},
-		}
-
 		// L3 Data-plane: Outbound packets from TUN -> Dispatch to peer over UDP Direct or MQTT Relay
 		pktCh := make(chan []byte, 256)
 		go func() {
@@ -524,10 +522,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					return
 				default:
 				}
-				// Blocking read: tunDev.file.Read() blocks until data arrives — no CPU spin
-				bufPtr := tunPktPool.Get().(*[]byte)
+				// Blocking read: tunDev blocks until data arrives — no CPU spin
 				pkt, err := tunDev.ReadPacket()
-				tunPktPool.Put(bufPtr)
 				if err != nil {
 					// Transient errors (e.g. EAGAIN on non-blocking fd): yield briefly
 					select {
@@ -546,10 +542,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if len(pkt) < 20 {
 					continue
 				}
-				pktCopy := make([]byte, len(pkt))
-				copy(pktCopy, pkt)
 				select {
-				case pktCh <- pktCopy:
+				case pktCh <- pkt:
 				default:
 				}
 			}
@@ -651,6 +645,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 						if targetEP == "" && p.PublicIP != "" && p.WGPort > 0 {
 							targetEP = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
+						}
+
+						// B1: Динамический обход физического шлюза для Exit Node / roaming peer, чтобы избежать routing black hole
+						if targetEP != "" && cfg.Network.SelectedExitNode != "" {
+							_ = tunnel.BypassEndpoint(targetEP)
 						}
 
 						pmin := 0
@@ -830,8 +829,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									p.Latency = rtt
 								}
 								p.PingMs = p.Latency.Milliseconds()
-								// Mark DirectP2P only if VIP ping actually succeeds (proves L3 reachability)
-								p.DirectP2P = true
+								// ВАЖНО: НЕ устанавливаем p.DirectP2P = true по L3-пингу!
+								// Пинг может успешно проходить через сигнальный Relay. Флаг DirectP2P должен
+								// подтверждаться исключительно прямыми UDP-пробами (onPingResult в puncher/magicsock).
+								// Иначе ложный DirectP2P выключает дублирование в Relay и трафик гибнет при блокировке UDP ТСПУ.
 								registry.Upsert(p)
 							} else {
 								// FIX-N3b: Increment ProbeCount on ICMP failure; latency stays at last known good value

@@ -164,6 +164,45 @@ func extractHostIPs(endpoint string) []string {
 	return res
 }
 
+// getNatBypassIfIndexWindows finds the interface index of the NatBypass Wintun adapter.
+func getNatBypassIfIndexWindows() int {
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if strings.EqualFold(iface.Name, "NatBypass") || strings.Contains(strings.ToLower(iface.Name), "natbypass") {
+				return iface.Index
+			}
+		}
+	}
+	return 0
+}
+
+// BypassEndpoint dynamically adds a /32 route via the physical default gateway for an endpoint IP/host
+// to prevent routing loops when Exit Node routing is active.
+func BypassEndpoint(endpoint string) error {
+	physGW := getPhysicalGatewayWindows()
+	if physGW == "" || endpoint == "" {
+		return nil
+	}
+	hostIPs := extractHostIPs(endpoint)
+	bypassedMu.Lock()
+	defer bypassedMu.Unlock()
+	for _, hostIP := range hostIPs {
+		alreadyAdded := false
+		for _, prev := range lastBypassedEndpointIPs {
+			if prev == hostIP {
+				alreadyAdded = true
+				break
+			}
+		}
+		if !alreadyAdded {
+			_ = runRouteCmd("route", "add", hostIP, "mask", "255.255.255.255", physGW, "metric", "1")
+			lastBypassedEndpointIPs = append(lastBypassedEndpointIPs, hostIP)
+		}
+	}
+	return nil
+}
+
 // EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1) via gatewayVIP,
 // with automatic routing-loop prevention and DNS configuration.
 func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
@@ -173,32 +212,23 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
 
 	// 1. Routing loop prevention: bypass remote endpoints, MQTT broker, STUN servers via physical default gateway
-	physGW := getPhysicalGatewayWindows()
-	if physGW != "" {
-		bypassedMu.Lock()
-		for _, ep := range remoteEndpoints {
-			for _, hostIP := range extractHostIPs(ep) {
-				alreadyAdded := false
-				for _, prev := range lastBypassedEndpointIPs {
-					if prev == hostIP {
-						alreadyAdded = true
-						break
-					}
-				}
-				if !alreadyAdded {
-					_ = runRouteCmd("route", "add", hostIP, "mask", "255.255.255.255", physGW, "metric", "1")
-					lastBypassedEndpointIPs = append(lastBypassedEndpointIPs, hostIP)
-				}
-			}
-		}
-		bypassedMu.Unlock()
+	for _, ep := range remoteEndpoints {
+		_ = BypassEndpoint(ep)
 	}
 
-	// 2. Add WireGuard def1 /1 routes
-	if err := runRouteCmd("route", "add", "0.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"); err != nil {
+	// 2. Add WireGuard def1 /1 routes with NatBypass adapter IF index to avoid interface ambiguity
+	ifIdx := getNatBypassIfIndexWindows()
+	args0 := []string{"add", "0.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"}
+	args128 := []string{"add", "128.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"}
+	if ifIdx > 0 {
+		args0 = append(args0, "IF", fmt.Sprintf("%d", ifIdx))
+		args128 = append(args128, "IF", fmt.Sprintf("%d", ifIdx))
+	}
+
+	if err := runRouteCmd("route", args0...); err != nil {
 		return fmt.Errorf("failed to add default route 0.0.0.0/1 via %s: %w", cleanVIP, err)
 	}
-	if err := runRouteCmd("route", "add", "128.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"); err != nil {
+	if err := runRouteCmd("route", args128...); err != nil {
 		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", cleanVIP)
 		return fmt.Errorf("failed to add default route 128.0.0.0/1 via %s: %w", cleanVIP, err)
 	}

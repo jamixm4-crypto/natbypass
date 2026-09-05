@@ -282,6 +282,32 @@ func extractHostIPs(endpoint string) []string {
 	return res
 }
 
+// BypassEndpoint dynamically adds a /32 route via the physical default gateway for an endpoint IP/host
+// to prevent routing loops when Exit Node routing is active.
+func BypassEndpoint(endpoint string) error {
+	physGW := getPhysicalGatewayLinux()
+	if physGW == "" || endpoint == "" {
+		return nil
+	}
+	hostIPs := extractHostIPs(endpoint)
+	linuxBypassedMu.Lock()
+	defer linuxBypassedMu.Unlock()
+	for _, hostIP := range hostIPs {
+		alreadyAdded := false
+		for _, prev := range lastBypassedEndpointIPs {
+			if prev == hostIP {
+				alreadyAdded = true
+				break
+			}
+		}
+		if !alreadyAdded {
+			_ = runLinuxCmd("ip", "route", "add", hostIP+"/32", "via", physGW)
+			lastBypassedEndpointIPs = append(lastBypassedEndpointIPs, hostIP)
+		}
+	}
+	return nil
+}
+
 // EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1),
 // with automatic routing-loop prevention by adding a bypass route to the remote endpoints and signaling servers.
 func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
@@ -291,25 +317,8 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
 
 	// 1. Bypass remote endpoint IPs via physical default gateway to prevent routing loop
-	physGW := getPhysicalGatewayLinux()
-	if physGW != "" {
-		linuxBypassedMu.Lock()
-		for _, ep := range remoteEndpoints {
-			for _, hostIP := range extractHostIPs(ep) {
-				alreadyAdded := false
-				for _, prev := range lastBypassedEndpointIPs {
-					if prev == hostIP {
-						alreadyAdded = true
-						break
-					}
-				}
-				if !alreadyAdded {
-					_ = runLinuxCmd("ip", "route", "add", hostIP+"/32", "via", physGW)
-					lastBypassedEndpointIPs = append(lastBypassedEndpointIPs, hostIP)
-				}
-			}
-		}
-		linuxBypassedMu.Unlock()
+	for _, ep := range remoteEndpoints {
+		_ = BypassEndpoint(ep)
 	}
 
 	// 2. Add def1 routes

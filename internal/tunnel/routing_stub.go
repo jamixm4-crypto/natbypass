@@ -43,6 +43,11 @@ func RemoveSubnetRoute(subnetCIDR string, gatewayVIP string) error {
 // FlushAllRouting stub.
 func FlushAllRouting(gatewayVIP string, subnets []string) {}
 
+// BypassEndpoint is a stub on non-supported platforms.
+func BypassEndpoint(endpoint string) error {
+	return nil
+}
+
 // EnsurePeerHostRoute is a no-op on non-Linux platforms.
 func EnsurePeerHostRoute(peerVIP string) {}
 
