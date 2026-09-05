@@ -1,8 +1,10 @@
 package updater
 
 import (
-	"crypto/ed25519"
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -706,6 +708,25 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	}
 
 	_ = os.Chmod(tmpPath, 0755)
+
+	// Проверка контрольной суммы SHA-256 (если манифест зеркала содержит эталонный хеш)
+	if lastMirrorManifest != nil {
+		exeName := currentExeName()
+		assetKey := mirrorAssetKey(runtime.GOOS, runtime.GOARCH, exeName)
+		if ma, ok := lastMirrorManifest.Assets[assetKey]; ok && ma.SHA256 != "" {
+			hasher := sha256.New()
+			if f, err := os.Open(tmpPath); err == nil {
+				_, _ = io.Copy(hasher, f)
+				f.Close()
+				calcHash := hex.EncodeToString(hasher.Sum(nil))
+				if !strings.EqualFold(calcHash, ma.SHA256) {
+					_ = os.Remove(tmpPath)
+					setStatus(false, 0, "", "КРИТИЧЕСКАЯ ОШИБКА: контрольная сумма SHA-256 не совпадает с зеркалом!", false)
+					return fmt.Errorf("SHA-256 hash mismatch: got %s, expected %s", calcHash, ma.SHA256)
+				}
+			}
+		}
+	}
 
 	// Проверка цифровой подписи Ed25519 релиза (если доступен файл .sig)
 	sigURL := assetURL + ".sig"

@@ -6,12 +6,13 @@ gen_mirror_manifest.py — генерация mirror-manifest.json для зер
     python scripts/gen_mirror_manifest.py \
         --tag v1.9.222-beta.13 \
         --token $GITHUB_TOKEN \
-        --out-dir dist/mirror
+        --out-dir mirror/releases \
+        --build-dir build
 
 Создаёт:
-    dist/mirror/releases/latest.json        (stable)
-    dist/mirror/releases/latest-beta.json   (beta)
-    dist/mirror/releases/<tag>.json         (конкретный релиз)
+    mirror/releases/latest.json        (stable)
+    mirror/releases/latest-beta.json   (beta)
+    mirror/releases/<tag>.json         (конкретный релиз)
 
 Формат совместим с internal/updater/mirrors.go MirrorManifest.
 """
@@ -25,6 +26,17 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+# Обеспечиваем безопасный вывод на любых консолях (Windows CP1251, UTF-8 и др.)
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 REPO = "jamixm4-crypto/natbypass"
 GITHUB_API = f"https://api.github.com/repos/{REPO}"
@@ -53,6 +65,15 @@ def github_get(url: str, token: str | None = None) -> dict:
         return json.loads(resp.read().decode())
 
 
+def sha256_of_file(file_path: Path) -> str:
+    """Вычисляет SHA-256 локального файла."""
+    h = hashlib.sha256()
+    with file_path.open("rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def sha256_of_url(url: str, token: str | None = None) -> str:
     """Скачивает файл и возвращает его SHA-256."""
     req = urllib.request.Request(url)
@@ -66,7 +87,7 @@ def sha256_of_url(url: str, token: str | None = None) -> str:
     return h.hexdigest()
 
 
-def build_manifest(release: dict, token: str | None, mirror_base: str | None) -> dict:
+def build_manifest(release: dict, token: str | None, mirror_base: str | None, build_dir: Path | None) -> dict:
     tag = release["tag_name"]
     assets_map: dict[str, dict] = {}
 
@@ -83,16 +104,26 @@ def build_manifest(release: dict, token: str | None, mirror_base: str | None) ->
         dl_url = asset["browser_download_url"]
         sig_url = dl_url + ".sig"
 
-        print(f"  [{name}] вычисляю SHA-256...", flush=True)
-        try:
-            sha = sha256_of_url(dl_url, token)
-        except Exception as e:
-            print(f"  WARN: не удалось получить SHA-256 для {name}: {e}", file=sys.stderr)
-            sha = ""
+        # Пытаемся вычислить SHA-256 локально (если передан --build-dir и файл существует)
+        sha = ""
+        local_path = (build_dir / name) if build_dir else None
+        if local_path and local_path.is_file():
+            print(f"  [{name}] SHA-256 (local build/{name})...", flush=True)
+            sha = sha256_of_file(local_path)
+        else:
+            print(f"  [{name}] SHA-256 (download from GitHub)...", flush=True)
+            try:
+                sha = sha256_of_url(dl_url, token)
+            except Exception as e:
+                print(f"  WARN: не удалось получить SHA-256 для {name}: {e}", file=sys.stderr)
+                sha = ""
 
-        mirrors = []
+        # Автоматические быстрые CDN-зеркала для РФ и регионов с блокировками GitHub
+        mirrors = [
+            f"https://ghproxy.net/{dl_url}",
+            f"https://gh-proxy.com/{dl_url}",
+        ]
         if mirror_base:
-            # Зеркало хранит файлы по пути: <mirror_base>/<tag>/<name>
             mirrors.append(f"{mirror_base.rstrip('/')}/{tag}/{name}")
 
         assets_map[key] = {
@@ -124,23 +155,41 @@ def write_manifest(manifest: dict, out_dir: Path, filenames: list[str]) -> None:
         print(f"  Записан: {path}")
 
 
+def purge_jsdelivr_cache(filenames: list[str]) -> None:
+    """Сбрасывает кэш jsDelivr для обновлённых файлов."""
+    for fname in filenames:
+        purge_url = f"https://purge.jsdelivr.net/gh/{REPO}@main/mirror/releases/{fname}"
+        try:
+            req = urllib.request.Request(purge_url)
+            req.add_header("User-Agent", "NatBypass-Purge/1.0")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode())
+                print(f"  jsDelivr purge {fname}: status={result.get('status', 'ok')}")
+        except Exception as e:
+            print(f"  jsDelivr purge {fname} skipped: {e}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate NatBypass mirror manifest")
     parser.add_argument("--tag", required=True, help="Git tag, e.g. v1.9.222-beta.13")
     parser.add_argument("--token", default=os.environ.get("GITHUB_TOKEN"), help="GitHub API token")
-    parser.add_argument("--out-dir", default="dist/mirror/releases", help="Output directory")
+    parser.add_argument("--out-dir", default="mirror/releases", help="Output directory")
+    parser.add_argument("--build-dir", default=None, help="Local build directory with binaries")
     parser.add_argument("--mirror-base", default=os.environ.get("MIRROR_BASE_URL", ""),
                         help="Base URL of file mirror, e.g. https://nb-mirror.pages.dev/files")
+    parser.add_argument("--purge", action="store_true", default=True, help="Purge jsDelivr cache")
     args = parser.parse_args()
 
     tag = args.tag
     out_dir = Path(args.out_dir)
+    build_dir = Path(args.build_dir) if args.build_dir else None
     mirror_base = args.mirror_base or ""
 
-    print(f"=== NatBypass Mirror Manifest Generator ===")
+    print("=== NatBypass Mirror Manifest Generator ===")
     print(f"Tag:        {tag}")
     print(f"Output:     {out_dir}")
-    print(f"Mirror:     {mirror_base or '(none)'}")
+    print(f"Build dir:  {build_dir or '(none)'}")
+    print(f"Mirror:     {mirror_base or '(auto: ghproxy + gh-proxy)'}")
     print()
 
     # Получаем данные релиза из GitHub API
@@ -156,7 +205,7 @@ def main() -> None:
 
     # Строим манифест
     print("Обработка ассетов:")
-    manifest = build_manifest(release, args.token, mirror_base)
+    manifest = build_manifest(release, args.token, mirror_base, build_dir)
     print(f"  Ассетов в манифесте: {len(manifest['assets'])}")
     print()
 
@@ -168,13 +217,16 @@ def main() -> None:
         filenames.append("latest-beta.json")
     else:
         filenames.append("latest.json")
-        filenames.append("latest-beta.json")  # стабильный релиз обновляет и beta-канал
 
     print("Запись манифестов:")
     write_manifest(manifest, out_dir, filenames)
 
+    if args.purge:
+        print("Сброс кэша jsDelivr CDN:")
+        purge_jsdelivr_cache(filenames)
+
     print()
-    print("✓ Манифест сгенерирован успешно.")
+    print("[OK] Манифест сгенерирован успешно.")
 
 
 if __name__ == "__main__":

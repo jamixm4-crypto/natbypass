@@ -42,24 +42,39 @@ type MirrorAsset struct {
 // Mirror source constants
 // ---------------------------------------------------------------------------
 
-// MirrorManifestURLs — URL манифестов для stable-канала (в порядке приоритета).
-// Cloudflare Pages — основное зеркало (CDN, доступен в РФ).
-// GitHub raw — резервный (может быть заблокирован, но иногда работает).
+// MirrorManifestURLsStable — URL манифестов для stable-канала (в порядке приоритета).
+//
+//   1. jsDelivr CDN — зеркалирует GitHub репозиторий, работает в РФ,
+//      кэширует глобально, не требует настройки.
+//   2. GitHub raw — прямой доступ к файлу в репозитории (может быть
+//      замедлен в РФ, но часто работает).
+//   3. Cloudflare Pages — если администратор настроил CF_API_TOKEN в
+//      GitHub Secrets (опционально).
 var MirrorManifestURLsStable = []string{
+	"https://cdn.jsdelivr.net/gh/" + mirrorRepo + "@main/mirror/releases/latest.json",
+	"https://raw.githubusercontent.com/" + mirrorRepo + "/main/mirror/releases/latest.json",
 	"https://nb-mirror.pages.dev/releases/latest.json",
-	"https://raw.githubusercontent.com/jamixm4-crypto/natbypass-mirror/main/releases/latest.json",
 }
 
 // MirrorManifestURLsBeta — URL манифестов для beta-канала.
 var MirrorManifestURLsBeta = []string{
+	"https://cdn.jsdelivr.net/gh/" + mirrorRepo + "@main/mirror/releases/latest-beta.json",
+	"https://raw.githubusercontent.com/" + mirrorRepo + "/main/mirror/releases/latest-beta.json",
 	"https://nb-mirror.pages.dev/releases/latest-beta.json",
-	"https://raw.githubusercontent.com/jamixm4-crypto/natbypass-mirror/main/releases/latest-beta.json",
 }
+
+// mirrorRepo — репозиторий, в котором хранятся mirror-манифесты.
+const mirrorRepo = GithubRepo
 
 // MirrorTrustedDomains — доверенные домены зеркал для IsValidAssetURL.
 var MirrorTrustedDomains = []string{
 	"nb-mirror.pages.dev",
-	"pub-",   // Cloudflare R2 public bucket prefix
+	"pub-", // Cloudflare R2 public bucket prefix
+	"cdn.jsdelivr.net",
+	"fastly.jsdelivr.net",
+	"raw.githubusercontent.com",
+	"ghproxy.net",
+	"gh-proxy.com",
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +232,11 @@ func GetMirrorAssetURLs(m *MirrorManifest, assetKey string) []string {
 
 // IsMirrorURL проверяет, что URL исходит из доверенного зеркала NatBypass.
 func IsMirrorURL(urlStr string) bool {
+	// Если это GitHub-прокси (ghproxy.net, gh-proxy.com), строго проверяем,
+	// что запрос направлен исключительно к нашему официальному репозиторию!
+	if strings.Contains(urlStr, "ghproxy.net") || strings.Contains(urlStr, "gh-proxy.com") {
+		return strings.Contains(urlStr, "/"+GithubRepo+"/releases/download/")
+	}
 	for _, domain := range MirrorTrustedDomains {
 		if strings.Contains(urlStr, domain) {
 			return true
