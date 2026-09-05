@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.222-beta.12"
+const Version = "1.9.222-beta.13"
 
 
 
@@ -757,6 +757,12 @@ func attachTUNLocked(tunFd int) {
 	if globalTunFile != nil {
 		_ = globalTunFile.Close()
 		globalTunFile = nil
+	}
+	// BUG-A2 fix: Переводим fd в non-blocking режим чтобы tf.Read() возвращал EAGAIN
+	// вместо блокировки навсегда. Без этого горутина TUN read loop не может проверить
+	// myTunCtx.Done() пока нет входящих данных — отключение зависало.
+	if err := setTunNonblock(tunFd); err != nil {
+		logger.Warn().Err(err).Int("fd", tunFd).Msg("SetNonblock TUN fd failed, disconnect may be slow")
 	}
 	globalTunFile = os.NewFile(uintptr(tunFd), "tun")
 

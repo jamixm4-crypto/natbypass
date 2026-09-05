@@ -38,6 +38,8 @@ class NatBypassVpnService : VpnService() {
     private var serviceJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
+    /** Raw TUN fd сохранённый после detachFd() для явного закрытия в disconnect() (BUG-A1 fix) */
+    private var tunRawFd: Int = -1
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -257,11 +259,13 @@ class NatBypassVpnService : VpnService() {
                 stopSelf()
                 return
             }
-            // detachFd() передает владение дескриптором файловому объекту Go (os.File),
-            // исключая double-close и падение процесса/задач Android WindowManager
+            // detachFd() передает владение дескриптором файловому объекту Go (os.File).
+            // Сохраняем raw fd отдельно, чтобы disconnect() мог закрыть его через Os.close()
+            // даже после того, как Go взял владение (BUG-A1 fix).
             val fd = pfd.detachFd()
+            tunRawFd = fd
             vpnInterface = null
-            Log.i(TAG, "VPN TUN established! detached fd=$fd, VIP=$currentVip")
+            Log.i(TAG, "VPN TUN established! detached fd=$fd, tunRawFd=$tunRawFd, VIP=$currentVip")
 
             val configFile = File(filesDir, "config.yaml")
             val configYaml = if (configFile.exists()) configFile.readText() else "{}"
@@ -348,6 +352,20 @@ class NatBypassVpnService : VpnService() {
         try { org.natbypass.app.util.MobileBridge.sendOfflineBeacon() } catch (_: Throwable) {}
         try { org.natbypass.app.util.MobileBridge.detachTUN() } catch (_: Throwable) {}
 
+        // BUG-A1 fix: явное закрытие raw TUN fd через системный вызов.
+        // vpnInterface == null после detachFd(), поэтому vpnInterface?.close() ничего не делает.
+        // Os.close() позволяет закрыть fd напрямую, освобождая ресурс TUN-устройства Android.
+        try {
+            val rawFd = tunRawFd
+            if (rawFd > 0) {
+                android.system.Os.close(android.os.ParcelFileDescriptor.fromFd(rawFd).fileDescriptor)
+                Log.i(TAG, "TUN fd=$rawFd closed via Os.close (BUG-A1 fix)")
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Os.close tunRawFd failed: ${e.message}")
+        }
+        tunRawFd = -1
+
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Throwable) {}
         try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Throwable) {}
         wakeLock = null
@@ -370,6 +388,14 @@ class NatBypassVpnService : VpnService() {
                 @Suppress("DEPRECATION")
                 stopForeground(true)
             }
+        } catch (_: Throwable) {}
+
+        // BUG-A3 fix: явная отмена нотификации — на MIUI/HyperOS/ColorOS значок VPN
+        // может зависать даже после stopForeground(STOP_FOREGROUND_REMOVE).
+        try {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .cancel(NOTIFICATION_ID)
+            Log.i(TAG, "Notification $NOTIFICATION_ID cancelled (BUG-A3 fix)")
         } catch (_: Throwable) {}
 
         try {
