@@ -808,7 +808,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.8"
+		ver = "1.9.221-beta.9"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1605,7 +1605,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.8"
+		ver = "1.9.221-beta.9"
 	}
 
 	vip := s.state.VirtualIP
@@ -1678,6 +1678,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			return ""
+		}(),
+		// R5: Сообщаем клиенту есть ли NetworkKey в активном профиле
+		"has_network_key": func() bool {
+			if cfg == nil {
+				return false
+			}
+			activeProf := cfg.EnsureActiveProfile()
+			return activeProf != nil && activeProf.NetworkKey != ""
 		}(),
 	}
 

@@ -271,12 +271,22 @@ func GetLocalSubnets() []string {
 	return network.GetLocalSubnets()
 }
 
-// EnableMSSClamping is a cross-platform stub on Windows.
+// EnableMSSClamping sets the MTU on the NatBypass TUN adapter on Windows.
+// R1: Windows does not support iptables MSS clamping, so we set a reduced MTU (1420)
+// on the TUN adapter so the OS derives a correct MSS (MTU - 40 = 1380) automatically.
+// This prevents TCP connection stalls over the VPN tunnel.
 func EnableMSSClamping(tunInterface string, mtu int) error {
+	if mtu <= 0 {
+		mtu = 1420
+	}
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "subinterface",
+		tunInterface, fmt.Sprintf("mtu=%d", mtu), "store=persistent")
 	return nil
 }
 
-// DisableMSSClamping is a cross-platform stub on Windows.
+// DisableMSSClamping restores default MTU (1500) on the NatBypass TUN adapter.
 func DisableMSSClamping(tunInterface string) error {
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "subinterface",
+		tunInterface, "mtu=1500", "store=persistent")
 	return nil
 }

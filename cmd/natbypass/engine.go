@@ -701,24 +701,52 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	// Dedicated keepalive & probe loop for maintaining carrier CGNAT mappings.
 	// Interval is adaptive: 2s on x86/x64, 10s on MIPS/ARM to spare embedded CPU.
+	// R3: Exponential backoff for peers that haven't responded — reduces signaling spam for Symmetric NAT.
 	if puncher != nil {
 		go func() {
 			kaTicker := time.NewTicker(adaptiveKeepAliveInterval())
 			defer kaTicker.Stop()
+
+			// R3: Per-peer backoff tracker: DeviceID -> when we're allowed to probe next
+			probeBackoff := make(map[string]time.Time)
 
 			for {
 				select {
 				case <-engineCtx.Done():
 					return
 				case <-kaTicker.C:
+					now := time.Now()
 					for _, p := range registry.List() {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
+							// Connected peer: just send keepalive and probe if STUN drifted
 							_ = puncher.SendKeepAlive(p.ActiveEndpoint)
-							// If peer's signaling STUNAddr has diverged from our current ActiveEndpoint, probe it to recover from remote port re-binds
 							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
 								_ = puncher.SendHolePunchProbe(p.STUNAddr)
 							}
+							// Clear backoff on successful connection
+							delete(probeBackoff, p.DeviceID)
 						} else {
+							// R3: Backoff logic for unconnected peers
+							if until, ok := probeBackoff[p.DeviceID]; ok && now.Before(until) {
+								// Still in backoff period — skip probe
+								continue
+							}
+
+							// Calculate next backoff based on ProbeCount:
+							// 0-15 probes (0-60s @ 4s): normal interval (already covered by ticker)
+							// 15-75 probes (60-300s): 4x backoff = 16s
+							// >75 probes (>300s): 15x backoff = 60s
+							var nextBackoff time.Duration
+							if p.ProbeCount > 75 {
+								nextBackoff = 60 * time.Second
+							} else if p.ProbeCount > 15 {
+								nextBackoff = 16 * time.Second
+							}
+							if nextBackoff > 0 {
+								probeBackoff[p.DeviceID] = now.Add(nextBackoff)
+							}
+
+							// Send probes to all known endpoints
 							if p.ActiveEndpoint != "" {
 								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
 							}
@@ -1095,6 +1123,8 @@ func publishLoop(
 		stunCacheTTL = constants.LowPowerSTUNCacheInterval
 	}
 	lastVIP := virtualIP
+	// R4: Отслеживаем смену публичного IP для немедленного обновления STUN после смены WAN
+	var lastPublicIPStr string
 
 	publishOnce := func() {
 		// Dynamic reload of current config & Virtual IP & MQTT topic
@@ -1168,7 +1198,20 @@ func publishLoop(
 			stunCacheExpired := now.Sub(stunCachedAt) >= stunCacheTTL
 			if stunCacheExpired || stunAddr == "" || stunAddr == "Недоступен (Relay / Symmetric NAT)" {
 				if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
-					stunAddr = fmt.Sprintf("%s:%d", extIP.String(), port)
+					newIPStr := extIP.String()
+					// R4: Если публичный IP изменился — это смена WAN/сети
+					// Немедленно сбрасываем кэш и логируем для быстрой re-publish
+					if lastPublicIPStr != "" && lastPublicIPStr != newIPStr {
+						log.Info().
+							Str("old_ip", lastPublicIPStr).
+							Str("new_ip", newIPStr).
+							Msg("R4: WAN IP изменился — принудительное обновление STUN и переpublish пирам")
+						// Инвалидируем stunAddr чтобы в следующем тике сразу переоткрыть
+						stunAddr = ""
+						stunCachedAt = time.Time{}
+					}
+					lastPublicIPStr = newIPStr
+					stunAddr = fmt.Sprintf("%s:%d", newIPStr, port)
 					stunCachedAt = now
 					ip = extIP
 					cachedIP = extIP

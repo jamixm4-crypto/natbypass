@@ -298,7 +298,41 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	_ = runLinuxCmd("ip", "route", "add", "1.1.1.1/32", "via", cleanVIP, "dev", "nb0", "onlink")
 	_ = runLinuxCmd("ip", "route", "add", "8.8.8.8/32", "via", cleanVIP, "dev", "nb0", "onlink")
 
+	// R2: Настраиваем DNS через exit node чтобы не было DNS-утечек
+	// Пробуем resolvectl (systemd-resolved), затем прямую запись в resolv.conf
+	setLinuxExitNodeDNS()
+
 	return nil
+}
+
+// setLinuxExitNodeDNS настраивает DNS серверы при активации exit node на Linux.
+// R2: Без этого DNS запросы могут идти мимо VPN-тоннеля (DNS leak).
+func setLinuxExitNodeDNS() {
+	// Метод 1: systemd-resolved через resolvectl
+	if err := exec.Command("resolvectl", "dns", "nb0", "1.1.1.1", "8.8.8.8").Run(); err == nil {
+		_ = exec.Command("resolvectl", "domain", "nb0", "~.").Run()
+		return
+	}
+	// Метод 2: через nmcli (NetworkManager)
+	if err := exec.Command("nmcli", "dev", "mod", "nb0", "ipv4.dns", "1.1.1.1 8.8.8.8").Run(); err == nil {
+		return
+	}
+	// Метод 3: Прямая правка /etc/resolv.conf (fallback для OpenWrt/Keenetic)
+	const dnsContent = "# NatBypass exit node DNS\nnameserver 1.1.1.1\nnameserver 8.8.8.8\n"
+	if err := os.WriteFile("/etc/resolv.conf", []byte(dnsContent), 0644); err != nil {
+		// /etc/resolv.conf может быть симлинком — игнорируем
+		_ = err
+	}
+}
+
+// restoreLinuxDNS восстанавливает DNS после отключения exit node.
+func restoreLinuxDNS() {
+	// Метод 1: resolvectl revert
+	if err := exec.Command("resolvectl", "revert", "nb0").Run(); err == nil {
+		return
+	}
+	// Метод 2: nmcli сброс
+	_ = exec.Command("nmcli", "dev", "mod", "nb0", "ipv4.dns", "").Run()
 }
 
 // DisableExitNodeRouting removes def1 routes and bypass routes.
@@ -321,6 +355,9 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	}
 	lastBypassedEndpointIPs = nil
 	linuxBypassedMu.Unlock()
+
+	// R2: Восстанавливаем DNS при отключении exit node
+	restoreLinuxDNS()
 
 	return nil
 }
