@@ -236,15 +236,25 @@ HTTP_GET() {
 }
 
 STATUS_JSON="$(HTTP_GET "http://127.0.0.1:8080/api/status")"
+MY_PUB_IP=""
+MY_STUN=""
+MY_VER=""
+
 if [ -n "$STATUS_JSON" ]; then
     log_ok "Локальный API отвечает (HTTP 200)"
     ACT_PROF="$(echo "$STATUS_JSON" | grep -o '"active_profile":"[^"]*' | cut -d'"' -f4)"
     MQTT_TOPIC="$(echo "$STATUS_JSON" | grep -o '"mqtt_topic":"[^"]*' | cut -d'"' -f4)"
     PEERS_CNT="$(echo "$STATUS_JSON" | grep -o '"peers_count":[0-9]*' | cut -d':' -f2)"
+    MY_PUB_IP="$(echo "$STATUS_JSON" | grep -o '"public_ip":"[^"]*' | cut -d'"' -f4)"
+    MY_STUN="$(echo "$STATUS_JSON" | grep -o '"stun_addr":"[^"]*' | cut -d'"' -f4)"
+    MY_VER="$(echo "$STATUS_JSON" | grep -o '"version":"[^"]*' | cut -d'"' -f4)"
+    
     [ -n "$ACT_PROF" ] && log_info "Активный профиль сети: $ACT_PROF"
-    [ -n "$MQTT_TOPIC" ] && log_info "Сигнальный MQTT топик: $MQTT_TOPIC"
+    [ -n "$MQTT_TOPIC" ] && log_info "Сигнальный топик: $MQTT_TOPIC"
+    [ -n "$MY_PUB_IP" ] && log_info "Внешний IP: $MY_PUB_IP | STUN: $MY_STUN | Версия: $MY_VER"
     [ -n "$PEERS_CNT" ] && log_info "Количество обнаруженных пиров: $PEERS_CNT"
     echo "API Status: $STATUS_JSON" >> "$REPORT_FILE"
+    
     PEERS_JSON="$(HTTP_GET "http://127.0.0.1:8080/api/peers")"
     if [ -n "$PEERS_JSON" ]; then
         log_section "8. СПИСОК ПОДКЛЮЧЕННЫХ ПИРОВ"
@@ -255,8 +265,86 @@ else
     log_warn "Локальный API http://127.0.0.1:8080 недоступен"
 fi
 
-# 8. Сквозной ICMP Ping тест ко всем обнаруженным пирам
-log_section "9. СКВОЗНОЙ ТЕСТ ICMP PING ДО ВСЕХ ОБНАРУЖЕННЫХ ПИРОВ"
+# 9. Глубокий анализ P2P, NAT, Wi-Fi и ТСПУ
+log_section "9. ДИАГНОСТИКА P2P, NAT И ТСПУ (АНАЛИЗ ПРИЧИН RELAY)"
+
+if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
+    TMP_ANALYSIS="$(mktemp 2>/dev/null || echo "/tmp/nb_diag_an_$$")"
+    echo "$PEERS_JSON" | tr '}' '\n' > "$TMP_ANALYSIS"
+    
+    while read -r p_line; do
+        VIP="$(echo "$p_line" | grep -o '"virtual_ip":"[^"]*' | cut -d'"' -f4)"
+        [ -z "$VIP" ] && continue
+        
+        DEV_NAME="$(echo "$p_line" | grep -o '"device_name":"[^"]*' | cut -d'"' -f4)"
+        DEV_ID="$(echo "$p_line" | grep -o '"device_id":"[^"]*' | cut -d'"' -f4)"
+        [ -z "$DEV_NAME" ] && DEV_NAME="$DEV_ID"
+        
+        P_PUB_IP="$(echo "$p_line" | grep -o '"public_ip":"[^"]*' | cut -d'"' -f4)"
+        P_NAT="$(echo "$p_line" | grep -o '"nat_type":"[^"]*' | cut -d'"' -f4)"
+        P_VER="$(echo "$p_line" | grep -o '"version":"[^"]*' | cut -d'"' -f4)"
+        P_PROBES="$(echo "$p_line" | grep -o '"probe_count":[0-9]*' | cut -d':' -f2)"
+        [ -z "$P_PROBES" ] && P_PROBES=0
+        P_DIRECT="$(echo "$p_line" | grep -o '"direct_p2p":true' | cut -d':' -f2)"
+        P_EP="$(echo "$p_line" | grep -o '"active_endpoint":"[^"]*' | cut -d'"' -f4)"
+        P_PING="$(echo "$p_line" | grep -o '"ping_ms":[0-9]*' | cut -d':' -f2)"
+        [ -z "$P_PING" ] && P_PING=0
+        
+        printf "\n  %bАнализ связности с '%s' (VIP: %s):%b\n" "$C_CYAN" "$DEV_NAME" "$VIP" "$C_RESET"
+        
+        if [ "$P_DIRECT" = "true" ]; then
+            log_ok "Прямой P2P установлен (Endpoint: $P_EP, Ping: ${P_PING} ms)"
+            continue
+        fi
+        
+        log_warn "Статус: Relay (прямой P2P не подтвержден)"
+        
+        # Проверка 1: Одно Wi-Fi / NAT Hairpinning
+        if [ -n "$MY_PUB_IP" ] && [ -n "$P_PUB_IP" ] && [ "$MY_PUB_IP" = "$P_PUB_IP" ]; then
+            log_fail "  [!] ПРИЧИНА [Same Wi-Fi / NAT Hairpinning]:"
+            log_warn "      Пир '$DEV_NAME' и данный хост имеют ОДИНАКОВЫЙ внешний IP ($MY_PUB_IP)!"
+            log_info "      -> Они находятся в ОДНОЙ локальной сети / Wi-Fi роутере."
+            log_info "      -> Роутер блокирует обратный трафик (NAT Loopback / Hairpinning) при обращении к собственному внешнему порту."
+            log_info "      -> Решение: Убедитесь, что в Wi-Fi сети отключена изоляция клиентов (AP/Client Isolation), и обмен идет по локальным IP (LAN candidates)."
+        fi
+        
+        # Проверка 2: ТСПУ / Блокировка UDP проб
+        if [ "$P_PROBES" -gt 15 ] 2>/dev/null; then
+            log_fail "  [!] ПРИЧИНА [ТСПУ / Блокировка UDP / Закрытый порт]:"
+            log_warn "      Отправлено $P_PROBES UDP-проб пробива NAT, но ни одного ответа не получено!"
+            log_info "      -> Сигнальные маяки через MQTT доходят (узел виден), но UDP пакеты сбрасываются ТСПУ (DPI) на трансграничном стыке или файрволом."
+            log_info "      -> Решение: Убедитесь, что у обоих узлов активирован строгий профиль AmneziaWG (AWG 3.1 strict) с обфускацией заголовков (H1..H4, S1..S4, Jc)."
+        fi
+        
+        # Проверка 3: Симметричный NAT
+        if echo "$P_NAT" | grep -qi "symmetric"; then
+            log_warn "  [!] ФАКТОР [Symmetric NAT]:"
+            log_info "      Удаленный узел находится за Symmetric NAT / мобильным CGNAT ($P_NAT)."
+            log_info "      Роутер меняет внешний порт для каждого назначения, что препятствует прямому пробиву."
+        fi
+        
+        # Проверка 4: Несовместимость версий
+        if [ -n "$P_VER" ] && ! echo "$P_VER" | grep -qE '1\.9\.22[12]'; then
+            log_warn "  [!] ФАКТОР [Устаревшая версия]:"
+            log_warn "      Пир использует устаревшую версию '$P_VER' (текущая: $MY_VER)."
+            log_info "      Рекомендуется обновить оба узла до актуального билда."
+        fi
+        
+        # Проверка 5: Несовпадение AmneziaWG
+        P_HAS_AWG="$(echo "$p_line" | grep -o '"awg":' || echo "")"
+        MY_HAS_AWG="$(echo "$STATUS_JSON" | grep -o '"awg":' || echo "")"
+        if [ -n "$P_HAS_AWG" ] && [ -z "$MY_HAS_AWG" ]; then
+            log_warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: на удаленном узле AWG включен, а на локальном выключен!"
+        elif [ -z "$P_HAS_AWG" ] && [ -n "$MY_HAS_AWG" ]; then
+            log_warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: на локальном узле AWG включен, а на удаленном выключен!"
+        fi
+        
+    done < "$TMP_ANALYSIS"
+    rm -f "$TMP_ANALYSIS"
+fi
+
+# 10. Сквозной ICMP Ping тест ко всем обнаруженным пирам
+log_section "10. СКВОЗНОЙ ТЕСТ ICMP PING ДО ВСЕХ ОБНАРУЖЕННЫХ ПИРОВ"
 
 test_ping() {
     TARGET_IP="$1"
@@ -301,7 +389,6 @@ fi
 # Если удалённых пиров в API пока нет:
 if [ "$PEERS_PINGED" -eq 0 ]; then
     log_info "Удалённые пиры в реестре API пока не зарегистрированы (ожидание маяков signaling)"
-    # Пингуем тестовый узел ТОЛЬКО из той же подсети, что и текущий узел (например, 10.11.12.1)
     if [ -n "$IP_ADDR" ]; then
         SUBNET_PREF="$(echo "$IP_ADDR" | awk -F'.' '{print $1"."$2"."$3}')"
         for host_num in 1 2; do
