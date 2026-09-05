@@ -41,9 +41,23 @@ var (
 	wssClient        *relay.WSSRelayClient
 	udpRelay         *relay.UDPRelayClient
 	triggerPublishCh = make(chan struct{}, 10)
+
+	// S6: Debounce для triggerPublish — предотвращаем signaling storm при одновременном появлении пиров
+	lastPublishTrigger   time.Time
+	publishTriggerMu     sync.Mutex
+	publishDebounceDelay = 2 * time.Second
 )
 
 func triggerPublish() {
+	publishTriggerMu.Lock()
+	now := time.Now()
+	if now.Sub(lastPublishTrigger) < publishDebounceDelay {
+		publishTriggerMu.Unlock()
+		return
+	}
+	lastPublishTrigger = now
+	publishTriggerMu.Unlock()
+
 	select {
 	case triggerPublishCh <- struct{}{}:
 	default:
@@ -242,6 +256,49 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			} else {
 				log.Info().Str("subnet", subnet).Msg("✅ Exit Node IP forwarding & NAT masquerade activated")
 			}
+		}
+
+		// F3: Если задан SelectedExitNode — активируем маршрутизацию через exit node при запуске.
+		// Поиск нужного пира произойдёт в TUN dispatch loop; здесь инжектируем маршруты.
+		// Поскольку пиры ещё не подключены, вызов с пустыми EP — только def1 маршруты.
+		var activeExitVIP string
+		if cfg.Network.SelectedExitNode != "" {
+			go func() {
+				// Ждём 5 секунд, чтобы пиры успели подключиться и зарегистрироваться
+				time.Sleep(5 * time.Second)
+				selStr := strings.TrimSpace(strings.Split(cfg.Network.SelectedExitNode, "/")[0])
+				var exitPeer *peer.Peer
+				if p, ok := registry.Get(selStr); ok && p != nil {
+					exitPeer = p
+				} else {
+					for _, item := range registry.List() {
+						itemVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
+						if item.DeviceID == selStr || itemVIP == selStr {
+							exitPeer = item
+							break
+						}
+					}
+				}
+				if exitPeer != nil {
+					exitVIP := strings.TrimSpace(strings.Split(exitPeer.VirtualIP, "/")[0])
+					if exitVIP == "" {
+						exitVIP = selStr
+					}
+					if err := tunnel.EnableExitNodeRouting(exitVIP, exitPeer.ActiveEndpoint, exitPeer.STUNAddr, exitPeer.PublicIP); err != nil {
+						log.Warn().Err(err).Str("exit_vip", exitVIP).Msg("Failed to enable exit node routing")
+					} else {
+						activeExitVIP = exitVIP
+						log.Info().Str("exit_vip", exitVIP).Str("peer", exitPeer.DeviceID).Msg("✅ Exit Node routing activated")
+					}
+				} else {
+					log.Warn().Str("selected_exit", cfg.Network.SelectedExitNode).Msg("Exit node peer not yet online, routing not activated")
+				}
+			}()
+			defer func() {
+				if activeExitVIP != "" {
+					_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+				}
+			}()
 		}
 
 		// Self-check and self-ping of Virtual IP
@@ -551,7 +608,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							found = true
 						} else {
 							for _, item := range registry.List() {
-								if item.DeviceID == cfg.Network.SelectedExitNode || item.VirtualIP == cfg.Network.SelectedExitNode {
+								// F4: VirtualIP хранится с маской (e.g. "10.11.12.5/24"), SelectedExitNode — без. Обрезаем маску.
+								itemVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
+								selStr := strings.TrimSpace(strings.Split(cfg.Network.SelectedExitNode, "/")[0])
+								if item.DeviceID == selStr || itemVIP == selStr {
 									p = item
 									found = true
 									break
@@ -599,8 +659,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no endpoint or puncher")
 						}
 
-						// Fallback: relay via MQTT/Signaling when direct UDP is not confirmed or P2P failed
-						if (!sentDirect || !p.DirectP2P) && sigMgr != nil {
+						// Fallback: relay via MQTT/Signaling ТОЛЬКО когда прямой UDP провалился (S1: убираем double-send)
+						if !sentDirect && sigMgr != nil {
 							dataToSend := pkt
 							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 								cKey := crypto.DeriveKey(activeProf.NetworkKey)

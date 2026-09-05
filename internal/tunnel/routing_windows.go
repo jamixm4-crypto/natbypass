@@ -35,8 +35,12 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	if subnet == "" {
 		subnet = "100.64.200.0/24"
 	}
+	// F5: Используем net.ParseCIDR для получения правильного сетевого адреса
+	// (например "10.11.12.1/24" → "10.11.12.0/24")
 	cleanSubnet := subnet
-	if !strings.Contains(cleanSubnet, "/") {
+	if _, ipNet, err := net.ParseCIDR(subnet); err == nil {
+		cleanSubnet = ipNet.String()
+	} else if !strings.Contains(cleanSubnet, "/") {
 		parts := strings.Split(cleanSubnet, ".")
 		if len(parts) >= 3 {
 			cleanSubnet = fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])

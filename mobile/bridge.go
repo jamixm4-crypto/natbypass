@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.221-beta.6"
+const Version = "1.9.221-beta.7"
 
 
 
@@ -128,10 +128,12 @@ var (
 	globalAWGPreset        string = "dpi"
 	globalPuncher          *network.UDPPuncher
 	globalTunFile   *os.File
+	globalTunCancel context.CancelFunc // controls TUN read goroutine lifecycle
 	globalTxBytes   uint64
 	globalRxBytes   uint64
 	logger          zerolog.Logger
 )
+
 
 func deriveInitialVirtualIP(devID string) string {
 	if globalConfig != nil {
@@ -715,11 +717,20 @@ func attachTUNLocked(tunFd int) {
 	if tunFd <= 0 {
 		return
 	}
+	// F2: Останавливаем предыдущую TUN-горутину перед запуском новой
+	if globalTunCancel != nil {
+		globalTunCancel()
+		globalTunCancel = nil
+	}
 	if globalTunFile != nil {
 		_ = globalTunFile.Close()
 		globalTunFile = nil
 	}
 	globalTunFile = os.NewFile(uintptr(tunFd), "tun")
+
+	// Создаём отдельный контекст для TUN горутины (независим от engineCtx)
+	tunCtx, tunCancel := context.WithCancel(engineCtx)
+	globalTunCancel = tunCancel
 
 	if globalPuncher != nil && globalTunFile != nil {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
@@ -736,7 +747,7 @@ func attachTUNLocked(tunFd int) {
 			}
 		})
 
-		go func() {
+		go func(myTunCtx context.Context) {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Warn().Msg(fmt.Sprintf("TUN read loop recovered: %v", r))
@@ -746,14 +757,13 @@ func attachTUNLocked(tunFd int) {
 			for {
 				engineMu.Lock()
 				tf := globalTunFile
-				ctx := engineCtx
 				engineMu.Unlock()
 
-				if tf == nil || ctx == nil {
+				if tf == nil {
 					return
 				}
 				select {
-				case <-ctx.Done():
+				case <-myTunCtx.Done():
 					return
 				default:
 					n, err := tf.Read(buf)
@@ -763,7 +773,7 @@ func attachTUNLocked(tunFd int) {
 							time.Sleep(2 * time.Millisecond)
 							continue
 						}
-						if ctx.Err() != nil {
+						if myTunCtx.Err() != nil {
 							return
 						}
 						logger.Warn().Err(err).Msg("TUN read error, retrying...")
@@ -896,7 +906,7 @@ func attachTUNLocked(tunFd int) {
 					}
 				}
 			}
-		}()
+		}(tunCtx)
 	}
 }
 
@@ -1057,13 +1067,29 @@ func StopEngine() {
 	if engineCancel != nil {
 		engineCancel()
 	}
+	// F6: Останавливаем TUN горутину
+	if globalTunCancel != nil {
+		globalTunCancel()
+		globalTunCancel = nil
+	}
+	// F6: Закрываем UDP сокет и MQTT-подключения
+	if globalPuncher != nil {
+		globalPuncher.Close()
+		globalPuncher = nil
+	}
+	if globalSigMgr != nil {
+		// FallbackManager останавливается через engineCancel() — контекст уже отменён
+		globalSigMgr = nil
+	}
 	if globalTunFile != nil {
 		_ = globalTunFile.Close()
 		globalTunFile = nil
 	}
+	globalRegistry = nil
 	engineRunning = false
 	logger.Info().Msg("NatBypass Android ядро остановлено")
 }
+
 
 // RestartEngine перезапускает движок с новым конфигом
 func RestartEngine(configYAML string) string {
@@ -1411,28 +1437,7 @@ func GetSelectedExitNode() string {
 	return globalExitNode
 }
 
-// GetUDPSocketFd возвращает дескриптор сокета UDP Puncher для вызова VpnService.protect() в Android
-func GetUDPSocketFd() int {
-	engineMu.Lock()
-	defer engineMu.Unlock()
-	if globalPuncher != nil {
-		return globalPuncher.SocketFd()
-	}
-	return -1
-}
 
-// RebindSockets переоткрывает UDP-сокет при смене сети (Wi-Fi <-> 4G) и возвращает дескриптор нового сокета
-func RebindSockets() int {
-	engineMu.Lock()
-	defer engineMu.Unlock()
-	if globalPuncher != nil {
-		if _, err := globalPuncher.HopPort(); err == nil {
-			return globalPuncher.SocketFd()
-		}
-		return globalPuncher.SocketFd()
-	}
-	return -1
-}
 
 // SetAllowExitNode разрешает другим устройствам выходить в интернет через этот узел
 func SetAllowExitNode(allow bool) {
