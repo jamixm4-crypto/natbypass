@@ -10,11 +10,33 @@ import (
 	"time"
 )
 
-// restartService перезапускает сервис на Linux/router платформах безопасно,
-// запуская команду перезапуска в отсоединённом фоновом процессе с задержкой 1.2 секунды,
+// isSystemdService проверяет, управляется ли процесс natbypass через systemd
+func isSystemdService() bool {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return false
+	}
+	// Если процесс запущен systemd, переменная INVOCATION_ID всегда установлена
+	if os.Getenv("INVOCATION_ID") != "" {
+		return true
+	}
+	// Проверяем, существует ли файл юнита или активна ли служба
+	if _, err := os.Stat("/etc/systemd/system/natbypass.service"); err == nil {
+		return true
+	}
+	if _, err := os.Stat("/lib/systemd/system/natbypass.service"); err == nil {
+		return true
+	}
+	if err := exec.Command("systemctl", "is-active", "--quiet", "natbypass").Run(); err == nil {
+		return true
+	}
+	return false
+}
+
+// RestartService перезапускает сервис на Linux/router платформах безопасно,
+// запуская команду перезапуска в отсоединённом фоновом процессе с задержкой 1.5 секунды,
 // чтобы текущий процесс natbypass успел завершиться и корректно освободить сокеты,
 // интерфейсы TUN (nb0) и файлы блокировок.
-func restartService(execPath string) {
+func RestartService(execPath string) {
 	var restartCmd string
 	if _, err := os.Stat("/opt/etc/init.d/S99natbypass"); err == nil {
 		// Keenetic Entware
@@ -22,8 +44,8 @@ func restartService(execPath string) {
 	} else if _, err := os.Stat("/etc/init.d/natbypass"); err == nil {
 		// OpenWrt Procd / SysVinit
 		restartCmd = "/etc/init.d/natbypass restart"
-	} else if _, err := exec.LookPath("systemctl"); err == nil {
-		// Linux systemd
+	} else if isSystemdService() {
+		// Linux systemd (только если служба реально управляется systemd)
 		restartCmd = "systemctl restart natbypass"
 	} else {
 		// Прямой перезапуск бинарника с сохранением оригинальных аргументов (включая --config)
@@ -38,13 +60,18 @@ func restartService(execPath string) {
 		restartCmd = strings.Join(escapedArgs, " ")
 	}
 
-	// Запуск через отсоединённый subshell: ждём 1.2 сек, пока текущий процесс natbypass завершит работу,
+	// Запуск через отсоединённый subshell с nohup: ждём 1.5 сек, пока текущий процесс natbypass завершит работу,
 	// затем перезапускаем службу или запускаем новый процесс
-	detachedScript := fmt.Sprintf("(sleep 1.2; %s) >/dev/null 2>&1 &", restartCmd)
+	detachedScript := fmt.Sprintf("(sleep 1.5; nohup %s >/dev/null 2>&1 &) &", restartCmd)
 	cmd := exec.Command("sh", "-c", detachedScript)
 	_ = cmd.Start()
 
 	// Даём команду на завершение текущего процесса
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	os.Exit(0)
 }
+
+func restartService(execPath string) {
+	RestartService(execPath)
+}
+

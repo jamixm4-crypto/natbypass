@@ -12,7 +12,7 @@ main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.221"
     DEFAULT_BETA="v1.9.222-beta.14"
-    BETA_MODE=0
+    BETA_MODE=-1
 
     # Parse CLI flags
     for arg in "$@"; do
@@ -51,24 +51,33 @@ main() {
         TARGET_BIN="/opt/bin/natbypass"
     fi
 
-    # Auto-detect beta mode if existing installed binary is a beta build
-    if [ "$BETA_MODE" -eq 0 ] && [ -x "${TARGET_BIN}" ]; then
-        INSTALLED_VER=$("${TARGET_BIN}" version 2>/dev/null || "${TARGET_BIN}" --version 2>/dev/null || true)
-        case "${INSTALLED_VER}" in
-            *beta*|*rc*|*-*)
-                BETA_MODE=1
-                print_cyan "ℹ️ Обнаружена установленная тестовая сборка (${INSTALLED_VER}). Включаем Beta-канал."
-                ;;
-        esac
-    fi
-
-    # Also check config.yaml for beta_channel setting
-    for cfg in /opt/etc/natbypass/config.yaml /etc/natbypass/config.yaml ./config.yaml; do
-        if [ -f "$cfg" ] && grep -q "beta_channel: true" "$cfg" 2>/dev/null; then
-            BETA_MODE=1
-            break
+    # Auto-detect beta mode if user did NOT specify --stable or --beta explicitly
+    if [ "$BETA_MODE" -eq -1 ]; then
+        if [ -x "${TARGET_BIN}" ]; then
+            INSTALLED_VER=$("${TARGET_BIN}" version 2>/dev/null || "${TARGET_BIN}" --version 2>/dev/null || true)
+            case "${INSTALLED_VER}" in
+                *beta*|*rc*|*-*)
+                    BETA_MODE=1
+                    print_cyan "ℹ️ Обнаружена установленная тестовая сборка (${INSTALLED_VER}). Включаем Beta-канал."
+                    ;;
+                *)
+                    BETA_MODE=0
+                    ;;
+            esac
+        else
+            BETA_MODE=0
         fi
-    done
+
+        # Also check config.yaml for beta_channel setting if not determined yet
+        if [ "$BETA_MODE" -eq 0 ]; then
+            for cfg in /opt/etc/natbypass/config.yaml /etc/natbypass/config.yaml ./config.yaml; do
+                if [ -f "$cfg" ] && grep -q "beta_channel: true" "$cfg" 2>/dev/null; then
+                    BETA_MODE=1
+                    break
+                fi
+            done
+        fi
+    fi
 
     # Resolve latest release tag (with jsDelivr CDN & ghproxy fallbacks for blocked regions)
     TAG=""

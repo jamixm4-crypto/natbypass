@@ -234,6 +234,22 @@ func (s *Server) SetVersion(v string) {
 	s.version = v
 }
 
+// isDiskBinaryUpdated проверяет, был ли бинарный файл на диске заменен/обновлен после запуска текущего процесса
+func (s *Server) isDiskBinaryUpdated() bool {
+	execPath, err := os.Executable()
+	if err != nil || execPath == "" {
+		return false
+	}
+	fi, err := os.Stat(execPath)
+	if err != nil {
+		return false
+	}
+	if s.state == nil || s.state.StartedAt.IsZero() {
+		return false
+	}
+	return fi.ModTime().After(s.state.StartedAt.Add(3 * time.Second))
+}
+
 // GetDeviceName возвращает текущее имя устройства
 func (s *Server) GetDeviceName() string {
 	return s.deviceName
@@ -362,6 +378,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/update/apply", s.handleUpdateApply)
 	mux.HandleFunc("/api/update/status", s.handleUpdateStatus)
 	mux.HandleFunc("/api/update/channel", s.handleUpdateChannel)
+	mux.HandleFunc("/api/system/restart", s.handleSystemRestart)
 	// Профили сети (Multi-Profile Mesh Networks)
 	mux.HandleFunc("/api/profiles", s.handleProfilesList)
 	mux.HandleFunc("/api/awg/generate-random", s.handleAWGGenerateRandom)
@@ -832,8 +849,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status := map[string]interface{}{
-		"version":         ver,
-		"device_id":       s.state.DeviceID,
+		"version":              ver,
+		"pid":                  os.Getpid(),
+		"disk_binary_updated":  s.isDiskBinaryUpdated(),
+		"device_id":            s.state.DeviceID,
 		"device_name":     s.deviceName,
 		"virtual_ip":      vip,
 		"public_ip":       s.state.PublicIP,
@@ -1650,8 +1669,10 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]interface{}{
-		"version":            ver,
-		"nat_type":           natType,
+		"version":             ver,
+		"pid":                 os.Getpid(),
+		"disk_binary_updated": s.isDiskBinaryUpdated(),
+		"nat_type":            natType,
 		"ip_conflict":        hasIPConflict,
 		"conflict_peer_name": conflictPeerName,
 		"conflict_ip":        conflictIP,
@@ -2278,7 +2299,13 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		strings.Contains(strings.ToLower(ver), "rc") ||
 		strings.Contains(ver, "-")
 
-	if !hasExplicitChannel || channel == "" {
+	if strings.EqualFold(channel, "stable") {
+		includePre = false
+		channel = "stable"
+	} else if strings.EqualFold(channel, "beta") {
+		includePre = true
+		channel = "beta"
+	} else if !hasExplicitChannel || channel == "" {
 		if (s.cfg != nil && s.cfg.App.BetaChannel) || isCurrentBeta {
 			includePre = true
 			channel = "beta"
@@ -2288,12 +2315,6 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		} else {
 			channel = "stable"
 		}
-	} else if channel == "stable" && !includePre && isCurrentBeta && r.URL.Query().Get("force_stable") != "true" {
-		// Защита: если клиент работает на тестовой сборке (например, v1.9.222-beta.13),
-		// но UI передал дефолтный channel=stable без явного намерения отката (force_stable=true),
-		// остаёмся на beta-ветке, чтобы автоматически находить beta.14+!
-		includePre = true
-		channel = "beta"
 	}
 
 	opts := updater.CheckOptions{
@@ -2334,7 +2355,13 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 			strings.Contains(strings.ToLower(ver), "rc") ||
 			strings.Contains(ver, "-")
 		includePre := req.IncludePrerelease || strings.EqualFold(req.Channel, "beta")
-		if !includePre && ((s.cfg != nil && s.cfg.App.BetaChannel) || isCurrentBeta) {
+		if strings.EqualFold(req.Channel, "stable") {
+			includePre = false
+			req.Channel = "stable"
+		} else if strings.EqualFold(req.Channel, "beta") {
+			includePre = true
+			req.Channel = "beta"
+		} else if !includePre && ((s.cfg != nil && s.cfg.App.BetaChannel) || isCurrentBeta) {
 			includePre = true
 			req.Channel = "beta"
 		}
@@ -2360,6 +2387,27 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, map[string]string{
 		"message": "Обновление запущено в фоновом режиме",
 	}, "")
+}
+
+// handleSystemRestart — POST /api/system/restart — ручной перезапуск службы NatBypass
+func (s *Server) handleSystemRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	s.AddEvent("info", "Запущен перезапуск службы NatBypass из панели управления", "")
+	s.jsonResponse(w, http.StatusOK, map[string]string{
+		"message": "Перезапуск службы запущен",
+	}, "")
+
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		execPath, err := os.Executable()
+		if err != nil {
+			execPath = os.Args[0]
+		}
+		updater.RestartService(execPath)
+	}()
 }
 
 // handleUpdateStatus — GET /api/update/status — статус процесса обновления

@@ -1088,7 +1088,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.221-beta.10</span>
+          <span id="topUpdateLabel">v1.9.222-beta.14</span>
         </button>
 
         <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
@@ -1099,7 +1099,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.221-beta.10</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.222-beta.14</span>
           <div class="online-dot"></div>
         </div>
 
@@ -1112,6 +1112,19 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     <!-- TAB 1: DASHBOARD (EXACT SCREENSHOT LAYOUT) -->
     <div id="tab-dashboard" class="tab-pane active">
+      <!-- Service Restart Banner when binary updated on disk -->
+      <div id="bannerBinaryUpdated" style="display:none; background: linear-gradient(135deg, rgba(14,165,233,0.2), rgba(15,23,42,0.95)); border: 2px solid #38bdf8; border-radius: 12px; padding: 12px 18px; margin-bottom: 14px; align-items: center; justify-content: space-between; gap: 14px; box-shadow: 0 0 20px rgba(56,189,248,0.25);">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="font-size:1.8rem;">📦</span>
+          <div>
+            <div style="font-weight:800; font-size:0.95rem; color:#38bdf8;">Обнаружен обновлённый файл NatBypass на диске!</div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">Новая версия уже установлена на накопителе, но служба всё ещё работает со старой версией в оперативной памяти.</div>
+          </div>
+        </div>
+        <button onclick="triggerServiceRestart()" class="btn btn-primary" style="background: linear-gradient(135deg, #0284c7, #06b6d4); flex-shrink:0; font-weight:700; font-size:0.85rem; padding:8px 16px; cursor:pointer;">
+          🔄 Перезапустить службу
+        </button>
+      </div>
       <!-- IP Conflict Warning Banner -->
       <!-- R5: NetworkKey missing — Plaintext mode warning -->
       <div id="bannerNoEncryption" style="display:none; background: linear-gradient(135deg, rgba(245,158,11,0.2), rgba(15,23,42,0.9)); border: 2px solid #f59e0b; border-radius: 12px; padding: 14px 18px; margin-bottom: 14px; align-items: center; justify-content: space-between; gap: 14px; box-shadow: 0 0 20px rgba(245,158,11,0.25);">
@@ -2600,6 +2613,19 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       btnCheck.disabled = false;
     }
 
+    async function triggerServiceRestart() {
+      try {
+        const res = await fetch('/api/system/restart', { method: 'POST' });
+        const json = await res.json();
+        showToast('🔄 Отправлена команда перезапуска службы NatBypass...');
+        setTimeout(() => {
+          waitForServiceRestart();
+        }, 800);
+      } catch (e) {
+        showToast('⚠️ Ошибка вызова перезапуска: ' + e.message);
+      }
+    }
+
     async function applyUpdateNow() {
       const btnApply = document.getElementById('btnApplyUpdate');
       const btnCheck = document.getElementById('btnCheckUpdate');
@@ -2616,6 +2642,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       progStatus.innerText = 'Запуск скачивания...';
 
       const isBeta = document.getElementById('toggleBetaChannel') ? document.getElementById('toggleBetaChannel').checked : false;
+      const isRollback = cachedUpdateInfo ? (cachedUpdateInfo.is_rollback || false) : false;
+      const targetChannel = isRollback ? 'stable' : (isBeta ? 'beta' : 'stable');
 
       try {
         const assetUrl = cachedUpdateInfo ? cachedUpdateInfo.asset_url : '';
@@ -2624,13 +2652,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             asset_url: assetUrl,
-            include_prerelease: isBeta,
-            channel: isBeta ? 'beta' : 'stable'
+            include_prerelease: isRollback ? false : isBeta,
+            channel: targetChannel
           })
         });
         const json = await res.json();
         if (json.ok) {
-          showToast('⏳ Скачивание новой версии...');
+          showToast(isRollback ? '⏳ Загрузка стабильной версии...' : '⏳ Скачивание новой версии...');
           pollUpdateStatus();
         } else {
           progStatus.innerText = 'Ошибка: ' + (json.error || 'Не удалось запустить обновление');
@@ -2682,7 +2710,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           }
         } catch (e) {
           fetchFailures++;
-          // Если скачивание началось (>30%) и соединение разорвалось (роутер перезапускает службу) — переходим в режим ожидания перезапуска
+          // Если скачивание началось (>30%) и соединение разорвалось (служба перезапускается) — переходим к ожиданию
           if (lastPct >= 30 || fetchFailures >= 2) {
             clearInterval(updatePollTimer);
             waitForServiceRestart();
@@ -2690,7 +2718,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
       }, 600);
     }
-
 
     function waitForServiceRestart() {
       const progStatus = document.getElementById('updateProgressStatus');
@@ -2700,17 +2727,21 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (progBar) progBar.style.width = '100%';
       if (progPct) progPct.innerText = '100%';
       if (progStatus) {
-        progStatus.innerText = '🔄 Роутер перезапускает службу NatBypass с новой версией...';
+        progStatus.innerText = '🔄 Перезапуск службы NatBypass с новой версией...';
         progStatus.style.color = '#38bdf8';
       }
 
+      const targetVersion = cachedUpdateInfo ? (cachedUpdateInfo.latest_version || '').replace(/^v/, '').trim() : '';
+      const oldVersion = cachedUpdateInfo ? (cachedUpdateInfo.current_version || '').replace(/^v/, '').trim() : '';
+
       let attempts = 0;
+      let hasDropped = false;
       const maxAttempts = 60; // до 30 секунд (по 500мс)
       
       const checkInterval = setInterval(async () => {
         attempts++;
         if (progStatus && attempts > 3) {
-          progStatus.innerText = `🔄 Ожидание готовности службы NatBypass (${Math.round(attempts/2)}с)...`;
+          progStatus.innerText = `🔄 Ожидание перезапуска службы NatBypass (${Math.round(attempts/2)}с)...`;
           progStatus.style.color = '#38bdf8';
         }
 
@@ -2719,30 +2750,43 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           if (res.ok) {
             const json = await res.json();
             if (json.ok && json.data) {
-              const newV = json.data.version || '';
-              // Убеждаемся, что демон перезапустился и уже возвращает ответ
-              if (attempts >= 4 || (cachedUpdateInfo && newV && newV.replace(/^v/,'') === (cachedUpdateInfo.latest_version||'').replace(/^v/,''))) {
+              const curV = (json.data.version || '').replace(/^v/, '').trim();
+              const isTargetReached = targetVersion && curV === targetVersion;
+              const isVersionChanged = oldVersion && curV && curV !== oldVersion;
+
+              // Завершаем ТОЛЬКО когда версия реально обновилась (или после подтвержденного разрыва соединения)
+              if (isTargetReached || isVersionChanged || (hasDropped && attempts >= 10)) {
                 clearInterval(checkInterval);
                 if (progStatus) {
-                  progStatus.innerText = '✓ Новая версия (v' + newV.replace(/^v/,'') + ') успешно запущена! Обновление страницы...';
+                  progStatus.innerText = '✓ Новая версия (v' + curV + ') успешно запущена! Обновление страницы...';
                   progStatus.style.color = '#10b981';
                 }
-                showToast('🎉 NatBypass успешно обновлен до v' + newV.replace(/^v/,'') + '!');
+                showToast('🎉 NatBypass успешно запущен на версии v' + curV + '!');
                 setTimeout(() => {
                   window.location.replace(window.location.origin + window.location.pathname + '?v=' + Date.now());
-                }, 500);
+                }, 800);
                 return;
               }
+
+              // Если служба отвечает старой версией больше 7 секунд (14 попыток) — авто-перезапуск не прошел
+              if (attempts >= 14 && !isVersionChanged) {
+                if (progStatus) {
+                  progStatus.innerHTML = `⚠️ Файл обновления сохранён на диск, но служба работает со старой версией в памяти.<br><button onclick="triggerServiceRestart()" class="btn btn-warning" style="margin-top:8px; font-size:0.8rem; padding:6px 14px; font-weight:700; cursor:pointer;">🔄 Перезапустить службу сейчас</button>`;
+                  progStatus.style.color = '#fbbf24';
+                }
+              }
             }
+          } else {
+            hasDropped = true;
           }
         } catch (e) {
-          // Ждём старта службы
+          hasDropped = true;
         }
 
         if (attempts >= maxAttempts) {
           clearInterval(checkInterval);
           if (progStatus) {
-            progStatus.innerHTML = `⚠️ Служба перезапускается. <button onclick="window.location.replace(window.location.pathname + '?v=' + Date.now())" class="btn btn-glass" style="margin-left:8px; padding:3px 8px;">🔄 Обновить сейчас</button>`;
+            progStatus.innerHTML = `⚠️ Служба перезапускается или требует ручного перезапуска. <button onclick="triggerServiceRestart()" class="btn btn-warning" style="margin-top:6px; font-size:0.8rem; padding:4px 10px; cursor:pointer;">🔄 Перезапустить</button> <button onclick="window.location.replace(window.location.pathname + '?v=' + Date.now())" class="btn btn-glass" style="margin-top:6px; margin-left:6px; font-size:0.8rem; padding:4px 10px; cursor:pointer;">Обновить страницу</button>`;
             progStatus.style.color = '#fbbf24';
           }
           document.getElementById('btnCheckUpdate').style.display = 'inline-flex';
@@ -3233,6 +3277,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           // has_network_key is false or missing → show warning
           const hasKey = d.has_network_key === true || d.has_network_key === 1;
           bannerNoEnc.style.display = hasKey ? 'none' : 'flex';
+        }
+
+        // Show/hide updated binary notification banner
+        const bannerBinUpd = document.getElementById('bannerBinaryUpdated');
+        if (bannerBinUpd) {
+          bannerBinUpd.style.display = d.disk_binary_updated ? 'flex' : 'none';
         }
 
           document.getElementById('statPeersCount').innerText = totalPeers;
