@@ -67,21 +67,21 @@ fun MainScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
+            val context = LocalContext.current
             var menuExpanded by remember { mutableStateOf(false) }
+            val vName = remember {
+                try {
+                    val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                    "v" + (pInfo.versionName ?: "1.6.9")
+                } catch (e: Exception) {
+                    "v1.6.9"
+                }
+            }
+            val isBeta = remember {
+                context.getSharedPreferences("natbypass_prefs", android.content.Context.MODE_PRIVATE).getBoolean("beta_channel", false)
+            }
             TopAppBar(
                 title = {
-                    val context = LocalContext.current
-                    val vName = remember {
-                        try {
-                            val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-                            "v" + (pInfo.versionName ?: "1.6.9")
-                        } catch (e: Exception) {
-                            "v1.6.9"
-                        }
-                    }
-                    val isBeta = remember {
-                        context.getSharedPreferences("natbypass_prefs", android.content.Context.MODE_PRIVATE).getBoolean("beta_channel", false)
-                    }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(end = 4.dp)
