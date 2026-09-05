@@ -62,11 +62,12 @@ class NatBypassVpnService : VpnService() {
 
     private fun startForegroundCompat(notification: Notification) {
         try {
-            if (Build.VERSION.SDK_INT >= 34) { // Android 14+ (API 34)
+            if (Build.VERSION.SDK_INT >= 34) { // Android 14+ (API 34, 35, 36)
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
                 )
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { // Android 10-13 (API 29-33)
                 startForeground(

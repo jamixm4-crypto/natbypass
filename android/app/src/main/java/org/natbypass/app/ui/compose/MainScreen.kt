@@ -1,5 +1,7 @@
 package org.natbypass.app.ui.compose
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -77,8 +79,18 @@ fun MainScreen(
                     "v1.6.9"
                 }
             }
-            val isBeta = remember {
-                context.getSharedPreferences("natbypass_prefs", android.content.Context.MODE_PRIVATE).getBoolean("beta_channel", false)
+            val prefs = remember { context.getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE) }
+            var isBeta by remember { mutableStateOf(prefs.getBoolean("beta_channel", false)) }
+            DisposableEffect(prefs) {
+                val listener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+                    if (key == "beta_channel") {
+                        isBeta = sp.getBoolean("beta_channel", false)
+                    }
+                }
+                prefs.registerOnSharedPreferenceChangeListener(listener)
+                onDispose {
+                    prefs.unregisterOnSharedPreferenceChangeListener(listener)
+                }
             }
             TopAppBar(
                 title = {

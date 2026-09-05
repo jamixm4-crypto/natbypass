@@ -1,6 +1,7 @@
 package org.natbypass.app.ui.compose
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +33,22 @@ fun UpdateDialog(
     val coroutineScope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE) }
     var betaChannel by remember { mutableStateOf(prefs.getBoolean("beta_channel", false)) }
+
+    LaunchedEffect(state) {
+        betaChannel = prefs.getBoolean("beta_channel", false)
+    }
+
+    DisposableEffect(prefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+            if (key == "beta_channel") {
+                betaChannel = sp.getBoolean("beta_channel", false)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
 
     when (state) {
         is UpdateState.Idle -> {}

@@ -1,6 +1,7 @@
 package org.natbypass.app.ui.compose
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
@@ -72,6 +73,17 @@ fun SettingsScreen(
     var tgProxy         by remember { mutableStateOf("") }
 
     var betaChannel     by remember { mutableStateOf(prefs.getBoolean("beta_channel", false)) }
+    DisposableEffect(prefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+            if (key == "beta_channel") {
+                betaChannel = sp.getBoolean("beta_channel", false)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
     val versionName     = remember {
         try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.9.221-beta.1" }
         catch (_: Exception) { "1.9.221-beta.1" }

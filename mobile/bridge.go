@@ -200,7 +200,7 @@ func StartEngine(configYAML string, tunFd int) string {
 	// Если движок уже активен и передан валидный TUN fd - привязываем TUN к работающему сокету
 	if engineRunning {
 		if tunFd > 0 {
-			attachTUN(tunFd)
+			attachTUNLocked(tunFd)
 			go func() {
 				time.Sleep(500 * time.Millisecond)
 				RefreshPublicIP()
@@ -673,7 +673,7 @@ func StartEngine(configYAML string, tunFd int) string {
 
 
 	if tunFd > 0 {
-		attachTUN(tunFd)
+		attachTUNLocked(tunFd)
 	}
 
 	engineRunning = true
@@ -681,17 +681,16 @@ func StartEngine(configYAML string, tunFd int) string {
 	return "OK"
 }
 
-func attachTUN(tunFd int) {
+// attachTUNLocked привязывает дескриптор TUN к движку. Вызывающий код ОБЯЗАН удерживать engineMu!
+func attachTUNLocked(tunFd int) {
 	if tunFd <= 0 {
 		return
 	}
-	engineMu.Lock()
 	if globalTunFile != nil {
 		_ = globalTunFile.Close()
 		globalTunFile = nil
 	}
 	globalTunFile = os.NewFile(uintptr(tunFd), "tun")
-	engineMu.Unlock()
 
 	if globalPuncher != nil && globalTunFile != nil {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
@@ -932,6 +931,13 @@ func calcChecksum(data []byte) uint16 {
 		sum = (sum & 0xffff) + (sum >> 16)
 	}
 	return ^uint16(sum)
+}
+
+// AttachTUN привязывает дескриптор TUN-интерфейса к работающему движку (для вызова из GoMobile)
+func AttachTUN(tunFd int) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	attachTUNLocked(tunFd)
 }
 
 // DetachTUN отключает TUN-интерфейс без остановки сигнального канала
