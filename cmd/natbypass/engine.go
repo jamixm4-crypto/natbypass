@@ -284,7 +284,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					if exitVIP == "" {
 						exitVIP = selStr
 					}
-					if err := tunnel.EnableExitNodeRouting(exitVIP, exitPeer.ActiveEndpoint, exitPeer.STUNAddr, exitPeer.PublicIP); err != nil {
+					// S3: Собираем все IP которые должны идти через физический шлюз (не через VPN)
+					// чтобы не разорвать соединение с сигналинговыми серверами при активации exit node
+					bypassIPs := []string{exitPeer.ActiveEndpoint, exitPeer.STUNAddr, exitPeer.PublicIP}
+					// Добавляем STUN-серверы из конфига
+					for _, stunURL := range cfg.Network.StunServers {
+						bypassIPs = append(bypassIPs, stunURL)
+					}
+					// Добавляем MQTT-брокер из активного профиля
+					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.MQTTBroker != "" {
+						bypassIPs = append(bypassIPs, activeProf.MQTTBroker)
+					}
+					if err := tunnel.EnableExitNodeRouting(exitVIP, bypassIPs...); err != nil {
 						log.Warn().Err(err).Str("exit_vip", exitVIP).Msg("Failed to enable exit node routing")
 					} else {
 						activeExitVIP = exitVIP

@@ -97,6 +97,8 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	if isKeeneticDevice() {
 		ensureIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "nb0", "-j", "ACCEPT")
 		ensureIptablesRule(ipt, "", "_NDM_FORWARD", "-o", "nb0", "-j", "ACCEPT")
+		// S5: Keenetic NDM блокирует ICMP по умолчанию — добавляем правило для пинга
+		ensureIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-p", "icmp", "-j", "ACCEPT")
 	}
 
 	// 3. Bi-directional TCP MSS Clamping
@@ -118,6 +120,7 @@ var (
 )
 
 // StartLinuxNATWatchdog запускает фоновый сторож целостности правил iptables ТОЛЬКО на KeeneticOS (каждые 60 сек).
+// S5: Расширен — проверяет и восстанавливает FORWARD, INPUT (ICMP) и MASQUERADE правила при сбросе цепочек NDM.
 func StartLinuxNATWatchdog(ctx context.Context, subnet string) {
 	if !isKeeneticDevice() {
 		return
@@ -139,9 +142,30 @@ func StartLinuxNATWatchdog(ctx context.Context, subnet string) {
 			case <-wCtx.Done():
 				return
 			case <-ticker.C:
-				cmd := exec.Command(ipt, "-w", "2", "-t", "nat", "-C", "POSTROUTING", "-s", subnet, "!", "-o", "nb0", "-j", "MASQUERADE")
-				if err := cmd.Run(); err != nil {
-					// Правило исчезло (сброс цепочек NDM при смене WAN) -> восстанавливаем
+				needRestore := false
+
+				// Проверяем MASQUERADE в nat POSTROUTING
+				if err := exec.Command(ipt, "-w", "2", "-t", "nat", "-C", "POSTROUTING",
+					"-s", subnet, "!", "-o", "nb0", "-j", "MASQUERADE").Run(); err != nil {
+					needRestore = true
+				}
+
+				// S5: Проверяем FORWARD правила для nb0
+				if err := exec.Command(ipt, "-w", "2", "-C", "FORWARD",
+					"-i", "nb0", "-j", "ACCEPT").Run(); err != nil {
+					needRestore = true
+				}
+
+				// S5: Проверяем INPUT ICMP через nb0 (Keenetic NDM блокирует ICMP без этого)
+				if err := exec.Command(ipt, "-w", "2", "-C", "INPUT",
+					"-i", "nb0", "-p", "icmp", "-j", "ACCEPT").Run(); err != nil {
+					// Восстанавливаем ICMP без полного сброса
+					_ = exec.Command(ipt, "-w", "2", "-I", "INPUT",
+						"-i", "nb0", "-p", "icmp", "-j", "ACCEPT").Run()
+				}
+
+				if needRestore {
+					// Полное восстановление через EnableHostIPForwardingSubnet
 					_ = EnableHostIPForwardingSubnet(subnet)
 				}
 			}

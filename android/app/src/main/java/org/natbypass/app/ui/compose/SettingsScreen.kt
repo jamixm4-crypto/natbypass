@@ -85,8 +85,8 @@ fun SettingsScreen(
         }
     }
     val versionName     = remember {
-        try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.9.221-beta.7" }
-        catch (_: Exception) { "1.9.221-beta.7" }
+        try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.9.221-beta.8" }
+        catch (_: Exception) { "1.9.221-beta.8" }
     }
 
     // Initialize from Active Profile in MobileBridge

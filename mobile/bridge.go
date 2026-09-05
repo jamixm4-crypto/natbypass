@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.221-beta.7"
+const Version = "1.9.221-beta.8"
 
 
 
@@ -120,8 +120,10 @@ var (
 	globalPublicIP  string
 	globalIPv6      string
 	globalSTUN      string
-	globalVirtualIP string = ""
-	globalStarted   time.Time
+	// S4: atomicGetVIP() теперь atomic.Value для безопасного чтения из горутин
+	// без захвата engineMu (TUN loop, signaling ticker читают без блокировки)
+	globalVirtualIP  sync.Map // used as atomic string via atomicGetVIP/atomicSetVIP
+	globalStarted    time.Time
 	globalExitNode         string
 	globalAllowExitNode    bool
 	globalAdvertisedRoutes []string
@@ -133,6 +135,21 @@ var (
 	globalRxBytes   uint64
 	logger          zerolog.Logger
 )
+
+// atomicGetVIP возвращает текущий виртуальный IP атомарно (без блокировки engineMu).
+func atomicGetVIP() string {
+	if v, ok := globalVirtualIP.Load("vip"); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// atomicSetVIP устанавливает виртуальный IP атомарно.
+func atomicSetVIP(vip string) {
+	globalVirtualIP.Store("vip", vip)
+}
 
 
 func deriveInitialVirtualIP(devID string) string {
@@ -170,7 +187,7 @@ func negotiateVirtualIP() {
 		}
 	}
 
-	conflictDev, hasConflict := usedIPs[globalVirtualIP]
+	conflictDev, hasConflict := usedIPs[atomicGetVIP()]
 	if hasConflict && conflictDev != "" {
 		if globalDevID > conflictDev {
 			prefix := "100.64.200"
@@ -180,7 +197,7 @@ func negotiateVirtualIP() {
 			for i := 10; i <= 250; i++ {
 				cand := fmt.Sprintf("%s.%d", prefix, i)
 				if _, used := usedIPs[cand]; !used {
-					globalVirtualIP = cand
+					atomicSetVIP(cand)
 					break
 				}
 			}
@@ -242,7 +259,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		cfg.App.DeviceID = devID
 	}
 	globalDevID = devID
-	globalVirtualIP = config.ResolveVirtualIP(cfg, devID)
+	atomicSetVIP(config.ResolveVirtualIP(cfg, devID))
 	if cfg.App.DeviceName != "" {
 		globalDevName = cfg.App.DeviceName
 	} else if globalDevName == "" {
@@ -449,7 +466,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					IPv6Addr:         globalIPv6,
 					WGPubKey:         wgKey.PublicKey,
 					WGPort:           pPort,
-					VirtualIP:        globalVirtualIP,
+					VirtualIP:        atomicGetVIP(),
 					DirectP2P:        hasDirect,
 					NATType:          natTypeStr,
 					IsExitNode:       globalAllowExitNode || cfg.Network.AllowExitNode,
@@ -812,7 +829,7 @@ func attachTUNLocked(tunFd int) {
 						}
 
 
-						cleanVIP := strings.TrimSpace(strings.Split(globalVirtualIP, "/")[0])
+						cleanVIP := strings.TrimSpace(strings.Split(atomicGetVIP(), "/")[0])
 						if destIP.String() == cleanVIP {
 							if tf != nil {
 								_, _ = tf.Write(pkt)
@@ -1009,7 +1026,7 @@ func SendOfflineBeacon() {
 
 	payload := &signaling.Payload{
 		DeviceID:  globalDevID,
-		VirtualIP: globalVirtualIP,
+		VirtualIP: atomicGetVIP(),
 		Offline:   true,
 		Leave:     true,
 		Timestamp: time.Now(),
@@ -1043,7 +1060,7 @@ func StopEngine() {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		leavePayload := &signaling.Payload{
 			DeviceID:  globalDevID,
-			VirtualIP: globalVirtualIP,
+			VirtualIP: atomicGetVIP(),
 			Offline:   true,
 			Leave:     true,
 			Timestamp: time.Now(),
@@ -1218,7 +1235,7 @@ func RefreshPublicIP() {
 				}
 			}
 
-			cleanVIP := strings.TrimSpace(strings.Split(globalVirtualIP, "/")[0])
+			cleanVIP := strings.TrimSpace(strings.Split(atomicGetVIP(), "/")[0])
 			payload := &signaling.Payload{
 				DeviceID:         globalDevID,
 				Nickname:         globalDevName,
@@ -1328,7 +1345,7 @@ func SetVirtualIP(vip string) {
 	defer engineMu.Unlock()
 	clean := strings.TrimSpace(strings.Split(vip, "/")[0])
 	if clean != "" {
-		globalVirtualIP = clean
+		atomicSetVIP(clean)
 		if globalConfig != nil {
 			globalConfig.Network.Address = clean
 			if p := globalConfig.EnsureActiveProfile(); p != nil {
@@ -1342,8 +1359,8 @@ func SetVirtualIP(vip string) {
 func GetVirtualIP() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
-	if globalVirtualIP != "" {
-		return globalVirtualIP
+	if atomicGetVIP() != "" {
+		return atomicGetVIP()
 	}
 	if globalDevID != "" {
 		return deriveInitialVirtualIP(globalDevID)
@@ -1668,7 +1685,7 @@ func GetFullTelemetryJSON() string {
 		"device_name":     globalDevName,
 		"public_ip":       globalPublicIP,
 		"stun_addr":       globalSTUN,
-		"virtual_ip":      globalVirtualIP,
+		"virtual_ip":      atomicGetVIP(),
 		"peers_count":     peersCount,
 		"direct_p2p":      directCount > 0,
 		"direct_count":    directCount,
@@ -2057,8 +2074,8 @@ func SwitchProfile(profileID string) bool {
 		return false
 	}
 
-	globalVirtualIP = config.ResolveVirtualIP(globalConfig, globalDevID)
-	globalConfig.Network.Address = globalVirtualIP
+	atomicSetVIP(config.ResolveVirtualIP(globalConfig, globalDevID))
+	globalConfig.Network.Address = atomicGetVIP()
 
 	if globalRegistry != nil {
 		globalRegistry.ClearAll()
@@ -2131,8 +2148,8 @@ func ImportProfileURI(rawURI string) string {
 
 	parsed.IsActive = true
 	saved := globalConfig.AddOrUpdateProfile(*parsed)
-	globalVirtualIP = config.ResolveVirtualIP(globalConfig, globalDevID)
-	globalConfig.Network.Address = globalVirtualIP
+	atomicSetVIP(config.ResolveVirtualIP(globalConfig, globalDevID))
+	globalConfig.Network.Address = atomicGetVIP()
 	rebuildSignalingInternal(saved)
 	engineMu.Unlock()
 
@@ -2167,8 +2184,8 @@ func rebuildSignalingInternal(p *config.Profile) {
 	}
 
 	if globalConfig != nil && globalDevID != "" {
-		globalVirtualIP = config.ResolveVirtualIP(globalConfig, globalDevID)
-		globalConfig.Network.Address = globalVirtualIP
+		atomicSetVIP(config.ResolveVirtualIP(globalConfig, globalDevID))
+		globalConfig.Network.Address = atomicGetVIP()
 	}
 }
 
@@ -2267,7 +2284,7 @@ func SetProfileVirtualIP(profileID, vip string) bool {
 			globalConfig.Profiles[i].VirtualIP = cleanVIP
 			if globalConfig.Profiles[i].IsActive || globalConfig.ActiveProfileID == profileID {
 				globalConfig.Network.Address = cleanVIP
-				globalVirtualIP = cleanVIP
+				atomicSetVIP(cleanVIP)
 			}
 			return true
 		}
