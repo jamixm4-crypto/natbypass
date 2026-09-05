@@ -467,6 +467,8 @@ var (
 	allowExitNode      bool
 	hBtnAddLocalSubnet uintptr
 	hEditAdvSubnets    uintptr
+	hBtnApplySubnets   uintptr
+	hBtnClearSubnets   uintptr
 
 	// Вкладка 6: Диагностика и Журнал
 	hBtnRunDiag    uintptr
@@ -609,6 +611,8 @@ const (
 	ID_BTN_CHECK_UPDATE      = 4055
 	ID_BTN_EXIT_NODE_DISABLE = 4056
 	ID_BTN_TOGGLE_BETA       = 4057
+	ID_BTN_APPLY_SUBNETS     = 4058
+	ID_BTN_CLEAR_SUBNETS     = 4059
 	WM_CHECK_UPDATE_DONE     = 0x8000 + 105
 
 	// Профили
@@ -1251,6 +1255,11 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 				return 0
 			}
 		}
+		if lParam == hEditAdvSubnets && hEditAdvSubnets != 0 {
+			if HIWORD(wParam) == 0x0200 /* EN_KILLFOCUS */ {
+				handleAdvSubnetsChange()
+			}
+		}
 		handleCommand(id)
 		return 0
 
@@ -1864,10 +1873,45 @@ func handleCommand(id uint16) {
 			newText := strings.Join(parts, ", ")
 			setControlText(hEditAdvSubnets, newText)
 			addLog("🏠 Добавлена локальная подсеть: " + strings.Join(added, ", "))
+			handleAdvSubnetsChange()
 			saveConfigFromUI()
+			triggerPublish()
 		} else {
 			addLog("💡 Все обнаруженные локальные подсети уже добавлены (" + strings.Join(localSubnets, ", ") + ")")
 		}
+
+	case ID_BTN_APPLY_SUBNETS:
+		handleAdvSubnetsChange()
+		saveConfigFromUI()
+		triggerPublish()
+		buttonLabels[ID_BTN_APPLY_SUBNETS] = "✓ ПРИМЕНЕНО!"
+		if hBtnApplySubnets != 0 {
+			procInvalidateRect.Call(hBtnApplySubnets, 0, 1)
+		}
+		time.AfterFunc(2*time.Second, func() {
+			buttonLabels[ID_BTN_APPLY_SUBNETS] = "💾 Применить подсети"
+			if hBtnApplySubnets != 0 {
+				procInvalidateRect.Call(hBtnApplySubnets, 0, 1)
+			}
+		})
+
+	case ID_BTN_CLEAR_SUBNETS:
+		if hEditAdvSubnets != 0 {
+			setControlText(hEditAdvSubnets, "")
+		}
+		handleAdvSubnetsChange()
+		saveConfigFromUI()
+		triggerPublish()
+		buttonLabels[ID_BTN_CLEAR_SUBNETS] = "✓ ОЧИЩЕНО!"
+		if hBtnClearSubnets != 0 {
+			procInvalidateRect.Call(hBtnClearSubnets, 0, 1)
+		}
+		time.AfterFunc(2*time.Second, func() {
+			buttonLabels[ID_BTN_CLEAR_SUBNETS] = "❌ Очистить / Отключить"
+			if hBtnClearSubnets != 0 {
+				procInvalidateRect.Call(hBtnClearSubnets, 0, 1)
+			}
+		})
 	}
 }
 
@@ -3691,12 +3735,21 @@ func buildModernUI(hInstance uintptr) {
 	btnSubnetToggleDirect := createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+425, 182, 415, 38, ID_BTN_TOGGLE_SUBNET, "normal")
 
 	lblAdvSubnets := createLabel(hInstance, "Список анонсируемых подсетей (через запятую, напр. 192.168.1.0/24):", cx, 230, 480, 20, hFontNormal)
-	hEditAdvSubnets = createEdit(hInstance, "", cx+490, 226, 350, 28, false, false, hFontNormal)
+	initSubnets := ""
+	if cfg != nil && len(cfg.Network.AdvertisedSubnets) > 0 {
+		initSubnets = strings.Join(cfg.Network.AdvertisedSubnets, ", ")
+	}
+	hEditAdvSubnets = createEdit(hInstance, initSubnets, cx+490, 226, 350, 28, false, false, hFontNormal)
+
+	lblAdvHint := createLabel(hInstance, "💡 Любые изменения и очистка подсетей сохраняются и рассылаются узлам автоматически.", cx, 274, 470, 20, hFontNormal)
+	hBtnApplySubnets = createOwnerDrawButton(hInstance, "💾 Применить подсети", cx+490, 266, 170, 34, ID_BTN_APPLY_SUBNETS, "normal")
+	hBtnClearSubnets = createOwnerDrawButton(hInstance, "❌ Очистить / Отключить", cx+670, 266, 170, 34, ID_BTN_CLEAR_SUBNETS, "normal")
 
 	tabPages[5] = []uintptr{
 		lblRoutingTitle, lblRoutingDesc,
 		lblExitHead, btnExitClientDirect, hBtnAllowExit,
 		lblSubnetHead, hBtnAddLocalSubnet, btnSubnetToggleDirect, lblAdvSubnets, hEditAdvSubnets,
+		lblAdvHint, hBtnApplySubnets, hBtnClearSubnets,
 	}
 
 	// СТРАНИЦА 6: ДИАГНОСТИКА И ЖУРНАЛ
@@ -3821,6 +3874,9 @@ func hideSplashScreen() {
 }
 
 func selectTab(index int) {
+	if currentTab == 5 && hEditAdvSubnets != 0 {
+		handleAdvSubnetsChange()
+	}
 	if isSplashActive {
 		hideSplashScreen()
 	}
@@ -4600,19 +4656,7 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 				if localIP == "" {
 					continue
 				}
-				var advSubnets []string
-				if cfg != nil && len(cfg.Network.AdvertisedSubnets) > 0 {
-					advSubnets = cfg.Network.AdvertisedSubnets
-				} else if hEditAdvSubnets != 0 {
-					subnetsRaw := strings.TrimSpace(getControlText(hEditAdvSubnets))
-					if subnetsRaw != "" {
-						for _, sp := range strings.Split(subnetsRaw, ",") {
-							if t := strings.TrimSpace(sp); t != "" {
-								advSubnets = append(advSubnets, t)
-							}
-						}
-					}
-				}
+				advSubnets := getAdvertisedSubnetsFromUI()
 				var awgParams *signaling.AWGParams
 				if hEditAwgJc != 0 {
 					jc, _ := strconv.Atoi(strings.TrimSpace(getControlText(hEditAwgJc)))
@@ -5187,6 +5231,50 @@ func negotiateVirtualIP() {
 	}
 }
 
+func getAdvertisedSubnetsFromUI() []string {
+	if hEditAdvSubnets != 0 {
+		subnetsRaw := strings.TrimSpace(getControlText(hEditAdvSubnets))
+		if subnetsRaw == "" {
+			return nil
+		}
+		var list []string
+		for _, sp := range strings.Split(subnetsRaw, ",") {
+			if t := strings.TrimSpace(sp); t != "" {
+				list = append(list, t)
+			}
+		}
+		return list
+	}
+	if cfg != nil {
+		return cfg.Network.AdvertisedSubnets
+	}
+	return nil
+}
+
+func handleAdvSubnetsChange() {
+	if hEditAdvSubnets == 0 {
+		return
+	}
+	subnets := getAdvertisedSubnetsFromUI()
+	oldStr := ""
+	if cfg != nil {
+		oldStr = strings.Join(cfg.Network.AdvertisedSubnets, ", ")
+	}
+	newStr := strings.Join(subnets, ", ")
+	if oldStr != newStr {
+		if cfg != nil {
+			cfg.Network.AdvertisedSubnets = subnets
+			_ = config.Save(cfg, configPath, false)
+		}
+		if len(subnets) == 0 {
+			addLog("🏠 Расшаривание локальных подсетей отключено (список очищен)")
+		} else {
+			addLog("🏠 Список анонсируемых подсетей сохранён: " + newStr)
+		}
+		triggerPublish()
+	}
+}
+
 func triggerPublish() {
 	select {
 	case triggerPublishCh <- struct{}{}:
@@ -5210,19 +5298,7 @@ func publishCurrentState(ctx context.Context) {
 		localAddr = fmt.Sprintf("%s:%d", localIP, pPort)
 	}
 
-	var advSubnets []string
-	if cfg != nil && len(cfg.Network.AdvertisedSubnets) > 0 {
-		advSubnets = cfg.Network.AdvertisedSubnets
-	} else if hEditAdvSubnets != 0 {
-		subnetsRaw := strings.TrimSpace(getControlText(hEditAdvSubnets))
-		if subnetsRaw != "" {
-			for _, sp := range strings.Split(subnetsRaw, ",") {
-				if t := strings.TrimSpace(sp); t != "" {
-					advSubnets = append(advSubnets, t)
-				}
-			}
-		}
-	}
+	advSubnets := getAdvertisedSubnetsFromUI()
 
 	var awgParams *signaling.AWGParams
 	if hEditAwgJc != 0 {
