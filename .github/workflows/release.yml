@@ -23,8 +23,6 @@ jobs:
           go-version: '1.22.12'
           cache: true
 
-
-
       - name: Compile Windows PE resources
         continue-on-error: true
         env:
@@ -35,7 +33,7 @@ jobs:
           go-winres make --in winres/winres.json --out cmd/natbypass-cli/rsrc
           go-winres make --in winres/winres.json --out cmd/natbypass-gui/rsrc
 
-      - name: Build Windows Binaries (without UPX)
+      - name: Build Windows Binaries
         env:
           CGO_ENABLED: '0'
           GOTOOLCHAIN: 'local'
@@ -49,23 +47,18 @@ jobs:
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-cli.exe ./cmd/natbypass-cli
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/NatBypass-Diag.exe ./cmd/natbypass-diag
 
-
       - name: Install Cosign (Sigstore)
         uses: sigstore/cosign-installer@v3
 
       - name: Sign Windows Binary with Sigstore
         run: |
-          cosign sign-blob --yes `
-            --output-signature build/NatBypass.exe.sig `
-            --output-certificate build/NatBypass.exe.pem `
-            build/NatBypass.exe
+          cosign sign-blob --yes --output-signature build/NatBypass.exe.sig --output-certificate build/NatBypass.exe.pem build/NatBypass.exe
 
       - name: Build Linux Cross-Platform Binaries
         env:
           CGO_ENABLED: '0'
           GOTOOLCHAIN: 'local'
           GOOS: linux
-
         run: |
           $VERSION = "${{ github.ref_name }}"
           $env:GOARCH = "amd64"
@@ -83,27 +76,25 @@ jobs:
           $env:GOMIPS = "softfloat"
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-router-mips ./cmd/natbypass
 
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          make_latest: ${{ !contains(github.ref_name, '-') }}
-          files: |
-            build/NatBypass.exe
-            build/NatBypass-GUI.exe
-            build/NatBypass-Diag.exe
-            build/NatBypass.exe.sig
-            build/NatBypass.exe.pem
-            build/natbypass-cli.exe
-            build/natbypass-linux-amd64
-            build/natbypass-linux-arm64
-            build/natbypass-keenetic-mipsle
-            build/natbypass-router-mipsle
-            build/natbypass-router-mips
+      - name: Upload Release Assets via GitHub CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $TAG = "${{ github.ref_name }}"
+          if ($TAG.Contains("-")) {
+            gh release view $TAG; if ($LASTEXITCODE -ne 0) { gh release create $TAG --title "NatBypass $TAG" --notes "NatBypass $TAG — P2P Mesh & AmneziaWG 2.0 Client." --prerelease --draft=false }
+          } else {
+            gh release view $TAG; if ($LASTEXITCODE -ne 0) { gh release create $TAG --title "NatBypass $TAG" --notes "NatBypass $TAG — P2P Mesh & AmneziaWG 2.0 Client." --latest --draft=false }
+          }
+          Get-ChildItem -Path "build/*" | ForEach-Object {
+            Write-Host "Uploading $($_.Name)..."
+            for ($attempt=1; $attempt -le 5; $attempt++) {
+              gh release upload $TAG $_.FullName --clobber
+              if ($LASTEXITCODE -eq 0) { break }
+              Start-Sleep -Seconds 3
+            }
+          }
 
-      # --- Зеркало обновлений: генерация манифеста и публикация в репозиторий / CDN ---
-      # Позволяет клиентам в РФ проверять и скачивать обновления даже при блокировке GitHub.
-      # Манифесты автоматически раздаются через jsDelivr CDN и сырой GitHub без необходимости настройки VPS.
       - name: Setup Python for manifest generator
         uses: actions/setup-python@v5
         with:
@@ -117,28 +108,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout -B main origin/main
-
-          python scripts/gen_mirror_manifest.py `
-            --tag "${{ github.ref_name }}" `
-            --build-dir build `
-            --out-dir mirror/releases
-
+          python scripts/gen_mirror_manifest.py --tag "${{ github.ref_name }}" --build-dir build --out-dir mirror/releases
           git add mirror/releases/
           $diff = git status --porcelain
           if ($diff) {
             git commit -m "chore(mirror): update release manifests for ${{ github.ref_name }} [skip ci]"
             git push origin main
           }
-
-      - name: Publish mirror manifest to Cloudflare Pages (Optional)
-        if: ${{ secrets.CF_API_TOKEN != '' }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-        run: |
-          $project = if ("${{ secrets.CF_PAGES_PROJECT }}" -ne "") { "${{ secrets.CF_PAGES_PROJECT }}" } else { "nb-mirror" }
-          npx wrangler@latest pages deploy mirror `
-            --project-name $project `
-            --commit-dirty=true `
-            --branch main
-        continue-on-error: true
