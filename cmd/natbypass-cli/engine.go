@@ -686,8 +686,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 
-						// Fallback: relay via MQTT/Signaling ТОЛЬКО когда прямой UDP провалился (S1: убираем double-send)
-						if !sentDirect && sigMgr != nil {
+						// FIX-N1: Relay fallback — when direct P2P is not confirmed (!DirectP2P), always send
+						// via relay IN PARALLEL with P2P attempt, not just when UDP sendto() fails.
+						// Rationale: UDP sendto() never returns an error for unreachable peers (EHOSTUNREACH
+						// comes back async as ICMP), so sentDirect=true even when packet is dropped.
+						// Without parallel relay, ICMP/UDP traffic to relay-mode peers is silently lost.
+						if (!sentDirect || !p.DirectP2P) && sigMgr != nil {
 							dataToSend := pkt
 							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 								cKey := crypto.DeriveKey(activeProf.NetworkKey)
@@ -748,14 +752,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								continue
 							}
 
-							// Calculate next backoff based on ProbeCount:
-							// 0-15 probes (0-60s @ 4s): normal interval (already covered by ticker)
-							// 15-75 probes (60-300s): 4x backoff = 16s
-							// >75 probes (>300s): 15x backoff = 60s
+							// FIX-N4: Extended exponential backoff for persistent relay-only peers.
+							// Stages based on ProbeCount (at default 4s ticker):
+							//   0-15   probes (~1 min):  no backoff (aggressive punching)
+							//  16-50   probes (~3 min):  16s backoff
+							//  51-150  probes (~10 min): 60s backoff
+							//  151-300 probes (~30 min): 120s backoff
+							//  >300    probes (>30 min): 300s backoff (probe once per 5 min)
 							var nextBackoff time.Duration
-							if p.ProbeCount > 75 {
+							switch {
+							case p.ProbeCount > 300:
+								nextBackoff = 300 * time.Second
+							case p.ProbeCount > 150:
+								nextBackoff = 120 * time.Second
+							case p.ProbeCount > 50:
 								nextBackoff = 60 * time.Second
-							} else if p.ProbeCount > 15 {
+							case p.ProbeCount > 15:
 								nextBackoff = 16 * time.Second
 							}
 							if nextBackoff > 0 {
@@ -811,20 +823,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							pingCancel()
 							if err == nil && rtt > 0 {
 								p.ProbeCount = 0
+								// FIX-N3: Keep latency and ping_ms in sync — EWMA smoothing
 								if p.Latency > 0 {
 									p.Latency = time.Duration(float64(p.Latency)*0.6 + float64(rtt)*0.4)
 								} else {
 									p.Latency = rtt
 								}
 								p.PingMs = p.Latency.Milliseconds()
+								// Mark DirectP2P only if VIP ping actually succeeds (proves L3 reachability)
 								p.DirectP2P = true
 								registry.Upsert(p)
 							} else {
+								// FIX-N3b: Increment ProbeCount on ICMP failure; latency stays at last known good value
 								p.ProbeCount++
-								// DirectP2P is transport-level health (UDP hole punch/keepalive),
-								// not application-level ICMP ping. Do NOT revoke DirectP2P on ICMP drops,
-								// otherwise firewall/battery-saver packet drops will spuriously switch
-								// nodes to MQTT relay and break direct P2P mesh connectivity.
+								registry.Upsert(p)
 							}
 						}
 					}

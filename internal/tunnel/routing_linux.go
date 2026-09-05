@@ -64,6 +64,27 @@ func ensureIptablesRule(ipt string, table string, chain string, args ...string) 
 	_ = exec.Command(ipt, insertArgs...).Run()
 }
 
+// insertIptablesRule inserts a rule at the TOP of a chain (-I), ensuring it takes priority
+// over any existing rules (e.g. Docker's DROP policies). Idempotent via -C check.
+func insertIptablesRule(ipt, table, chain string, args ...string) {
+	checkArgs := []string{"-w", "2"}
+	if table != "" {
+		checkArgs = append(checkArgs, "-t", table)
+	}
+	checkArgs = append(checkArgs, "-C", chain)
+	checkArgs = append(checkArgs, args...)
+	if exec.Command(ipt, checkArgs...).Run() == nil {
+		return // already exists
+	}
+	insertArgs := []string{"-w", "2"}
+	if table != "" {
+		insertArgs = append(insertArgs, "-t", table)
+	}
+	insertArgs = append(insertArgs, "-I", chain, "1")
+	insertArgs = append(insertArgs, args...)
+	_ = exec.Command(ipt, insertArgs...).Run()
+}
+
 // EnableHostIPForwardingSubnet enables kernel IPv4 forwarding and adds iptables NAT masquerading for mesh subnet.
 func EnableHostIPForwardingSubnet(subnet string) error {
 	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.ip_forward=1")
@@ -89,8 +110,9 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	ensureIptablesRule(ipt, "nat", "POSTROUTING", "-s", cleanSubnet, "!", "-o", "nb0", "-j", "MASQUERADE")
 
 	// 2. Forwarding rules for nb0
-	ensureIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
-	ensureIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
+	// FIX-N2: Use -I (insert at top) for FORWARD rules so they take priority over Docker's DROP policies
+	insertIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
+	insertIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
 	// Try conntrack module first; fall back to 'state' module if conntrack not available (MIPS routers)
 	if exec.Command(ipt, "-w", "2", "-C", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run() != nil {
 		if err2 := exec.Command(ipt, "-w", "2", "-A", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run(); err2 != nil {
