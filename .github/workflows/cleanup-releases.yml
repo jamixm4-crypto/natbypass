@@ -1,9 +1,6 @@
 name: Cleanup Releases and Workflow Runs
 
 on:
-  push:
-    branches:
-      - main
   release:
     types: [published]
   workflow_dispatch:
@@ -70,36 +67,6 @@ jobs:
                 } catch (e) {
                   console.warn(`Could not delete tag ${release.tag_name}: ${e.message}`);
                 }
-              }
-            }
-
-            // Prune unattached/superseded git tags (keeping only active stable and beta)
-            if (keepTags.size > 0) {
-              console.log('Checking repository git tags to prune unattached/superseded tags...');
-              try {
-                const allTags = await github.paginate(github.rest.repos.listTags, {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  per_page: 100,
-                });
-                console.log(`Found ${allTags.length} tags in repository`);
-                for (const tag of allTags) {
-                  if (!keepTags.has(tag.name)) {
-                    console.log(`Pruning obsolete git tag: ${tag.name}`);
-                    try {
-                      await github.rest.git.deleteRef({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        ref: `tags/${tag.name}`,
-                      });
-                      console.log(`✓ Pruned tag ${tag.name}`);
-                    } catch (e) {
-                      console.warn(`Could not prune tag ${tag.name}: ${e.message}`);
-                    }
-                  }
-                }
-              } catch (e) {
-                console.warn(`Tag pruning failed: ${e.message}`);
               }
             }
 
