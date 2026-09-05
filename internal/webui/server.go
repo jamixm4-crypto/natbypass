@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -436,8 +437,8 @@ func (s *Server) Start(ctx context.Context) error {
 					}
 					vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 					if vip != "" {
-						pingCtx, pingCancel := context.WithTimeout(ctx, 1500*time.Millisecond)
-						rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 1200*time.Millisecond)
+						pingCtx, pingCancel := context.WithTimeout(ctx, 3000*time.Millisecond)
+						rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 2500*time.Millisecond)
 						pingCancel()
 						if err == nil && rtt > 0 {
 							if p.Latency > 0 {
@@ -694,7 +695,6 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 			if time.Since(p.LastSeen) > constants.PeerOfflineThreshold {
 				p.Online = false
-				p.DirectP2P = false
 			}
 
 			if p.VirtualIP == "" {
@@ -758,6 +758,33 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 		for _, p := range vipMap {
 			uniquePeers = append(uniquePeers, p)
 		}
+
+		// 🛡️ Детерминированная сортировка: предотвращает хаотичное перескакивание строк в UI
+		sort.Slice(uniquePeers, func(i, j int) bool {
+			// 1. Сначала узлы в сети (Online)
+			if uniquePeers[i].Online != uniquePeers[j].Online {
+				return uniquePeers[i].Online && !uniquePeers[j].Online
+			}
+			// 2. По имени устройства / никнейму
+			nameI := uniquePeers[i].Nickname
+			if nameI == "" {
+				nameI = uniquePeers[i].DeviceName
+			}
+			nameJ := uniquePeers[j].Nickname
+			if nameJ == "" {
+				nameJ = uniquePeers[j].DeviceName
+			}
+			if nameI != nameJ {
+				return strings.ToLower(nameI) < strings.ToLower(nameJ)
+			}
+			// 3. По Virtual IP
+			if uniquePeers[i].VirtualIP != uniquePeers[j].VirtualIP {
+				return uniquePeers[i].VirtualIP < uniquePeers[j].VirtualIP
+			}
+			// 4. По DeviceID
+			return uniquePeers[i].DeviceID < uniquePeers[j].DeviceID
+		})
+
 		activePeers = uniquePeers
 	}
 	if activePeers == nil {
@@ -781,7 +808,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.4"
+		ver = "1.9.221-beta.5"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1578,7 +1605,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.221-beta.4"
+		ver = "1.9.221-beta.5"
 	}
 
 	vip := s.state.VirtualIP
@@ -1735,9 +1762,9 @@ func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 		if p, ok := s.registry.Get(req.DeviceID); ok && p != nil {
 			vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 			if vip != "" {
-				ctx, cancel := context.WithTimeout(r.Context(), 2500*time.Millisecond)
+				ctx, cancel := context.WithTimeout(r.Context(), 3500*time.Millisecond)
 				defer cancel()
-				rtt, err := diagnostic.PingVirtualIP(ctx, vip, 2*time.Second)
+				rtt, err := diagnostic.PingVirtualIP(ctx, vip, 3*time.Second)
 				if err == nil && rtt > 0 {
 					p.Latency = rtt
 					p.PingMs = rtt.Milliseconds()
@@ -1756,14 +1783,11 @@ func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Если ICMP не ответил (например, таймаут), сбрасываем p.Latency в 0 и возвращаем ошибку
-			p.Latency = 0
-			p.PingMs = 0
-			s.registry.Upsert(p)
+			// Если ICMP не ответил (например, таймаут или временный сбой), возвращаем ошибку без разрушения метрики пира
 			s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 				"device_id":  req.DeviceID,
-				"latency_ms": 0,
-				"direct_p2p": false,
+				"latency_ms": p.PingMs,
+				"direct_p2p": p.DirectP2P,
 				"vip":        vip,
 				"error":      "узел не отвечает на пинг (превышен интервал ожидания)",
 			}, "")

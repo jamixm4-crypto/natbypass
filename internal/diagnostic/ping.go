@@ -26,7 +26,7 @@ func PingVirtualIP(ctx context.Context, targetVIP string, timeout time.Duration)
 	}
 
 	if timeout <= 0 {
-		timeout = 1500 * time.Millisecond
+		timeout = 2500 * time.Millisecond
 	}
 
 	var cmd *exec.Cmd

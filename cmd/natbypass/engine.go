@@ -370,20 +370,38 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 				// Userspace ICMP reflection for instant ping response across Linux, routers, and cross-border nodes
 				cleanMyVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-				if inDstIP == cleanMyVIP && len(payload) >= 28 && payload[9] == 1 && payload[20] == 8 {
+				ihl := int(payload[0]&0x0F) * 4
+				if inDstIP == cleanMyVIP && len(payload) >= ihl+8 && payload[9] == 1 && payload[ihl] == 8 {
 					if reply := createICMPEchoReply(payload); len(reply) > 0 {
+						sent := false
 						if directAddr != nil && puncher != nil {
-							_ = puncher.SendDataPacketWithPadding(directAddr.String(), reply, 0, 0)
-						} else if sigMgr != nil && registry != nil {
+							if err := puncher.SendDataPacketWithPadding(directAddr.String(), reply, 0, 0); err == nil {
+								sent = true
+							}
+						}
+						if registry != nil {
 							if senderPeer, ok := registry.GetByVirtualIP(inSrcIP); ok && senderPeer != nil {
-								replyToSend := reply
-								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-									cKey := crypto.DeriveKey(activeProf.NetworkKey)
-									if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
-										replyToSend = enc
+								if !sent && puncher != nil {
+									ep := senderPeer.ActiveEndpoint
+									if ep == "" {
+										ep = senderPeer.STUNAddr
+									}
+									if ep != "" {
+										if err := puncher.SendDataPacketWithPadding(ep, reply, 0, 0); err == nil {
+											sent = true
+										}
 									}
 								}
-								_ = sigMgr.PublishTunnelData(senderPeer.DeviceID, replyToSend)
+								if !sent && sigMgr != nil {
+									replyToSend := reply
+									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+										cKey := crypto.DeriveKey(activeProf.NetworkKey)
+										if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
+											replyToSend = enc
+										}
+									}
+									_ = sigMgr.PublishTunnelData(senderPeer.DeviceID, replyToSend)
+								}
 							}
 						}
 					}
@@ -1549,8 +1567,12 @@ func createICMPEchoReply(pkt []byte) []byte {
 	if len(pkt) < 28 {
 		return nil
 	}
+	ihl := int(pkt[0]&0x0F) * 4
+	if len(pkt) < ihl+8 {
+		return nil
+	}
 	// Protocol must be ICMP (1) and Type must be Echo Request (8)
-	if pkt[9] != 1 || pkt[20] != 8 {
+	if pkt[9] != 1 || pkt[ihl] != 8 {
 		return nil
 	}
 	reply := make([]byte, len(pkt))
@@ -1566,17 +1588,17 @@ func createICMPEchoReply(pkt []byte) []byte {
 	// Reset and recalculate IPv4 header checksum (bytes 10..11)
 	reply[10] = 0
 	reply[11] = 0
-	ipChecksum := calculateChecksum(reply[:20])
+	ipChecksum := calculateChecksum(reply[:ihl])
 	binary.BigEndian.PutUint16(reply[10:12], ipChecksum)
 
 	// Change ICMP Type to 0 (Echo Reply)
-	reply[20] = 0
+	reply[ihl] = 0
 
-	// Reset and recalculate ICMP checksum (bytes 22..23)
-	reply[22] = 0
-	reply[23] = 0
-	icmpChecksum := calculateChecksum(reply[20:])
-	binary.BigEndian.PutUint16(reply[22:24], icmpChecksum)
+	// Reset and recalculate ICMP checksum (bytes ihl+2..ihl+3)
+	reply[ihl+2] = 0
+	reply[ihl+3] = 0
+	icmpChecksum := calculateChecksum(reply[ihl:])
+	binary.BigEndian.PutUint16(reply[ihl+2:ihl+4], icmpChecksum)
 
 	return reply
 }
