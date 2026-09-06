@@ -46,6 +46,17 @@ if ($isAdmin) {
 $osInfo = (Get-CimInstance Win32_OperatingSystem).Caption
 Log-Info "ОС: $osInfo ($env:PROCESSOR_ARCHITECTURE)"
 
+# Определение основного интернет-интерфейса и шлюза
+$defaultRoute = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1
+if ($defaultRoute) {
+    $egressAdapter = Get-NetAdapter -InterfaceIndex $defaultRoute.InterfaceIndex -ErrorAction SilentlyContinue
+    $egressIP = Get-NetIPAddress -InterfaceIndex $defaultRoute.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty IPAddress -First 1
+    $canaryPing = Test-Connection -ComputerName 1.1.1.1 -Count 1 -Quiet -TimeoutSeconds 2 -ErrorAction SilentlyContinue
+    $canaryStatus = if ($canaryPing) { "✅ ДОСТУПЕН" } else { "⚠️ ТАЙМАУТ" }
+    Log-Ok "Основной интернет-выход: $($egressAdapter.Name) [$($egressAdapter.InterfaceDescription)]"
+    Log-Info "  -> Локальный IP: $egressIP, Шлюз: $($defaultRoute.NextHop), MTU: $($egressAdapter.NdisLinkSpeed), Интернет: $canaryStatus"
+}
+
 # 2. Process Check
 Log-Section "2. СОСТОЯНИЕ ПРОЦЕССА NATBYPASS"
 $procs = Get-Process -Name "*natbypass*" -ErrorAction SilentlyContinue

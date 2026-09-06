@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.5"
+	Version = "1.9.223-beta.6"
 	Commit  = "release"
 )
 
@@ -4065,6 +4065,28 @@ func startEngineFromConfig(c *config.Config) {
 	engineCancel = cancel
 	triggerPublishCh = make(chan struct{}, 10)
 
+	// 0. Определение основного интернет-интерфейса и шлюза при старте GUI (Zero-RTT + 1-RTT Canary)
+	go func() {
+		if egress, err := network.DetectEgress(ctx); err == nil && egress != nil {
+			liveStr := "❌ НЕДОСТУПЕН (Canary STUN таймаут)"
+			if egress.InternetLive {
+				liveStr = fmt.Sprintf("✅ ДОСТУПЕН (Canary STUN RTT: %v)", egress.CanaryLatency.Round(time.Millisecond))
+			}
+			gwStr := "не определён"
+			if egress.GatewayIP != nil {
+				gwStr = egress.GatewayIP.String()
+			}
+			localIPStr := "не определён"
+			if egress.LocalIP != nil {
+				localIPStr = egress.LocalIP.String()
+			}
+			msg := fmt.Sprintf("🌐 Сеть: %s [%s] IP: %s, Шлюз: %s, MTU: %d, Интернет: %s",
+				egress.InterfaceName, egress.HardwareType, localIPStr, gwStr, egress.MTU, liveStr)
+			addLog(msg)
+			writeDebug(msg)
+		}
+	}()
+
 	var err error
 	myPubKey, myPrivKey, err = loadOrGenerateKeys(c)
 	if err != nil {
@@ -4195,6 +4217,32 @@ func startEngineFromConfig(c *config.Config) {
 			writeDebug(fmt.Sprintf("🧲 Magicsock GUI: путь к %s переключен: %s -> %s (%s)", devID, oldPath, newPath, pType))
 		})
 		writeDebug(fmt.Sprintf("UDPPuncher слушает локальный UDP порт :%d", puncher.LocalPort()))
+
+		// Фоновый NetworkWatchdog для мгновенной реакции на смену сети в GUI (Wi-Fi ↔ Ethernet / roaming)
+		network.NewNetworkWatchdog(ctx, 2*time.Second, func(oldInfo, newInfo *network.EgressInfo) {
+			oldIP := ""
+			if oldInfo != nil && oldInfo.LocalIP != nil {
+				oldIP = oldInfo.LocalIP.String()
+			}
+			newIP := ""
+			if newInfo != nil && newInfo.LocalIP != nil {
+				newIP = newInfo.LocalIP.String()
+			}
+			msg := fmt.Sprintf("🔄 Смена сетевого интерфейса: %s (%s) → %s (%s) [%s]! Сброс STUN и ре-анонс...",
+				oldInfo.InterfaceName, oldIP, newInfo.InterfaceName, newIP, newInfo.HardwareType)
+			addLog(msg)
+			writeDebug(msg)
+
+			if udpPuncher != nil {
+				udpPuncher.InvalidateMappedAddress()
+				go func() {
+					sCtx, sCancel := context.WithTimeout(ctx, 2*time.Second)
+					defer sCancel()
+					_, _, _ = udpPuncher.ForceDiscoverMappedAddress(sCtx)
+				}()
+			}
+			triggerPublish()
+		})
 
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
 		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {

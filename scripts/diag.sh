@@ -74,6 +74,24 @@ else
     log_fail "Драйвер /dev/net/tun: НЕ НАЙДЕН!"
 fi
 
+# Проверка физического интернет-интерфейса и шлюза
+DEFAULT_ROUTE="$(ip route show default 2>/dev/null | head -n 1)"
+if [ -z "$DEFAULT_ROUTE" ]; then
+    DEFAULT_ROUTE="$(route -n 2>/dev/null | awk '$1 == "0.0.0.0" {print "default via " $2 " dev " $8; exit}')"
+fi
+EGRESS_DEV="$(echo "$DEFAULT_ROUTE" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -n 1)"
+EGRESS_GW="$(echo "$DEFAULT_ROUTE" | awk '{for(i=1;i<=NF;i++) if($i=="via") print $(i+1)}' | head -n 1)"
+if [ -n "$EGRESS_DEV" ]; then
+    EGRESS_IP="$(ip -4 addr show dev "$EGRESS_DEV" 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n 1)"
+    EGRESS_MTU="$(cat /sys/class/net/"$EGRESS_DEV"/mtu 2>/dev/null || echo '1500')"
+    CANARY_PING="$(ping -c 1 -W 2 1.1.1.1 2>/dev/null | awk -F'/' '/rtt|round-trip/ {print $5}')"
+    if [ -n "$CANARY_PING" ]; then
+        log_ok "Интернет-выход: dev $EGRESS_DEV (IP: $EGRESS_IP, Шлюз: $EGRESS_GW, MTU: $EGRESS_MTU) | Canary RTT: ${CANARY_PING}ms"
+    else
+        log_warn "Интернет-выход: dev $EGRESS_DEV (IP: $EGRESS_IP, Шлюз: $EGRESS_GW, MTU: $EGRESS_MTU) | Canary ping 1.1.1.1: таймаут"
+    fi
+fi
+
 # 2. Процессы NatBypass
 log_section "2. СОСТОЯНИЕ ПРОЦЕССА NATBYPASS"
 

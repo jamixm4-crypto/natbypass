@@ -1240,8 +1240,8 @@ func RefreshPublicIP() {
 	globalIPv6 = ""
 
 	go func() {
-		time.Sleep(300 * time.Millisecond)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Zero-delay STUN probe: immediately discover new public IP and mapped port
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 		defer cancel()
 
 		// 1. Принудительный опрос STUN через puncher сокет (без устаревшего кэша)

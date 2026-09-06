@@ -147,12 +147,73 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	engineCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// 0. Определение основного интернет-интерфейса и шлюза при старте (Zero-RTT + 1-RTT Canary)
+	if egress, err := network.DetectEgress(engineCtx); err == nil && egress != nil {
+		liveStr := "❌ НЕДОСТУПЕН (Canary STUN таймаут)"
+		if egress.InternetLive {
+			liveStr = fmt.Sprintf("✅ ДОСТУПЕН (Canary STUN RTT: %v)", egress.CanaryLatency.Round(time.Millisecond))
+		}
+		gwStr := "не определён"
+		if egress.GatewayIP != nil {
+			gwStr = egress.GatewayIP.String()
+		}
+		localIPStr := "не определён"
+		if egress.LocalIP != nil {
+			localIPStr = egress.LocalIP.String()
+		}
+		log.Info().
+			Str("interface", egress.InterfaceName).
+			Str("local_ip", localIPStr).
+			Str("gateway", gwStr).
+			Str("hardware", egress.HardwareType).
+			Int("mtu", egress.MTU).
+			Str("internet", liveStr).
+			Msg("🌐 Основной интернет-интерфейс определён")
+	}
+
 	registry := startPeerRegistry(engineCtx)
 	sigMgr := startSignaling(engineCtx, cfg, deviceID)
 	uiServer := startWebUI(engineCtx, cfg, registry, sigMgr, deviceID, myVirtualIP)
 	puncher, ipDisc := startNetworkLayer(engineCtx, cfg, deviceID, registry)
 	if puncher != nil {
 		defer puncher.Close()
+
+		// Фоновый NetworkWatchdog для мгновенной реакции на смену сети (Wi-Fi ↔ LTE / смена кабеля/DHCP)
+		watchdog := network.NewNetworkWatchdog(engineCtx, 2*time.Second, func(oldInfo, newInfo *network.EgressInfo) {
+			oldIP := ""
+			if oldInfo != nil && oldInfo.LocalIP != nil {
+				oldIP = oldInfo.LocalIP.String()
+			}
+			newIP := ""
+			if newInfo != nil && newInfo.LocalIP != nil {
+				newIP = newInfo.LocalIP.String()
+			}
+			newGW := ""
+			if newInfo != nil && newInfo.GatewayIP != nil {
+				newGW = newInfo.GatewayIP.String()
+			}
+			log.Warn().
+				Str("old_iface", oldInfo.InterfaceName).
+				Str("old_ip", oldIP).
+				Str("new_iface", newInfo.InterfaceName).
+				Str("new_ip", newIP).
+				Str("new_gateway", newGW).
+				Str("hardware", newInfo.HardwareType).
+				Msg("🔄 Смена физического сетевого интерфейса! Мгновенный сброс STUN и ре-анонс пирам...")
+
+			puncher.InvalidateMappedAddress()
+			go func() {
+				sCtx, sCancel := context.WithTimeout(engineCtx, 2*time.Second)
+				defer sCancel()
+				_, _, _ = puncher.ForceDiscoverMappedAddress(sCtx)
+			}()
+
+			select {
+			case triggerPublishCh <- struct{}{}:
+			default:
+			}
+		})
+		defer watchdog.Stop()
 	}
 
 	awgParams := cfg.GetAWGParams()

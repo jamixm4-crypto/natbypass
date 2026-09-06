@@ -454,14 +454,13 @@ class NatBypassVpnService : VpnService() {
     private fun handleNetworkChange(network: Network?) {
         if (!isRunning) return
         val now = System.currentTimeMillis()
-        if (now - lastNetworkChangeTs < 800) return
+        if (now - lastNetworkChangeTs < 250) return
         lastNetworkChangeTs = now
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1 && network != null) {
             try { setUnderlyingNetworks(arrayOf(network)) } catch (_: Exception) {}
         }
-        serviceScope.launch {
-            delay(350)
+        serviceScope.launch(Dispatchers.IO) {
             try {
                 val newFd = org.natbypass.app.util.MobileBridge.rebindSockets()
                 if (newFd > 0) {
