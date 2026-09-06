@@ -109,7 +109,7 @@ signaling:
 wireguard:
   enabled: true
   interface: "wg0"
-  listen_port: 443  # QUIC/HTTPS-friendly порт, обходит ограничения ТСПУ
+  listen_port: 47820  # Непривилегированный порт (>3000), исключает конфликты с HTTPS/веб-серверами и обходит блокировки ТСПУ
 
   # ═══ AmneziaWG 3.1 Protocol ═══
   awg_version: "3.1"          # "2.0" (legacy) | "3.1" (рекомендуется для РФ/Китая)

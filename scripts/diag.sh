@@ -347,12 +347,25 @@ fi
 
 # 9.2 Path MTU (PMTU) Discovery
 log_info "[9.2] Проверка Path MTU (PMTU) и нефрагментированного прохождения пакетов:"
+PING_DF="-M do"
+if ! ping -c 1 -W 1 -M do -s 56 127.0.0.1 >/dev/null 2>&1; then
+    PING_DF=""
+fi
+
 for MTU_TEST in 1420 1360 1280; do
     PAYLOAD_SIZE=$((MTU_TEST - 28))
-    if ping -c 1 -W 1 -M do -s $PAYLOAD_SIZE 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 1 -M do -s $PAYLOAD_SIZE 1.1.1.1 >/dev/null 2>&1; then
-        log_ok "MTU $MTU_TEST (Payload $PAYLOAD_SIZE байт): УСПЕШНО без фрагментации"
+    if [ -n "$PING_DF" ]; then
+        if ping -c 1 -W 1 -M do -s $PAYLOAD_SIZE 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 1 -M do -s $PAYLOAD_SIZE 1.1.1.1 >/dev/null 2>&1; then
+            log_ok "MTU $MTU_TEST (Payload $PAYLOAD_SIZE байт): УСПЕШНО без фрагментации"
+        else
+            log_warn "MTU $MTU_TEST: ТРЕБУЕТСЯ ФРАГМЕНТАЦИЯ (или блокируется промежуточными маршрутизаторами)"
+        fi
     else
-        log_warn "MTU $MTU_TEST: ТРЕБУЕТСЯ ФРАГМЕНТАЦИЯ (или блокируется промежуточными маршрутизаторами)"
+        if ping -c 1 -W 1 -s $PAYLOAD_SIZE 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 1 -s $PAYLOAD_SIZE 1.1.1.1 >/dev/null 2>&1; then
+            log_ok "MTU $MTU_TEST (Payload $PAYLOAD_SIZE байт): УСПЕШНО (ICMP доставлен)"
+        else
+            log_warn "MTU $MTU_TEST: Пакет размером $PAYLOAD_SIZE байт не доставлен"
+        fi
     fi
 done
 
@@ -377,8 +390,6 @@ udp_send_devudp() {
     BIN_FILE="$1"
     DST_IP="$2"
     DST_PORT="$3"
-    # /dev/udp доступен только в bash (не в dash/sh на busybox)
-    # Пробуем: exec с таймаутом через subshell
     ( bash -c "exec 3>/dev/udp/$DST_IP/$DST_PORT 2>/dev/null && cat '$BIN_FILE' >&3 && sleep 0.3; exec 3>&-" ) 2>/dev/null
     return $?
 }
@@ -386,15 +397,16 @@ udp_send_devudp() {
 NC_AVAILABLE=0
 DEVUDP_AVAILABLE=0
 command -v nc >/dev/null 2>&1 && NC_AVAILABLE=1
-# Проверяем /dev/udp (только bash, не busybox sh)
 bash -c 'exec 3>/dev/udp/1.1.1.1/53 2>/dev/null && exec 3>&-' 2>/dev/null && DEVUDP_AVAILABLE=1
+TIMEOUT_CMD="timeout 1"
+command -v timeout >/dev/null 2>&1 || TIMEOUT_CMD=""
 
 if [ "$NC_AVAILABLE" -eq 1 ] || [ "$DEVUDP_AVAILABLE" -eq 1 ]; then
     for TEST_P in 443 3478 51820; do
         if [ "$NC_AVAILABLE" -eq 1 ]; then
-            timeout 1 nc -u -w 1 1.1.1.1 "$TEST_P" < "$TMP_DPI_DIR/wg.bin" >/dev/null 2>&1;   WG_STAT=$?
-            timeout 1 nc -u -w 1 1.1.1.1 "$TEST_P" < "$TMP_DPI_DIR/rand.bin" >/dev/null 2>&1; RAND_STAT=$?
-            timeout 1 nc -u -w 1 1.1.1.1 "$TEST_P" < "$TMP_DPI_DIR/quic.bin" >/dev/null 2>&1; QUIC_STAT=$?
+            $TIMEOUT_CMD nc -u -w 1 1.1.1.1 "$TEST_P" < "$TMP_DPI_DIR/wg.bin" >/dev/null 2>&1;   WG_STAT=$?
+            $TIMEOUT_CMD nc -u -w 1 1.1.1.1 "$TEST_P" < "$TMP_DPI_DIR/rand.bin" >/dev/null 2>&1; RAND_STAT=$?
+            $TIMEOUT_CMD nc -u -w 1 1.1.1.1 "$TEST_P" < "$TMP_DPI_DIR/quic.bin" >/dev/null 2>&1; QUIC_STAT=$?
         else
             udp_send_devudp "$TMP_DPI_DIR/wg.bin" 1.1.1.1 "$TEST_P";   WG_STAT=$?
             udp_send_devudp "$TMP_DPI_DIR/rand.bin" 1.1.1.1 "$TEST_P"; RAND_STAT=$?

@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.223-beta.2"
+const Version = "1.9.223-beta.3"
 
 
 

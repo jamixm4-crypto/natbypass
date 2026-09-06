@@ -277,10 +277,10 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	if len(parts) >= 3 {
 		prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
 	}
-	_ = exec.CommandContext(ctx, ipBin, "route", "replace", prefix+".0/24", "dev", d.AdapterName).Run()
-	_ = exec.CommandContext(ctx, ipBin, "route", "replace", prefix+".0/24", "dev", d.AdapterName, "table", "main").Run()
-	_ = exec.CommandContext(ctx, ipBin, "route", "replace", "100.64.200.0/24", "dev", d.AdapterName).Run()
-	_ = exec.CommandContext(ctx, ipBin, "route", "replace", "100.64.200.0/24", "dev", d.AdapterName, "table", "main").Run()
+	_ = exec.CommandContext(ctx, ipBin, "route", "replace", prefix+".0/24", "dev", d.AdapterName, "src", cleanVIP).Run()
+	_ = exec.CommandContext(ctx, ipBin, "route", "replace", prefix+".0/24", "dev", d.AdapterName, "src", cleanVIP, "table", "main").Run()
+	_ = exec.CommandContext(ctx, ipBin, "route", "replace", "100.64.200.0/24", "dev", d.AdapterName, "src", cleanVIP).Run()
+	_ = exec.CommandContext(ctx, ipBin, "route", "replace", "100.64.200.0/24", "dev", d.AdapterName, "src", cleanVIP, "table", "main").Run()
 
 	// Приоритетные правила маршрутизации для KeeneticOS (обход blackhole таблиц 4096-4101)
 	_ = exec.CommandContext(ctx, ipBin, "rule", "del", "pref", "50", "to", prefix+".0/24", "lookup", "main").Run()

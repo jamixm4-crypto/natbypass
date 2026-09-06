@@ -107,7 +107,8 @@ Log-Section "6. ЛОКАЛЬНЫЙ API ДЕМОНА (HTTP 127.0.0.1:8080)"
 $status = $null
 $peers = $null
 try {
-    $status = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/status" -TimeoutSec 3 -ErrorAction Stop
+    $statusResp = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/status" -TimeoutSec 3 -ErrorAction Stop
+    $status = if ($statusResp.data) { $statusResp.data } else { $statusResp }
     $myPubIP = if ($status.public_ip) { $status.public_ip } else { "" }
     $myStun = if ($status.stun_addr) { $status.stun_addr } else { "" }
     Log-Ok "API Status: OK"
@@ -203,7 +204,8 @@ Log-Info "Локальный сокет привязан к порту: :$localB
 $stunTargets = @(
     @{ Host = "stun.l.google.com"; Port = 19302; Label = "Google STUN" },
     @{ Host = "stun.cloudflare.com"; Port = 3478; Label = "Cloudflare STUN" },
-    @{ Host = "stun.nextcloud.com"; Port = 443; Label = "Nextcloud STUN" }
+    @{ Host = "stun.sipnet.ru"; Port = 3478; Label = "Sipnet STUN (RU)" },
+    @{ Host = "stun.miwifi.com"; Port = 3478; Label = "Xiaomi STUN" }
 )
 
 $mappedSamples = @()
@@ -266,10 +268,14 @@ if ($mappedSamples.Count -ge 2) {
             $localNATClassification = "Full Cone / Endpoint-Independent Mapping (EIM)"
             Log-Ok "КЛАССИФИКАЦИЯ: $localNATClassification"
             Log-Ok "Прямой P2P поддерживается на 100%! Внешний порт не меняется между пирами."
-        } elseif ([math]::Abs($delta1) -le 5 -and $delta1 -eq $delta2) {
-            $localNATClassification = "Symmetric NAT (Линейный сдвиг delta=$delta1)"
+        } elseif ($delta1 -eq $delta2 -and $delta1 -ne 0) {
+            $localNATClassification = "Symmetric NAT (Предсказуемый линейный сдвиг delta=$delta1)"
             Log-Warn "КЛАССИФИКАЦИЯ: $localNATClassification"
-            Log-Info "Предиктор портов NatBypass автоматически рассчитывает шаг delta=$delta1 для пробива сокета."
+            Log-Info "Предиктор портов NatBypass v1.9.223-beta.3 рассчитывает шаг delta=$delta1 для направленного пробива сокета."
+        } elseif ([math]::Abs($delta1) -le 250 -and [math]::Abs($delta2) -le 250) {
+            $localNATClassification = "Symmetric NAT (Линейный диапазон delta1=$delta1, delta2=$delta2)"
+            Log-Warn "КЛАССИФИКАЦИЯ: $localNATClassification"
+            Log-Info "Двойной спрей-пробив NatBypass v1.9.223-beta.3 охватывает диапазон дельты смещения портов."
         } elseif ($pbaSize -gt 0) {
             $localNATClassification = "Symmetric NAT / CGNAT (Пул PBA-$pbaSize)"
             Log-Warn "КЛАССИФИКАЦИЯ: $localNATClassification"
@@ -277,7 +283,7 @@ if ($mappedSamples.Count -ge 2) {
         } else {
             $localNATClassification = "Symmetric NAT (Случайное распределение портов)"
             Log-Warn "КЛАССИФИКАЦИЯ: $localNATClassification"
-            Log-Warn "Жесткий симметричный NAT. Требуется UPnP на роутере или fallback на Relay."
+            Log-Warn "Жесткий симметричный NAT. Рекомендуется fallback на Relay или включение UPnP на роутере."
         }
     } else {
         if ($p1 -eq $p2) {
@@ -286,6 +292,7 @@ if ($mappedSamples.Count -ge 2) {
         } else {
             $localNATClassification = "Symmetric NAT (delta=$delta1)"
             Log-Warn "КЛАССИФИКАЦИЯ: $localNATClassification (P1=$p1 -> P2=$p2, delta=$delta1)"
+            Log-Info "Двойной спрей-пробив NatBypass v1.9.223-beta.3 компенсирует дельту смещения портов."
         }
     }
 } elseif ($mappedSamples.Count -eq 1) {
