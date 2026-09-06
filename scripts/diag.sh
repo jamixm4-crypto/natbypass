@@ -312,7 +312,7 @@ if [ -n "$STATUS_JSON" ]; then
     PEERS_CNT="$(echo "$STATUS_JSON" | grep -o '"peers_count":[0-9]*' | cut -d':' -f2)"
     MY_PUB_IP="$(echo "$STATUS_JSON" | grep -o '"public_ip":"[^"]*' | cut -d'"' -f4)"
     MY_STUN="$(echo "$STATUS_JSON" | grep -o '"stun_addr":"[^"]*' | cut -d'"' -f4)"
-    MY_VER="$(echo "$STATUS_JSON" | grep -o '"version":"[^"]*' | cut -d'"' -f4)"
+    MY_VER="$(echo "$STATUS_JSON" | grep -o '"version":"v[^"]*' | cut -d'"' -f4)"
     
     [ -n "$ACT_PROF" ] && log_info "Активный профиль сети: $ACT_PROF"
     [ -n "$MQTT_TOPIC" ] && log_info "Сигнальный топик: $MQTT_TOPIC"
@@ -425,7 +425,7 @@ if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
         
         P_PUB_IP="$(echo "$p_line" | grep -o '"public_ip":"[^"]*' | cut -d'"' -f4)"
         P_NAT="$(echo "$p_line" | grep -o '"nat_type":"[^"]*' | cut -d'"' -f4)"
-        P_VER="$(echo "$p_line" | grep -o '"version":"[^"]*' | cut -d'"' -f4)"
+        P_VER="$(echo "$p_line" | grep -o '"version":"v[^"]*' | cut -d'"' -f4)"
         P_PROBES="$(echo "$p_line" | grep -o '"probe_count":[0-9]*' | cut -d':' -f2)"
         [ -z "$P_PROBES" ] && P_PROBES=0
         P_DIRECT="$(echo "$p_line" | grep -o '"direct_p2p":true' | cut -d':' -f2)"

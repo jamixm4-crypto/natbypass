@@ -200,6 +200,15 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	}
 
 	localPort := conn.LocalAddr().(*net.UDPAddr).Port
+
+	// Enlarge UDP socket buffers to 4MB to reduce packet loss on MIPS/ARM routers
+	// where the kernel default (net.core.rmem_default) is only ~212KB.
+	// SetReadBuffer / SetWriteBuffer use SO_RCVBUF / SO_SNDBUF internally and work on
+	// Windows, Linux (amd64/arm64/mipsle), and Android — no CGO or syscall needed.
+	const udpSocketBufSize = 4 * 1024 * 1024 // 4 MB
+	_ = conn.SetReadBuffer(udpSocketBufSize)
+	_ = conn.SetWriteBuffer(udpSocketBufSize)
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &UDPPuncher{
