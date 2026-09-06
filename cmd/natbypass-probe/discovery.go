@@ -18,6 +18,7 @@ type PeerInfo struct {
 	PubKey     string
 	STUNAddr   string
 	NATType    string
+	NATDelta   int
 	VIP        string
 	ListenPort int // UDP порт для probe-теста (отдельный от STUN)
 	LastSeen   time.Time
@@ -31,6 +32,7 @@ type ProbeBeacon struct {
 	PubKey     string `json:"pub_key"`
 	STUNAddr   string `json:"stun_addr"`
 	NATType    string `json:"nat_type"`
+	NATDelta   int    `json:"nat_delta,omitempty"`
 	VIP        string `json:"vip"`
 	ProbeID    string `json:"probe_id"`
 	ListenPort int    `json:"listen_port"` // UDP порт для приёма probe-пакетов
@@ -143,6 +145,7 @@ func (d *Discovery) handlePayload(payload *signaling.Payload) {
 		PubKey:     beacon.PubKey,
 		STUNAddr:   beacon.STUNAddr,
 		NATType:    beacon.NATType,
+		NATDelta:   beacon.NATDelta,
 		VIP:        beacon.VIP,
 		ListenPort: beacon.ListenPort,
 		LastSeen:   time.Now(),

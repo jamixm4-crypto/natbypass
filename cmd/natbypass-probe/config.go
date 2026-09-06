@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"crypto/sha256"
@@ -53,9 +53,11 @@ func DefaultConfig(probeID string) *ProbeConfig {
 		MQTTBroker: "tcp://broker.emqx.io:1883",
 		MQTTTopic:  "natbypass/probe/" + probeID,
 		STUNServers: []string{
+			"stun.cloudflare.com:3478",
+			"stun.syncthing.net:3478",
+			"stun.miwifi.com:3478",
 			"stun.l.google.com:19302",
 			"stun1.l.google.com:3478",
-			"stun.cloudflare.com:3478",
 		},
 		AWG: AWGProbeParams{
 			Jc: 4, Jmin: 36, Jmax: 77,

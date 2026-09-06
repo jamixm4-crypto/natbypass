@@ -114,3 +114,24 @@ func RunSelfTest(ctx context.Context, cfg *ProbeConfig, listenPort int) (*SelfTe
 
 	return result, nil
 }
+
+func getHostname() (string, error) {
+	return os.Hostname()
+}
+
+func getLocalIPs() []string {
+	var ips []string
+	ifaces, _ := net.Interfaces()
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, _ := iface.Addrs()
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP.To4() != nil {
+				ips = append(ips, ipNet.IP.String())
+			}
+		}
+	}
+	return ips
+}

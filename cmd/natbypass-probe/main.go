@@ -92,17 +92,21 @@ func main() {
 		Pairs:     make(map[string]*PairResult),
 	}
 
-	// ─── PHASE 1: SELF-TEST ───────────────────────────────────
-	logf("\n[>] PHASE 1: Self-test")
-	selfResult, err := RunSelfTest(ctx, cfg, *listenPort)
+	// ─── PHASE 1: SELF-TEST (SAME-SOCKET BINDING) ─────────────
+	logf("\n[>] PHASE 1: Self-test (Same-Socket NAT & STUN)")
+	probeSocket, err := NewProbeSocket(*listenPort, myNodeID, cfg)
+	if err != nil {
+		log.Fatalf("Failed to bind probe socket on port %d: %v", *listenPort, err)
+	}
+	defer probeSocket.Close()
+
+	logf("[UDP-SOCK] Bound persistent probe socket on port %d", probeSocket.GetLocalPort())
+
+	selfResult, err := probeSocket.RunSTUNSelfTest(ctx)
 	if err != nil {
 		logf("[SELF] Warning: %v", err)
 	}
 	report.SelfTest = selfResult
-
-	// Start UDP probe listener (echo server) — needed for bidirectional UDP punch tests
-	probeListenAddr := startUDPProbeListener(ctx, *listenPort, myNodeID)
-	logf("[UDP-SRV] Probe listener on %s", probeListenAddr)
 
 	// ─── PHASE 2: DISCOVERY ──────────────────────────────────
 	logf("\n[>] PHASE 2: Peer discovery (60s)")
@@ -132,15 +136,14 @@ func main() {
 		stunAddr = selfResult.STUNAddr
 	}
 	natType := ""
+	natDelta := 0
 	if selfResult != nil {
 		natType = selfResult.NATType
+		natDelta = selfResult.NATDelta
 	}
 
 	// Start beacon loop (publish every 10s)
-	beaconListenPort := *listenPort
-	if selfResult != nil && selfResult.ListenPort > 0 {
-		beaconListenPort = selfResult.ListenPort
-	}
+	beaconListenPort := probeSocket.GetLocalPort()
 	beacon := &ProbeBeacon{
 		NodeID:     myNodeID,
 		Label:      nodeLabel,
@@ -148,6 +151,7 @@ func main() {
 		PubKey:     myKP.PublicKey,
 		STUNAddr:   stunAddr,
 		NATType:    natType,
+		NATDelta:   natDelta,
 		VIP:        myVIP,
 		ProbeID:    cfg.ProbeID,
 		ListenPort: beaconListenPort,
@@ -187,29 +191,24 @@ func main() {
 
 		logf("\n--- Testing %s ---", pairKey)
 
-		// 3a. Raw UDP punch
+		// 3a. Raw UDP punch (Same-Socket)
 		if peer.STUNAddr != "" {
-			pair.UDPPunch = TestRawUDPPunch(ctx, myNodeID, peer)
+			pair.UDPPunch = probeSocket.TestUDPPunch(ctx, peer)
 		}
 
-		// 3b. AWG Handshake
-		pair.AWGHandshake = TestAWGHandshake(ctx, cfg, myNodeID, myKP, peer)
+		// 3b. AWG Handshake (Same-Socket)
+		pair.AWGHandshake = probeSocket.TestAWGHandshake(ctx, peer, false)
 
-		// 3c. AWG Ping (if handshake OK)
-		// if pair.AWGHandshake != nil && pair.AWGHandshake.Success {
-		//     pair.AWGPing = TestAWGPing(ctx, peer, 10)
-		// }
-
-		// 3d. TCP tests
+		// 3c. TCP tests
 		if peer.STUNAddr != "" {
 			host := strings.Split(peer.STUNAddr, ":")[0]
 			pair.TCPTests = TestTCPConnectivity(ctx, myNodeID, peer.NodeID, host)
 		}
 
-		// 3e. DPI probe (if AWG failed but UDP ok)
+		// 3d. DPI probe (if AWG failed but UDP ok)
 		if pair.UDPPunch != nil && pair.UDPPunch.Success &&
 			pair.AWGHandshake != nil && !pair.AWGHandshake.Success && !pair.AWGHandshake.Skipped {
-			pair.DPIProbe = TestDPIProbe(ctx, cfg, myNodeID, myKP, peer)
+			pair.DPIProbe = probeSocket.TestDPIProbe(ctx, peer)
 		}
 
 		// Determine verdict
