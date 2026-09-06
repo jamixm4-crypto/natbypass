@@ -744,7 +744,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 			// R3: Per-peer backoff tracker: DeviceID -> when we're allowed to probe next
 			probeBackoff := make(map[string]time.Time)
+			// activeSymSessions guards in-progress Symmetric NAT sessions.
+			// Access MUST be protected by symSessionMu because the cleanup defer runs
+			// in a child goroutine that races with the keepalive ticker goroutine.
 			activeSymSessions := make(map[string]bool)
+			var symSessionMu sync.Mutex
 
 			for {
 				select {
@@ -814,12 +818,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									_ = puncher.SendHolePunchProbe(cand)
 								}
 							}
-							if p.PublicIP != "" && p.WGPort > 0 {
+						if p.PublicIP != "" && p.WGPort > 0 {
 								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
 							}
 
 							// Trigger Symmetric NAT wide-sweep multi-hop session when peer or local is behind Symmetric NAT
-							if (p.NATType == "symmetric" || puncher.GetNATType().IsSymmetric()) && p.ProbeCount >= 8 && !activeSymSessions[p.DeviceID] {
+							symSessionMu.Lock()
+							alreadyActive := activeSymSessions[p.DeviceID]
+							symSessionMu.Unlock()
+							if (p.NATType == "symmetric" || puncher.GetNATType().IsSymmetric()) && p.ProbeCount >= 8 && !alreadyActive {
 								targetAddr := p.STUNAddr
 								if targetAddr == "" && p.ActiveEndpoint != "" {
 									targetAddr = p.ActiveEndpoint
@@ -827,11 +834,42 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								if targetAddr != "" {
 									if host, portStr, err := net.SplitHostPort(targetAddr); err == nil {
 										if bPort, err := strconv.Atoi(portStr); err == nil && bPort > 0 {
+											symSessionMu.Lock()
 											activeSymSessions[p.DeviceID] = true
+											symSessionMu.Unlock()
+
+											// Broadcast SymPunch request so the remote peer probes us simultaneously.
+											// This is the key fix for Symmetric NAT: both sides need to punch at the same time.
+											if sigMgr != nil {
+												mySTUN := puncher.GetCachedSTUNAddr() // thread-safe cached STUN address
+												myHopHint := puncher.LocalPort()
+												if mySTUN != "" {
+													symPunchPayload := &signaling.Payload{
+														DeviceID: deviceID,
+														SymPunch: &signaling.SymPunchSignal{
+															MySTUNAddr:     mySTUN,
+															TargetDeviceID: p.DeviceID,
+															HopHint:        myHopHint,
+														},
+													}
+									go func(pl *signaling.Payload) { _ = sigMgr.Send(engineCtx, pl) }(symPunchPayload)
+													log.Info().Str("peer", p.DeviceID).Str("my_stun", mySTUN).
+														Msg("📡 SymPunch: broadcasting bilateral punch request to peer")
+												}
+											}
+
+											// Force STUN refresh before session when probe count is high
+											// (stale STUN address is the #1 cause of session failure).
+											if p.ProbeCount > 100 {
+												go puncher.ForceDiscoverMappedAddress(engineCtx)
+											}
+
 											go func(devID, tIP string, bP int) {
 												defer func() {
 													time.Sleep(30 * time.Second)
+													symSessionMu.Lock()
 													delete(activeSymSessions, devID)
+													symSessionMu.Unlock()
 												}()
 												sCtx, sCancel := context.WithTimeout(engineCtx, 15*time.Second)
 												defer sCancel()
@@ -1616,6 +1654,51 @@ func receiveLoop(
 			}
 			if p.DeviceID == "" || p.DeviceID == deviceID {
 				continue
+			}
+
+			// Handle coordinated Symmetric NAT punch request.
+			// The remote peer has started a SymmetricNATSession and is asking us to
+			// simultaneously spray probes at their current STUN address so that both
+			// sides pierce NAT mappings at the same moment.
+			if p.SymPunch != nil {
+				sp := p.SymPunch
+				// Only respond if we are the target (or it's a broadcast request)
+				if (sp.TargetDeviceID == "" || sp.TargetDeviceID == deviceID) && puncher != nil && sp.MySTUNAddr != "" {
+					go func(senderID, stunAddr string, hopHint int) {
+						log.Info().Str("sender", senderID).Str("stun", stunAddr).
+							Msg("⚡ SymPunch: coordinated bilateral punch — probing sender STUN")
+						// Round 1: probe exact STUN address
+						_ = puncher.SendHolePunchProbe(stunAddr)
+						time.Sleep(20 * time.Millisecond)
+						_ = puncher.SendHolePunchProbe(stunAddr)
+
+						// Round 2: if HopHint provided, probe the hint range ±64 around it
+						if hopHint > 0 {
+							if host, _, err := net.SplitHostPort(stunAddr); err == nil {
+								const symPunchHopRange = 64
+								for i := 1; i <= symPunchHopRange; i++ {
+									for _, delta := range []int{i, -i} {
+										candidate := fmt.Sprintf("%s:%d", host, hopHint+delta)
+										if hopHint+delta > 1024 && hopHint+delta < 65535 {
+											_ = puncher.SendHolePunchProbe(candidate)
+										}
+									}
+									if i%16 == 0 {
+										time.Sleep(5 * time.Millisecond)
+									}
+								}
+							}
+						}
+
+						// Round 3: repeat exact STUN to reinforce the window
+						time.Sleep(50 * time.Millisecond)
+						_ = puncher.SendHolePunchProbe(stunAddr)
+					}(p.DeviceID, sp.MySTUNAddr, sp.HopHint)
+				}
+				// SymPunch-only payload: don't update registry / wg config
+				if p.VirtualIP == "" || p.PublicKey == "" {
+					continue
+				}
 			}
 
 			// Маяки внутри одной сигнальной комнаты принимаются безусловно

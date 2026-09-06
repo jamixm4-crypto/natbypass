@@ -746,7 +746,11 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 						remH3 := parseAWGHeaderUint32(p.AWG.H3)
 						remH4 := parseAWGHeaderUint32(p.AWG.H4)
 						if remH1 != loc.H1 || remH2 != loc.H2 || remH3 != loc.H3 || remH4 != loc.H4 ||
-							p.AWG.S1 != loc.S1 || p.AWG.S2 != loc.S2 || p.AWG.Jc != loc.Jc {
+							p.AWG.S1 != loc.S1 || p.AWG.S2 != loc.S2 || p.AWG.Jc != loc.Jc ||
+							// Also check packet-framing flags — they affect AWG wire format
+							p.AWG.RandomTrailers != loc.RandomTrailers ||
+							p.AWG.DisableCookies != loc.DisableCookies ||
+							p.AWG.HeaderProtectionEnabled != loc.HeaderProtectionEnabled {
 							p.AWGMismatch = true
 						}
 					}

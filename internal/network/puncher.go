@@ -435,6 +435,20 @@ func (p *UDPPuncher) ForceDiscoverMappedAddress(ctx context.Context) (net.IP, in
 	return p.DiscoverMappedAddress(ctx)
 }
 
+// GetCachedSTUNAddr returns the last known external address (IP:port) from the STUN cache
+// without issuing a network request. Returns "" if no cached address is available.
+// Safe to call from any goroutine.
+func (p *UDPPuncher) GetCachedSTUNAddr() string {
+	p.mu.Lock()
+	ip := p.mappedIP
+	port := p.mappedPort
+	p.mu.Unlock()
+	if ip == nil || port == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", ip.String(), port)
+}
+
 // GetSocketFd returns the raw OS file descriptor of the UDP socket (used for Android VpnService.protect).
 func (p *UDPPuncher) GetSocketFd() int {
 	p.mu.Lock()
@@ -1523,6 +1537,12 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	}
 
 	p.conn = conn
+	// Apply large socket buffers on every rebind (same as at construction time).
+	// Without this, fast port-hopping sweeps on MIPS/ARM drop packets due to
+	// the kernel's default 208 KB receive ring.
+	const udpSocketBufSize = 4 * 1024 * 1024
+	_ = conn.SetReadBuffer(udpSocketBufSize)
+	_ = conn.SetWriteBuffer(udpSocketBufSize)
 	p.addrCache.Range(func(k, v any) bool { p.addrCache.Delete(k); return true })
 	p.localPort = conn.LocalAddr().(*net.UDPAddr).Port
 	// BUG-13 FIX: capture localPort before releasing lock to avoid stale read

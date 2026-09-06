@@ -424,7 +424,10 @@ func (ms *MagicSock) RecordProbeAttempt(deviceID string) {
 	count := ms.peerProbeCount[deviceID]
 	ms.probeCountMu.Unlock()
 
-	if count == TCPFallbackProbeThreshold {
+	// Trigger TCP fallback every TCPFallbackProbeThreshold probes (200, 400, 600, …).
+	// Using modulo ensures retries happen after each additional N failed UDP probes,
+	// not just the first time — important when the initial attempt times out.
+	if count > 0 && count%TCPFallbackProbeThreshold == 0 {
 		ms.triggerTCPFallback(deviceID)
 	}
 }

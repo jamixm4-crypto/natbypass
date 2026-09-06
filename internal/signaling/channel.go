@@ -106,6 +106,21 @@ func (a *AWGParams) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// SymPunchSignal is broadcast via the mesh signaling channel to trigger coordinated
+// simultaneous hole-punching between two nodes where one or both are behind Symmetric NAT.
+// When a node starts a SymmetricNATSession it broadcasts this to the target peer;
+// the target peer immediately starts probing the sender's current STUN address without
+// calling HopPort() (so its own NAT mapping stays stable for the sender's sweep).
+type SymPunchSignal struct {
+	// MySTUNAddr is the sender's current external address:port (from STUN discovery).
+	MySTUNAddr string `json:"my_stun_addr"`
+	// TargetDeviceID restricts which peer should respond (empty = broadcast to all peers).
+	TargetDeviceID string `json:"target_device_id,omitempty"`
+	// HopHint: if non-zero, recipient should probe the sender at MySTUNAddr IP
+	// at ports [HopHint-256 .. HopHint+256] in addition to MySTUNAddr port.
+	HopHint int `json:"hop_hint,omitempty"`
+}
+
 type Payload struct {
 	DeviceID         string     `json:"device_id"`
 	Nickname         string     `json:"nickname,omitempty"`
@@ -148,6 +163,10 @@ type Payload struct {
 	DPIPreset       string `json:"dpi_preset,omitempty"`
 	AdaptationEpoch uint64 `json:"adaptation_epoch,omitempty"`
 	HealthScore     int    `json:"health_score,omitempty"`
+
+	// SymPunch: coordinated simultaneous Symmetric NAT hole-punch request.
+	// Non-nil when this payload is a punch coordination signal, not a regular beacon.
+	SymPunch *SymPunchSignal `json:"sym_punch,omitempty"`
 }
 
 
