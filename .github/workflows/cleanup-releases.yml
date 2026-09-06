@@ -1,6 +1,9 @@
 name: Cleanup Releases and Workflow Runs
 
 on:
+  push:
+    branches:
+      - main
   release:
     types: [published]
   workflow_dispatch:
@@ -30,17 +33,12 @@ jobs:
 
             if (releases.length > 0) {
               const stables = releases.filter(r => !r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-              const betas = releases.filter(r => r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-              if (stables.length > 0) {
-                keepIds.add(stables[0].id);
-                keepTags.add(stables[0].tag_name);
-                console.log(`Keeping latest STABLE release: ${stables[0].tag_name} (ID: ${stables[0].id})`);
-              }
-              for (const beta of betas.slice(0, 1)) {
-                keepIds.add(beta.id);
-                keepTags.add(beta.tag_name);
-                console.log(`Keeping latest BETA release: ${beta.tag_name} (ID: ${beta.id})`);
+              // Keep latest 2 stable releases
+              for (const stable of stables.slice(0, 2)) {
+                keepIds.add(stable.id);
+                keepTags.add(stable.tag_name);
+                console.log(`Keeping STABLE release: ${stable.tag_name} (ID: ${stable.id})`);
               }
 
               for (const release of releases) {
