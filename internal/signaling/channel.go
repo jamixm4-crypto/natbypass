@@ -218,15 +218,11 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 	if p.DeviceID == "" && aux.UpperDeviceID != "" {
 		p.DeviceID = aux.UpperDeviceID
 	}
-	if !p.DirectP2P && aux.UpperDirectP2P {
-		p.DirectP2P = true
-	}
-	if p.ActiveEndpoint == "" && aux.UpperActiveEndpoint != "" {
-		p.ActiveEndpoint = aux.UpperActiveEndpoint
-	}
-	if p.PingMs == 0 && aux.UpperPingMs != 0 {
-		p.PingMs = aux.UpperPingMs
-	}
+	// DirectP2P, ActiveEndpoint, and PingMs are local network observations of THIS node.
+	// They must NEVER be adopted from a remote peer's signaling beacon.
+	p.DirectP2P = false
+	p.ActiveEndpoint = ""
+	p.PingMs = 0
 	if p.IPv6Addr == "" && aux.UpperIPv6Addr != "" {
 		p.IPv6Addr = aux.UpperIPv6Addr
 	}

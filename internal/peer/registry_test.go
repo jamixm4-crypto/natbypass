@@ -16,6 +16,7 @@ func TestPeer_MergeFrom(t *testing.T) {
 		ActiveEndpoint: "192.168.1.50:47832",
 		Latency:        15 * time.Millisecond,
 		PingMs:         15,
+		LastDirectSeen: time.Now(),
 		HasMQTT:        true,
 		LastMQTTSeen:   time.Now().Add(-5 * time.Second),
 		AWG: &signaling.AWGParams{

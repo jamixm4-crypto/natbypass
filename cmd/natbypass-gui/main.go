@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.8"
+	Version = "1.9.223-beta.9"
 	Commit  = "release"
 )
 
@@ -4173,9 +4173,9 @@ func startEngineFromConfig(c *config.Config) {
 			guiMagicSock.RecordProbeSuccess(remoteDevID, fromAddr, rtt)
 		}
 		if p, ok := registry.Get(remoteDevID); ok {
-			p.DirectP2P = true
 			p.LastDirectSeen = time.Now()
 			if rtt > 0 && rtt <= 1500*time.Millisecond {
+				p.DirectP2P = true
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.70 + float64(rtt)*0.30)
 				} else {
@@ -4205,9 +4205,11 @@ func startEngineFromConfig(c *config.Config) {
 			p.Online = true
 			p.LastSeen = time.Now()
 			registry.Upsert(p)
-			msg := fmt.Sprintf("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг до %s (%s): %v! NAT пробит сокет-в-сокет!", remoteDevID, fromAddr, p.Latency.Round(time.Millisecond))
-			addLog(msg)
-			writeDebug(msg)
+			if rtt > 0 {
+				msg := fmt.Sprintf("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг до %s (%s): %v! NAT пробит сокет-в-сокет!", remoteDevID, fromAddr, p.Latency.Round(time.Millisecond))
+				addLog(msg)
+				writeDebug(msg)
+			}
 		}
 	})
 	if err == nil {
@@ -4682,12 +4684,16 @@ func startEngineFromConfig(c *config.Config) {
 						rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 1200*time.Millisecond)
 						pingCancel()
 						if err == nil && rtt > 0 {
+							p.ProbeCount = 0
 							if p.Latency > 0 {
 								p.Latency = time.Duration(float64(p.Latency)*0.6 + float64(rtt)*0.4)
 							} else {
 								p.Latency = rtt
 							}
 							p.PingMs = p.Latency.Milliseconds()
+							registry.Upsert(p)
+						} else {
+							p.ProbeCount++
 							registry.Upsert(p)
 						}
 					}
@@ -5083,7 +5089,8 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 				return
 			}
 			// Защита от петель
-			if srcIP.String() == myVirtualIP {
+			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+			if cleanVIP != "" && srcIP.String() == cleanVIP {
 				return
 			}
 			_ = destIP
@@ -5256,9 +5263,6 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						preservedLat = existingPeer.Latency
 						preservedPingMs = existingPeer.PingMs
 					}
-				}
-				if p.ActiveEndpoint != "" {
-					preservedEP = p.ActiveEndpoint
 				}
 				if preservedEP == "" {
 					if p.STUNAddr != "" {

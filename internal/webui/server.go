@@ -478,7 +478,6 @@ func (s *Server) Start(ctx context.Context) error {
 								p.Latency = rtt
 							}
 							p.PingMs = p.Latency.Milliseconds()
-							p.DirectP2P = true
 							s.registry.Upsert(p)
 						}
 					}
@@ -866,7 +865,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.223-beta.8"
+		ver = "1.9.223-beta.9"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1697,7 +1696,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.223-beta.8"
+		ver = "1.9.223-beta.9"
 	}
 
 	vip := s.state.VirtualIP
@@ -1870,13 +1869,12 @@ func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 				if err == nil && rtt > 0 {
 					p.Latency = rtt
 					p.PingMs = rtt.Milliseconds()
-					p.DirectP2P = true
 					p.Online = true
 					s.registry.Upsert(p)
 					s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 						"device_id":  req.DeviceID,
 						"latency_ms": rtt.Milliseconds(),
-						"direct_p2p": true,
+						"direct_p2p": p.DirectP2P,
 						"vip":        vip,
 						"method":     "icmp",
 						"message":    fmt.Sprintf("✓ Пинг до %s (%s): %d ms", p.Nickname, vip, rtt.Milliseconds()),

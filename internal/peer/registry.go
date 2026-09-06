@@ -80,10 +80,13 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	}
 
 	// Dynamic P2P health check: if direct UDP packets haven't been seen for 15 seconds,
-	// demote DirectP2P to false so traffic immediately falls back to parallel relay.
+	// or if LastDirectSeen is zero (never confirmed direct), demote DirectP2P to false
+	// so traffic immediately falls back to parallel relay.
 	directP2PExpired := false
-	if existing.DirectP2P && !existing.LastDirectSeen.IsZero() && time.Since(existing.LastDirectSeen) > 15*time.Second {
-		directP2PExpired = true
+	if existing.DirectP2P {
+		if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 15*time.Second {
+			directP2PExpired = true
+		}
 	}
 
 	// Unconditional preservation of measured latency and ping across periodic signaling beacons
@@ -108,8 +111,8 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
-	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty
-	if newer.ActiveEndpoint == "" {
+	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty or never seen direct
+	if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() {
 		newer.DirectP2P = false
 	}
 

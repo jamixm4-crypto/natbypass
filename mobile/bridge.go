@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.223-beta.8"
+const Version = "1.9.223-beta.9"
 
 
 
@@ -335,7 +335,18 @@ func StartEngine(configYAML string, tunFd int) string {
 					}
 				}
 			}
-			p.DirectP2P = true
+			if rtt > 0 {
+				p.DirectP2P = true
+				p.LastDirectSeen = time.Now()
+				p.PingMs = rtt.Milliseconds()
+				if p.Latency > 0 {
+					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
+				} else {
+					p.Latency = rtt
+				}
+			} else {
+				p.LastDirectSeen = time.Now()
+			}
 			if peer.IsValidEndpointForPeer(fromAddr, p, myPubIP) {
 				p.ActiveEndpoint = fromAddr
 			} else if p.ActiveEndpoint == "" {
@@ -350,19 +361,6 @@ func StartEngine(configYAML string, tunFd int) string {
 			}
 			p.LastSeen = time.Now() // ВСЕГДА обновляем LastSeen!
 			p.Online = true
-			if rtt > 0 {
-				p.PingMs = rtt.Milliseconds()
-			} else {
-				p.PingMs = 1
-			}
-			if p.PingMs <= 0 {
-				p.PingMs = 1
-			}
-			if p.Latency > 0 {
-				p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
-			} else {
-				p.Latency = rtt
-			}
 			globalRegistry.Upsert(p)
 			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("⚡ Android P2P сокет пробит!")
 

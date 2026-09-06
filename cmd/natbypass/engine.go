@@ -1243,9 +1243,9 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 				}
 			}
 			oldEP := p.ActiveEndpoint
-			p.DirectP2P = true
 			p.LastDirectSeen = time.Now()
 			if rtt > 0 {
+				p.DirectP2P = true
 				p.Latency = rtt
 				p.PingMs = rtt.Milliseconds()
 			}
