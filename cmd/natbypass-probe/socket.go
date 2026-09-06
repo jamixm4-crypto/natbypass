@@ -33,10 +33,26 @@ type awgReplyEvent struct {
 	receivedAt time.Time
 }
 
+// PeerPunchState хранит текущий статус активного пробива пира в реальном времени
+type PeerPunchState struct {
+	mu           sync.RWMutex
+	Peer         *PeerInfo
+	TargetAddr   *net.UDPAddr
+	PunchSent    int
+	PunchSuccess bool
+	PunchRTT     int64
+	PunchRemote  string
+	AWGSent      int
+	AWGSuccess   bool
+	AWGRTT       int64
+	LastSent     time.Time
+}
+
 // ProbeSocket инкапсулирует единый UDP-сокет, используемый одновременно для:
 // 1. STUN-запросов (определение реального внешнего сопоставленного порта роутера).
-// 2. Входящих и исходящих P2P UDP-проб пробива NAT (Same Socket Hole Punching).
-// 3. Отправки и приёма AWG-рукопожатий и мусорных пакетов (Jc/H1/H2).
+// 2. Непрерывного параллельного фонового пробива NAT (Continuous Mesh Hole Punching).
+// 3. Автоматического ответа на входящие пробы и AWG-пакеты.
+// 4. Тестирования обфускации AmneziaWG и DPI.
 type ProbeSocket struct {
 	conn       *net.UDPConn
 	localPort  int
@@ -46,12 +62,15 @@ type ProbeSocket struct {
 	cfg        *ProbeConfig
 
 	mu         sync.Mutex
+	peerStates sync.Map // string (NodeID) -> *PeerPunchState
+
 	stunEvents chan stunResultEvent
 	udpReplies chan udpReplyEvent
 	awgReplies chan awgReplyEvent
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx        context.Context
+	cancel     context.CancelFunc
+	punchOnce  sync.Once
 }
 
 // NewProbeSocket открывает локальный UDP-сокет и запускает единый readLoop
@@ -74,8 +93,8 @@ func NewProbeSocket(preferredPort int, myNodeID string, cfg *ProbeConfig) (*Prob
 
 	localPort := conn.LocalAddr().(*net.UDPAddr).Port
 
-	_ = conn.SetReadBuffer(2 * 1024 * 1024)
-	_ = conn.SetWriteBuffer(2 * 1024 * 1024)
+	_ = conn.SetReadBuffer(4 * 1024 * 1024)
+	_ = conn.SetWriteBuffer(4 * 1024 * 1024)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -84,9 +103,9 @@ func NewProbeSocket(preferredPort int, myNodeID string, cfg *ProbeConfig) (*Prob
 		localPort:  localPort,
 		myNodeID:   myNodeID,
 		cfg:        cfg,
-		stunEvents: make(chan stunResultEvent, 64),
-		udpReplies: make(chan udpReplyEvent, 64),
-		awgReplies: make(chan awgReplyEvent, 64),
+		stunEvents: make(chan stunResultEvent, 128),
+		udpReplies: make(chan udpReplyEvent, 128),
+		awgReplies: make(chan awgReplyEvent, 128),
 		ctx:        ctx,
 		cancel:     cancel,
 	}
@@ -113,6 +132,193 @@ func (ps *ProbeSocket) GetMappedAddr() string {
 		return fmt.Sprintf("%s:%d", ps.mappedIP.String(), ps.mappedPort)
 	}
 	return ""
+}
+
+// TrackPeer добавляет обнаруженного пира в активный фоновый цикл пробива
+func (ps *ProbeSocket) TrackPeer(peer *PeerInfo) {
+	if peer == nil || peer.NodeID == "" || peer.NodeID == ps.myNodeID {
+		return
+	}
+
+	rAddr, err := net.ResolveUDPAddr("udp4", peer.STUNAddr)
+	if err != nil {
+		return
+	}
+
+	val, loaded := ps.peerStates.LoadOrStore(peer.NodeID, &PeerPunchState{
+		Peer:       peer,
+		TargetAddr: rAddr,
+	})
+
+	if loaded {
+		state := val.(*PeerPunchState)
+		state.mu.Lock()
+		state.Peer = peer
+		state.TargetAddr = rAddr
+		state.mu.Unlock()
+	} else {
+		logf("[PUNCH-TRACK] Started continuous P2P punching worker to %s (%s)", peer.NodeID, peer.STUNAddr)
+	}
+
+	ps.punchOnce.Do(func() {
+		go ps.continuousPunchLoop()
+	})
+}
+
+// continuousPunchLoop непрерывно отсылает пробы ко всем обнаруженным узлам параллельно
+func (ps *ProbeSocket) continuousPunchLoop() {
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ps.ctx.Done():
+			return
+		case <-ticker.C:
+			ps.peerStates.Range(func(key, value interface{}) bool {
+				state := value.(*PeerPunchState)
+				ps.sendPunchStep(state)
+				return true
+			})
+		}
+	}
+}
+
+func (ps *ProbeSocket) sendPunchStep(state *PeerPunchState) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	if state.TargetAddr == nil {
+		return
+	}
+
+	now := time.Now()
+	state.LastSent = now
+
+	// 1. Если пробив UDP ещё не подтверждён, шлём NATPROBE
+	if !state.PunchSuccess || state.PunchSent < 20 {
+		probePayload := []byte(fmt.Sprintf("NATPROBE:%s>%s", ps.myNodeID, state.Peer.NodeID))
+		_, _ = ps.conn.WriteToUDP(probePayload, state.TargetAddr)
+		state.PunchSent++
+
+		// Если у пира Symmetric NAT или известен delta — веерный опрос портов
+		delta := state.Peer.NATDelta
+		if delta <= 0 {
+			delta = 1
+		}
+		if state.Peer.NATType == "symmetric" || state.Peer.NATDelta > 0 {
+			for step := 1; step <= 3; step++ {
+				pHigh := state.TargetAddr.Port + step*delta
+				pLow := state.TargetAddr.Port - step*delta
+				if pHigh > 1024 && pHigh < 65535 {
+					_, _ = ps.conn.WriteToUDP(probePayload, &net.UDPAddr{IP: state.TargetAddr.IP, Port: pHigh})
+				}
+				if pLow > 1024 && pLow < 65535 {
+					_, _ = ps.conn.WriteToUDP(probePayload, &net.UDPAddr{IP: state.TargetAddr.IP, Port: pLow})
+				}
+			}
+		}
+	}
+
+	// 2. Если UDP подтверждён, но AWG ещё нет — шлём AWG Handshake Initiation
+	if state.PunchSuccess && !state.AWGSuccess && state.AWGSent < 15 {
+		// Junk packets
+		if ps.cfg.AWG.Jc > 0 {
+			jMin := ps.cfg.AWG.Jmin
+			if jMin <= 0 {
+				jMin = 36
+			}
+			jMax := ps.cfg.AWG.Jmax
+			if jMax <= jMin {
+				jMax = jMin + 40
+			}
+			for j := 0; j < ps.cfg.AWG.Jc; j++ {
+				jLen := jMin + (j*7)%(jMax-jMin+1)
+				junk := make([]byte, jLen)
+				_, _ = rand.Read(junk)
+				_, _ = ps.conn.WriteToUDP(junk, state.TargetAddr)
+			}
+		}
+
+		// AWG Initiation packet
+		packetLen := 148 + ps.cfg.AWG.S1
+		initPacket := make([]byte, packetLen)
+		binary.LittleEndian.PutUint32(initPacket[:4], ps.cfg.AWG.H1)
+		marker := fmt.Sprintf("AWGPROBE:%s>%s", ps.myNodeID, state.Peer.NodeID)
+		copy(initPacket[4:], []byte(marker))
+		if len(initPacket) > 4+len(marker) {
+			_, _ = rand.Read(initPacket[4+len(marker):])
+		}
+
+		_, _ = ps.conn.WriteToUDP(initPacket, state.TargetAddr)
+		state.AWGSent++
+	}
+}
+
+// AllPeersSuccess возвращает true, если для всех пиров подтверждён пробив и AWG
+func (ps *ProbeSocket) AllPeersSuccess(peers []*PeerInfo) bool {
+	if len(peers) == 0 {
+		return false
+	}
+	for _, p := range peers {
+		val, ok := ps.peerStates.Load(p.NodeID)
+		if !ok {
+			return false
+		}
+		st := val.(*PeerPunchState)
+		st.mu.RLock()
+		okPunch := st.PunchSuccess
+		okAWG := st.AWGSuccess
+		st.mu.RUnlock()
+		if !okPunch || !okAWG {
+			return false
+		}
+	}
+	return true
+}
+
+func (ps *ProbeSocket) GetUDPPunchResult(peer *PeerInfo) *UDPPunchResult {
+	res := &UDPPunchResult{}
+	val, ok := ps.peerStates.Load(peer.NodeID)
+	if !ok {
+		res.Error = "peer was not probed"
+		return res
+	}
+	st := val.(*PeerPunchState)
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+
+	res.Success = st.PunchSuccess
+	res.Bidirectional = st.PunchSuccess
+	res.LatencyMs = st.PunchRTT
+	if !st.PunchSuccess {
+		res.Error = fmt.Sprintf("no UDP response after %d continuous probes to %s", st.PunchSent, peer.STUNAddr)
+	}
+	return res
+}
+
+func (ps *ProbeSocket) GetAWGHandshakeResult(peer *PeerInfo) *AWGHandshakeResult {
+	res := &AWGHandshakeResult{Attempts: 3}
+	val, ok := ps.peerStates.Load(peer.NodeID)
+	if !ok {
+		res.Error = "peer was not probed"
+		return res
+	}
+	st := val.(*PeerPunchState)
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+
+	res.Success = st.AWGSuccess
+	res.TimeMs = st.AWGRTT
+	res.Attempts = st.AWGSent
+	if !st.AWGSuccess {
+		if !st.PunchSuccess {
+			res.Error = "UDP hole punch failed, AWG handshake unreachable"
+		} else {
+			res.Error = fmt.Sprintf("no AWG H2 response after %d attempts", st.AWGSent)
+		}
+	}
+	return res
 }
 
 func (ps *ProbeSocket) readLoop() {
@@ -177,11 +383,33 @@ func (ps *ProbeSocket) readLoop() {
 			reply := []byte("NATREPLY:" + ps.myNodeID)
 			_, _ = ps.conn.WriteToUDP(reply, remoteAddr)
 			logf("[UDP-SRV] Received NATPROBE from %s (%s) -> sent NATREPLY", remoteAddr, fromID)
+
+			if val, ok := ps.peerStates.Load(fromID); ok {
+				st := val.(*PeerPunchState)
+				st.mu.Lock()
+				st.PunchRemote = remoteAddr.String()
+				st.mu.Unlock()
+			}
 			continue
 		}
 
 		if strings.HasPrefix(payloadStr, "NATREPLY:") {
 			fromID := strings.TrimPrefix(payloadStr, "NATREPLY:")
+			fromID = strings.TrimSpace(fromID)
+
+			if val, ok := ps.peerStates.Load(fromID); ok {
+				st := val.(*PeerPunchState)
+				st.mu.Lock()
+				if !st.PunchSuccess {
+					st.PunchSuccess = true
+					st.PunchRTT = time.Since(st.LastSent).Milliseconds()
+					st.PunchRemote = remoteAddr.String()
+					logf("[PUNCH-OK] %s <-> %s: Direct UDP hole punched! RTT=%dms (remote: %s)",
+						ps.myNodeID, fromID, st.PunchRTT, remoteAddr)
+				}
+				st.mu.Unlock()
+			}
+
 			select {
 			case ps.udpReplies <- udpReplyEvent{
 				fromNodeID: fromID,
@@ -222,7 +450,7 @@ func (ps *ProbeSocket) readLoop() {
 				_, _ = rand.Read(reply[20:])
 			}
 			_, _ = ps.conn.WriteToUDP(reply, remoteAddr)
-			logf("[AWG-SRV] Received AWG Handshake Initiation from %s (%s) -> sent AWG H2 Response", remoteAddr, fromID)
+			logf("[AWG-SRV] Received AWG Handshake Initiation from %s (%s) -> sent H2 response", remoteAddr, fromID)
 			continue
 		}
 
@@ -243,6 +471,19 @@ func (ps *ProbeSocket) readLoop() {
 					fromID = fromID[:32]
 				}
 			}
+
+			if val, ok := ps.peerStates.Load(fromID); ok {
+				st := val.(*PeerPunchState)
+				st.mu.Lock()
+				if !st.AWGSuccess {
+					st.AWGSuccess = true
+					st.AWGRTT = time.Since(st.LastSent).Milliseconds()
+					logf("[AWG-OK] %s <-> %s: AWG Handshake confirmed! RTT=%dms (remote: %s)",
+						ps.myNodeID, fromID, st.AWGRTT, remoteAddr)
+				}
+				st.mu.Unlock()
+			}
+
 			select {
 			case ps.awgReplies <- awgReplyEvent{
 				fromNodeID: fromID,
@@ -351,164 +592,45 @@ func (ps *ProbeSocket) RunSTUNSelfTest(ctx context.Context) (*SelfTestResult, er
 	return res, nil
 }
 
-func (ps *ProbeSocket) TestUDPPunch(ctx context.Context, peer *PeerInfo) *UDPPunchResult {
-	result := &UDPPunchResult{}
-
-	targetAddr := peer.STUNAddr
-	if targetAddr == "" {
-		result.Error = "no STUN address for peer"
-		return result
-	}
-
-	rAddr, err := net.ResolveUDPAddr("udp4", targetAddr)
-	if err != nil {
-		result.Error = fmt.Sprintf("invalid address %s: %v", targetAddr, err)
-		return result
-	}
-
-	logf("[UDP] %s -> %s: Punching to %s (via socket port %d)", ps.myNodeID, peer.NodeID, targetAddr, ps.localPort)
-
-	probePayload := []byte(fmt.Sprintf("NATPROBE:%s>%s", ps.myNodeID, peer.NodeID))
-
-	delta := peer.NATDelta
-	if delta <= 0 {
-		delta = 1
-	}
-
-	start := time.Now()
-	for attempt := 0; attempt < 6; attempt++ {
-		_, _ = ps.conn.WriteToUDP(probePayload, rAddr)
-
-		if peer.NATType == "symmetric" || peer.NATDelta > 0 {
-			for step := 1; step <= 3; step++ {
-				pHigh := rAddr.Port + step*delta
-				pLow := rAddr.Port - step*delta
-				if pHigh > 1024 && pHigh < 65535 {
-					_, _ = ps.conn.WriteToUDP(probePayload, &net.UDPAddr{IP: rAddr.IP, Port: pHigh})
-				}
-				if pLow > 1024 && pLow < 65535 {
-					_, _ = ps.conn.WriteToUDP(probePayload, &net.UDPAddr{IP: rAddr.IP, Port: pLow})
-				}
-			}
-		}
-
-		waitTimer := time.NewTimer(400 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			waitTimer.Stop()
-			result.Error = ctx.Err().Error()
-			return result
-		case reply := <-ps.udpReplies:
-			waitTimer.Stop()
-			if reply.fromNodeID == peer.NodeID || strings.Contains(reply.fromNodeID, peer.NodeID) || peer.NodeID == "" {
-				result.Success = true
-				result.Bidirectional = true
-				result.LatencyMs = time.Since(start).Milliseconds()
-				logf("[UDP] %s -> %s: SUCCESS (%dms, from %s)", ps.myNodeID, peer.NodeID, result.LatencyMs, reply.remoteAddr)
-				return result
-			}
-		case <-waitTimer.C:
-		}
-	}
-
-	result.Success = false
-	result.Error = "no response after 6 punch attempts"
-	logf("[UDP] %s -> %s: FAIL (no response from %s)", ps.myNodeID, peer.NodeID, targetAddr)
-	return result
-}
-
-func (ps *ProbeSocket) TestAWGHandshake(ctx context.Context, peer *PeerInfo, plainMode bool) *AWGHandshakeResult {
-	result := &AWGHandshakeResult{Attempts: 3}
-
-	targetAddr := peer.STUNAddr
-	if targetAddr == "" {
-		result.Error = "no target STUN address"
-		return result
-	}
-
-	rAddr, err := net.ResolveUDPAddr("udp4", targetAddr)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-
-	logf("[AWG-HS] %s -> %s: Testing AWG Handshake (plain=%v, H1=%d, Jc=%d)",
-		ps.myNodeID, peer.NodeID, plainMode, ps.cfg.AWG.H1, ps.cfg.AWG.Jc)
-
-	start := time.Now()
-
-	for attempt := 0; attempt < 3; attempt++ {
-		if !plainMode && ps.cfg.AWG.Jc > 0 {
-			jMin := ps.cfg.AWG.Jmin
-			jMax := ps.cfg.AWG.Jmax
-			if jMin <= 0 {
-				jMin = 36
-			}
-			if jMax <= jMin {
-				jMax = jMin + 40
-			}
-			for j := 0; j < ps.cfg.AWG.Jc; j++ {
-				jLen := jMin + (j*7)%(jMax-jMin+1)
-				junkBuf := make([]byte, jLen)
-				_, _ = rand.Read(junkBuf)
-				_, _ = ps.conn.WriteToUDP(junkBuf, rAddr)
-			}
-		}
-
-		packetLen := 148
-		if !plainMode {
-			packetLen += ps.cfg.AWG.S1
-		}
-		initPacket := make([]byte, packetLen)
-
-		if plainMode {
-			initPacket[0] = 0x01
-		} else {
-			binary.LittleEndian.PutUint32(initPacket[:4], ps.cfg.AWG.H1)
-		}
-
-		marker := fmt.Sprintf("AWGPROBE:%s>%s", ps.myNodeID, peer.NodeID)
-		copy(initPacket[4:], []byte(marker))
-		if len(initPacket) > 4+len(marker) {
-			_, _ = rand.Read(initPacket[4+len(marker):])
-		}
-
-		_, _ = ps.conn.WriteToUDP(initPacket, rAddr)
-
-		waitTimer := time.NewTimer(500 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			waitTimer.Stop()
-			result.Error = ctx.Err().Error()
-			return result
-		case reply := <-ps.awgReplies:
-			waitTimer.Stop()
-			result.Success = true
-			result.TimeMs = time.Since(start).Milliseconds()
-			logf("[AWG-HS] %s -> %s: SUCCESS (%dms, received H2 response from %s)",
-				ps.myNodeID, peer.NodeID, result.TimeMs, reply.remoteAddr)
-			return result
-		case <-waitTimer.C:
-		}
-	}
-
-	result.Success = false
-	result.Error = "no H2 response received"
-	logf("[AWG-HS] %s -> %s: FAIL (no response to Initiation)", ps.myNodeID, peer.NodeID)
-	return result
-}
-
 func (ps *ProbeSocket) TestDPIProbe(ctx context.Context, peer *PeerInfo) *DPIProbeResult {
 	result := &DPIProbeResult{}
 	logf("[DPI] %s -> %s: Testing DPI evasion (Plain WG vs AWG)", ps.myNodeID, peer.NodeID)
 
-	// Test 1: Plain WG (type 0x01)
-	plainRes := ps.TestAWGHandshake(ctx, peer, true)
-	result.PlainWGSuccess = plainRes.Success
+	targetAddr := peer.STUNAddr
+	if targetAddr == "" {
+		result.Notes = "no STUN address"
+		return result
+	}
+	rAddr, err := net.ResolveUDPAddr("udp4", targetAddr)
+	if err != nil {
+		result.Notes = err.Error()
+		return result
+	}
 
-	// Test 2: AWG with configured H1/H2 and Jc
-	awgRes := ps.TestAWGHandshake(ctx, peer, false)
-	result.AWGSuccess = awgRes.Success
+	// 1. Test Plain WG (0x01)
+	plainInit := make([]byte, 148)
+	plainInit[0] = 0x01
+	copy(plainInit[4:], []byte("AWGPROBE:"+ps.myNodeID+">"+peer.NodeID))
+	_, _ = ps.conn.WriteToUDP(plainInit, rAddr)
+
+	timer := time.NewTimer(1 * time.Second)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+	case <-timer.C:
+		result.PlainWGSuccess = false
+	case <-ps.awgReplies:
+		timer.Stop()
+		result.PlainWGSuccess = true
+	}
+
+	// 2. Check AWG result
+	if val, ok := ps.peerStates.Load(peer.NodeID); ok {
+		st := val.(*PeerPunchState)
+		st.mu.RLock()
+		result.AWGSuccess = st.AWGSuccess
+		st.mu.RUnlock()
+	}
 
 	if !result.PlainWGSuccess && !result.AWGSuccess {
 		result.BlockedByDPI = true

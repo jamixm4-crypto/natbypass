@@ -92,8 +92,10 @@ func main() {
 		Pairs:     make(map[string]*PairResult),
 	}
 
-	// ─── PHASE 1: SELF-TEST (SAME-SOCKET BINDING) ─────────────
+	// ─── PHASE 1: SELF-TEST (SAME-SOCKET BINDING & FIREWALL) ───
 	logf("\n[>] PHASE 1: Self-test (Same-Socket NAT & STUN)")
+	EnsureProbeFirewallRule(*listenPort)
+
 	probeSocket, err := NewProbeSocket(*listenPort, myNodeID, cfg)
 	if err != nil {
 		log.Fatalf("Failed to bind probe socket on port %d: %v", *listenPort, err)
@@ -108,8 +110,12 @@ func main() {
 	}
 	report.SelfTest = selfResult
 
-	// ─── PHASE 2: DISCOVERY ──────────────────────────────────
-	logf("\n[>] PHASE 2: Peer discovery (60s)")
+	// ─── PHASE 2: DISCOVERY & CONTINUOUS MESH PUNCHING ────────
+	testDuration := cfg.TestDurationSec
+	if testDuration < 20 {
+		testDuration = 30
+	}
+	logf("\n[>] PHASE 2: Peer discovery & active hole punching (%ds)", testDuration)
 
 	nodeLabel := *label
 	if nodeLabel == "" {
@@ -117,10 +123,8 @@ func main() {
 	}
 	myVIP := NodeVIP(myNodeID)
 
-	var discoveredPeers []*PeerInfo
-
 	disc, err := NewDiscovery(cfg, myNodeID, func(peer *PeerInfo) {
-		discoveredPeers = append(discoveredPeers, peer)
+		probeSocket.TrackPeer(peer)
 	})
 	if err != nil {
 		log.Fatalf("Discovery init error: %v", err)
@@ -132,17 +136,15 @@ func main() {
 	}
 
 	stunAddr := ""
-	if selfResult != nil {
-		stunAddr = selfResult.STUNAddr
-	}
 	natType := ""
 	natDelta := 0
 	if selfResult != nil {
+		stunAddr = selfResult.STUNAddr
 		natType = selfResult.NATType
 		natDelta = selfResult.NATDelta
 	}
 
-	// Start beacon loop (publish every 10s)
+	// Start beacon loop (publish every 5s for fast discovery)
 	beaconListenPort := probeSocket.GetLocalPort()
 	beacon := &ProbeBeacon{
 		NodeID:     myNodeID,
@@ -156,48 +158,53 @@ func main() {
 		ProbeID:    cfg.ProbeID,
 		ListenPort: beaconListenPort,
 	}
-	disc.StartBeaconLoop(ctx, beacon, 10)
+	disc.StartBeaconLoop(ctx, beacon, 5)
 
+	// Run active punching loop for testDuration
+	testDeadline := time.Now().Add(time.Duration(testDuration) * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
-	// Wait for discovery (up to 60s or until we have at least 1 peer)
-	discoveryDeadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(discoveryDeadline) {
-		if len(disc.GetPeers()) >= 1 {
-			time.Sleep(5 * time.Second) // small extra wait for more peers
-			break
-		}
-		time.Sleep(2 * time.Second)
+	for time.Now().Before(testDeadline) {
 		select {
 		case <-ctx.Done():
-			goto printReport
-		default:
+			goto phase3
+		case <-ticker.C:
+			peers := disc.GetPeers()
+			for _, p := range peers {
+				probeSocket.TrackPeer(p)
+			}
+			if len(peers) >= 2 && probeSocket.AllPeersSuccess(peers) {
+				logf("[TEST] All %d discovered peer(s) successfully punched and verified!", len(peers))
+				time.Sleep(2 * time.Second)
+				goto phase3
+			}
 		}
 	}
 
-	discoveredPeers = disc.GetPeers()
+phase3:
+	discoveredPeers := disc.GetPeers()
 	if len(discoveredPeers) == 0 {
-		logf("[SIG] No peers discovered after 60s. Check MQTT connectivity.")
+		logf("[SIG] No peers discovered after %ds. Check MQTT connectivity.", testDuration)
 		goto printReport
 	}
 	logf("[SIG] Discovered %d peer(s)", len(discoveredPeers))
 	report.Nodes = discoveredPeers
 
-	// ─── PHASE 3: TESTS ──────────────────────────────────────
-	logf("\n[>] PHASE 3: Connectivity tests")
+	// ─── PHASE 3: TESTS & SUMMARY ────────────────────────────
+	logf("\n[>] PHASE 3: Connectivity summary & TCP verification")
 
 	for _, peer := range discoveredPeers {
 		pairKey := myNodeID + ">" + peer.NodeID
 		pair := &PairResult{From: myNodeID, To: peer.NodeID}
 
-		logf("\n--- Testing %s ---", pairKey)
+		logf("\n--- Results for %s (%s, %s) ---", pairKey, peer.Label, peer.Country)
 
-		// 3a. Raw UDP punch (Same-Socket)
-		if peer.STUNAddr != "" {
-			pair.UDPPunch = probeSocket.TestUDPPunch(ctx, peer)
-		}
+		// 3a. UDP Punch result from continuous puncher
+		pair.UDPPunch = probeSocket.GetUDPPunchResult(peer)
 
-		// 3b. AWG Handshake (Same-Socket)
-		pair.AWGHandshake = probeSocket.TestAWGHandshake(ctx, peer, false)
+		// 3b. AWG Handshake result from continuous puncher
+		pair.AWGHandshake = probeSocket.GetAWGHandshakeResult(peer)
 
 		// 3c. TCP tests
 		if peer.STUNAddr != "" {
@@ -207,7 +214,7 @@ func main() {
 
 		// 3d. DPI probe (if AWG failed but UDP ok)
 		if pair.UDPPunch != nil && pair.UDPPunch.Success &&
-			pair.AWGHandshake != nil && !pair.AWGHandshake.Success && !pair.AWGHandshake.Skipped {
+			pair.AWGHandshake != nil && !pair.AWGHandshake.Success {
 			pair.DPIProbe = probeSocket.TestDPIProbe(ctx, peer)
 		}
 
