@@ -1,4 +1,4 @@
-﻿package network
+package network
 
 import (
 	"context"
@@ -16,6 +16,8 @@ type SymmetricNATSession struct {
 	puncher   *UDPPuncher
 	targetIP  string
 	basePort  int
+	winner    string
+	winnerMu  sync.RWMutex
 	successCh chan string // delivers winning address on success
 	stopOnce  sync.Once
 	cancel    context.CancelFunc
@@ -31,10 +33,19 @@ func newSymmetricNATSession(p *UDPPuncher, targetIP string, basePort int) *Symme
 	}
 }
 
+func (s *SymmetricNATSession) getWinner() string {
+	s.winnerMu.RLock()
+	defer s.winnerMu.RUnlock()
+	return s.winner
+}
+
 // NotifySuccess is called by the outer code when a PONG arrives from any address.
 // It signals the session to stop immediately.
 func (s *SymmetricNATSession) NotifySuccess(fromAddr string) {
 	s.stopOnce.Do(func() {
+		s.winnerMu.Lock()
+		s.winner = fromAddr
+		s.winnerMu.Unlock()
 		select {
 		case s.successCh <- fromAddr:
 		default:
@@ -58,9 +69,12 @@ func (s *SymmetricNATSession) Run(ctx context.Context) string {
 	defer cancel()
 
 	for hop := 0; hop < SymmetricNATMaxHops; hop++ {
+		if w := s.getWinner(); w != "" {
+			return w
+		}
 		select {
 		case <-sessionCtx.Done():
-			return ""
+			return s.getWinner()
 		case winner := <-s.successCh:
 			return winner
 		default:
@@ -106,21 +120,27 @@ func (s *SymmetricNATSession) Run(ctx context.Context) string {
 		}
 
 		// Wait between hops or for early success
+		if w := s.getWinner(); w != "" {
+			return w
+		}
 		select {
 		case <-sessionCtx.Done():
-			return ""
+			return s.getWinner()
 		case winner := <-s.successCh:
 			return winner
 		case <-time.After(SymmetricNATHopDelay):
 		}
 	}
 
-	// Drain success channel after all hops
+	// Check if winner was recorded
+	if w := s.getWinner(); w != "" {
+		return w
+	}
 	select {
 	case winner := <-s.successCh:
 		return winner
 	default:
-		return ""
+		return s.getWinner()
 	}
 }
 

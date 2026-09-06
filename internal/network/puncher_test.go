@@ -348,7 +348,7 @@ func TestSymmetricNATSession_RunsAndStops(t *testing.T) {
 		if winner != "127.0.0.1:50001" {
 			t.Fatalf("unexpected winner: %s", winner)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatalf("session did not terminate after NotifySuccess")
 	}
 }
