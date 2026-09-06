@@ -1,4 +1,15 @@
-﻿package main
+// Copyright (C) 2026 jamixm4-crypto
+//
+// NatBypass is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// AmneziaWG protocol parameters and obfuscation mechanisms (H1..H4, S1..S4, Jc, Jmin, Jmax)
+// are developed by the AmneziaWG team (https://github.com/amnezia-vpn/amneziawg-go).
+// Original WireGuard protocol created by Jason A. Donenfeld (https://www.wireguard.com).
+
+package main
 
 import (
 	"context"
