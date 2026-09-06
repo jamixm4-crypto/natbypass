@@ -23,6 +23,7 @@
 * 🪟 [**Windows-руководство**](https://github.com/jamixm4-crypto/natbypass/wiki/Windows-Guide) — нативный UI, трей, Wintun и серверный режим.
 * 🧪 [**Обновление и Тестовые Сборки (Beta)**](https://github.com/jamixm4-crypto/natbypass/wiki/Updating-and-Beta-Versions) — обновление в 1 клик на Windows, Linux, роутерах и Android.
 * 🔧 [**Диагностика и устранение неполадок**](https://github.com/jamixm4-crypto/natbypass/wiki/Troubleshooting-and-Diagnostics) — универсальные скрипты диагностики и сквозной проверки пинга.
+* 🌍 [**natbypass-probe: Межгеографическая диагностика**](docs/PROBE.md) — утилита для тестирования P2P/AWG-соединений между узлами в разных странах (BY, RU, US). Выявляет блокировки UDP, WireGuard-паттерна, DPI/ТСПУ.
 
 ---
 
