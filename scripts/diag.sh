@@ -474,11 +474,10 @@ if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
         fi
         
         # Проверка 5: Несовпадение AmneziaWG
+        # Используем awg_mismatch флаг от сервера (авторитетный) как приоритетный источник.
+        # Локальный AWG определяем по awg_active:true или awg_version в STATUS_JSON.
         P_HAS_AWG="$(echo "$p_line" | grep -o '"h1":' || echo "")"
-        MY_HAS_AWG="$(echo "$STATUS_JSON" | grep -o '"awg_enabled":true' || echo "")"
-        if [ -z "$MY_HAS_AWG" ]; then
-            MY_HAS_AWG="$(echo "$STATUS_JSON" | grep -o '"h1":' || echo "")"
-        fi
+        MY_HAS_AWG="$(echo "$STATUS_JSON" | grep -o '"awg_active":true\|"awg_version":"[^"]*"' | grep -v '""' || echo "")"
         P_MISMATCH="$(echo "$p_line" | grep -o '"awg_mismatch":true' || echo "")"
         if [ -n "$P_MISMATCH" ]; then
             log_warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: параметры обфускации AWG 3.1 различаются!"
