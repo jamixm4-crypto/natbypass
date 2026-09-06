@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.6"
+	Version = "1.9.223-beta.7"
 	Commit  = "release"
 )
 
@@ -4084,6 +4084,9 @@ func startEngineFromConfig(c *config.Config) {
 				egress.InterfaceName, egress.HardwareType, localIPStr, gwStr, egress.MTU, liveStr)
 			addLog(msg)
 			writeDebug(msg)
+			if uiServer != nil {
+				uiServer.SetEgressInfo(egress.InterfaceName, gwStr, egress.MTU, egress.InternetLive)
+			}
 		}
 	}()
 
@@ -4228,6 +4231,10 @@ func startEngineFromConfig(c *config.Config) {
 			if newInfo != nil && newInfo.LocalIP != nil {
 				newIP = newInfo.LocalIP.String()
 			}
+			newGW := ""
+			if newInfo != nil && newInfo.GatewayIP != nil {
+				newGW = newInfo.GatewayIP.String()
+			}
 			msg := fmt.Sprintf("🔄 Смена сетевого интерфейса: %s (%s) → %s (%s) [%s]! Сброс STUN и ре-анонс...",
 				oldInfo.InterfaceName, oldIP, newInfo.InterfaceName, newIP, newInfo.HardwareType)
 			addLog(msg)
@@ -4240,6 +4247,9 @@ func startEngineFromConfig(c *config.Config) {
 					defer sCancel()
 					_, _, _ = udpPuncher.ForceDiscoverMappedAddress(sCtx)
 				}()
+			}
+			if uiServer != nil && newInfo != nil {
+				uiServer.SetEgressInfo(newInfo.InterfaceName, newGW, newInfo.MTU, newInfo.InternetLive)
 			}
 			triggerPublish()
 		})

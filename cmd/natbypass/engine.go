@@ -148,7 +148,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	defer cancel()
 
 	// 0. Определение основного интернет-интерфейса и шлюза при старте (Zero-RTT + 1-RTT Canary)
+	var startEgress *network.EgressInfo
 	if egress, err := network.DetectEgress(engineCtx); err == nil && egress != nil {
+		startEgress = egress
 		liveStr := "❌ НЕДОСТУПЕН (Canary STUN таймаут)"
 		if egress.InternetLive {
 			liveStr = fmt.Sprintf("✅ ДОСТУПЕН (Canary STUN RTT: %v)", egress.CanaryLatency.Round(time.Millisecond))
@@ -169,11 +171,27 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			Int("mtu", egress.MTU).
 			Str("internet", liveStr).
 			Msg("🌐 Основной интернет-интерфейс определён")
+
+		statusMark := "✓"
+		if !egress.InternetLive {
+			statusMark = "!"
+		}
+		fmt.Printf("\n▶ 🌐 ОСНОВНОЙ ИНТЕРНЕТ-ИНТЕРФЕЙС И ДОСТУПНОСТЬ СЕТИ\n")
+		fmt.Printf("  [✓] Адаптер: %s [%s] (ifIndex: %d, MTU: %d)\n", egress.InterfaceName, egress.HardwareType, egress.InterfaceIndex, egress.MTU)
+		fmt.Printf("  [i] Локальный IP: %s | Физический шлюз: %s\n", localIPStr, gwStr)
+		fmt.Printf("  [%s] Проверка доступности интернета: %s\n\n", statusMark, liveStr)
 	}
 
 	registry := startPeerRegistry(engineCtx)
 	sigMgr := startSignaling(engineCtx, cfg, deviceID)
 	uiServer := startWebUI(engineCtx, cfg, registry, sigMgr, deviceID, myVirtualIP)
+	if uiServer != nil && startEgress != nil {
+		gw := ""
+		if startEgress.GatewayIP != nil {
+			gw = startEgress.GatewayIP.String()
+		}
+		uiServer.SetEgressInfo(startEgress.InterfaceName, gw, startEgress.MTU, startEgress.InternetLive)
+	}
 	puncher, ipDisc := startNetworkLayer(engineCtx, cfg, deviceID, registry)
 	if puncher != nil {
 		defer puncher.Close()
@@ -207,6 +225,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				defer sCancel()
 				_, _, _ = puncher.ForceDiscoverMappedAddress(sCtx)
 			}()
+
+			if uiServer != nil && newInfo != nil {
+				gw := ""
+				if newInfo.GatewayIP != nil {
+					gw = newInfo.GatewayIP.String()
+				}
+				uiServer.SetEgressInfo(newInfo.InterfaceName, gw, newInfo.MTU, newInfo.InternetLive)
+			}
 
 			select {
 			case triggerPublishCh <- struct{}{}:

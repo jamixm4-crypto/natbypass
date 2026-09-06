@@ -60,6 +60,10 @@ type AppState struct {
 	Uptime         string    `json:"uptime"`
 	CurrentChannel string    `json:"current_channel"`
 	StartedAt      time.Time `json:"started_at"`
+	InterfaceName  string    `json:"interface_name,omitempty"`
+	GatewayIP      string    `json:"gateway_ip,omitempty"`
+	MTU            int       `json:"mtu,omitempty"`
+	InternetLive   bool      `json:"internet_live"`
 }
 
 // EventEntry — запись в журнале событий NatBypass
@@ -221,6 +225,16 @@ func (s *Server) SetVirtualIP(vip string) {
 func (s *Server) SetNATType(natType string) {
 	if s.state != nil {
 		s.state.NATType = natType
+	}
+}
+
+// SetEgressInfo обновляет параметры физического интернет-интерфейса ноды (шлюз, MTU, доступ в сеть)
+func (s *Server) SetEgressInfo(ifaceName, gatewayIP string, mtu int, live bool) {
+	if s.state != nil {
+		s.state.InterfaceName = ifaceName
+		s.state.GatewayIP = gatewayIP
+		s.state.MTU = mtu
+		s.state.InternetLive = live
 	}
 }
 
@@ -886,6 +900,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"active_profile":       activeProfileName,
 		"mqtt_topic":           mqttTopic,
 		"config_path":          s.configPath,
+		"interface_name":       s.state.InterfaceName,
+		"gateway_ip":           s.state.GatewayIP,
+		"mtu":                  s.state.MTU,
+		"internet_live":        s.state.InternetLive,
 	}
 
 	awgEnabled := false
