@@ -43,13 +43,20 @@ func (n NATType) IsSymmetric() bool {
 	return n == NATTypeSymmetric
 }
 
-// defaultSTUNServers вЂ” diverse list across vendors so at least one works on any operator.
+// defaultSTUNServers — diverse list across vendors so at least one works on any operator.
+// Pre-seeded with direct IPv4 addresses (including port 443) so STUN discovery requires 0ms DNS
+// and successfully penetrates mobile cellular operators (LTE/5G) that filter UDP port 3478.
 var defaultSTUNServers = []string{
+	"162.159.207.0:3478",    // Cloudflare STUN direct IP (0ms DNS)
+	"74.125.250.129:19302",  // Google STUN direct IP (0ms DNS)
+	"212.53.40.43:3478",     // Sipnet Moscow direct IP (0ms DNS)
+	"195.201.201.32:443",    // Nextcloud STUN port 443 (punches through cellular carrier port 3478 blocks)
 	"stun.cloudflare.com:3478",
+	"stun.sipnet.ru:3478",
+	"stun.miwifi.com:3478",
 	"stun.l.google.com:19302",
 	"stun1.l.google.com:19302",
 	"stun.nextcloud.com:443",
-	"stun.twilio.com:3478",
 	"relay.webwormhole.io:3478",
 }
 

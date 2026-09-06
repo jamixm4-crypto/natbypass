@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # NatBypass Universal Diagnostic Script for Windows 10 / 11 / Server
 # ==============================================================================
 # Usage:
@@ -51,10 +51,21 @@ $defaultRoute = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction Silentl
 if ($defaultRoute) {
     $egressAdapter = Get-NetAdapter -InterfaceIndex $defaultRoute.InterfaceIndex -ErrorAction SilentlyContinue
     $egressIP = Get-NetIPAddress -InterfaceIndex $defaultRoute.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty IPAddress -First 1
-    $canaryPing = Test-Connection -ComputerName 1.1.1.1 -Count 1 -Quiet -TimeoutSeconds 2 -ErrorAction SilentlyContinue
+    $egressMTU = Get-NetIPInterface -InterfaceIndex $defaultRoute.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty NlMtu -First 1
+    if (-not $egressMTU) { $egressMTU = 1500 }
+
+    $canaryPing = $false
+    try {
+        $pObj = New-Object System.Net.NetworkInformation.Ping
+        $reply = $pObj.Send("1.1.1.1", 1500)
+        if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
+            $canaryPing = $true
+        }
+    } catch {}
+
     $canaryStatus = if ($canaryPing) { "✅ ДОСТУПЕН" } else { "⚠️ ТАЙМАУТ" }
     Log-Ok "Основной интернет-выход: $($egressAdapter.Name) [$($egressAdapter.InterfaceDescription)]"
-    Log-Info "  -> Локальный IP: $egressIP, Шлюз: $($defaultRoute.NextHop), MTU: $($egressAdapter.NdisLinkSpeed), Интернет: $canaryStatus"
+    Log-Info "  -> Локальный IP: $egressIP, Шлюз: $($defaultRoute.NextHop), MTU: $egressMTU, Интернет: $canaryStatus"
 }
 
 # 2. Process Check
@@ -526,10 +537,20 @@ function Test-PeerPing($ip, $name) {
     if ([string]::IsNullOrWhiteSpace($cleanIp) -or $cleanIp -eq "0.0.0.0" -or $cleanIp -eq "<nil>") {
         return
     }
-    $res = Test-Connection -ComputerName $cleanIp -Count 2 -Quiet -ErrorAction SilentlyContinue
-    if ($res) {
-        Log-Ok "Ping до $name ($cleanIp): УСПЕШНО (0% потерь)"
-        $script:lines += "Ping $cleanIp ($name): SUCCESS"
+    $pingOk = $false
+    $rtt = 0
+    try {
+        $pObj = New-Object System.Net.NetworkInformation.Ping
+        $reply = $pObj.Send($cleanIp, 1000)
+        if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
+            $pingOk = $true
+            $rtt = $reply.RoundtripTime
+        }
+    } catch {}
+
+    if ($pingOk) {
+        Log-Ok "Ping до $name ($cleanIp): УСПЕШНО (${rtt} ms, 0% потерь)"
+        $script:lines += "Ping $cleanIp ($name): SUCCESS (${rtt} ms)"
     } else {
         Log-Fail "Ping до $name ($cleanIp): ПРЕВЫШЕН ИНТЕРВАЛ ОЖИДАНИЯ (100% потерь)"
         $script:lines += "Ping $cleanIp ($name): FAIL"

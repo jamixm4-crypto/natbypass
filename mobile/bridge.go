@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.223-beta.4"
+const Version = "1.9.223-beta.8"
 
 
 
@@ -376,30 +376,53 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}
 
-	// Определение IP и STUN на постоянном UDP Puncher сокете
+	// Определение IP и STUN на постоянном UDP Puncher сокете:
+	// 1. Быстрый параллельный STUN-опрос (суб-100мс) без ожидания медленных HTTP API
+	go func() {
+		if puncher != nil {
+			if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
+				engineMu.Lock()
+				globalSTUN = fmt.Sprintf("%s:%d", extIP.String(), port)
+				if globalPublicIP == "" {
+					globalPublicIP = extIP.String()
+				}
+				stunSnap := globalSTUN
+				engineMu.Unlock()
+				logger.Info().Str("stun", stunSnap).Msg("✅ STUN адрес мобильного устройства успешно определён")
+			}
+		}
+		if globalSTUN == "" {
+			stunClient := network.NewSTUNClient(cfg.Network.StunServers)
+			if extIP, port, err := stunClient.GetMappedAddress(ctx); err == nil && extIP != nil {
+				engineMu.Lock()
+				globalSTUN = fmt.Sprintf("%s:%d", extIP.String(), port)
+				if globalPublicIP == "" {
+					globalPublicIP = extIP.String()
+				}
+				engineMu.Unlock()
+			}
+		}
+	}()
+
+	// 2. HTTP и IPv6 определение параллельно (не блокируя STUN)
 	ipDisc := network.NewDiscoverer(cfg.Network.IPApis, 5*time.Second)
 	go func() {
-		if ip, err := ipDisc.GetPublicIPCached(ctx, 5*time.Minute); err == nil {
-			globalPublicIP = ip.String()
+		if ip, err := ipDisc.GetPublicIPCached(ctx, 5*time.Minute); err == nil && ip != nil {
+			engineMu.Lock()
+			if globalPublicIP == "" {
+				globalPublicIP = ip.String()
+			}
+			engineMu.Unlock()
 		}
 		if v6 := network.GetPublicIPv6(ctx); v6 != "" {
 			pPort := 51820
 			if puncher != nil {
 				pPort = puncher.LocalPort()
 			}
+			engineMu.Lock()
 			globalIPv6 = fmt.Sprintf("[%s]:%d", v6, pPort)
+			engineMu.Unlock()
 			logger.Info().Str("ipv6", globalIPv6).Msg("Глобальный IPv6 адрес мобильного устройства определён (P2P без CGNAT)")
-		}
-		if puncher != nil {
-			if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil {
-				globalSTUN = fmt.Sprintf("%s:%d", extIP.String(), port)
-			}
-		}
-		if globalSTUN == "" {
-			stunClient := network.NewSTUNClient(cfg.Network.StunServers)
-			if extIP, port, err := stunClient.GetMappedAddress(ctx); err == nil {
-				globalSTUN = fmt.Sprintf("%s:%d", extIP.String(), port)
-			}
 		}
 	}()
 
@@ -1234,10 +1257,8 @@ func RefreshPublicIP() {
 	puncher := globalPuncher
 	logger.Info().Msg("🔄 Смена сети обнаружена — принудительно пересматриваю IP и STUN-адрес...")
 
-	// Сбрасываем текущий STUN и IP
-	globalSTUN = ""
-	globalPublicIP = ""
-	globalIPv6 = ""
+	// Не зануляем globalSTUN и globalPublicIP, чтобы не отправлять пирам пустые эндпоинты
+	// и не вызывать ложного показа «Определение STUN...» в UI во время зондирования новой сети.
 
 	go func() {
 		// Zero-delay STUN probe: immediately discover new public IP and mapped port

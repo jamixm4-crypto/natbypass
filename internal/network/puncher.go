@@ -401,15 +401,38 @@ func (p *UDPPuncher) DiscoverMappedAddress(ctx context.Context) (net.IP, int, er
 		return nil, 0, fmt.Errorf("UDP socket closed")
 	}
 
-	if len(servers) > 6 {
-		servers = servers[:6]
+	if len(servers) > 8 {
+		servers = servers[:8]
 	}
 
-	// 2. Отправляем Binding Request параллельно на все топ STUN сервера
+	// Очищаем старые токены из канала stunRespCh перед новым опросом
+	for {
+		select {
+		case <-p.stunRespCh:
+		default:
+			goto drained
+		}
+	}
+drained:
+
+	// 2. Отправляем Binding Request:
+	// Серверы с прямыми IP-адресами опрашиваются немедленно (0 мс DNS),
+	// а доменные имена разрешаются параллельно в фоне, не блокируя цикл.
 	msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
 	for _, srv := range servers {
-		if rAddr, err := p.resolveAddr(srv); err == nil && rAddr != nil {
-			_, _ = conn.WriteToUDP(msg.Raw, rAddr)
+		host, _, splitErr := net.SplitHostPort(srv)
+		if splitErr == nil && net.ParseIP(host) != nil {
+			// Прямой IP-адрес: мгновенно и без DNS
+			if rAddr, err := p.resolveAddr(srv); err == nil && rAddr != nil {
+				_, _ = conn.WriteToUDP(msg.Raw, rAddr)
+			}
+		} else {
+			// Доменное имя: параллельное разрешение без блокировки основного потока
+			go func(server string) {
+				if rAddr, err := p.resolveAddr(server); err == nil && rAddr != nil {
+					_, _ = conn.WriteToUDP(msg.Raw, rAddr)
+				}
+			}(srv)
 		}
 	}
 

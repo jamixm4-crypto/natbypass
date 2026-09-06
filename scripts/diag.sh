@@ -536,13 +536,12 @@ test_ping() {
         return
     fi
     PING_OK=0
-    if ping -c 2 -w 3 "$CLEAN_IP" >/dev/null 2>&1; then
+    # Быстрая проверка с таймаутом 1 секунда (без 13-секундных зависаний на Keenetic)
+    if ping -c 1 -W 1 -w 1 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
-    elif [ -n "$IP_ADDR" ] && ping -c 2 -w 3 -I "$IP_ADDR" "$CLEAN_IP" >/dev/null 2>&1; then
+    elif ping -c 1 -W 1 -w 1 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
-    elif ping -c 2 -w 3 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
-        PING_OK=1
-    elif ping -c 2 -W 2 "$CLEAN_IP" >/dev/null 2>&1; then
+    elif ping -c 1 -w 1 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
     fi
     if [ "$PING_OK" -eq 1 ]; then

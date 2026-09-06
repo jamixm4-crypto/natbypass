@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.7"
+	Version = "1.9.223-beta.8"
 	Commit  = "release"
 )
 

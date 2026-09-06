@@ -273,6 +273,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("network.mtu", 1280)
 	v.SetDefault("network.allow_exit_node", false)
 	v.SetDefault("network.stun_servers", []string{
+		"162.159.207.0:3478",   // Cloudflare STUN direct IP (0ms DNS)
+		"74.125.250.129:19302", // Google STUN direct IP (0ms DNS)
+		"212.53.40.43:3478",    // Sipnet Moscow direct IP (0ms DNS)
+		"195.201.201.32:443",   // Nextcloud STUN port 443 (cellular carrier bypass)
 		"stun.cloudflare.com:3478",
 		"stun.sipnet.ru:3478",
 		"stun.miwifi.com:3478",

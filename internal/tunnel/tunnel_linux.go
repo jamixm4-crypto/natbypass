@@ -122,13 +122,19 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 
 	// 4. Включение маршрутизации ядра Linux (IP Forwarding)
 	_ = exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").Run()
+	_ = os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1\n"), 0644)
 
 	// 5. Оптимизация буферов UDP сокетов ядра Linux (Keenetic, OpenWrt, Debian)
-	// Без rmem_max/wmem_max ядро ограничивает SO_RCVBUF ~212KB, что приводит к RcvbufErrors
+	// Без rmem_max/wmem_max ядро ограничивает SO_RCVBUF ~212KB, что приводит к RcvbufErrors.
+	// Прямая запись в /proc/sys работает даже при отсутствии утилиты sysctl в KeeneticOS/busybox.
 	_ = exec.Command("sysctl", "-w", "net.core.rmem_max=4194304").Run()
 	_ = exec.Command("sysctl", "-w", "net.core.wmem_max=4194304").Run()
 	_ = exec.Command("sysctl", "-w", "net.core.rmem_default=2097152").Run()
 	_ = exec.Command("sysctl", "-w", "net.core.wmem_default=2097152").Run()
+	_ = os.WriteFile("/proc/sys/net/core/rmem_max", []byte("4194304\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/core/wmem_max", []byte("4194304\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/core/rmem_default", []byte("2097152\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/core/wmem_default", []byte("2097152\n"), 0644)
 
 	return dev, nil
 }
