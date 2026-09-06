@@ -1,3 +1,4 @@
+#!/bin/sh
 # NatBypass Universal Diagnostic Script for Linux / KeeneticOS / OpenWrt / Routers
 # Usage: curl -sSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.sh | sh
 
@@ -159,7 +160,7 @@ else
     log_fail "Виртуальный интерфейс nb0 НЕ существует!"
 fi
 
-# 4. Параметры ядра Linux (sysctl / procfs)
+# 4. Параметры ядра Linux (sysctl / procfs / conntrack / buffers)
 log_section "4. ПАРАМЕТРЫ СЕТЕВОГО СТЕКА ЯДРА LINUX"
 
 check_sysctl() {
@@ -183,6 +184,37 @@ if [ -n "$NB_IF" ]; then
     check_sysctl "conf/$NB_IF/rp_filter" "0" "Фильтрация обратного пути ($NB_IF.rp_filter)"
 fi
 check_sysctl "icmp_echo_ignore_all" "0" "Ответ ядра на ICMP Ping (icmp_echo_ignore_all)"
+
+# 4.1 Conntrack Saturation Check (Критично для роутеров Keenetic / OpenWrt)
+if [ -f "/proc/sys/net/netfilter/nf_conntrack_count" ] && [ -f "/proc/sys/net/netfilter/nf_conntrack_max" ]; then
+    CT_CNT="$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo 0)"
+    CT_MAX="$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo 0)"
+    if [ "$CT_MAX" -gt 0 ] 2>/dev/null; then
+        CT_PCT=$((CT_CNT * 100 / CT_MAX))
+        if [ "$CT_PCT" -ge 85 ]; then
+            log_fail "ВНИМАНИЕ: Таблица conntrack заполнена на ${CT_PCT}% ($CT_CNT / $CT_MAX)!"
+            log_warn "Роутер сбрасывает новые UDP-сессии NAT hole punching! Увеличьте nf_conntrack_max или снизьте тайм-ауты."
+        else
+            log_ok "Таблица отслеживания соединений conntrack: $CT_CNT / $CT_MAX (${CT_PCT}% занято)"
+        fi
+    fi
+fi
+
+# 4.2 UDP Socket Buffer Drops (/proc/net/snmp)
+if [ -f "/proc/net/snmp" ]; then
+    UDP_SNMP="$(grep -A 1 '^Udp:' /proc/net/snmp 2>/dev/null | tail -n 1)"
+    if [ -n "$UDP_SNMP" ]; then
+        IN_PKTS="$(echo "$UDP_SNMP" | awk '{print $2}')"
+        IN_ERRS="$(echo "$UDP_SNMP" | awk '{print $3}')"
+        RCV_ERRS="$(echo "$UDP_SNMP" | awk '{print $5}')"
+        log_info "Статистика UDP ядра: Получено=$IN_PKTS, InErrors=$IN_ERRS, RcvbufErrors=$RCV_ERRS"
+        if [ -n "$RCV_ERRS" ] && [ "$RCV_ERRS" -gt 500 ] 2>/dev/null; then
+            log_warn "Высокое число ошибок буфера UDP (RcvbufErrors: $RCV_ERRS). Ядро отбрасывает входящие датаграммы из-за нехватки SO_RCVBUF!"
+        else
+            log_ok "Буферы сокетов UDP ядра в норме (нет массового сброса пакетов)"
+        fi
+    fi
+fi
 
 # 5. Маршрутизация
 log_section "5. ТАБЛИЦЫ МАРШРУТИЗАЦИИ И ПРАВИЛА (IP ROUTE / IP RULE)"
@@ -259,14 +291,69 @@ if [ -n "$STATUS_JSON" ]; then
     if [ -n "$PEERS_JSON" ]; then
         log_section "8. СПИСОК ПОДКЛЮЧЕННЫХ ПИРОВ"
         echo "$PEERS_JSON" >> "$REPORT_FILE"
-        echo "$PEERS_JSON"
     fi
 else
     log_warn "Локальный API http://127.0.0.1:8080 недоступен"
 fi
 
-# 9. Глубокий анализ P2P, NAT, Wi-Fi и ТСПУ
-log_section "9. ДИАГНОСТИКА P2P, NAT И ТСПУ (АНАЛИЗ ПРИЧИН RELAY)"
+# 9. Глубокий анализ NAT, CGNAT, Path MTU, ТСПУ/DPI и причин Relay
+log_section "9. ГЛУБОКИЙ АНАЛИЗ NAT, CGNAT, ТСПУ/DPI И ПРИЧИН RELAY"
+
+# 9.1 Multi-STUN триангуляция и RFC 6598 CGNAT
+log_info "[9.1] Классификация внешнего IP и CGNAT подсети:"
+if [ -n "$MY_PUB_IP" ]; then
+    if echo "$MY_PUB_IP" | grep -qE '^100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\.'; then
+        log_warn "[RFC 6598] Ваш внешний IP ($MY_PUB_IP) принадлежит операторскому пулу Carrier-Grade NAT (100.64.0.0/10)!"
+    else
+        log_ok "Публичный IP хоста: $MY_PUB_IP"
+    fi
+fi
+if [ -n "$MY_STUN" ]; then
+    log_info "STUN эндпоинт по данным демона: $MY_STUN"
+fi
+
+# 9.2 Path MTU (PMTU) Discovery
+log_info "[9.2] Проверка Path MTU (PMTU) и нефрагментированного прохождения пакетов:"
+for MTU_TEST in 1420 1360 1280; do
+    PAYLOAD_SIZE=$((MTU_TEST - 28))
+    if ping -c 1 -W 1 -M do -s $PAYLOAD_SIZE 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 1 -M do -s $PAYLOAD_SIZE 1.1.1.1 >/dev/null 2>&1; then
+        log_ok "MTU $MTU_TEST (Payload $PAYLOAD_SIZE байт): УСПЕШНО без фрагментации"
+    else
+        log_warn "MTU $MTU_TEST: ТРЕБУЕТСЯ ФРАГМЕНТАЦИЯ (или блокируется промежуточными маршрутизаторами)"
+    fi
+done
+
+# 9.3 Дифференциальная диагностика ТСПУ / DPI (WireGuard vs Random vs QUIC Initial)
+log_info "[9.3] Дифференциальная диагностика фильтрации ТСПУ / DPI:"
+TMP_DPI_DIR="/tmp/tspu_diag_$$"
+mkdir -p "$TMP_DPI_DIR"
+
+# 1. WireGuard Mock (148B)
+printf '\x01\x00\x00\x00' > "$TMP_DPI_DIR/wg.bin"
+dd if=/dev/urandom bs=144 count=1 >> "$TMP_DPI_DIR/wg.bin" 2>/dev/null
+
+# 2. Random UDP Noise (148B)
+dd if=/dev/urandom of="$TMP_DPI_DIR/rand.bin" bs=148 count=1 2>/dev/null
+
+# 3. QUIC Initial Mock (1200B)
+printf '\xc0\x00\x00\x00\x01\x08\x11\x22\x33\x44\x55\x66\x77\x88\x00\x00' > "$TMP_DPI_DIR/quic.bin"
+dd if=/dev/zero bs=1 count=1184 >> "$TMP_DPI_DIR/quic.bin" 2>/dev/null
+
+if command -v nc >/dev/null 2>&1; then
+    for TEST_P in 443 3478 51820; do
+        timeout 1 nc -u -w 1 1.1.1.1 $TEST_P < "$TMP_DPI_DIR/wg.bin" >/dev/null 2>&1
+        WG_STAT=$?
+        timeout 1 nc -u -w 1 1.1.1.1 $TEST_P < "$TMP_DPI_DIR/rand.bin" >/dev/null 2>&1
+        RAND_STAT=$?
+        timeout 1 nc -u -w 1 1.1.1.1 $TEST_P < "$TMP_DPI_DIR/quic.bin" >/dev/null 2>&1
+        QUIC_STAT=$?
+        log_info "Порт UDP $TEST_P -> WG(148B): exit $WG_STAT | Rand(148B): exit $RAND_STAT | QUIC(1200B): exit $QUIC_STAT"
+    done
+fi
+rm -rf "$TMP_DPI_DIR"
+
+# 9.4 Матрица совместимости пиров и причины работы через Relay
+log_info "[9.4] Матрица совместимости пиров и анализ причин Relay:"
 
 if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
     TMP_ANALYSIS="$(mktemp 2>/dev/null || echo "/tmp/nb_diag_an_$$")"
@@ -290,22 +377,22 @@ if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
         P_PING="$(echo "$p_line" | grep -o '"ping_ms":[0-9]*' | cut -d':' -f2)"
         [ -z "$P_PING" ] && P_PING=0
         
-        printf "\n  %bАнализ связности с '%s' (VIP: %s):%b\n" "$C_CYAN" "$DEV_NAME" "$VIP" "$C_RESET"
+        printf "\n  %bПир '%s' (VIP: %s):%b\n" "$C_CYAN" "$DEV_NAME" "$VIP" "$C_RESET"
         
         if [ "$P_DIRECT" = "true" ]; then
             log_ok "Прямой P2P установлен (Endpoint: $P_EP, Ping: ${P_PING} ms)"
             continue
         fi
         
-        log_warn "Статус: Relay (прямой P2P не подтвержден)"
+        log_warn "Текущий статус: Relay (прямой P2P не установлен)"
         
         # Проверка 1: Одно Wi-Fi / NAT Hairpinning
         if [ -n "$MY_PUB_IP" ] && [ -n "$P_PUB_IP" ] && [ "$MY_PUB_IP" = "$P_PUB_IP" ]; then
-            log_fail "  [!] ПРИЧИНА [Same Wi-Fi / NAT Hairpinning]:"
+            log_fail "  [!] ПРИЧИНА [Same Wi-Fi / NAT Loopback Blocked]:"
             log_warn "      Пир '$DEV_NAME' и данный хост имеют ОДИНАКОВЫЙ внешний IP ($MY_PUB_IP)!"
             log_info "      -> Они находятся в ОДНОЙ локальной сети / Wi-Fi роутере."
-            log_info "      -> Роутер блокирует обратный трафик (NAT Loopback / Hairpinning) при обращении к собственному внешнему порту."
-            log_info "      -> Решение: Убедитесь, что в Wi-Fi сети отключена изоляция клиентов (AP/Client Isolation), и обмен идет по локальным IP (LAN candidates)."
+            log_info "      -> Роутер блокирует обратный трафик (NAT Hairpinning) при обращении к собственному внешнему порту."
+            log_info "      -> Решение: Убедитесь, что в Wi-Fi сети отключена изоляция клиентов (AP Isolation = Off), и обмен идет по локальным IP (LAN candidates)."
         fi
         
         # Проверка 2: ТСПУ / Блокировка UDP проб
@@ -318,7 +405,7 @@ if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
         
         # Проверка 3: Симметричный NAT
         if echo "$P_NAT" | grep -qi "symmetric"; then
-            log_warn "  [!] ФАКТОР [Symmetric NAT]:"
+            log_warn "  [!] ФАКТОР [Symmetric NAT у пира]:"
             log_info "      Удаленный узел находится за Symmetric NAT / мобильным CGNAT ($P_NAT)."
             log_info "      Роутер меняет внешний порт для каждого назначения, что препятствует прямому пробиву."
         fi

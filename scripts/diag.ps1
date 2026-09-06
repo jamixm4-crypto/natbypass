@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # NatBypass Universal Diagnostic Script for Windows 10 / 11 / Server
 # ==============================================================================
 # Usage:
@@ -6,7 +6,7 @@
 # ==============================================================================
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "          NatBypass Universal Network and L3 Diagnostic Tool          " -ForegroundColor Cyan
+Write-Host "   🔍 NatBypass Universal Network, NAT and L3 Diagnostic Tool (v1.9)  " -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 $reportFile = "$env:TEMP\natbypass_diag_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
@@ -136,45 +136,286 @@ try {
     Log-Warn "Локальный API http://127.0.0.1:8080 недоступен: $($_.Exception.Message)"
 }
 
-# 8. Deep P2P, NAT, Wi-Fi and TSPU Diagnostics
-Log-Section "8. ДИАГНОСТИКА P2P, NAT И ТСПУ (АНАЛИЗ ПРИЧИН RELAY)"
+# 8. Deep Network Diagnostics
+Log-Section "8. ГЛУБОКИЙ АНАЛИЗ NAT, CGNAT, ТСПУ/DPI И ПРИЧИН RELAY"
 
-# 8.1. STUN UDP Test
-function Test-STUNServer($serverHost, $serverPort, $label) {
-    $u = New-Object System.Net.Sockets.UdpClient
-    $u.Client.ReceiveTimeout = 2000
-    $req = [byte[]](0x00,0x01, 0x00,0x00, 0x21,0x12,0xA4,0x42, 0x01,0x02,0x03,0x04, 0x05,0x06,0x07,0x08, 0x09,0x0A,0x0B,0x0C)
+# 8.1. STUN Helper with XOR-MAPPED-ADDRESS parsing
+function Send-STUNBinding($client, $hostName, $port) {
+    $req = [byte[]](
+        0x00,0x01, 0x00,0x00,
+        0x21,0x12,0xA4,0x42,
+        0x01,0x02,0x03,0x04, 0x05,0x06,0x07,0x08, 0x09,0x0A,0x0B,0x0C
+    )
     try {
-        $addrs = [System.Net.Dns]::GetHostAddresses($serverHost)
-        if ($addrs -and $addrs.Count -gt 0) {
-            $ep = New-Object System.Net.IPEndPoint($addrs[0], $serverPort)
-            [void]$u.Send($req, $req.Length, $ep)
-            $listenEp = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
-            $resp = $u.Receive([ref]$listenEp)
-            if ($resp -and $resp.Length -ge 20) {
-                Log-Ok "STUN проба [$label] ($($serverHost):$($serverPort)): УСПЕШНО (UDP доступен)"
-                return $true
+        $addrs = [System.Net.Dns]::GetHostAddresses($hostName)
+        if (-not $addrs -or $addrs.Count -eq 0) { return $null }
+        $targetEp = New-Object System.Net.IPEndPoint($addrs[0], $port)
+        [void]$client.Send($req, $req.Length, $targetEp)
+        
+        $listenEp = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
+        $resp = $client.Receive([ref]$listenEp)
+        if (-not $resp -or $resp.Length -lt 20) { return $null }
+        
+        # Parse STUN XOR-MAPPED-ADDRESS
+        $pos = 20
+        while ($pos + 4 -le $resp.Length) {
+            $attrType = [int]($resp[$pos] * 256 + $resp[$pos+1])
+            $attrLen  = [int]($resp[$pos+2] * 256 + $resp[$pos+3])
+            $pos += 4
+            if ($pos + $attrLen -gt $resp.Length) { break }
+            
+            # 0x0020 = XOR-MAPPED-ADDRESS, 0x0001 = MAPPED-ADDRESS
+            if ($attrType -eq 0x0020 -and $attrLen -ge 8) {
+                $family = $resp[$pos+1]
+                if ($family -eq 1) { # IPv4
+                    $xport = [int]($resp[$pos+2] * 256 + $resp[$pos+3])
+                    $realPort = $xport -bxor 0x2112
+                    $b0 = $resp[$pos+4] -bxor 0x21
+                    $b1 = $resp[$pos+5] -bxor 0x12
+                    $b2 = $resp[$pos+6] -bxor 0xA4
+                    $b3 = $resp[$pos+7] -bxor 0x42
+                    $ipStr = "$b0.$b1.$b2.$b3"
+                    return @{ IP = $ipStr; Port = $realPort; Server = ($hostName + ':' + $port) }
+                }
+            } elseif ($attrType -eq 0x0001 -and $attrLen -ge 8) {
+                $family = $resp[$pos+1]
+                if ($family -eq 1) { # IPv4
+                    $realPort = [int]($resp[$pos+2] * 256 + $resp[$pos+3])
+                    $ipStr = "$($resp[$pos+4]).$($resp[$pos+5]).$($resp[$pos+6]).$($resp[$pos+7])"
+                    return @{ IP = $ipStr; Port = $realPort; Server = ($hostName + ':' + $port) }
+                }
             }
+            $pos += $attrLen
         }
     } catch {
-        Log-Warn "STUN проба [$label] ($($serverHost):$($serverPort)): ТАЙМАУТ / НЕТ ОТВЕТА ($($_.Exception.Message))"
-        return $false
+        return $null
+    }
+    return $null
+}
+
+# 8.1 Multi-STUN Triangulation from the SAME local socket
+Write-Host "`n[8.1] Multi-STUN триангуляция и классификация NAT (RFC 5780 / RFC 6888):" -ForegroundColor Cyan
+$stunSocket = New-Object System.Net.Sockets.UdpClient(0)
+$stunSocket.Client.ReceiveTimeout = 2500
+$localBoundPort = $stunSocket.Client.LocalEndPoint.Port
+Log-Info "Локальный сокет привязан к порту: :$localBoundPort"
+
+$stunTargets = @(
+    @{ Host = "stun.l.google.com"; Port = 19302; Label = "Google STUN" },
+    @{ Host = "stun.cloudflare.com"; Port = 3478; Label = "Cloudflare STUN" },
+    @{ Host = "stun.nextcloud.com"; Port = 443; Label = "Nextcloud STUN" }
+)
+
+$mappedSamples = @()
+foreach ($st in $stunTargets) {
+    Start-Sleep -Milliseconds 40
+    $res = Send-STUNBinding $stunSocket $st.Host $st.Port
+    if ($res) {
+        Log-Ok "Ответ от $($st.Label) ($($res.Server)): внешний сокет $($res.IP):$($res.Port)"
+        $mappedSamples += $res
+    } else {
+        Log-Warn "Нет ответа от $($st.Label) ($($st.Host):$($st.Port))"
+    }
+}
+$stunSocket.Close()
+
+$localNATClassification = "Unknown"
+$isCGNATPool = $false
+
+if ($mappedSamples.Count -ge 1) {
+    $mainPubIP = $mappedSamples[0].IP
+    if ($mainPubIP -match '^100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\.') {
+        $isCGNATPool = $true
+        Log-Warn "[RFC 6598] Ваш внешний IP ($mainPubIP) находится в операторском пуле Carrier-Grade NAT (100.64.0.0/10)!"
+    }
+}
+
+if ($mappedSamples.Count -ge 2) {
+    $p1 = $mappedSamples[0].Port
+    $p2 = $mappedSamples[1].Port
+    $delta1 = $p2 - $p1
+    
+    if ($mappedSamples.Count -ge 3) {
+        $p3 = $mappedSamples[2].Port
+        $delta2 = $p3 - $p2
+        Log-Info "Анализ портов сопоставления: P1=$p1, P2=$p2, P3=$p3 (delta1=$delta1, delta2=$delta2)"
+        
+        # Parity check
+        $parityPreserved = (($p1 % 2) -eq ($p2 % 2)) -and (($p2 % 2) -eq ($p3 % 2))
+        if ($parityPreserved) {
+            $parStr = if (($p1 % 2) -eq 0) { "ЧЕТНЫЕ (Even)" } else { "НЕЧЕТНЫЕ (Odd)" }
+            Log-Ok "Сохранение чётности (Parity Preservation по RFC 4787): ДА ($parStr, шаг 2k)"
+        }
+        
+        # PBA check (Port Block Allocation)
+        $pbaSize = 0
+        $pbaBase = 0
+        foreach ($bs in @(512, 256, 128, 64)) {
+            $mask = -bnot ($bs - 1)
+            if (($p1 -band $mask) -eq ($p2 -band $mask) -and ($p2 -band $mask) -eq ($p3 -band $mask)) {
+                $pbaSize = $bs
+                $pbaBase = $p1 -band $mask
+                break
+            }
+        }
+        if ($pbaSize -gt 0) {
+            Log-Ok "[RFC 6888] Обнаружен пул Port Block Allocation (PBA): Блок=$pbaSize портов (Диапазон: $pbaBase..$($pbaBase + $pbaSize - 1))"
+        }
+        
+        if ($p1 -eq $p2 -and $p2 -eq $p3) {
+            $localNATClassification = "Full Cone / Endpoint-Independent Mapping (EIM)"
+            Log-Ok "КЛАССИФИКАЦИЯ: $localNATClassification"
+            Log-Ok "Прямой P2P поддерживается на 100%! Внешний порт не меняется между пирами."
+        } elseif ([math]::Abs($delta1) -le 5 -and $delta1 -eq $delta2) {
+            $localNATClassification = "Symmetric NAT (Линейный сдвиг delta=$delta1)"
+            Log-Warn "КЛАССИФИКАЦИЯ: $localNATClassification"
+            Log-Info "Предиктор портов NatBypass автоматически рассчитывает шаг delta=$delta1 для пробива сокета."
+        } elseif ($pbaSize -gt 0) {
+            $localNATClassification = "Symmetric NAT / CGNAT (Пул PBA-$pbaSize)"
+            Log-Warn "КЛАССИФИКАЦИЯ: $localNATClassification"
+            Log-Info "NatBypass производит направленный sweep-пробив внутри выделенного блока портов CGNAT."
+        } else {
+            $localNATClassification = "Symmetric NAT (Случайное распределение портов)"
+            Log-Warn "КЛАССИФИКАЦИЯ: $localNATClassification"
+            Log-Warn "Жесткий симметричный NAT. Требуется UPnP на роутере или fallback на Relay."
+        }
+    } else {
+        if ($p1 -eq $p2) {
+            $localNATClassification = "Endpoint-Independent Mapping (Cone NAT)"
+            Log-Ok "КЛАССИФИКАЦИЯ: $localNATClassification (P1=$p1 == P2=$p2)"
+        } else {
+            $localNATClassification = "Symmetric NAT (delta=$delta1)"
+            Log-Warn "КЛАССИФИКАЦИЯ: $localNATClassification (P1=$p1 -> P2=$p2, delta=$delta1)"
+        }
+    }
+} elseif ($mappedSamples.Count -eq 1) {
+    Log-Ok "STUN доступен (один сервер ответил). Публичный сокет: $($mappedSamples[0].IP):$($mappedSamples[0].Port)"
+} else {
+    Log-Fail "КРИТИЧЕСКАЯ БЛОКИРОВКА: Ни один STUN-сервер не ответил по UDP!"
+    Log-Warn "Возможна блокировка протокола UDP на ТСПУ (РКН) или файрволе провайдера."
+}
+
+# 8.2 DPI / TSPU Differential Probe Discrimination
+Write-Host "`n[8.2] Дифференциальная диагностика ТСПУ / DPI (WireGuard vs Random vs QUIC):" -ForegroundColor Cyan
+
+function Send-DiffProbe($payload, $targetHost, $targetPort) {
+    $u = New-Object System.Net.Sockets.UdpClient
+    $u.Client.ReceiveTimeout = 1500
+    try {
+        $addrs = [System.Net.Dns]::GetHostAddresses($targetHost)
+        if (-not $addrs -or $addrs.Count -eq 0) { return "DNS_ERR" }
+        $ep = New-Object System.Net.IPEndPoint($addrs[0], $targetPort)
+        [void]$u.Send($payload, $payload.Length, $ep)
+        $lep = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
+        $null = $u.Receive([ref]$lep)
+        return "REPLY"
+    } catch [System.Net.Sockets.SocketException] {
+        if ($_.Exception.SocketErrorCode -eq [System.Net.Sockets.SocketError]::ConnectionReset) {
+            return "ICMP_RESET"
+        } elseif ($_.Exception.SocketErrorCode -eq [System.Net.Sockets.SocketError]::TimedOut) {
+            return "TIMEOUT"
+        }
+        return "ERR_$($_.Exception.SocketErrorCode)"
+    } catch {
+        return "TIMEOUT"
     } finally {
         $u.Close()
     }
-    return $false
 }
 
-$stun1 = Test-STUNServer "stun.l.google.com" 19302 "Google STUN"
-$stun2 = Test-STUNServer "stun.cloudflare.com" 3478 "Cloudflare STUN"
+# 1. WireGuard Mock (148B, Header 0x01 00 00 00)
+$wgProbe = New-Object byte[] 148
+$wgProbe[0] = 0x01; $wgProbe[1] = 0x00; $wgProbe[2] = 0x00; $wgProbe[3] = 0x00
+(New-Object System.Random).NextBytes($wgProbe)
+$wgProbe[0] = 0x01; $wgProbe[1] = 0x00; $wgProbe[2] = 0x00; $wgProbe[3] = 0x00
 
-if (-not $stun1 -and -not $stun2) {
-    Log-Fail "КРИТИЧЕСКАЯ БЛОКИРОВКА: Внешние STUN-серверы недоступны по UDP!"
-    Log-Warn "  -> Возможна блокировка протокола UDP на ТСПУ (РКН) или файрвол провайдера."
-    Log-Warn "  -> В таких условиях прямой P2P невозможен, связь работает только через WSS/TCP Relay."
+# 2. Random UDP Noise (148B)
+$randProbe = New-Object byte[] 148
+(New-Object System.Random).NextBytes($randProbe)
+
+# 3. QUIC v1 Initial Mock (1200B, Long Header 0xC0, Ver 1)
+$quicProbe = New-Object byte[] 1200
+$quicProbe[0] = 0xC0 # Long Header, Initial
+$quicProbe[1] = 0x00; $quicProbe[2] = 0x00; $quicProbe[3] = 0x00; $quicProbe[4] = 0x01 # Version 1
+$quicProbe[5] = 0x08 # DCID len
+(New-Object System.Random).NextBytes($quicProbe)
+$quicProbe[0] = 0xC0
+$quicProbe[1] = 0x00; $quicProbe[2] = 0x00; $quicProbe[3] = 0x00; $quicProbe[4] = 0x01
+$quicProbe[5] = 0x08
+
+$probeTarget = "1.1.1.1"
+$testPorts = @(443, 3478, 51820)
+$dpiWgBlocked = $false
+
+foreach ($tp in $testPorts) {
+    $resWG   = Send-DiffProbe $wgProbe $probeTarget $tp
+    $resRand = Send-DiffProbe $randProbe $probeTarget $tp
+    $resQuic = Send-DiffProbe $quicProbe $probeTarget $tp
+    
+    Log-Info "Порт UDP $tp -> WG(148B): $resWG | Rand(148B): $resRand | QUIC(1200B): $resQuic"
+    
+    if ($resWG -eq "TIMEOUT" -and ($resQuic -eq "ICMP_RESET" -or $resRand -eq "ICMP_RESET" -or $resQuic -eq "REPLY")) {
+        $dpiWgBlocked = $true
+        Log-Fail "Обнаружена сигнатурная блокировка WireGuard ТСПУ/DPI на порту $tp (QUIC/Rand проходит, WG сбрасывается)!"
+    }
 }
 
-# 8.2. Peer connectivity and relay root cause analysis
+if ($dpiWgBlocked) {
+    Log-Warn "Рекомендация: Для обхода ТСПУ обязательно используйте профиль AmneziaWG (AWG 3.1) с обфускацией H1..H4 и S1..S2."
+} else {
+    Log-Ok "Сигнатурная блокировка стандартных пакетов на исследуемых портах не зафиксирована."
+}
+
+# 8.3 Path MTU (PMTU) and Fragmentation Discovery
+Write-Host "`n[8.3] Проверка Path MTU (PMTU) и потерь фрагментации:" -ForegroundColor Cyan
+$mtuTargets = @(
+    @{ MTU = 1420; Buf = 1392; Desc = "Стандартный туннель NatBypass / WireGuard" },
+    @{ MTU = 1360; Buf = 1332; Desc = "Сотовые сети LTE / CGNAT" },
+    @{ MTU = 1280; Buf = 1252; Desc = "Минимальный базовый IPv6 / QUIC MTU" }
+)
+
+$pingHost = "8.8.8.8"
+foreach ($m in $mtuTargets) {
+    $pOut = ping.exe $pingHost -f -l $m.Buf -n 1 -w 1000 2>&1 | Out-String
+    if ($pOut -match "(TTL=|ttl=|время=|time=)") {
+        Log-Ok "MTU $($m.MTU) (Payload $($m.Buf) байт): УСПЕШНО без фрагментации ($($m.Desc))"
+    } elseif ($pOut -match "(fragment|фрагмент)") {
+        Log-Warn "MTU $($m.MTU): ТРЕБУЕТСЯ ФРАГМЕНТАЦИЯ (Пакетам нужен меньший размер)!"
+    } else {
+        Log-Warn "MTU $($m.MTU): Нет ответа / Таймаут"
+    }
+}
+
+# 8.4 Windows Socket Buffers and UDP Health
+Write-Host "`n[8.4] Состояние буферов сокетов UDP в Windows (netstat -s):" -ForegroundColor Cyan
+try {
+    $netstatOut = netstat -s -p UDP | Out-String
+    $rxErrors = 0
+    $discarded = 0
+    $inDatagrams = 0
+    
+    foreach ($line in ($netstatOut -split "`n")) {
+        if ($line -match "(Receive Errors|Ошибок при приеме)\s*=\s*(\d+)") {
+            $rxErrors = [int]$Matches[2]
+        } elseif ($line -match "(Discarded Datagrams|Отброшено полученных датаграмм)\s*=\s*(\d+)") {
+            $discarded = [int]$Matches[2]
+        } elseif ($line -match "(In Datagrams|Получено датаграмм)\s*=\s*(\d+)") {
+            $inDatagrams = [int]$Matches[2]
+        }
+    }
+    
+    Log-Info "Статистика UDP ядра: Получено=$inDatagrams, Ошибок приема=$rxErrors, Отброшено=$discarded"
+    if ($discarded -gt 1000 -or $rxErrors -gt 1000) {
+        Log-Warn "Высокое число сброшенных датаграмм UDP ($discarded). Приложение не успевает читать из сокета или переполнен буфер SO_RCVBUF."
+    } else {
+        Log-Ok "Сокетные буферы UDP в норме (отбрасывание пакетов ядром Windows минимально)."
+    }
+} catch {
+    Log-Info "Не удалось прочесть статистику UDP сокетов: $($_.Exception.Message)"
+}
+
+# 8.5 Peer Connectivity Matrix and Relay Root Cause Analysis
+Write-Host "`n[8.5] Матрица совместимости пиров и причины работы через Relay:" -ForegroundColor Cyan
 if ($peers -and $peers.data) {
     $myPublicIP = if ($status -and $status.public_ip) { $status.public_ip.Trim() } else { "" }
     
@@ -184,57 +425,58 @@ if ($peers -and $peers.data) {
         $isDirect = [bool]$p.direct_p2p
         $probes = if ($p.probe_count) { [int]$p.probe_count } else { 0 }
         
-        Write-Host "`n  Анализ связности с '$pName' (VIP: $($p.virtual_ip)):" -ForegroundColor Cyan
+        Write-Host "`n  Пир '$pName' (VIP: $($p.virtual_ip)):" -ForegroundColor Cyan
         
         if ($isDirect) {
             Log-Ok "Прямой P2P установлен (Endpoint: $($p.active_endpoint), Ping: $($p.ping_ms) ms)"
             continue
         }
         
-        Log-Warn "Статус: Relay (прямой P2P не подтвержден)"
+        Log-Warn "Текущий статус: Relay (прямой P2P не установлен)"
         
         # Check 1: Same Wi-Fi / NAT Hairpinning
         if ($myPublicIP -and $pPubIP -and ($myPublicIP -eq $pPubIP)) {
-            Log-Fail "  [!] ПРИЧИНА [Same Wi-Fi / NAT Hairpinning]:"
+            Log-Fail "  [!] ПРИЧИНА [Same Wi-Fi / NAT Loopback Blocked]:"
             Log-Warn "      Пир '$pName' и этот компьютер имеют ОДИНАКОВЫЙ внешний IP ($myPublicIP)!"
             Log-Info "      -> Они находятся в ОДНОЙ локальной сети / Wi-Fi роутере."
-            Log-Info "      -> Роутер блокирует обратный трафик (NAT Loopback / Hairpinning) при обращении к собственному внешнему порту."
-            Log-Info "      -> Решение: Убедитесь, что в Wi-Fi сети отключена изоляция клиентов (AP/Client Isolation), и обмен идет по локальным IP (LAN candidates: $(if ($p.candidates){$p.candidates -join ', '}else{'не найдены'}))."
+            Log-Info "      -> Роутер блокирует обратный трафик (NAT Hairpinning) при обращении к собственному внешнему порту."
+            Log-Info "      -> Решение: Включите изоляцию клиентов (AP Isolation = Off) и используйте локальные IP кандидатов."
         }
         
         # Check 2: TSPU / DPI / UDP drop
         if ($probes -gt 15) {
             Log-Fail "  [!] ПРИЧИНА [ТСПУ / Блокировка UDP / Закрытый порт]:"
             Log-Warn "      Отправлено $probes UDP-проб пробива NAT, но ни одного ответа не получено!"
-            Log-Info "      -> Сигнальные маяки через MQTT доходят (узел виден), но UDP пакеты сбрасываются ТСПУ (DPI) на трансграничном стыке или файрволом."
-            Log-Info "      -> Решение: Убедитесь, что у обоих узлов активирован строгий профиль AmneziaWG (AWG 3.1 strict) с обфускацией заголовков (H1..H4, S1..S4, Jc)."
+            Log-Info "      -> Сигнальные маяки через MQTT доходят, но UDP пакеты сбрасываются ТСПУ (DPI) на границе операторов."
+            Log-Info "      -> Решение: Убедитесь, что у обоих узлов активирован строгий профиль AmneziaWG (AWG 3.1)."
         }
         
-        # Check 3: Symmetric NAT
+        # Check 3: Symmetric NAT combination
         $pNat = if ($p.nat_type) { $p.nat_type.ToLower() } else { "" }
         if ($pNat -like "*symmetric*") {
-            Log-Warn "  [!] ФАКТОР [Symmetric NAT]:"
-            Log-Info "      Удаленный узел находится за Symmetric NAT / мобильным CGNAT."
-            Log-Info "      Роутер меняет внешний порт для каждого назначения, что препятствует прямому пробиву."
+            Log-Warn "  [!] ФАКТОР [Symmetric NAT у пира]:"
+            Log-Info "      Удаленный узел находится за Symmetric NAT / мобильным CGNAT ($pNat)."
+            if ($localNATClassification -like "*Symmetric*") {
+                Log-Fail "      КРИТИЧЕСКАЯ КОМБИНАЦИЯ [Symmetric + Symmetric]:"
+                Log-Warn "      Оба узла находятся за Symmetric NAT! Прямой UDP пробив без UPnP математически маловероятен (<5%). Fallback на Relay является штатным поведением."
+            } else {
+                Log-Info "      Локальный узел за Cone NAT. Пробив будет выполнен через предсказание портов удаленного пира."
+            }
         }
         
-        # Check 4: Outdated version
-        $pVer = if ($p.version) { $p.version } else { "" }
-        if ($pVer -and ($pVer -notmatch "1\.9\.22[12]")) {
-            Log-Warn "  [!] ФАКТОР [Устаревшая версия]:"
-            Log-Warn "      Пир использует устаревшую версию '$pVer' (текущая: $($status.version))."
-            Log-Info "      Рекомендуется обновить оба узла до актуального билда."
-        }
-        
-        # Check 5: AmneziaWG Mismatch
+        # Check 4: AmneziaWG Mismatch
         $pHasAwg = ($p.awg -ne $null -and $p.awg.h1 -ne $null -and $p.awg.h1 -ne "" -and $p.awg.h1 -ne "0")
         $myHasAwg = ($status.awg_enabled -eq $true) -or ($status.awg -ne $null -and $status.awg.h1 -ne $null -and $status.awg.h1 -ne 0 -and $status.awg.h1 -ne "")
         if ($p.awg_mismatch -eq $true) {
-            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]:"
-            Log-Warn "      Параметры обфускации (H1-H4/S1-S2) различаются между узлами. Пакеты WireGuard не расшифруются!"
+            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: параметры обфускации (H1-H4/S1-S2) различаются!"
         } elseif ($pHasAwg -ne $myHasAwg) {
-            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]:"
-            Log-Warn "      На одном узле обфускация AWG включена, на втором выключена. Зашифрованные пакеты не распознаются!"
+            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: на одном узле AWG включен, на втором выключен!"
+        }
+        
+        # Check 5: Version check
+        $pVer = if ($p.version) { $p.version } else { "" }
+        if ($pVer -and ($pVer -notmatch "1\.9\.22[12]")) {
+            Log-Warn "  [!] ФАКТОР [Устаревшая версия пира]: узел использует '$pVer' (текущая: $($status.version))."
         }
     }
 }
@@ -275,7 +517,7 @@ if ($peers -and $peers.data) {
 
 # Fallback
 if (-not $pingedAny) {
-    $myIP = ($status.virtual_ip -split '/')[0].Trim()
+    $myIP = if ($status -and $status.virtual_ip) { ($status.virtual_ip -split '/')[0].Trim() } else { "" }
     if ($myIP -match '^(\d+\.\d+\.\d+)\.\d+$') {
         $subnetPref = $Matches[1]
         $fallbacks = @("$subnetPref.1", "$subnetPref.2")

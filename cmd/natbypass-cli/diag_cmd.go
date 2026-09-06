@@ -59,8 +59,25 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 	natInfo, err := diagnostic.ClassifyNATBehavior()
 	if err == nil && natInfo != nil {
 		fmt.Printf("  \033[1;32m[✓]\033[0m Публичный IP: %s (Порт STUN: %d)\n", natInfo.PublicIP, natInfo.MappedPort1)
+		if natInfo.IsCGNAT {
+			fmt.Printf("  \033[1;33m[!]\033[0m [RFC 6598] IP находится в операторском пуле Carrier-Grade NAT (100.64.0.0/10)\n")
+		}
 		fmt.Printf("  [i] Тип NAT: %s\n", natInfo.NATType)
+		if natInfo.MappedPort2 > 0 {
+			fmt.Printf("  [i] Сопоставление портов: P1=%d, P2=%d, P3=%d (Δ=%+d)\n",
+				natInfo.MappedPort1, natInfo.MappedPort2, natInfo.MappedPort3, natInfo.PortDelta)
+		}
+		if natInfo.ParityPreserved {
+			fmt.Println("  \033[1;32m[✓]\033[0m Сохранение чётности портов (RFC 4787): ДА (шаг 2k)")
+		}
+		if natInfo.PBABlockSize > 0 {
+			fmt.Printf("  \033[1;32m[✓]\033[0m [RFC 6888] Пул Port Block Allocation (PBA): %d портов (%d..%d)\n",
+				natInfo.PBABlockSize, natInfo.PBABase, natInfo.PBABase+natInfo.PBABlockSize-1)
+		}
 		fmt.Printf("  [i] P2P совместимость: %s\n", natInfo.P2PFeasibility)
+		if natInfo.Recommendation != "" {
+			fmt.Printf("  [i] Рекомендация: %s\n", natInfo.Recommendation)
+		}
 	} else {
 		fmt.Printf("  \033[1;33m[!]\033[0m STUN проба: %v\n", err)
 	}
