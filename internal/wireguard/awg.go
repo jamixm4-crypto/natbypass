@@ -250,6 +250,19 @@ func randomUint32() uint32 {
 	return val
 }
 
+// GenerateRandomWGPort генерирует криптографически стойкий случайный UDP-порт в диапазоне 25700..49000
+// для исключения конфликтов сервисов и обхода сигнатурных блокировок ТСПУ/DPI.
+func GenerateRandomWGPort() int {
+	minPort := 25700
+	maxPort := 49000
+	delta := big.NewInt(int64(maxPort - minPort + 1))
+	n, err := rand.Int(rand.Reader, delta)
+	if err != nil {
+		return 47820
+	}
+	return minPort + int(n.Int64())
+}
+
 // GenerateRandomAWGParams генерирует случайные валидные параметры AWG
 func GenerateRandomAWGParams() AWGParams {
 	jcBig, _ := rand.Int(rand.Reader, big.NewInt(6))

@@ -2,6 +2,8 @@
 # NatBypass Universal Diagnostic Script for Linux / KeeneticOS / OpenWrt / Routers
 # Usage: curl -sSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.sh | sh
 
+export PATH="$PATH:/usr/sbin:/sbin:/usr/local/sbin:/opt/bin:/opt/sbin"
+
 C_RESET='\033[0m'
 C_RED='\033[1;31m'
 C_GREEN='\033[1;32m'
@@ -479,7 +481,9 @@ if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
         fi
         
         # Проверка 4: Несовместимость версий
-        if [ -n "$P_VER" ] && [ -n "$MY_VER" ] && [ "$P_VER" != "$MY_VER" ]; then
+        CLEAN_P_VER="$(echo "$P_VER" | sed 's/^v//')"
+        CLEAN_MY_VER="$(echo "$MY_VER" | sed 's/^v//')"
+        if [ -n "$CLEAN_P_VER" ] && [ -n "$CLEAN_MY_VER" ] && [ "$CLEAN_P_VER" != "$CLEAN_MY_VER" ]; then
             log_warn "  [!] ФАКТОР [Версия пира отличается]:"
             log_warn "      Пир использует версию '$P_VER', а данный узел — '$MY_VER'."
             log_info "      Рекомендуется обновить все узлы до одного актуального билда."
@@ -513,7 +517,7 @@ test_ping() {
     if [ -z "$CLEAN_IP" ] || [ "$CLEAN_IP" = "0.0.0.0" ] || [ "$CLEAN_IP" = "<nil>" ]; then
         return
     fi
-    if ping -c 2 -W 2 "$CLEAN_IP" >/dev/null 2>&1; then
+    if ping -c 2 -W 2 "$CLEAN_IP" >/dev/null 2>&1 || ping -c 2 -W 2 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
         log_ok "Ping до $NAME ($CLEAN_IP): УСПЕШЕН!"
         echo "Ping $CLEAN_IP ($NAME): SUCCESS" >> "$REPORT_FILE"
     else

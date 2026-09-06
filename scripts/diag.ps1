@@ -500,8 +500,8 @@ if ($peers -and $peers.data) {
         # Если оба H1 совпадают (или оба нулевые) — AWG согласован, предупреждение не выводим
         
         # Check 5: Version check
-        $pVer = if ($p.version) { $p.version } else { "" }
-        $myVer = if ($status -and $status.version) { $status.version } else { "" }
+        $pVer = if ($p.version) { $p.version.TrimStart('v') } else { "" }
+        $myVer = if ($status -and $status.version) { $status.version.TrimStart('v') } else { "" }
         if ($pVer -and $myVer -and ($pVer -ne $myVer)) {
             Log-Warn "  [!] ФАКТОР [Версия пира отличается]: пир использует '$pVer', локальный узел — '$myVer'. Рекомендуется обновить все узлы до одного билда."
         }

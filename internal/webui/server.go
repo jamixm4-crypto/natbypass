@@ -1155,11 +1155,20 @@ func (s *Server) handleWgConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	listenPort := wireguard.GenerateRandomWGPort()
+	if curCfg, _ := config.Load(s.configPath); curCfg != nil {
+		if prof := curCfg.EnsureActiveProfile(); prof != nil && prof.WGPort > 0 {
+			listenPort = prof.WGPort
+		} else if curCfg.WireGuard.ListenPort > 0 {
+			listenPort = curCfg.WireGuard.ListenPort
+		}
+	}
+
 	cfg := &wireguard.WGConfig{
 		InterfaceName: "wg0",
 		PrivateKey:    kp.PrivateKey,
 		Address:       "100.64.200.1/24",
-		ListenPort:    51820,
+		ListenPort:    listenPort,
 		MTU:           1420,
 		Peers:         wgPeers,
 	}
@@ -1252,12 +1261,21 @@ func (s *Server) handleAWGConfig(w http.ResponseWriter, r *http.Request) {
 		awgParams = cfg.GetAWGParams()
 	}
 
+	listenPort := wireguard.GenerateRandomWGPort()
+	if cfg != nil {
+		if prof := cfg.EnsureActiveProfile(); prof != nil && prof.WGPort > 0 {
+			listenPort = prof.WGPort
+		} else if cfg.WireGuard.ListenPort > 0 {
+			listenPort = cfg.WireGuard.ListenPort
+		}
+	}
+
 	awgCfg := &wireguard.AWGConfig{
 		WGConfig: wireguard.WGConfig{
 			InterfaceName: "awg0",
 			PrivateKey:    kp.PrivateKey,
 			Address:       fmt.Sprintf("%s/24", myVIP),
-			ListenPort:    51820,
+			ListenPort:    listenPort,
 			MTU:           1420,
 			Peers:         wgPeers,
 		},

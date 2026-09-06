@@ -38,6 +38,7 @@ type Profile struct {
 	H3                  uint32    `json:"h3,omitempty" mapstructure:"h3" yaml:"h3,omitempty"`
 	H4                  uint32    `json:"h4,omitempty" mapstructure:"h4" yaml:"h4,omitempty"`
 	HeaderProtectionKey string    `json:"header_protection_key,omitempty" mapstructure:"header_protection_key" yaml:"header_protection_key,omitempty"`
+	WGPort              int       `json:"wg_port,omitempty" mapstructure:"wg_port" yaml:"wg_port,omitempty"`
 	RandomTrailers      bool      `json:"random_trailers,omitempty" mapstructure:"random_trailers" yaml:"random_trailers,omitempty"`
 	DisableCookies      bool      `json:"disable_cookies,omitempty" mapstructure:"disable_cookies" yaml:"disable_cookies,omitempty"`
 	IsActive            bool      `json:"is_active" mapstructure:"is_active" yaml:"is_active"`
@@ -77,6 +78,14 @@ func GenerateRandomAWGProfileParams() (jc, jmin, jmax, s1, s2 int, h1, h2, h3, h
 	return
 }
 
+// GenerateRandomWGPort генерирует случайный порт WireGuard в диапазоне 25700..49000
+func GenerateRandomWGPort() int {
+	var r [2]byte
+	_, _ = rand.Read(r[:])
+	portVal := int(r[0])<<8 | int(r[1])
+	return 25700 + (portVal % (49000 - 25700 + 1))
+}
+
 func GenerateDefaultProfile(name string) Profile {
 	if name == "" {
 		name = "Основная сеть"
@@ -90,6 +99,7 @@ func GenerateDefaultProfile(name string) Profile {
 		MQTTBroker:          "ssl://broker.emqx.io:8883",
 		MQTTTopic:           "natbypass/mesh/" + topicID,
 		AWGPreset:           "custom",
+		WGPort:              GenerateRandomWGPort(),
 		Jc:                  jc,
 		Jmin:                jmin,
 		Jmax:                jmax,
