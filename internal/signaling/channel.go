@@ -156,6 +156,7 @@ type Payload struct {
 	ActiveEndpoint   string     `json:"active_endpoint,omitempty"`
 	PingMs           int64      `json:"ping_ms,omitempty"`
 	NATType          string     `json:"nat_type,omitempty"` // "full_cone", "restricted", "symmetric", "unknown"
+	NATDelta         int        `json:"nat_delta,omitempty"`
 	Candidates       []string   `json:"candidates,omitempty"`
 
 	// MDAR (Mesh Dynamic Adaptive Reconfiguration)
@@ -204,6 +205,9 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		UpperDirectP2P        bool       `json:"DirectP2P"`
 		UpperActiveEndpoint   string     `json:"ActiveEndpoint"`
 		UpperPingMs           int64      `json:"PingMs"`
+		UpperNATType          string     `json:"NATType"`
+		UpperNATDelta         *int       `json:"NATDelta"`
+		CamelNATDelta         *int       `json:"natDelta"`
 		*Alias
 	}{
 		Alias: (*Alias)(p),
@@ -303,6 +307,16 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 	}
 	if p.CountryFlag == "" && aux.UpperCountryFlag != "" {
 		p.CountryFlag = aux.UpperCountryFlag
+	}
+	if p.NATType == "" && aux.UpperNATType != "" {
+		p.NATType = aux.UpperNATType
+	}
+	if p.NATDelta == 0 {
+		if aux.UpperNATDelta != nil {
+			p.NATDelta = *aux.UpperNATDelta
+		} else if aux.CamelNATDelta != nil {
+			p.NATDelta = *aux.CamelNATDelta
+		}
 	}
 	return nil
 }

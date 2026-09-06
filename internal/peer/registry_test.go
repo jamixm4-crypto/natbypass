@@ -260,3 +260,25 @@ func TestRegistry_DynamicP2PDemotion(t *testing.T) {
 		t.Errorf("expected ActiveEndpoint to be preserved for background hole punch, got %s", newer.ActiveEndpoint)
 	}
 }
+
+func TestRegistry_EmptyActiveEndpoint_NeverDirectP2P(t *testing.T) {
+	existing := &Peer{
+		DeviceID:       "dev-ghost",
+		DirectP2P:      true,
+		ActiveEndpoint: "",
+		LastSeen:       time.Now(),
+	}
+
+	newer := &Peer{
+		DeviceID:       "dev-ghost",
+		DirectP2P:      true,
+		ActiveEndpoint: "",
+		LastSeen:       time.Now(),
+	}
+
+	existing.MergeFrom(newer)
+
+	if newer.DirectP2P {
+		t.Errorf("expected DirectP2P to be FALSE when ActiveEndpoint is empty")
+	}
+}

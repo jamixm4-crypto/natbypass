@@ -276,6 +276,20 @@ func (p *UDPPuncher) GetNATType() NATType {
 	return p.NATType
 }
 
+// GetPortDelta returns the observed consecutive port increment for Symmetric NAT prediction.
+func (p *UDPPuncher) GetPortDelta() int {
+	p.natTypeMu.RLock()
+	defer p.natTypeMu.RUnlock()
+	return p.portDelta
+}
+
+// SetPortDelta manually sets or overrides the port delta.
+func (p *UDPPuncher) SetPortDelta(delta int) {
+	p.natTypeMu.Lock()
+	p.portDelta = delta
+	p.natTypeMu.Unlock()
+}
+
 // DiscoverCandidates harvests all possible ICE-like candidate endpoints for direct connectivity.
 func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []string {
 	candidateSet := make(map[string]struct{})
@@ -945,8 +959,9 @@ func (p *UDPPuncher) probePortRange(ctx context.Context, ip string, start, end, 
 	return true
 }
 
-// SendHolePunchProbe отправляет probe пакеты с маскировкой QUIC Initial (RFC 9000) для обхода ТСПУ/DPI
-func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
+// SendHolePunchProbeWithDelta отправляет probe пакеты с маскировкой QUIC Initial (RFC 9000) для обхода ТСПУ/DPI
+// и выполняет delta-aware spraying при наличии известного port delta для Symmetric NAT.
+func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta int) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
 	}
@@ -973,50 +988,68 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 		}
 	}
 
-	// 1. Отправляем пробу: приоритет отдается QUIC Chameleon probe (неотличим от HTTP/3 трафика для ТСПУ)
-	if len(chameleonProbe) > 0 {
-		_, _ = p.conn.WriteToUDP(chameleonProbe, rAddr)
-	} else if len(stealthProbe) > 0 {
-		_, _ = p.conn.WriteToUDP(stealthProbe, rAddr)
-	} else {
-		_, _ = p.conn.WriteToUDP(probeData, rAddr)
+	sendToAddr := func(dst *net.UDPAddr) {
+		if len(chameleonProbe) > 0 {
+			_, _ = p.conn.WriteToUDP(chameleonProbe, dst)
+		} else if len(stealthProbe) > 0 {
+			_, _ = p.conn.WriteToUDP(stealthProbe, dst)
+		} else {
+			_, _ = p.conn.WriteToUDP(probeData, dst)
+		}
 	}
 
-	// Always probe immediate neighbor ports (±1, ±2, ±3, ±4, ±8) to overcome PON router port drift (Beltelecom, Rostelecom)
+	// 1. Отправляем пробу: приоритет отдается QUIC Chameleon probe (неотличим от HTTP/3 трафика для ТСПУ)
+	sendToAddr(rAddr)
+
+	// 2. Always probe immediate neighbor ports (±1, ±2, ±3, ±4, ±8) to overcome PON router port drift (Beltelecom, Rostelecom)
 	neighbors := []int{-4, -3, -2, -1, 1, 2, 3, 4, 8, -8}
 	for _, offset := range neighbors {
 		neighborPort := rAddr.Port + offset
 		if neighborPort > 1024 && neighborPort < 65535 {
-			nAddr := &net.UDPAddr{IP: rAddr.IP, Port: neighborPort}
-			if len(chameleonProbe) > 0 {
-				_, _ = p.conn.WriteToUDP(chameleonProbe, nAddr)
-			} else if len(stealthProbe) > 0 {
-				_, _ = p.conn.WriteToUDP(stealthProbe, nAddr)
-			} else {
-				_, _ = p.conn.WriteToUDP(probeData, nAddr)
+			sendToAddr(&net.UDPAddr{IP: rAddr.IP, Port: neighborPort})
+		}
+	}
+
+	// 3. Delta-aware spray for Symmetric NAT:
+	// If peer delta or local delta is known (> 0 and < 500), spray multiples of delta!
+	delta := peerDelta
+	if delta <= 0 {
+		p.natTypeMu.RLock()
+		delta = p.portDelta
+		p.natTypeMu.RUnlock()
+	}
+	if delta > 0 && delta < 500 {
+		deltaOffsets := []int{
+			delta, -delta,
+			2 * delta, -2 * delta,
+			3 * delta, -3 * delta,
+			4 * delta, -4 * delta,
+		}
+		for _, offset := range deltaOffsets {
+			targetPort := rAddr.Port + offset
+			if targetPort > 1024 && targetPort < 65535 {
+				sendToAddr(&net.UDPAddr{IP: rAddr.IP, Port: targetPort})
 			}
 		}
 	}
 
-	// Targeted probing for Symmetric NAT using advanced CGNAT heuristics (Parity, PBA, Delta)
+	// 4. Targeted probing for Symmetric NAT using advanced CGNAT heuristics (Parity, PBA, Delta)
 	if p.GetNATType().IsSymmetric() {
 		targetIP := rAddr.IP
 		candidates := p.candidatePorts(rAddr.Port)
 		for _, port := range candidates {
 			if port != rAddr.Port {
-				cAddr := &net.UDPAddr{IP: targetIP, Port: port}
-				if len(chameleonProbe) > 0 {
-					_, _ = p.conn.WriteToUDP(chameleonProbe, cAddr)
-				} else if len(stealthProbe) > 0 {
-					_, _ = p.conn.WriteToUDP(stealthProbe, cAddr)
-				} else {
-					_, _ = p.conn.WriteToUDP(probeData, cAddr)
-				}
+				sendToAddr(&net.UDPAddr{IP: targetIP, Port: port})
 			}
 		}
 	}
 
 	return nil
+}
+
+// SendHolePunchProbe sends a hole punch probe using default/observed delta.
+func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
+	return p.SendHolePunchProbeWithDelta(targetAddr, 0)
 }
 
 

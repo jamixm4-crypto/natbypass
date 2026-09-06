@@ -30,6 +30,7 @@ type Peer struct {
 	ActiveEndpoint   string               `json:"active_endpoint,omitempty"`
 	PingMs           int64                `json:"ping_ms"`
 	NATType          string               `json:"nat_type,omitempty"`
+	NATDelta         int                  `json:"nat_delta,omitempty"`
 	OS               string               `json:"os,omitempty"`
 	Platform         string               `json:"platform,omitempty"`
 	Arch             string               `json:"arch,omitempty"`
@@ -107,6 +108,11 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
+	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty
+	if newer.ActiveEndpoint == "" {
+		newer.DirectP2P = false
+	}
+
 	if newer.Latency == 0 && existing.Latency > 0 && existing.DirectP2P {
 		newer.Latency = existing.Latency
 		newer.PingMs = existing.PingMs
@@ -114,6 +120,10 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 
 	if newer.TCPAddr == "" && existing.TCPAddr != "" {
 		newer.TCPAddr = existing.TCPAddr
+	}
+
+	if newer.NATDelta == 0 && existing.NATDelta > 0 {
+		newer.NATDelta = existing.NATDelta
 	}
 
 	if newer.Arch == "" && existing.Arch != "" {

@@ -40,19 +40,19 @@
     "#1": {
       "0000": {
         "fixed": {
-          "file_version": "1.9.223.1",
-          "product_version": "1.9.223.1"
+          "file_version": "1.9.223.2",
+          "product_version": "1.9.223.2"
         },
         "info": {
           "0409": {
             "CompanyName": "NatBypass Project",
             "FileDescription": "NatBypass Mesh VPN & DPI Bypass",
-            "FileVersion": "1.9.223.1",
+            "FileVersion": "1.9.223.2",
             "InternalName": "natbypass",
             "LegalCopyright": "Copyright © 2026 NatBypass Project",
             "OriginalFilename": "NatBypass.exe",
             "ProductName": "NatBypass",
-            "ProductVersion": "1.9.223-beta.1"
+            "ProductVersion": "1.9.223-beta.2"
           }
         }
       }

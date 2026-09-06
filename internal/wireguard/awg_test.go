@@ -158,3 +158,31 @@ func TestAWG31EndToEnd(t *testing.T) {
 		t.Error("Header Protection Keys must match between server and client")
 	}
 }
+
+func TestDeriveAWGParamsFromKey(t *testing.T) {
+	key1 := "mesh-network-secret-key-12345"
+	key2 := "mesh-network-secret-key-67890"
+
+	p1 := DeriveAWGParamsFromKey(key1)
+	p2 := DeriveAWGParamsFromKey(key1)
+	pOther := DeriveAWGParamsFromKey(key2)
+
+	// Determinism: Same key must produce identical parameters
+	if p1.HeaderProtectionKey != p2.HeaderProtectionKey {
+		t.Errorf("expected deterministic HeaderProtectionKey for same key")
+	}
+	if p1.H1 != p2.H1 || p1.H2 != p2.H2 || p1.H3 != p2.H3 || p1.H4 != p2.H4 {
+		t.Errorf("expected deterministic H1..H4 for same key")
+	}
+	if p1.S1 != p2.S1 || p1.S2 != p2.S2 {
+		t.Errorf("expected deterministic S1..S2 for same key")
+	}
+
+	// Distinct keys must produce different parameters
+	if p1.HeaderProtectionKey == pOther.HeaderProtectionKey {
+		t.Errorf("expected different HeaderProtectionKey for different keys")
+	}
+	if p1.H1 == pOther.H1 && p1.H2 == pOther.H2 {
+		t.Errorf("expected different H1..H2 for different keys")
+	}
+}

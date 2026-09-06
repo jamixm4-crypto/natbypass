@@ -245,7 +245,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		defer tunDev.Close()
 
 		if runtime.GOOS == "linux" {
-			if err := tunnel.EnableMSSClamping(adapterName, 1420); err != nil {
+			if err := tunnel.EnableMSSClamping(adapterName, 1280); err != nil {
 				log.Warn().Err(err).Msg("Failed to enable MSS clamping")
 			}
 			defer tunnel.DisableMSSClamping(adapterName)
@@ -726,7 +726,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						// 1b. Reactive instant hole punching if direct P2P is not yet confirmed
 						if !p.DirectP2P && puncher != nil {
 							if p.STUNAddr != "" && p.STUNAddr != targetEP {
-								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+								_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 							}
 							for _, cand := range p.Candidates {
 								if cand != "" && cand != targetEP && cand != p.STUNAddr {
@@ -811,7 +811,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
 							}
 							if p.STUNAddr != "" {
-								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+								_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 							}
 							if p.LocalAddr != "" {
 								_ = puncher.SendHolePunchProbe(p.LocalAddr)
@@ -1259,7 +1259,7 @@ func initialDiscovery(ctx context.Context, puncher *network.UDPPuncher, ipDisc *
 
 var (
 	mdarMu            sync.Mutex
-	currentMTU        int    = 1420
+	currentMTU        int    = 1280
 	currentAdaptEpoch uint64 = 1
 	currentDPIPreset  string = "dpi"
 	relayStreakCount  int    = 0
@@ -1516,8 +1516,10 @@ func publishLoop(
 		}
 
 		natLabel := "unknown"
+		natDelta := 0
 		if puncher != nil {
 			natLabel = puncher.GetNATType().String()
+			natDelta = puncher.GetPortDelta()
 		}
 
 		mdarMu.Lock()
@@ -1566,6 +1568,7 @@ func publishLoop(
 			}(),
 			Candidates:      candidates,
 			NATType:         natLabel,
+			NATDelta:        natDelta,
 			WGPubKey:        wgPubKey,
 			WGPort:          wgPort,
 			Timestamp:       time.Now(),
@@ -1812,6 +1815,7 @@ func receiveLoop(
 				TCPAddr:          p.TCPAddr,
 				Candidates:       p.Candidates,
 				NATType:          p.NATType,
+				NATDelta:         p.NATDelta,
 				WGPubKey:         p.WGPubKey,
 				WGPort:           p.WGPort,
 				VirtualIP:        p.VirtualIP,

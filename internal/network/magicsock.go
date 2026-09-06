@@ -68,7 +68,8 @@ func classifyAddress(addrStr string) (PathType, int) {
 		return PathTypeCGNAT, 2
 	}
 	if ip.IsPrivate() {
-		return PathTypeRelay, 4
+		// Remote RFC 1918 private IP (not in our local subnet) - lowest priority, cannot be routed over WAN
+		return PathTypeRelay, 5
 	}
 	return PathTypeWAN, 3
 }
@@ -224,9 +225,11 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 			pr.ActiveEndpoint = stunAddr
 			pr.ActiveType = PathTypeWAN
 		} else if localAddr != "" {
-			pType, _ := classifyAddress(localAddr)
-			pr.ActiveEndpoint = localAddr
-			pr.ActiveType = pType
+			pType, priority := classifyAddress(localAddr)
+			if priority < 5 {
+				pr.ActiveEndpoint = localAddr
+				pr.ActiveType = pType
+			}
 		}
 	}
 }
@@ -291,7 +294,11 @@ func (ms *MagicSock) RecordProbeSuccess(deviceID, fromAddr string, rtt time.Dura
 
 	// Auto-promote candidate if it has strictly better priority (lower number) or lower latency within same priority
 	shouldSwitch := false
-	if pr.ActiveEndpoint == "" || pr.ActiveEndpoint == fromAddr {
+	if pr.ActiveEndpoint == "" {
+		if cand.Priority < 5 {
+			shouldSwitch = true
+		}
+	} else if pr.ActiveEndpoint == fromAddr {
 		shouldSwitch = true
 	} else if activeCand, hasActive := pr.Candidates[pr.ActiveEndpoint]; hasActive {
 		if cand.Priority < activeCand.Priority {
@@ -305,12 +312,14 @@ func (ms *MagicSock) RecordProbeSuccess(deviceID, fromAddr string, rtt time.Dura
 			}
 		} else if cand.Priority > activeCand.Priority {
 			// Lower priority path (e.g. remote private IP over STUN WAN) ONLY switches if STUN WAN is DEAD!
-			if time.Since(activeCand.LastSuccess) > 10*time.Second {
+			if time.Since(activeCand.LastSuccess) > 10*time.Second && cand.Priority < 5 {
 				shouldSwitch = true
 			}
 		}
 	} else {
-		shouldSwitch = true
+		if cand.Priority < 5 {
+			shouldSwitch = true
+		}
 	}
 
 	if shouldSwitch && pr.ActiveEndpoint != fromAddr {
@@ -385,6 +394,15 @@ func (ms *MagicSock) TriggerRoamingProbes() {
 		pr.mu.RLock()
 		for _, cand := range pr.Candidates {
 			if cand.Address != "" {
+				host := cand.Address
+				if h, _, err := net.SplitHostPort(cand.Address); err == nil {
+					host = h
+				}
+				ip := net.ParseIP(host)
+				// Never probe unroutable private RFC 1918 IPs across WAN
+				if ip != nil && ip.IsPrivate() && !isLocalSubnet(ip) {
+					continue
+				}
 				_ = ms.puncher.SendHolePunchProbe(cand.Address)
 			}
 		}

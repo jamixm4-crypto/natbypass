@@ -3,11 +3,15 @@ package wireguard
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 // AWGVersion определяет версию протокола AmneziaWG
@@ -177,6 +181,61 @@ func GenerateAWG31StrictParams() AWGParams {
 	// Strict: добавляем CPS packets
 	params.I1 = "quic_initial"
 	params.I2 = "dns_query"
+
+	return params
+}
+
+// DeriveAWGParamsFromKey derives deterministic AWG 3.1 parameters from a shared network key.
+// Ensures all nodes in the mesh automatically have matching H1..H4, S1..S2, and HeaderProtectionKey.
+func DeriveAWGParamsFromKey(networkKey string) AWGParams {
+	params := GenerateAWG31StrictParams()
+	if networkKey == "" {
+		return params
+	}
+
+	// Derive 64 bytes using HKDF-SHA256 from networkKey
+	hkdfReader := hkdf.New(sha256.New, []byte(networkKey), []byte("natbypass-awg-salt-v1"), []byte("natbypass-awg-31-mesh"))
+	var derived [64]byte
+	if _, err := io.ReadFull(hkdfReader, derived[:]); err != nil {
+		h := sha256.Sum256([]byte(networkKey))
+		copy(params.HeaderProtectionKey[:], h[:])
+		return params
+	}
+
+	// 1. Header Protection Key (32 bytes)
+	copy(params.HeaderProtectionKey[:], derived[0:32])
+	params.HeaderProtectionEnabled = true
+
+	// 2. Deterministic H1..H4
+	params.H1 = binary.BigEndian.Uint32(derived[32:36])
+	params.H2 = binary.BigEndian.Uint32(derived[36:40])
+	params.H3 = binary.BigEndian.Uint32(derived[40:44])
+	params.H4 = binary.BigEndian.Uint32(derived[44:48])
+
+	// Ensure headers are non-zero and distinct
+	if params.H1 < 1000 {
+		params.H1 += 1000
+	}
+	if params.H2 < 1000 {
+		params.H2 += 2000
+	}
+	if params.H3 < 1000 {
+		params.H3 += 3000
+	}
+	if params.H4 < 1000 {
+		params.H4 += 4000
+	}
+
+	// 3. S1..S4 (prefixes)
+	params.S1 = 20 + int(derived[48]%40)
+	params.S2 = 20 + int(derived[49]%40)
+	params.S3 = params.S1
+	params.S4 = params.S2
+
+	// 4. Jc, Jmin, Jmax
+	params.Jc = 4 + int(derived[50]%4)
+	params.Jmin = 40 + int(derived[51]%30)
+	params.Jmax = params.Jmin + 30 + int(derived[52]%40)
 
 	return params
 }

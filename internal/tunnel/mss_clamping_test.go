@@ -44,15 +44,15 @@ func TestMSSClamping_Logic(t *testing.T) {
 	})
 
 	t.Run("MTU_clamp_out_of_range", func(t *testing.T) {
-		// Values outside [576, 1500] should default to 1420
+		// Values outside [576, 1500] should default to 1280
 		for _, badMTU := range []int{0, 100, 575, 1501, 9000} {
 			mtu := badMTU
 			if mtu < 576 || mtu > 1500 {
-				mtu = 1420
+				mtu = 1280
 			}
 			mss := mtu - 60
-			if mss != 1360 {
-				t.Errorf("bad MTU %d: expected fallback MSS=1360, got %d", badMTU, mss)
+			if mss != 1220 {
+				t.Errorf("bad MTU %d: expected fallback MSS=1220, got %d", badMTU, mss)
 			}
 		}
 	})

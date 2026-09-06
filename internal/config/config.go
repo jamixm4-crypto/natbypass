@@ -135,11 +135,16 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 	if preset == "" {
 		preset = c.WireGuard.AWG.Preset
 	}
-	if preset == "" {
-		preset = "awg31_strict" // Дефолт: 3.1 Strict
+	var params wireguard.AWGParams
+	if preset != "" && preset != "awg31_strict" {
+		params = wireguard.GetAWGParamsByPreset(preset)
+	} else if activeProf != nil && activeProf.NetworkKey != "" {
+		// Mesh-wide deterministic derivation from shared NetworkKey:
+		// Guarantees all nodes in this network share identical H1..H4, S1..S2, and HeaderProtectionKey!
+		params = wireguard.DeriveAWGParamsFromKey(activeProf.NetworkKey)
+	} else {
+		params = wireguard.GetAWGParamsByPreset("awg31_strict")
 	}
-
-	params := wireguard.GetAWGParamsByPreset(preset)
 
 	// Если в активном профиле заданы параметры AWG — они имеют наивысший приоритет
 	if activeProf != nil && activeProf.H1 != 0 {
@@ -265,6 +270,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("network.upnp_enabled", true)
 	v.SetDefault("network.ip_timeout", 10)
+	v.SetDefault("network.mtu", 1280)
 	v.SetDefault("network.allow_exit_node", false)
 	v.SetDefault("network.stun_servers", []string{
 		"stun.cloudflare.com:3478",

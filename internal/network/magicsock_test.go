@@ -2,6 +2,7 @@ package network
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -90,5 +91,40 @@ func TestMagicSock_HasTCPConn_False(t *testing.T) {
 
 	if ms.HasTCPConn("nonexistent-peer") {
 		t.Fatalf("expected HasTCPConn to return false for unknown peer")
+	}
+}
+
+func TestMagicSock_UnroutablePrivateCandidateNotPromoted(t *testing.T) {
+	isLocalSubnetHook = func(ip net.IP) bool {
+		// Only 192.168.200.x is local
+		return strings.HasPrefix(ip.String(), "192.168.200.")
+	}
+	defer func() { isLocalSubnetHook = nil }()
+
+	ms := NewMagicSock(nil, nil)
+	defer ms.Close()
+
+	devID := "peer-remote-nat"
+	// Register peer with remote RFC 1918 address (192.168.39.254) and empty STUNAddr
+	ms.RegisterPeerEndpoints(devID, "", "192.168.39.254:47832", "")
+
+	// Unroutable private candidate should NOT be set as ActiveEndpoint!
+	ep, pType, _ := ms.GetActiveRoute(devID)
+	if ep != "" {
+		t.Errorf("expected empty active endpoint for unroutable private IP, got %s (%s)", ep, pType)
+	}
+
+	// Now register STUN WAN address
+	ms.RegisterPeerEndpoints(devID, "37.212.11.43:3211", "192.168.39.254:47832", "")
+	ep, pType, _ = ms.GetActiveRoute(devID)
+	if ep != "37.212.11.43:3211" || pType != PathTypeWAN {
+		t.Errorf("expected STUN WAN endpoint, got %s (%s)", ep, pType)
+	}
+
+	// Even if an echo is falsely recorded on 192.168.39.254, it must NOT override WAN (Priority 5 vs 3)
+	ms.RecordProbeSuccess(devID, "192.168.39.254:47832", 1*time.Millisecond)
+	ep, pType, _ = ms.GetActiveRoute(devID)
+	if ep != "37.212.11.43:3211" {
+		t.Errorf("unroutable private IP should NOT override STUN WAN, active is %s (%s)", ep, pType)
 	}
 }

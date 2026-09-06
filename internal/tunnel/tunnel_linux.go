@@ -123,6 +123,13 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 	// 4. Включение маршрутизации ядра Linux (IP Forwarding)
 	_ = exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").Run()
 
+	// 5. Оптимизация буферов UDP сокетов ядра Linux (Keenetic, OpenWrt, Debian)
+	// Без rmem_max/wmem_max ядро ограничивает SO_RCVBUF ~212KB, что приводит к RcvbufErrors
+	_ = exec.Command("sysctl", "-w", "net.core.rmem_max=4194304").Run()
+	_ = exec.Command("sysctl", "-w", "net.core.wmem_max=4194304").Run()
+	_ = exec.Command("sysctl", "-w", "net.core.rmem_default=2097152").Run()
+	_ = exec.Command("sysctl", "-w", "net.core.wmem_default=2097152").Run()
+
 	return dev, nil
 }
 
@@ -200,7 +207,7 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	ipBin := findIPBinary()
 
 	// 1. Установка MTU
-	mtu := 1420
+	mtu := 1280
 	d.mu.Lock()
 	if d.MTU > 0 {
 		mtu = d.MTU

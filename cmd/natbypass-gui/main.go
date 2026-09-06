@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.1"
+	Version = "1.9.223-beta.2"
 	Commit  = "release"
 )
 
@@ -4528,7 +4528,7 @@ func startEngineFromConfig(c *config.Config) {
 								_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
 							}
 							if p.STUNAddr != "" {
-								_ = udpPuncher.SendHolePunchProbe(p.STUNAddr)
+								_ = udpPuncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 							}
 							if p.LocalAddr != "" {
 								_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
@@ -5216,7 +5216,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
 					}
 					if p.STUNAddr != "" {
-						_ = udpPuncher.SendHolePunchProbe(p.STUNAddr)
+						_ = udpPuncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 					}
 					if p.LocalAddr != "" {
 						_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)

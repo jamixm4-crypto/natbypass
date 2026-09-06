@@ -444,7 +444,7 @@ func EnableMSSClamping(tunInterface string, mtu int) error {
 		return fmt.Errorf("tun interface name is required")
 	}
 	if mtu < 576 || mtu > 1500 {
-		mtu = 1420 // Default WireGuard MTU
+		mtu = 1280 // Default Mesh MTU
 	}
 	mss := mtu - 60 // IP header (20) + TCP header (20) + overhead (20)
 
