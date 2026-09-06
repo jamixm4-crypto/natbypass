@@ -208,6 +208,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	const udpSocketBufSize = 4 * 1024 * 1024 // 4 MB
 	_ = conn.SetReadBuffer(udpSocketBufSize)
 	_ = conn.SetWriteBuffer(udpSocketBufSize)
+	DisableUDPConnReset(conn)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -503,6 +504,7 @@ func (p *UDPPuncher) ResetSocket() (int, error) {
 		}
 	}
 
+	DisableUDPConnReset(newConn)
 	oldConn := p.conn
 	p.conn = newConn
 	p.localPort = newConn.LocalAddr().(*net.UDPAddr).Port
@@ -978,6 +980,22 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 		_, _ = p.conn.WriteToUDP(stealthProbe, rAddr)
 	} else {
 		_, _ = p.conn.WriteToUDP(probeData, rAddr)
+	}
+
+	// Always probe immediate neighbor ports (±1, ±2, ±3, ±4, ±8) to overcome PON router port drift (Beltelecom, Rostelecom)
+	neighbors := []int{-4, -3, -2, -1, 1, 2, 3, 4, 8, -8}
+	for _, offset := range neighbors {
+		neighborPort := rAddr.Port + offset
+		if neighborPort > 1024 && neighborPort < 65535 {
+			nAddr := &net.UDPAddr{IP: rAddr.IP, Port: neighborPort}
+			if len(chameleonProbe) > 0 {
+				_, _ = p.conn.WriteToUDP(chameleonProbe, nAddr)
+			} else if len(stealthProbe) > 0 {
+				_, _ = p.conn.WriteToUDP(stealthProbe, nAddr)
+			} else {
+				_, _ = p.conn.WriteToUDP(probeData, nAddr)
+			}
+		}
 	}
 
 	// Targeted probing for Symmetric NAT using advanced CGNAT heuristics (Parity, PBA, Delta)
@@ -1543,6 +1561,7 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	const udpSocketBufSize = 4 * 1024 * 1024
 	_ = conn.SetReadBuffer(udpSocketBufSize)
 	_ = conn.SetWriteBuffer(udpSocketBufSize)
+	DisableUDPConnReset(conn)
 	p.addrCache.Range(func(k, v any) bool { p.addrCache.Delete(k); return true })
 	p.localPort = conn.LocalAddr().(*net.UDPAddr).Port
 	// BUG-13 FIX: capture localPort before releasing lock to avoid stale read

@@ -21,6 +21,7 @@ type Peer struct {
 	PublicIP         string               `json:"public_ip"`
 	LocalAddr        string               `json:"local_addr,omitempty"`
 	STUNAddr         string               `json:"stun_addr,omitempty"`
+	TCPAddr          string               `json:"tcp_addr,omitempty"`
 	IPv6Addr         string               `json:"ipv6_addr,omitempty"`
 	WGPubKey         string               `json:"wg_pubkey,omitempty"`
 	WGPort           int                  `json:"wg_port,omitempty"`
@@ -109,6 +110,10 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	if newer.Latency == 0 && existing.Latency > 0 && existing.DirectP2P {
 		newer.Latency = existing.Latency
 		newer.PingMs = existing.PingMs
+	}
+
+	if newer.TCPAddr == "" && existing.TCPAddr != "" {
+		newer.TCPAddr = existing.TCPAddr
 	}
 
 	if newer.Arch == "" && existing.Arch != "" {

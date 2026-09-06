@@ -268,6 +268,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("network.allow_exit_node", false)
 	v.SetDefault("network.stun_servers", []string{
 		"stun.cloudflare.com:3478",
+		"stun.sipnet.ru:3478",
+		"stun.miwifi.com:3478",
+		"stun.syncthing.net:3478",
 		"stun.l.google.com:19302",
 		"stun1.l.google.com:19302",
 	})

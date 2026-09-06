@@ -507,6 +507,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			})
 		}
 
+		if tcpDirectMgr != nil {
+			tcpDirectMgr.SetOnPacket(func(srcAddr *net.UDPAddr, payload []byte) {
+				onInboundPacket(payload, srcAddr)
+			})
+		}
+
 		if sigMgr != nil {
 			sigMgr.SubscribeTunnelData(deviceID, func(payload []byte) {
 				dataToProcess := payload
@@ -891,37 +897,25 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 
-							// Trigger TCP Simultaneous Open fallback when UDP is persistently dropped (> 12 probes)
-							if p.ProbeCount > 12 && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && puncher != nil {
-								tcpTarget := p.STUNAddr
+							// Trigger Direct TCP / TCP Simultaneous Open fallback when UDP is persistently dropped (> 8 probes)
+							if p.ProbeCount > 8 && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+								tcpTarget := p.TCPAddr
+								if tcpTarget == "" {
+									tcpTarget = p.STUNAddr
+								}
 								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
 									tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
 								}
 								if tcpTarget != "" {
-									go func(devID, target string, lPort int) {
-										tCtx, tCancel := context.WithTimeout(engineCtx, 4*time.Second)
-										defer tCancel()
-										conn, err := network.AttemptTCPSimultaneousOpen(tCtx, lPort, target)
-										if err == nil && conn != nil {
-											log.Info().Str("peer", devID).Str("target", target).Msg("⚡ TCP Simultaneous Open SUCCEEDED: established P2P TCP fallback")
-											tcpDirectMgr.RegisterConn(devID, conn, func(remoteAddr *net.UDPAddr, payload []byte) {
-												if tunDev != nil {
-													_ = tunDev.WritePacket(payload)
-												}
-												if regPeer, ok := registry.Get(devID); ok && regPeer != nil {
-													regPeer.LastDirectSeen = time.Now()
-													regPeer.DirectP2P = true
-													registry.Upsert(regPeer)
-												}
-											})
-											if regPeer, ok := registry.Get(devID); ok && regPeer != nil {
-												regPeer.DirectP2P = true
-												regPeer.ActiveEndpoint = target
-												regPeer.LastDirectSeen = time.Now()
-												registry.Upsert(regPeer)
-											}
+									lPort := 0
+									if puncher != nil {
+										lPort = puncher.LocalPort()
+									}
+									go func(devID, target string, localP int) {
+										if err := tcpDirectMgr.ConnectPeer(devID, target, localP); err == nil {
+											log.Info().Str("peer", devID).Str("target", target).Msg("⚡ P2P TCP connection established successfully")
 										}
-									}(p.DeviceID, tcpTarget, puncher.LocalPort())
+									}(p.DeviceID, tcpTarget, lPort)
 								}
 							}
 						}
@@ -1184,6 +1178,19 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		})
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDP puncher active on persistent socket with MagicSock and KeepAlive")
 		tcpDirectMgr = network.NewTCPDirectManager(ctx)
+		tcpDirectMgr.SetDeviceID(deviceID)
+		tcpDirectMgr.SetOnPeerUp(func(peerID string, remoteAddr string) {
+			log.Info().Str("peer", peerID).Str("addr", remoteAddr).Msg("⚡ Direct P2P TCP connection ACTIVE")
+			if regPeer, ok := registry.Get(peerID); ok && regPeer != nil {
+				regPeer.DirectP2P = true
+				regPeer.ActiveEndpoint = remoteAddr
+				regPeer.LastDirectSeen = time.Now()
+				registry.Upsert(regPeer)
+			}
+		})
+		if tcpPort, err := tcpDirectMgr.StartListener(puncher.LocalPort()); err == nil {
+			log.Info().Int("port", tcpPort).Msg("Direct P2P TCP listener active")
+		}
 	}
 
 	return puncher, ipDisc
@@ -1543,6 +1550,20 @@ func publishLoop(
 			PublicKey:       crypto.KeyToHex(pubKey),
 			PublicIP:        ip.String(),
 			STUNAddr:        stunAddr,
+			TCPAddr: func() string {
+				if tcpDirectMgr != nil && tcpDirectMgr.Port() > 0 {
+					host := ip.String()
+					if host == "" || host == "0.0.0.0" || host == "<nil>" {
+						if stunAddr != "" {
+							host = strings.Split(stunAddr, ":")[0]
+						}
+					}
+					if host != "" && host != "0.0.0.0" && host != "<nil>" {
+						return fmt.Sprintf("%s:%d", host, tcpDirectMgr.Port())
+					}
+				}
+				return ""
+			}(),
 			Candidates:      candidates,
 			NATType:         natLabel,
 			WGPubKey:        wgPubKey,
@@ -1788,6 +1809,7 @@ func receiveLoop(
 				PublicKey:        p.PublicKey,
 				PublicIP:         p.PublicIP,
 				STUNAddr:         p.STUNAddr,
+				TCPAddr:          p.TCPAddr,
 				Candidates:       p.Candidates,
 				NATType:          p.NATType,
 				WGPubKey:         p.WGPubKey,

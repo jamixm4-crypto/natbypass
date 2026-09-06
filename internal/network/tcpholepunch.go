@@ -79,12 +79,17 @@ func AttemptTCPSimultaneousOpen(ctx context.Context, localPort int, targetAddr s
 	}
 }
 
-// TCPDirectManager manages direct P2P TCP streams established via TCP Simultaneous Open.
+// TCPDirectManager manages direct P2P TCP streams established via TCP Simultaneous Open or direct TCP dial.
 type TCPDirectManager struct {
-	conns  map[string]net.Conn
-	mu     sync.RWMutex
-	ctx    context.Context
-	cancel context.CancelFunc
+	conns      map[string]net.Conn
+	mu         sync.RWMutex
+	ctx        context.Context
+	cancel     context.CancelFunc
+	listener   net.Listener
+	listenPort int
+	myDeviceID string
+	onPacket   func(remoteAddr *net.UDPAddr, payload []byte)
+	onPeerUp   func(peerID string, remoteAddr string)
 }
 
 // NewTCPDirectManager creates a new manager for P2P TCP streams.
@@ -97,6 +102,177 @@ func NewTCPDirectManager(ctx context.Context) *TCPDirectManager {
 	}
 }
 
+// SetDeviceID sets the local device ID used for TCP handshakes.
+func (m *TCPDirectManager) SetDeviceID(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.myDeviceID = id
+}
+
+// SetOnPacket sets the default incoming packet callback.
+func (m *TCPDirectManager) SetOnPacket(fn func(remoteAddr *net.UDPAddr, payload []byte)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onPacket = fn
+}
+
+// SetOnPeerUp sets the callback invoked when a direct TCP connection is established.
+func (m *TCPDirectManager) SetOnPeerUp(fn func(peerID string, remoteAddr string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onPeerUp = fn
+}
+
+// Port returns the listening TCP port, or 0 if not listening.
+func (m *TCPDirectManager) Port() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.listenPort
+}
+
+// StartListener starts an inbound TCP listener on preferredPort (or dynamic port if taken).
+func (m *TCPDirectManager) StartListener(preferredPort int) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.listener != nil {
+		return m.listenPort, nil
+	}
+
+	var ln net.Listener
+	var err error
+
+	if preferredPort > 0 {
+		ln, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", preferredPort))
+	}
+	if err != nil || preferredPort <= 0 {
+		ln, err = net.Listen("tcp", "0.0.0.0:0")
+		if err != nil {
+			return 0, fmt.Errorf("failed to start TCP listener: %w", err)
+		}
+	}
+
+	m.listener = ln
+	m.listenPort = ln.Addr().(*net.TCPAddr).Port
+
+	go m.acceptLoop(ln)
+	return m.listenPort, nil
+}
+
+func (m *TCPDirectManager) acceptLoop(ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			select {
+			case <-m.ctx.Done():
+				return
+			default:
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+		}
+
+		go func(c net.Conn) {
+			_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+			magic := make([]byte, 5)
+			if _, err := io.ReadFull(c, magic); err != nil || string(magic) != "NBTCP" {
+				_ = c.Close()
+				return
+			}
+			idLen := make([]byte, 1)
+			if _, err := io.ReadFull(c, idLen); err != nil || idLen[0] == 0 {
+				_ = c.Close()
+				return
+			}
+			peerIDBuf := make([]byte, idLen[0])
+			if _, err := io.ReadFull(c, peerIDBuf); err != nil {
+				_ = c.Close()
+				return
+			}
+			remotePeerID := string(peerIDBuf)
+
+			m.mu.RLock()
+			myID := m.myDeviceID
+			onPkt := m.onPacket
+			onUp := m.onPeerUp
+			m.mu.RUnlock()
+
+			resp := []byte("NBTCP")
+			resp = append(resp, byte(len(myID)))
+			resp = append(resp, []byte(myID)...)
+			if _, err := c.Write(resp); err != nil {
+				_ = c.Close()
+				return
+			}
+			_ = c.SetDeadline(time.Time{})
+
+			m.RegisterConn(remotePeerID, c, onPkt)
+			if onUp != nil {
+				onUp(remotePeerID, c.RemoteAddr().String())
+			}
+		}(conn)
+	}
+}
+
+// ConnectPeer initiates a direct TCP connection or TCP Simultaneous Open to the remote peer.
+func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int) error {
+	if targetAddr == "" {
+		return fmt.Errorf("empty target address")
+	}
+	if m.HasConn(peerID) {
+		return nil
+	}
+
+	dialer := net.Dialer{Timeout: 3500 * time.Millisecond}
+	conn, err := dialer.DialContext(m.ctx, "tcp", targetAddr)
+	if err != nil && localPort > 0 {
+		// Fall back to simultaneous open
+		sCtx, sCancel := context.WithTimeout(m.ctx, 3500*time.Millisecond)
+		defer sCancel()
+		conn, err = AttemptTCPSimultaneousOpen(sCtx, localPort, targetAddr)
+	}
+	if err != nil || conn == nil {
+		return fmt.Errorf("tcp connect to %s failed: %w", targetAddr, err)
+	}
+
+	m.mu.RLock()
+	myID := m.myDeviceID
+	onPkt := m.onPacket
+	onUp := m.onPeerUp
+	m.mu.RUnlock()
+
+	_ = conn.SetDeadline(time.Now().Add(4 * time.Second))
+	req := []byte("NBTCP")
+	req = append(req, byte(len(myID)))
+	req = append(req, []byte(myID)...)
+	if _, err := conn.Write(req); err != nil {
+		_ = conn.Close()
+		return err
+	}
+
+	magic := make([]byte, 5)
+	if _, err := io.ReadFull(conn, magic); err != nil || string(magic) != "NBTCP" {
+		_ = conn.Close()
+		return fmt.Errorf("invalid tcp handshake from %s", targetAddr)
+	}
+	idLen := make([]byte, 1)
+	if _, err := io.ReadFull(conn, idLen); err != nil || idLen[0] == 0 {
+		_ = conn.Close()
+		return fmt.Errorf("invalid handshake id length from %s", targetAddr)
+	}
+	peerIDBuf := make([]byte, idLen[0])
+	if _, err := io.ReadFull(conn, peerIDBuf); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("failed to read remote peer id from %s", targetAddr)
+	}
+	_ = conn.SetDeadline(time.Time{})
+
+	m.RegisterConn(peerID, conn, onPkt)
+	if onUp != nil {
+		onUp(peerID, targetAddr)
+	}
+	return nil
+}
+
 // HasConn returns true if an active TCP stream exists for the peer.
 func (m *TCPDirectManager) HasConn(deviceID string) bool {
 	m.mu.RLock()
@@ -107,6 +283,12 @@ func (m *TCPDirectManager) HasConn(deviceID string) bool {
 
 // RegisterConn registers a newly established TCP connection and starts reading length-prefixed frames.
 func (m *TCPDirectManager) RegisterConn(deviceID string, conn net.Conn, onPacket func(remoteAddr *net.UDPAddr, payload []byte)) {
+	if onPacket == nil {
+		m.mu.RLock()
+		onPacket = m.onPacket
+		m.mu.RUnlock()
+	}
+
 	m.mu.Lock()
 	if old, exists := m.conns[deviceID]; exists && old != nil {
 		_ = old.Close()
@@ -178,6 +360,10 @@ func (m *TCPDirectManager) Close() {
 	m.cancel()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.listener != nil {
+		_ = m.listener.Close()
+		m.listener = nil
+	}
 	for _, c := range m.conns {
 		_ = c.Close()
 	}
