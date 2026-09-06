@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui.compose
+package org.natbypass.app.ui.compose
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -73,7 +73,7 @@ data class PeerDiagItem(
 
 // ── Helper: parse peers from JSON and diagnose ─────────────────────────────────
 
-private fun parsePeerDiags(peersJson: String, myPubIP: String, myVersion: String, myAwgActive: Boolean): List<PeerDiagItem> {
+private fun parsePeerDiags(peersJson: String, myPubIP: String, myVersion: String, myAwgActive: Boolean, myH1: String): List<PeerDiagItem> {
     return try {
         val arr = JSONArray(peersJson)
         (0 until arr.length()).mapNotNull { i ->
@@ -105,14 +105,18 @@ private fun parsePeerDiags(peersJson: String, myPubIP: String, myVersion: String
                     if (nat.contains("symmetric", ignoreCase = true))
                         reasons += RelayReason.SYMMETRIC_NAT
                     // awg_mismatch is set server-side (authoritative).
-                    // Also detect if peer has AWG but we don't (or vice versa).
-                    if (awgMismatch)
+                    if (awgMismatch) {
                         reasons += RelayReason.AWG_MISMATCH
-                    else if (peerH1.isNotEmpty() && !myAwgActive)
+                    } else if (myH1.isNotEmpty() && peerH1.isNotEmpty() && myH1 != peerH1) {
                         reasons += RelayReason.AWG_MISMATCH
-                    else if (peerH1.isEmpty() && myAwgActive)
+                    } else if (peerH1.isNotEmpty() && !myAwgActive) {
                         reasons += RelayReason.AWG_MISMATCH
-                    if (ver.isNotEmpty() && myVersion.isNotEmpty() && ver != myVersion)
+                    } else if (peerH1.isEmpty() && myAwgActive) {
+                        reasons += RelayReason.AWG_MISMATCH
+                    }
+                    val cleanPeerVer = ver.removePrefix("v")
+                    val cleanMyVer   = myVersion.removePrefix("v")
+                    if (cleanPeerVer.isNotEmpty() && cleanMyVer.isNotEmpty() && cleanPeerVer != cleanMyVer)
                         reasons += RelayReason.VERSION_MISMATCH
                     if (reasons.isEmpty())
                         reasons += RelayReason.UNKNOWN
@@ -167,11 +171,14 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
                 val myPubIP   = statusObj.optString("public_ip", "")
                 val myVersion = statusObj.optString("version", "")
                 val myAwgActive = statusObj.optBoolean("awg_active", false) ||
-                                  statusObj.optString("awg_version", "").isNotEmpty()
+                                  statusObj.optString("awg_version", "").isNotEmpty() ||
+                                  statusObj.optString("awg_preset", "").isNotEmpty() ||
+                                  statusObj.has("awg")
+                val myH1 = statusObj.optJSONObject("awg")?.optString("h1", "") ?: ""
 
                 // Peer relay analysis
                 val peersStr = MobileBridge.getPeersJSON()
-                val peers = parsePeerDiags(peersStr, myPubIP, myVersion, myAwgActive)
+                val peers = parsePeerDiags(peersStr, myPubIP, myVersion, myAwgActive, myH1)
 
                 val logs = MobileBridge.getLogsText()
                 diagItems = parsed

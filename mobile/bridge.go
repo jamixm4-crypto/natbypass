@@ -29,7 +29,7 @@ import (
 )
 
 
-const Version = "1.9.223-beta.3"
+const Version = "1.9.223-beta.4"
 
 
 
@@ -1734,8 +1734,27 @@ func GetFullTelemetryJSON() string {
 		channel = globalSigMgr.CurrentChannel()
 	}
 
+	var awgData map[string]interface{}
+	awgActive := true
+	if globalConfig != nil {
+		awgP := globalConfig.GetAWGParams()
+		awgActive = globalConfig.WireGuard.Enabled || globalConfig.WireGuard.AWG.Enabled
+		awgData = map[string]interface{}{
+			"h1":      fmt.Sprintf("%d", awgP.H1),
+			"h2":      fmt.Sprintf("%d", awgP.H2),
+			"h3":      fmt.Sprintf("%d", awgP.H3),
+			"h4":      fmt.Sprintf("%d", awgP.H4),
+			"s1":      awgP.S1,
+			"s2":      awgP.S2,
+			"jc":      awgP.Jc,
+			"version": string(awgP.Version),
+			"preset":  globalConfig.WireGuard.AWGPreset,
+		}
+	}
+
 	res := map[string]interface{}{
 		"running":         engineRunning,
+		"version":         Version,
 		"device_id":       globalDevID,
 		"device_name":     globalDevName,
 		"public_ip":       globalPublicIP,
@@ -1748,6 +1767,9 @@ func GetFullTelemetryJSON() string {
 		"channel":         channel,
 		"exit_node":       globalExitNode,
 		"awg_preset":      globalAWGPreset,
+		"awg_active":      awgActive,
+		"awg_version":     "3.1",
+		"awg":             awgData,
 		"tx_bytes":        atomic.LoadUint64(&globalTxBytes),
 		"rx_bytes":        atomic.LoadUint64(&globalRxBytes),
 		"uptime":          time.Since(globalStarted).Round(time.Second).String(),
