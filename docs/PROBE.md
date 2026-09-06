@@ -1,4 +1,4 @@
-﻿# NatBypass Probe — Диагностика межгеографических соединений
+# NatBypass Probe — Диагностика межгеографических соединений
 
 `natbypass-probe` — автономная утилита для тестирования возможности установки P2P/AWG-соединений между узлами в разных странах. Помогает выявить, что именно блокирует соединение: NAT, файервол, DPI или ТСПУ.
 
@@ -27,31 +27,99 @@
 
 ---
 
-## Быстрый старт (3 шага)
+## 🚀 Быстрый старт через консоль (One-Liners)
+
+### 🐧 Linux (VPS, сервер, Nextcloud, Ubuntu / Debian / CentOS / Alpine)
+
+#### Вариант А: Вы организатор теста (первый узел)
+```bash
+# 1. Скачивание утилиты через curl (или wget) и выдача прав
+curl -sSL -o natbypass-probe https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-probe-linux-amd64 && chmod +x natbypass-probe
+
+# (Если GitHub заблокирован, через CDN-зеркало):
+# curl -sSL -o natbypass-probe https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-probe-linux-amd64 && chmod +x natbypass-probe
+# или через wget:
+# wget -O natbypass-probe https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-probe-linux-amd64 && chmod +x natbypass-probe
+
+# 2. Инициализация единого конфига probe.json
+./natbypass-probe --init
+
+# 3. Передайте созданный файл probe.json остальным участникам (в РФ, РБ, США)
+
+# 4. Запуск тестирования на своём узле (с сохранением JSON-отчёта)
+./natbypass-probe --config probe.json --label "US / Oracle VPS" --country US --out report-us.json
+```
+
+#### Вариант Б: Вы участник (получили файл `probe.json`)
+```bash
+# 1. Скачивание утилиты
+curl -sSL -o natbypass-probe https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-probe-linux-amd64 && chmod +x natbypass-probe
+
+# 2. Положите выданный probe.json в ту же папку (или скачайте по ссылке от организатора):
+# curl -sSL -o probe.json https://ваш-сервер.com/probe.json
+
+# 3. Запуск тестирования (укажите свою страну и понятную метку)
+./natbypass-probe --config probe.json --label "Nextcloud / Debian" --country RU --out report-ru.json
+
+# 4. Просмотр готового отчёта
+cat report-ru.json
+```
+
+---
+
+### 🪟 Windows (PowerShell / cmd)
+
+#### Вариант А: Вы организатор теста
+```powershell
+# 1. Скачивание утилиты в текущую папку через PowerShell или curl.exe
+Invoke-WebRequest -Uri "https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass-Probe.exe" -OutFile "natbypass-probe.exe"
+# или через curl:
+# curl.exe -sSL -o natbypass-probe.exe https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass-Probe.exe
+
+# 2. Инициализация единого конфига probe.json
+.\natbypass-probe.exe --init
+
+# 3. Передайте созданный файл probe.json остальным участникам
+
+# 4. Запуск тестирования
+.\natbypass-probe.exe --config probe.json --label "РБ / Beltelecom" --country BY --out report-by.json
+```
+
+#### Вариант Б: Вы участник (получили `probe.json`)
+```powershell
+# 1. Скачивание утилиты
+Invoke-WebRequest -Uri "https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass-Probe.exe" -OutFile "natbypass-probe.exe"
+
+# 2. Положите probe.json рядом с exe и запустите тестирование:
+.\natbypass-probe.exe --config probe.json --label "РФ / Ростелеком" --country RU --out report-ru.json
+
+# 3. Просмотр отчёта:
+Get-Content report-ru.json
+```
+
+---
+
+## Пошаговое руководство (Workflow)
 
 ### Шаг 1 — Организатор создаёт конфиг
-
-Один участник (обычно администратор) создаёт общий конфиг:
-
+Один участник (администратор) создаёт общий конфиг:
+```bash
+./natbypass-probe --init --config probe.json
 ```
-natbypass-probe.exe --init --config probe.json
-```
-
 Файл `probe.json` создаётся с вашим AWG-профилем и настройками MQTT. Передайте этот файл **всем остальным участникам** (через мессенджер, email и т.д.).
 
 ### Шаг 2 — Каждый участник запускает утилиту
-
-Каждый узел запускает утилиту, указав страну и провайдера:
+Все узлы запускают тест практически одновременно (в окне ~5 минут):
 
 ```bash
 # Windows (Беларусь / Beltelecom)
-natbypass-probe.exe --config probe.json --label "РБ / Beltelecom" --country BY
+.\natbypass-probe.exe --config probe.json --label "РБ / Beltelecom" --country BY
 
 # Windows (Россия / Ростелеком)
-natbypass-probe.exe --config probe.json --label "РФ / Ростелеком" --country RU
+.\natbypass-probe.exe --config probe.json --label "РФ / Ростелеком" --country RU
 
 # Linux (США / VPS)
-./natbypass-probe-linux-amd64 --config probe.json --label "США / VPS" --country US
+./natbypass-probe --config probe.json --label "США / VPS" --country US
 ```
 
 Дополнительные флаги:

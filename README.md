@@ -65,6 +65,22 @@ irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag
 ```
 *(или через CLI: `.\NatBypass.exe diag`)*
 
+### 🌍 Межгеографическая P2P/DPI диагностика (natbypass-probe)
+Автономная утилита для выявления блокировок UDP, WireGuard-паттерна и параметров AmneziaWG между узлами в разных странах (РФ, РБ, США):
+
+**Linux (быстрый запуск в 1 строку):**
+```bash
+curl -sSL -o natbypass-probe https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-probe-linux-amd64 && chmod +x natbypass-probe
+./natbypass-probe --config probe.json --label "US / VPS" --country US --out report-us.json
+```
+
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri "https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass-Probe.exe" -OutFile "natbypass-probe.exe"
+.\natbypass-probe.exe --config probe.json --label "РФ / Ростелеком" --country RU --out report-ru.json
+```
+Подробная инструкция, создание `probe.json` и флаги: [**docs/PROBE.md**](docs/PROBE.md).
+
 ---
 
 ## 🏗️ Архитектура P2P сети
