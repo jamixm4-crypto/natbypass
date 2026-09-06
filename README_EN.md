@@ -92,7 +92,9 @@ irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag
 
 | Platform | Architecture | Release Binary | Description |
 |---|---|---|---|
-| **Windows** | amd64 | [NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Windows 10/11 / Server (Desktop GUI + Tray + Wintun) |
+| **Windows (WebUI)** | amd64 | [NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest) | **Windows 10 / 11** (WebUI browser control panel `http://localhost:8080` + Tray + Wintun) |
+| **Windows (GUI)** | amd64 | [NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest) | **Windows 10 / 11** & **Windows Server (2016/2019/2022/2025)** (Pure native Win32 GDI GUI, no browser required, 15 MB RAM + Tray) |
+| **Windows (CLI)** | amd64 | [natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest) | **Windows 10 / 11 / Server** (Headless CLI for automation, services, and background tasks) |
 | **Android** | arm64 / arm / x64 | [NatBypass.apk](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Android 8.0+ (VpnService + QR Scanner + Screen QR) |
 | **Linux** | amd64 | [natbypass-linux-amd64](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Ubuntu, Debian, CentOS, Arch |
 | **Linux ARM64** | arm64 | [natbypass-linux-arm64](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Raspberry Pi 3/4/5, Keenetic Ultra/Giga |
@@ -103,10 +105,15 @@ irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag
 
 ## 🚀 Quick Start
 
-### Windows (10/11 & Windows Server)
-1. Download [**NatBypass.exe**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
-2. Run as Administrator to initialize the Wintun adapter.
-3. The application will open in a native GUI window.
+### Windows
+* **Windows 10 / 11 (WebUI Version):**
+  1. Download [**NatBypass.exe**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+  2. Run as Administrator. Browser management UI will open at `http://localhost:8080`.
+* **Windows 10 / 11 & Windows Server (Native GUI Version):**
+  1. Download [**NatBypass-GUI.exe**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+  2. Run as Administrator. Opens a lightweight native Win32 window (does not require WebView2/browser/Electron, 15–25 MB RAM, ideal for Windows Server).
+* **Windows Server / Headless (CLI):**
+  1. Download [**natbypass-cli.exe**](https://github.com/jamixm4-crypto/natbypass/releases/latest). Run: `.\natbypass-cli.exe -c config.yaml`.
 
 ### Linux / Keenetic / OpenWrt (1-Command Install)
 ```bash

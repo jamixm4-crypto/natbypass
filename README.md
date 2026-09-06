@@ -109,7 +109,9 @@ Invoke-WebRequest -Uri "https://github.com/jamixm4-crypto/natbypass/releases/lat
 
 | Платформа | Архитектура | Файл релиза | Описание |
 |---|---|---|---|
-| **Windows** | amd64 | [NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Windows 10/11 / Server (Desktop UI + Трей + Wintun) |
+| **Windows (WebUI)** | amd64 | [NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest) | **Windows 10 / 11** (Панель управления в браузере `http://localhost:8080` + трей + Wintun) |
+| **Windows (GUI)** | amd64 | [NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest) | **Windows 10 / 11** и **Windows Server (2016/2019/2022/2025)** (Чистый нативный Win32 GUI без браузера, 15 МБ RAM + трей) |
+| **Windows (CLI)** | amd64 | [natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest) | **Windows 10 / 11 / Server** (Консольная версия для скриптов, служб и автоматизации) |
 | **Android** | arm64 / arm / x64 | [NatBypass.apk](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Android 8.0+ (VpnService + QR-сканер + Экранный QR) |
 | **Linux** | amd64 | [natbypass-linux-amd64](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Ubuntu, Debian, CentOS, Arch |
 | **Linux ARM64** | arm64 | [natbypass-linux-arm64](https://github.com/jamixm4-crypto/natbypass/releases/latest) | Raspberry Pi 3/4/5, Keenetic Ultra/Giga |
@@ -120,10 +122,15 @@ Invoke-WebRequest -Uri "https://github.com/jamixm4-crypto/natbypass/releases/lat
 
 ## 🚀 Быстрая установка
 
-### Windows (10/11 & Windows Server)
-1. Скачайте [**NatBypass.exe**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
-2. Запустите файл от имени Администратора для настройки интерфейса Wintun.
-3. Приложение откроется в нативном графическом окне.
+### Windows
+* **Windows 10 / 11 (Версия с WebUI):**
+  1. Скачайте [**NatBypass.exe**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+  2. Запустите от имени Администратора для настройки интерфейса Wintun. Откроется интерфейс в браузере по адресу `http://localhost:8080`.
+* **Windows 10 / 11 и Windows Server (Версия с нативным GUI):**
+  1. Скачайте [**NatBypass-GUI.exe**](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+  2. Запустите от имени Администратора. Откроется легкое нативное Win32-окно (не требует браузера, WebView2 или Electron, потребляет всего 15–25 МБ RAM, идеально для серверных ОС).
+* **Windows Server / Headless (CLI):**
+  1. Скачайте [**natbypass-cli.exe**](https://github.com/jamixm4-crypto/natbypass/releases/latest). Запуск: `.\natbypass-cli.exe -c config.yaml`.
 
 ### Linux / Keenetic / OpenWrt (Установка в 1 команду)
 ```bash
