@@ -32,10 +32,18 @@ func isSystemdService() bool {
 	return false
 }
 
-// RestartService перезапускает сервис на Linux/router платформах безопасно,
-// запуская команду перезапуска в отсоединённом фоновом процессе с задержкой 1.5 секунды,
-// чтобы текущий процесс natbypass успел завершиться и корректно освободить сокеты,
-// интерфейсы TUN (nb0) и файлы блокировок.
+// hasBinaryInPath возвращает true, если команда есть в PATH.
+func hasBinaryInPath(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+// RestartService перезапускает сервис на Linux/router платформах безопасно.
+//
+// Особенности реализации для BusyBox (Keenetic MIPS, OpenWrt):
+//   - sleep использует только целые числа (BusyBox не принимает дробные, напр. 1.5)
+//   - nohup опционален — используется setsid или просто двойной fork как fallback
+//   - двойной fork через "sh -c '... &'" гарантирует отсоединение от текущего PID
 func RestartService(execPath string) {
 	var restartCmd string
 	if _, err := os.Stat("/opt/etc/init.d/S99natbypass"); err == nil {
@@ -60,14 +68,33 @@ func RestartService(execPath string) {
 		restartCmd = strings.Join(escapedArgs, " ")
 	}
 
-	// Запуск через отсоединённый subshell с nohup: ждём 1.5 сек, пока текущий процесс natbypass завершит работу,
-	// затем перезапускаем службу или запускаем новый процесс
-	detachedScript := fmt.Sprintf("(sleep 1.5; nohup %s >/dev/null 2>&1 &) &", restartCmd)
+	// Строим BusyBox-совместимый detached-скрипт.
+	// ВАЖНО: sleep должен использовать только целое число секунд —
+	// BusyBox sleep не принимает дробные значения (sleep 1.5 завершается ошибкой,
+	// прерывая весь пайп и служба не запускается).
+	var detachedScript string
+	switch {
+	case hasBinaryInPath("nohup"):
+		detachedScript = fmt.Sprintf("(sleep 2; nohup %s >/dev/null 2>&1 &) &", restartCmd)
+	case hasBinaryInPath("setsid"):
+		// BusyBox без nohup, но с setsid (некоторые OpenWrt/Entware сборки)
+		detachedScript = fmt.Sprintf("(sleep 2; setsid %s >/dev/null 2>&1 &) &", restartCmd)
+	default:
+		// Минимальный вариант: двойной fork через вложенный &
+		// Работает на любом POSIX sh, включая BusyBox ash
+		detachedScript = fmt.Sprintf("(sleep 2; %s >/dev/null 2>&1 &) &", restartCmd)
+	}
+
 	cmd := exec.Command("sh", "-c", detachedScript)
+	// Явно отсоединяем все стандартные дескрипторы, чтобы sh не унаследовал
+	// открытые сокеты / pipe'ы текущего процесса natbypass
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
 	_ = cmd.Start()
 
-	// Даём команду на завершение текущего процесса
-	time.Sleep(200 * time.Millisecond)
+	// Даём subshell зарегистрироваться в планировщике ядра, затем завершаем текущий процесс
+	time.Sleep(300 * time.Millisecond)
 	os.Exit(0)
 }
 
