@@ -115,6 +115,17 @@
         "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.223-beta.4/natbypass-probe-linux-arm64"
       ]
     },
+    "windows/amd64/probe": {
+      "name": "NatBypass-Probe.exe",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.223-beta.4/NatBypass-Probe.exe",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.223-beta.4/NatBypass-Probe.exe.sig",
+      "size": 5901312,
+      "sha256": "b7262fcbec6f6e8520d19cca8d15cee8daf411cb8ccbc0880d378c05dc0f8c2f",
+      "mirrors": [
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.223-beta.4/NatBypass-Probe.exe",
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.223-beta.4/NatBypass-Probe.exe"
+      ]
+    },
     "linux/mips": {
       "name": "natbypass-router-mips",
       "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.223-beta.4/natbypass-router-mips",
