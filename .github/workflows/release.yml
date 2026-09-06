@@ -47,6 +47,10 @@ jobs:
           go build -trimpath -ldflags="-s -w -H=windowsgui -X main.Version=$VERSION" -o build/NatBypass-GUI.exe ./cmd/natbypass-gui
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-cli.exe ./cmd/natbypass-cli
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/NatBypass-Diag.exe ./cmd/natbypass-diag
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/NatBypass-Probe.exe ./cmd/natbypass-probe
+          Copy-Item build/NatBypass-Probe.exe build/natbypass-probe.exe -Force
+          Copy-Item scripts/diag.ps1 build/diag.ps1 -Force
+          Copy-Item scripts/diag.sh build/diag.sh -Force
 
       - name: Install Cosign (Sigstore)
         uses: sigstore/cosign-installer@v3
@@ -64,14 +68,18 @@ jobs:
           $VERSION = "${{ github.ref_name }}"
           $env:GOARCH = "amd64"
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-linux-amd64 ./cmd/natbypass
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-probe-linux-amd64 ./cmd/natbypass-probe
 
           $env:GOARCH = "arm64"
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-linux-arm64 ./cmd/natbypass
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-probe-linux-arm64 ./cmd/natbypass-probe
 
           $env:GOARCH = "mipsle"
           $env:GOMIPS = "softfloat"
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-keenetic-mipsle ./cmd/natbypass
+          go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-probe-keenetic-mipsle ./cmd/natbypass-probe
           Copy-Item build/natbypass-keenetic-mipsle build/natbypass-router-mipsle -Force
+          Copy-Item build/natbypass-probe-keenetic-mipsle build/natbypass-probe-router-mipsle -Force
 
           $env:GOARCH = "mips"
           $env:GOMIPS = "softfloat"

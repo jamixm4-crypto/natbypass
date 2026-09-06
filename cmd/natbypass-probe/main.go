@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const version = "1.0.0-beta.1"
+var Version = "1.0.0-beta.1"
 
 func main() {
 	var (
@@ -28,7 +28,7 @@ func main() {
 	)
 	flag.Parse()
 
-	logf("NatBypass Probe v%s (%s/%s)", version, runtime.GOOS, runtime.GOARCH)
+	logf("NatBypass Probe v%s (%s/%s)", Version, runtime.GOOS, runtime.GOARCH)
 	logf("=======================================")
 
 	// Init mode: create a new probe.json
