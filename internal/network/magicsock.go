@@ -85,6 +85,10 @@ const (
 	PathTypeRelay PathType = "Relay" // Fallback encrypted TLS/WSS or signaling relay
 )
 
+// TCPFallbackProbeThreshold is the number of failed UDP probe attempts before
+// MagicSock automatically tries a TCP Simultaneous Open to the peer.
+const TCPFallbackProbeThreshold = 200
+
 // WANHairpin represents the relative network location of two peers with respect to NAT.
 type WANHairpin int
 
@@ -153,18 +157,27 @@ type MagicSock struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	onPathSwitch func(deviceID string, oldPath, newPath string, pType PathType)
+
+	// TCP Simultaneous Open fallback fields
+	tcpManager     *TCPDirectManager
+	probeCountMu   sync.Mutex
+	peerProbeCount map[string]int  // tracks UDP probe attempts per peer
+	tcpAttempted   map[string]bool // prevents repeated TCP dial attempts
 }
 
 // NewMagicSock creates a new smart routing socket wrapper.
 func NewMagicSock(puncher *UDPPuncher, onSwitch func(deviceID string, oldPath, newPath string, pType PathType)) *MagicSock {
 	ctx, cancel := context.WithCancel(context.Background())
 	ms := &MagicSock{
-		puncher:      puncher,
-		peerRoutes:   make(map[string]*PeerRouteState),
-		ctx:          ctx,
-		cancel:       cancel,
-		onPathSwitch: onSwitch,
+		puncher:        puncher,
+		peerRoutes:     make(map[string]*PeerRouteState),
+		ctx:            ctx,
+		cancel:         cancel,
+		onPathSwitch:   onSwitch,
+		peerProbeCount: make(map[string]int),
+		tcpAttempted:   make(map[string]bool),
 	}
+	ms.tcpManager = NewTCPDirectManager(ctx)
 	go ms.maintenanceLoop()
 	return ms
 }
@@ -394,7 +407,91 @@ func (ms *MagicSock) maintenanceLoop() {
 	}
 }
 
-// Close terminates background magicsock workers.
+// Close terminates background magicsock workers and all managed TCP streams.
 func (ms *MagicSock) Close() {
 	ms.cancel()
+	if ms.tcpManager != nil {
+		ms.tcpManager.Close()
+	}
+}
+
+// RecordProbeAttempt increments the UDP probe attempt counter for a peer and triggers
+// TCP Simultaneous Open fallback once TCPFallbackProbeThreshold is crossed.
+// Safe to call from multiple goroutines.
+func (ms *MagicSock) RecordProbeAttempt(deviceID string) {
+	ms.probeCountMu.Lock()
+	ms.peerProbeCount[deviceID]++
+	count := ms.peerProbeCount[deviceID]
+	ms.probeCountMu.Unlock()
+
+	if count == TCPFallbackProbeThreshold {
+		ms.triggerTCPFallback(deviceID)
+	}
+}
+
+// triggerTCPFallback initiates a TCP Simultaneous Open to the peer if not already attempted.
+// It runs the dial in a goroutine so it never blocks the caller.
+func (ms *MagicSock) triggerTCPFallback(deviceID string) {
+	ms.probeCountMu.Lock()
+	if ms.tcpAttempted[deviceID] {
+		ms.probeCountMu.Unlock()
+		return
+	}
+	ms.tcpAttempted[deviceID] = true
+	ms.probeCountMu.Unlock()
+
+	stunAddr, _, _ := ms.GetActiveRoute(deviceID)
+
+	var localPort int
+	if ms.puncher != nil {
+		localPort = ms.puncher.LocalPort()
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(ms.ctx, 10*time.Second)
+		defer cancel()
+
+		conn, err := AttemptTCPSimultaneousOpen(ctx, localPort, stunAddr)
+		if err != nil {
+			// Allow a retry next time the threshold is crossed again.
+			ms.probeCountMu.Lock()
+			ms.tcpAttempted[deviceID] = false
+			ms.probeCountMu.Unlock()
+			return
+		}
+
+		ms.tcpManager.RegisterConn(deviceID, conn, func(addr *net.UDPAddr, payload []byte) {
+			ms.notifyTCPPacket(deviceID, addr, payload)
+		})
+
+		// Register the TCP endpoint as a successful route so path selection picks it up.
+		ms.RecordProbeSuccess(deviceID, stunAddr, 0)
+
+		if ms.onPathSwitch != nil {
+			ms.onPathSwitch(deviceID, stunAddr, stunAddr, PathTypeTCP)
+		}
+	}()
+}
+
+// notifyTCPPacket forwards a packet received over the TCP connection to the puncher's
+// data callback, allowing higher layers to treat it identically to UDP tunnel packets.
+func (ms *MagicSock) notifyTCPPacket(deviceID string, remoteAddr *net.UDPAddr, payload []byte) {
+	if ms.puncher != nil {
+		ms.puncher.InvokeDataCallback(remoteAddr, payload)
+	}
+}
+
+// HasTCPConn reports whether a live TCP Simultaneous Open stream exists for the peer.
+func (ms *MagicSock) HasTCPConn(deviceID string) bool {
+	if ms.tcpManager == nil {
+		return false
+	}
+	return ms.tcpManager.HasConn(deviceID)
+}
+
+// hasTCPAttempted is an unexported helper used in tests to inspect tcpAttempted state.
+func (ms *MagicSock) hasTCPAttempted(deviceID string) bool {
+	ms.probeCountMu.Lock()
+	defer ms.probeCountMu.Unlock()
+	return ms.tcpAttempted[deviceID]
 }

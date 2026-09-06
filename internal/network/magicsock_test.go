@@ -40,3 +40,55 @@ func TestMagicSock_CandidateSwitching(t *testing.T) {
 		t.Errorf("expected valid latency, got %v", lat)
 	}
 }
+
+func TestMagicSock_ProbeCount_TCPFallbackTriggered(t *testing.T) {
+	p, err := NewUDPPuncher(0, "tcp-fallback-test", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	triggered := make(chan struct{}, 1)
+	ms := NewMagicSock(p, func(deviceID, oldPath, newPath string, pType PathType) {
+		if pType == PathTypeTCP {
+			select {
+			case triggered <- struct{}{}:
+			default:
+			}
+		}
+	})
+	defer ms.Close()
+
+	devID := "peer-tcp-test"
+	// Register a localhost endpoint so TCP dial goes somewhere testable
+	ms.RegisterPeerEndpoints(devID, "127.0.0.1:0", "", "")
+
+	// Must NOT trigger before threshold
+	for i := 0; i < TCPFallbackProbeThreshold-1; i++ {
+		ms.RecordProbeAttempt(devID)
+	}
+	if ms.hasTCPAttempted(devID) {
+		t.Fatalf("TCP fallback triggered before threshold")
+	}
+
+	// The 200th probe must set tcpAttempted flag
+	ms.RecordProbeAttempt(devID)
+	if !ms.hasTCPAttempted(devID) {
+		t.Fatalf("expected TCP fallback to be attempted after threshold")
+	}
+}
+
+func TestMagicSock_HasTCPConn_False(t *testing.T) {
+	p, err := NewUDPPuncher(0, "tcp-conn-test", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	ms := NewMagicSock(p, nil)
+	defer ms.Close()
+
+	if ms.HasTCPConn("nonexistent-peer") {
+		t.Fatalf("expected HasTCPConn to return false for unknown peer")
+	}
+}

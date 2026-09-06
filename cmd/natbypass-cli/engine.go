@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -743,6 +744,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 			// R3: Per-peer backoff tracker: DeviceID -> when we're allowed to probe next
 			probeBackoff := make(map[string]time.Time)
+			activeSymSessions := make(map[string]bool)
 
 			for {
 				select {
@@ -759,6 +761,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 							// Clear backoff on successful connection
 							delete(probeBackoff, p.DeviceID)
+							delete(activeSymSessions, p.DeviceID)
 						} else {
 							// R3: Backoff logic for unconnected peers
 							if until, ok := probeBackoff[p.DeviceID]; ok && now.Before(until) {
@@ -788,6 +791,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								probeBackoff[p.DeviceID] = now.Add(nextBackoff)
 							}
 
+							// Track probe attempt in MagicSock for automatic TCP Simultaneous Open fallback
+							if magicSock != nil {
+								magicSock.RecordProbeAttempt(p.DeviceID)
+							}
+
 							// Send probes to all known endpoints
 							if p.ActiveEndpoint != "" {
 								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
@@ -808,6 +816,41 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 							if p.PublicIP != "" && p.WGPort > 0 {
 								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+							}
+
+							// Trigger Symmetric NAT wide-sweep multi-hop session when peer or local is behind Symmetric NAT
+							if (p.NATType == "symmetric" || puncher.GetNATType().IsSymmetric()) && p.ProbeCount >= 8 && !activeSymSessions[p.DeviceID] {
+								targetAddr := p.STUNAddr
+								if targetAddr == "" && p.ActiveEndpoint != "" {
+									targetAddr = p.ActiveEndpoint
+								}
+								if targetAddr != "" {
+									if host, portStr, err := net.SplitHostPort(targetAddr); err == nil {
+										if bPort, err := strconv.Atoi(portStr); err == nil && bPort > 0 {
+											activeSymSessions[p.DeviceID] = true
+											go func(devID, tIP string, bP int) {
+												defer func() {
+													time.Sleep(30 * time.Second)
+													delete(activeSymSessions, devID)
+												}()
+												sCtx, sCancel := context.WithTimeout(engineCtx, 15*time.Second)
+												defer sCancel()
+												puncher.LaunchSymmetricNATSession(sCtx, tIP, bP, func(winnerAddr string) {
+													log.Info().Str("peer", devID).Str("winner", winnerAddr).Msg("🎯 Symmetric NAT wide-sweep SUCCEEDED: direct P2P established")
+													if magicSock != nil {
+														magicSock.RecordProbeSuccess(devID, winnerAddr, 0)
+													}
+													if regPeer, ok := registry.Get(devID); ok && regPeer != nil {
+														regPeer.DirectP2P = true
+														regPeer.ActiveEndpoint = winnerAddr
+														regPeer.LastDirectSeen = time.Now()
+														registry.Upsert(regPeer)
+													}
+												})
+											}(p.DeviceID, host, bPort)
+										}
+									}
+								}
 							}
 
 							// Trigger TCP Simultaneous Open fallback when UDP is persistently dropped (> 12 probes)
@@ -848,6 +891,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 		}()
+
 	}
 
 	// Фоновый опрос реального ICMP пинга активных пиров (каждые 20 секунд)
@@ -1346,6 +1390,9 @@ func publishLoop(
 
 				// 2. Periodic hole punch probe burst for non-direct peers
 				if !p.DirectP2P {
+					if magicSock != nil {
+						magicSock.RecordProbeAttempt(p.DeviceID)
+					}
 					if p.STUNAddr != "" {
 						_ = puncher.SendHolePunchProbe(p.STUNAddr)
 						p.ProbeCount++

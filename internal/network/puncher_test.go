@@ -287,3 +287,69 @@ func TestAdaptiveProbeEngine_Feedback(t *testing.T) {
 	_ = p.ExecuteAdaptiveProbing(ctx, engine)
 }
 
+func TestCandidatePortsAdvanced_WideSweep(t *testing.T) {
+	// Random-delta Symmetric NAT: BlockSize=0, IsSequential=false, delta=50
+	prof := CGNATProfile{
+		IsSequential:    false,
+		ParityPreserved: false,
+		BlockSize:       0,
+		Delta:           1,
+	}
+	p, err := NewUDPPuncher(0, "test-wide", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	candidates := p.CandidatePortsAdvanced(40000, nil, prof, 50) // fallbackDelta=50 > 10
+	// Must contain base ± WideSymmetricSweepRadius ports
+	if len(candidates) < WideSymmetricSweepRadius {
+		t.Fatalf("expected at least %d wide-sweep candidates, got %d", WideSymmetricSweepRadius, len(candidates))
+	}
+	// Verify base+1 and base-1 are present
+	hasPlus := false
+	hasMinus := false
+	for _, c := range candidates {
+		if c == 40001 {
+			hasPlus = true
+		}
+		if c == 39999 {
+			hasMinus = true
+		}
+	}
+	if !hasPlus || !hasMinus {
+		t.Fatalf("expected base±1 in wide-sweep candidates")
+	}
+}
+
+func TestSymmetricNATSession_RunsAndStops(t *testing.T) {
+	p, err := NewUDPPuncher(0, "test-sym-session", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	successCh := make(chan string, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	session := p.LaunchSymmetricNATSession(ctx, "127.0.0.1", 50000, func(addr string) {
+		successCh <- addr
+	})
+
+	// Notify success immediately from hop 1
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		session.NotifySuccess("127.0.0.1:50001")
+	}()
+
+	select {
+	case winner := <-successCh:
+		if winner != "127.0.0.1:50001" {
+			t.Fatalf("unexpected winner: %s", winner)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("session did not terminate after NotifySuccess")
+	}
+}
+

@@ -636,8 +636,27 @@ func (p *UDPPuncher) CandidatePortsAdvanced(base int, samples []int, prof CGNATP
 		add(base - i*step)
 	}
 
+	// Strategy C: Wide-sweep for Symmetric NAT with random/large delta (random CGNAT)
+	// Triggered when: no PBA block, no sequential delta, and fallbackDelta > 10
+	// Sprays ±WideSymmetricSweepRadius ports around base
+	if prof.BlockSize == 0 && !prof.IsSequential && (fallbackDelta > 10 || (fallbackDelta <= 0 && delta > 10)) {
+		for i := 1; i <= WideSymmetricSweepRadius; i++ {
+			add(base + i)
+			add(base - i)
+		}
+	}
+
 	return ports
 }
+
+const (
+	// WideSymmetricSweepRadius: ±N ports around the base for random-delta Symmetric NAT
+	WideSymmetricSweepRadius = 256
+	// SymmetricNATMaxHops: maximum HopPort() cycles in one session
+	SymmetricNATMaxHops = 5
+	// SymmetricNATHopDelay: time between HopPort cycles (allow NAT state to settle)
+	SymmetricNATHopDelay = 800 * time.Millisecond
+)
 
 const (
 	QUICVersion1   = uint32(0x00000001)
@@ -1041,6 +1060,17 @@ func (p *UDPPuncher) SetDataCallback(cb DirectDataCallback) {
 	p.mu.Lock()
 	p.onDataPacket = cb
 	p.mu.Unlock()
+}
+
+// InvokeDataCallback forwards a received packet to the registered data callback.
+// Used by MagicSock to route TCP-plane packets through the same handler as UDP data.
+func (p *UDPPuncher) InvokeDataCallback(addr *net.UDPAddr, payload []byte) {
+	p.mu.Lock()
+	cb := p.onDataPacket
+	p.mu.Unlock()
+	if cb != nil {
+		cb(addr, payload)
+	}
 }
 
 // SendDataPacket sends a raw tunnel IP packet directly to the peer with optional Amnezia 3.x dynamic padding.
