@@ -905,6 +905,29 @@ func main() {
 		showDiagnostics = false
 	}
 	cachedAWGParams = wireguard.DefaultAWGParams()
+	// Запускаем миграцию профилей (random_trailers, disable_cookies и пр.) и
+	// сразу инициализируем cachedAWGParams из реального конфига профиля,
+	// чтобы первый publish-бекон содержал корректные AWG-параметры.
+	if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+		awg := cfg.WireGuard.AWG
+		cachedAWGParams = wireguard.AWGParams{
+			Enabled:                 awg.Enabled,
+			Version:                 wireguard.AWGVersion31,
+			Jc:                      awg.Jc,
+			Jmin:                    awg.Jmin,
+			Jmax:                    awg.Jmax,
+			S1:                      awg.S1,
+			S2:                      awg.S2,
+			H1:                      awg.H1,
+			H2:                      awg.H2,
+			H3:                      awg.H3,
+			H4:                      awg.H4,
+			HeaderProtectionEnabled: awg.HeaderProtectionKey != "",
+			RandomTrailers:          awg.RandomTrailers,
+			DisableCookies:          awg.DisableCookies,
+		}
+	}
+
 
 	// 4. Создание постоянных ресурсов GDI, иконок и курсора
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
