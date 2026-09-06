@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # NatBypass Universal Diagnostic Script for Windows 10 / 11 / Server
 # ==============================================================================
 # Usage:
@@ -465,18 +465,38 @@ if ($peers -and $peers.data) {
         }
         
         # Check 4: AmneziaWG Mismatch
-        $pHasAwg = ($p.awg -ne $null -and $p.awg.h1 -ne $null -and $p.awg.h1 -ne "" -and $p.awg.h1 -ne "0")
-        $myHasAwg = ($status.awg_enabled -eq $true) -or ($status.awg -ne $null -and $status.awg.h1 -ne $null -and $status.awg.h1 -ne 0 -and $status.awg.h1 -ne "")
-        if ($p.awg_mismatch -eq $true) {
-            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: параметры обфускации (H1-H4/S1-S2) различаются!"
-        } elseif ($pHasAwg -ne $myHasAwg) {
-            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: на одном узле AWG включен, на втором выключен!"
+        # Сравниваем числовые значения h1: если оба ненулевые и совпадают — AWG идентичен.
+        # Флаг awg_enabled отсутствует у Android/Linux — не используем как индикатор "выключен".
+        $myH1 = 0
+        if ($status.awg -ne $null -and $status.awg.h1 -ne $null) {
+            try { $myH1 = [long]$status.awg.h1 } catch {}
+        } elseif ($status.h1 -ne $null) {
+            try { $myH1 = [long]$status.h1 } catch {}
         }
+        $pH1 = 0
+        if ($p.awg -ne $null -and $p.awg.h1 -ne $null) {
+            try { $pH1 = [long]$p.awg.h1 } catch {}
+        } elseif ($p.h1 -ne $null) {
+            try { $pH1 = [long]$p.h1 } catch {}
+        }
+        if ($p.awg_mismatch -eq $true) {
+            # Явный флаг от сервера — параметры AWG точно отличаются
+            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: параметры обфускации (H1-H4/S1-S2) различаются!"
+        } elseif ($myH1 -gt 0 -and $pH1 -gt 0 -and $myH1 -ne $pH1) {
+            # Оба имеют ненулевые H1, но значения не совпадают
+            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: H1 не совпадает (локальный: $myH1, пир: $pH1)!"
+        } elseif ($myH1 -eq 0 -and $pH1 -gt 0) {
+            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: у пира AWG включён (H1=$pH1), а на локальном узле параметры AWG не заданы!"
+        } elseif ($myH1 -gt 0 -and $pH1 -eq 0) {
+            Log-Warn "  [!] ФАКТОР [Рассогласование AmneziaWG]: локальный AWG включён (H1=$myH1), а у пира параметры AWG не заданы!"
+        }
+        # Если оба H1 совпадают (или оба нулевые) — AWG согласован, предупреждение не выводим
         
         # Check 5: Version check
         $pVer = if ($p.version) { $p.version } else { "" }
-        if ($pVer -and ($pVer -notmatch "1\.9\.22[12]")) {
-            Log-Warn "  [!] ФАКТОР [Устаревшая версия пира]: узел использует '$pVer' (текущая: $($status.version))."
+        $myVer = if ($status -and $status.version) { $status.version } else { "" }
+        if ($pVer -and $myVer -and ($pVer -ne $myVer)) {
+            Log-Warn "  [!] ФАКТОР [Версия пира отличается]: пир использует '$pVer', локальный узел — '$myVer'. Рекомендуется обновить все узлы до одного билда."
         }
     }
 }

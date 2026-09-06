@@ -202,19 +202,52 @@ fi
 
 # 4.2 UDP Socket Buffer Drops (/proc/net/snmp)
 if [ -f "/proc/net/snmp" ]; then
-    UDP_SNMP="$(grep -A 1 '^Udp:' /proc/net/snmp 2>/dev/null | tail -n 1)"
-    if [ -n "$UDP_SNMP" ]; then
-        IN_PKTS="$(echo "$UDP_SNMP" | awk '{print $2}')"
-        IN_ERRS="$(echo "$UDP_SNMP" | awk '{print $3}')"
-        RCV_ERRS="$(echo "$UDP_SNMP" | awk '{print $5}')"
+    # Явно читаем строку заголовка и строку данных по имени "Udp:",
+    # чтобы не зависеть от grep -A поведения на busybox (может вернуть только одну строку)
+    SNMP_HDR="$(grep '^Udp:' /proc/net/snmp | head -n 1)"
+    SNMP_VAL="$(grep '^Udp:' /proc/net/snmp | tail -n 1)"
+    if [ -n "$SNMP_HDR" ] && [ "$SNMP_HDR" != "$SNMP_VAL" ]; then
+        # Находим индекс нужного поля по имени в строке заголовка
+        get_snmp_col() {
+            FIELD="$1"
+            HDR="$SNMP_HDR"
+            VAL="$SNMP_VAL"
+            # Нумерация с 1, первый столбец — "Udp:" (пропускаем)
+            COL_IDX="$(echo "$HDR" | awk -v f="$FIELD" '{for(i=1;i<=NF;i++){if($i==f){print i; exit}}}')"
+            if [ -n "$COL_IDX" ]; then
+                echo "$VAL" | awk -v c="$COL_IDX" '{print $c}'
+            else
+                echo ""
+            fi
+        }
+        IN_PKTS="$(get_snmp_col InDatagrams)"
+        IN_ERRS="$(get_snmp_col InErrors)"
+        RCV_ERRS="$(get_snmp_col RcvbufErrors)"
         log_info "Статистика UDP ядра: Получено=$IN_PKTS, InErrors=$IN_ERRS, RcvbufErrors=$RCV_ERRS"
         if [ -n "$RCV_ERRS" ] && [ "$RCV_ERRS" -gt 500 ] 2>/dev/null; then
             log_warn "Высокое число ошибок буфера UDP (RcvbufErrors: $RCV_ERRS). Ядро отбрасывает входящие датаграммы из-за нехватки SO_RCVBUF!"
         else
             log_ok "Буферы сокетов UDP ядра в норме (нет массового сброса пакетов)"
         fi
+    elif [ -n "$SNMP_HDR" ]; then
+        # busybox: обе строки одинаковые — grep вернул только одну; пробуем sed
+        SNMP_HDR2="$(sed -n '/^Udp:/{N;p}' /proc/net/snmp 2>/dev/null | head -n 1)"
+        SNMP_VAL2="$(sed -n '/^Udp:/{N;p}' /proc/net/snmp 2>/dev/null | tail -n 1)"
+        if [ -n "$SNMP_HDR2" ] && [ "$SNMP_HDR2" != "$SNMP_VAL2" ]; then
+            IN_PKTS="$(echo "$SNMP_VAL2" | awk '{print $2}')"
+            RCV_ERRS="$(echo "$SNMP_VAL2" | awk '{print $5}')"
+            log_info "Статистика UDP ядра (busybox fallback): Получено=$IN_PKTS, RcvbufErrors=$RCV_ERRS"
+            if [ -n "$RCV_ERRS" ] && [ "$RCV_ERRS" -gt 500 ] 2>/dev/null; then
+                log_warn "Высокое число ошибок буфера UDP (RcvbufErrors: $RCV_ERRS)."
+            else
+                log_ok "Буферы сокетов UDP ядра в норме"
+            fi
+        else
+            log_info "Статистика UDP /proc/net/snmp: недоступна на данной платформе"
+        fi
     fi
 fi
+
 
 # 5. Маршрутизация
 log_section "5. ТАБЛИЦЫ МАРШРУТИЗАЦИИ И ПРАВИЛА (IP ROUTE / IP RULE)"
@@ -339,18 +372,41 @@ dd if=/dev/urandom of="$TMP_DPI_DIR/rand.bin" bs=148 count=1 2>/dev/null
 printf '\xc0\x00\x00\x00\x01\x08\x11\x22\x33\x44\x55\x66\x77\x88\x00\x00' > "$TMP_DPI_DIR/quic.bin"
 dd if=/dev/zero bs=1 count=1184 >> "$TMP_DPI_DIR/quic.bin" 2>/dev/null
 
-if command -v nc >/dev/null 2>&1; then
+# Вспомогательная функция: отправка UDP через /dev/udp (bash built-in, без nc)
+udp_send_devudp() {
+    BIN_FILE="$1"
+    DST_IP="$2"
+    DST_PORT="$3"
+    # /dev/udp доступен только в bash (не в dash/sh на busybox)
+    # Пробуем: exec с таймаутом через subshell
+    ( bash -c "exec 3>/dev/udp/$DST_IP/$DST_PORT 2>/dev/null && cat '$BIN_FILE' >&3 && sleep 0.3; exec 3>&-" ) 2>/dev/null
+    return $?
+}
+
+NC_AVAILABLE=0
+DEVUDP_AVAILABLE=0
+command -v nc >/dev/null 2>&1 && NC_AVAILABLE=1
+# Проверяем /dev/udp (только bash, не busybox sh)
+bash -c 'exec 3>/dev/udp/1.1.1.1/53 2>/dev/null && exec 3>&-' 2>/dev/null && DEVUDP_AVAILABLE=1
+
+if [ "$NC_AVAILABLE" -eq 1 ] || [ "$DEVUDP_AVAILABLE" -eq 1 ]; then
     for TEST_P in 443 3478 51820; do
-        timeout 1 nc -u -w 1 1.1.1.1 $TEST_P < "$TMP_DPI_DIR/wg.bin" >/dev/null 2>&1
-        WG_STAT=$?
-        timeout 1 nc -u -w 1 1.1.1.1 $TEST_P < "$TMP_DPI_DIR/rand.bin" >/dev/null 2>&1
-        RAND_STAT=$?
-        timeout 1 nc -u -w 1 1.1.1.1 $TEST_P < "$TMP_DPI_DIR/quic.bin" >/dev/null 2>&1
-        QUIC_STAT=$?
+        if [ "$NC_AVAILABLE" -eq 1 ]; then
+            timeout 1 nc -u -w 1 1.1.1.1 "$TEST_P" < "$TMP_DPI_DIR/wg.bin" >/dev/null 2>&1;   WG_STAT=$?
+            timeout 1 nc -u -w 1 1.1.1.1 "$TEST_P" < "$TMP_DPI_DIR/rand.bin" >/dev/null 2>&1; RAND_STAT=$?
+            timeout 1 nc -u -w 1 1.1.1.1 "$TEST_P" < "$TMP_DPI_DIR/quic.bin" >/dev/null 2>&1; QUIC_STAT=$?
+        else
+            udp_send_devudp "$TMP_DPI_DIR/wg.bin" 1.1.1.1 "$TEST_P";   WG_STAT=$?
+            udp_send_devudp "$TMP_DPI_DIR/rand.bin" 1.1.1.1 "$TEST_P"; RAND_STAT=$?
+            udp_send_devudp "$TMP_DPI_DIR/quic.bin" 1.1.1.1 "$TEST_P"; QUIC_STAT=$?
+        fi
         log_info "Порт UDP $TEST_P -> WG(148B): exit $WG_STAT | Rand(148B): exit $RAND_STAT | QUIC(1200B): exit $QUIC_STAT"
     done
+else
+    log_warn "[9.3] DPI-тест пропущен: nc (netcat) и /dev/udp (bash) недоступны на данной платформе (KeeneticOS busybox sh)"
 fi
 rm -rf "$TMP_DPI_DIR"
+
 
 # 9.4 Матрица совместимости пиров и причины работы через Relay
 log_info "[9.4] Матрица совместимости пиров и анализ причин Relay:"
@@ -411,10 +467,10 @@ if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
         fi
         
         # Проверка 4: Несовместимость версий
-        if [ -n "$P_VER" ] && ! echo "$P_VER" | grep -qE '1\.9\.22[12]'; then
-            log_warn "  [!] ФАКТОР [Устаревшая версия]:"
-            log_warn "      Пир использует устаревшую версию '$P_VER' (текущая: $MY_VER)."
-            log_info "      Рекомендуется обновить оба узла до актуального билда."
+        if [ -n "$P_VER" ] && [ -n "$MY_VER" ] && [ "$P_VER" != "$MY_VER" ]; then
+            log_warn "  [!] ФАКТОР [Версия пира отличается]:"
+            log_warn "      Пир использует версию '$P_VER', а данный узел — '$MY_VER'."
+            log_info "      Рекомендуется обновить все узлы до одного актуального билда."
         fi
         
         # Проверка 5: Несовпадение AmneziaWG
