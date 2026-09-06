@@ -325,8 +325,26 @@ func StartEngine(configYAML string, tunFd int) string {
 	var puncher *network.UDPPuncher
 	puncher, _ = network.NewUDPPuncher(cfg.Network.UDPPort, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		if p, ok := globalRegistry.Get(remoteDevID); ok {
+			var myPubIP string
+			if puncher != nil {
+				if cachedSTUN := puncher.GetCachedSTUNAddr(); cachedSTUN != "" {
+					if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
+						myPubIP = h
+					} else {
+						myPubIP = cachedSTUN
+					}
+				}
+			}
 			p.DirectP2P = true
-			p.ActiveEndpoint = fromAddr
+			if peer.IsValidEndpointForPeer(fromAddr, p, myPubIP) {
+				p.ActiveEndpoint = fromAddr
+			} else if p.ActiveEndpoint == "" {
+				if p.STUNAddr != "" {
+					p.ActiveEndpoint = p.STUNAddr
+				} else if p.LocalAddr != "" {
+					p.ActiveEndpoint = p.LocalAddr
+				}
+			}
 			if p.STUNAddr == "" {
 				p.STUNAddr = fromAddr
 			}
@@ -589,6 +607,13 @@ func StartEngine(configYAML string, tunFd int) string {
 							if existingPeer.PingMs > 0 {
 								pingMs = existingPeer.PingMs
 							}
+						}
+					}
+					if activeEP == "" {
+						if p.STUNAddr != "" {
+							activeEP = p.STUNAddr
+						} else if p.LocalAddr != "" {
+							activeEP = p.LocalAddr
 						}
 					}
 					globalRegistry.Upsert(&peer.Peer{

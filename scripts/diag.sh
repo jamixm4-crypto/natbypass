@@ -517,7 +517,17 @@ test_ping() {
     if [ -z "$CLEAN_IP" ] || [ "$CLEAN_IP" = "0.0.0.0" ] || [ "$CLEAN_IP" = "<nil>" ]; then
         return
     fi
-    if ping -c 2 -W 2 "$CLEAN_IP" >/dev/null 2>&1 || ping -c 2 -W 2 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
+    PING_OK=0
+    if ping -c 2 -w 3 "$CLEAN_IP" >/dev/null 2>&1; then
+        PING_OK=1
+    elif [ -n "$IP_ADDR" ] && ping -c 2 -w 3 -I "$IP_ADDR" "$CLEAN_IP" >/dev/null 2>&1; then
+        PING_OK=1
+    elif ping -c 2 -w 3 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
+        PING_OK=1
+    elif ping -c 2 -W 2 "$CLEAN_IP" >/dev/null 2>&1; then
+        PING_OK=1
+    fi
+    if [ "$PING_OK" -eq 1 ]; then
         log_ok "Ping до $NAME ($CLEAN_IP): УСПЕШЕН!"
         echo "Ping $CLEAN_IP ($NAME): SUCCESS" >> "$REPORT_FILE"
     else

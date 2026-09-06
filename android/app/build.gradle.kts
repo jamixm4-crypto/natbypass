@@ -12,8 +12,8 @@ android {
         minSdk = 24
         targetSdk = 34
 
-        val vName = (project.findProperty("versionName") as? String)?.trim() ?: "1.9.223-beta.4"
-        val vCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 109244
+        val vName = (project.findProperty("versionName") as? String)?.trim() ?: "1.9.223-beta.5"
+        val vCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 192235
         versionCode = vCode
         versionName = vName
 
@@ -27,6 +27,8 @@ android {
             storePassword = "natbypass_release_password"
             keyAlias = "natbypass"
             keyPassword = "natbypass_release_password"
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 

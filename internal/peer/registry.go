@@ -2,11 +2,11 @@ package peer
 
 import (
 	"context"
+	"net"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-
 
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/signaling"
@@ -167,6 +167,13 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	}
 	if newer.ActiveEndpoint == "" && existing.ActiveEndpoint != "" {
 		newer.ActiveEndpoint = existing.ActiveEndpoint
+	}
+	if newer.ActiveEndpoint == "" {
+		if newer.STUNAddr != "" {
+			newer.ActiveEndpoint = newer.STUNAddr
+		} else if newer.LocalAddr != "" {
+			newer.ActiveEndpoint = newer.LocalAddr
+		}
 	}
 	if newer.AWG == nil && existing.AWG != nil {
 		newer.AWG = existing.AWG
@@ -342,6 +349,13 @@ func (r *Registry) Upsert(p *Peer) {
 		if p.Latency > 0 {
 			p.PingMs = p.Latency.Milliseconds()
 		}
+		if p.ActiveEndpoint == "" {
+			if p.STUNAddr != "" {
+				p.ActiveEndpoint = p.STUNAddr
+			} else if p.LocalAddr != "" {
+				p.ActiveEndpoint = p.LocalAddr
+			}
+		}
 		// Only force Online=true and reset LastSeen when the peer has no explicit timestamp.
 		// Peers arriving from signaling have their own LastSeen from the beacon timestamp.
 		if p.LastSeen.IsZero() {
@@ -503,4 +517,29 @@ func (r *Registry) Exists(deviceID string) bool {
 	defer r.mu.RUnlock()
 	_, ok := r.peers[deviceID]
 	return ok
+}
+
+// IsValidEndpointForPeer checks if a socket endpoint is valid to be set as ActiveEndpoint for a peer.
+// Prevents CGNAT / gateway IP poisoning (e.g. 10.100.1.210) from overwriting a valid public STUN address
+// when communicating with remote peers across WAN.
+func IsValidEndpointForPeer(endpoint string, p *Peer, myPublicIP string) bool {
+	if endpoint == "" || p == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		host = endpoint
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	// Private / Loopback / LinkLocal addresses are only valid if both peers share the same Public IP
+	// (meaning they are genuinely on the same local LAN behind the same NAT router) or if public IPs are unknown.
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		if p.PublicIP != "" && myPublicIP != "" && p.PublicIP != myPublicIP {
+			return false
+		}
+	}
+	return true
 }

@@ -282,3 +282,33 @@ func TestRegistry_EmptyActiveEndpoint_NeverDirectP2P(t *testing.T) {
 		t.Errorf("expected DirectP2P to be FALSE when ActiveEndpoint is empty")
 	}
 }
+
+func TestIsValidEndpointForPeer(t *testing.T) {
+	remotePeer := &Peer{
+		DeviceID: "peer-remote",
+		PublicIP: "178.120.10.55",
+		STUNAddr: "178.120.10.55:47832",
+	}
+
+	myPubIP := "95.161.220.10"
+
+	// 1. Private CGNAT/Gateway IP should be REJECTED for remote WAN peer
+	if IsValidEndpointForPeer("10.100.1.210:47832", remotePeer, myPubIP) {
+		t.Errorf("expected 10.100.1.210 to be rejected for remote WAN peer")
+	}
+
+	// 2. Public IP endpoint matching peer's public address should be ACCEPTED
+	if !IsValidEndpointForPeer("178.120.10.55:47832", remotePeer, myPubIP) {
+		t.Errorf("expected 178.120.10.55:47832 to be accepted")
+	}
+
+	// 3. Local LAN peer (sharing same public IP) SHOULD accept private IP
+	localPeer := &Peer{
+		DeviceID: "peer-lan",
+		PublicIP: "95.161.220.10",
+		LocalAddr: "192.168.1.100:47832",
+	}
+	if !IsValidEndpointForPeer("192.168.1.100:47832", localPeer, myPubIP) {
+		t.Errorf("expected 192.168.1.100:47832 to be accepted for same-NAT local peer")
+	}
+}

@@ -411,23 +411,41 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 
 				if targetPeer != nil {
+					var myPubIP string
+					if puncher != nil {
+						if cachedSTUN := puncher.GetCachedSTUNAddr(); cachedSTUN != "" {
+							if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
+								myPubIP = h
+							} else {
+								myPubIP = cachedSTUN
+							}
+						}
+					}
 					// BUG-01 FIX: targetPeer is already a copy (set above), safe to mutate
 					oldEP := targetPeer.ActiveEndpoint
 					targetPeer.DirectP2P = true
-					targetPeer.ActiveEndpoint = fromAddrStr
+					if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
+						targetPeer.ActiveEndpoint = fromAddrStr
+					} else if targetPeer.ActiveEndpoint == "" {
+						if targetPeer.STUNAddr != "" {
+							targetPeer.ActiveEndpoint = targetPeer.STUNAddr
+						} else if targetPeer.LocalAddr != "" {
+							targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+						}
+					}
 					targetPeer.Online = true
 					targetPeer.LastSeen = time.Now()
 					targetPeer.LastDirectSeen = time.Now()
 					targetPeer.ProbeCount = 0 // Reset backoff on successful direct packet
 					registry.Upsert(targetPeer)
-					if magicSock != nil {
-						magicSock.RecordProbeSuccess(targetPeer.DeviceID, fromAddrStr, 0)
+					if magicSock != nil && targetPeer.ActiveEndpoint != "" {
+						magicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
 					}
-					if puncher != nil {
-						if oldEP != "" && oldEP != fromAddrStr {
+					if puncher != nil && targetPeer.ActiveEndpoint != "" {
+						if oldEP != "" && oldEP != targetPeer.ActiveEndpoint {
 							puncher.RemoveKeepAliveTarget(oldEP)
 						}
-						puncher.AddKeepAliveTarget(fromAddrStr)
+						puncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
 					}
 				}
 			}
@@ -1125,6 +1143,16 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			magicSock.RecordProbeSuccess(remoteDevID, fromAddr, rtt)
 		}
 		if p, ok := registry.Get(remoteDevID); ok && p != nil {
+			var myPubIP string
+			if puncher != nil {
+				if cachedSTUN := puncher.GetCachedSTUNAddr(); cachedSTUN != "" {
+					if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
+						myPubIP = h
+					} else {
+						myPubIP = cachedSTUN
+					}
+				}
+			}
 			oldEP := p.ActiveEndpoint
 			p.DirectP2P = true
 			p.LastDirectSeen = time.Now()
@@ -1132,14 +1160,20 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 				p.Latency = rtt
 				p.PingMs = rtt.Milliseconds()
 			}
+			targetEP := fromAddr
 			if magicSock != nil {
-				if bestEP, _, _ := magicSock.GetActiveRoute(remoteDevID); bestEP != "" {
-					p.ActiveEndpoint = bestEP
-				} else {
-					p.ActiveEndpoint = fromAddr
+				if bestEP, _, _ := magicSock.GetActiveRoute(remoteDevID); bestEP != "" && peer.IsValidEndpointForPeer(bestEP, p, myPubIP) {
+					targetEP = bestEP
 				}
-			} else {
-				p.ActiveEndpoint = fromAddr
+			}
+			if peer.IsValidEndpointForPeer(targetEP, p, myPubIP) {
+				p.ActiveEndpoint = targetEP
+			} else if p.ActiveEndpoint == "" {
+				if p.STUNAddr != "" {
+					p.ActiveEndpoint = p.STUNAddr
+				} else if p.LocalAddr != "" {
+					p.ActiveEndpoint = p.LocalAddr
+				}
 			}
 			p.NATBlocked = false
 			registry.Upsert(p)
@@ -1787,6 +1821,13 @@ func receiveLoop(
 					preservedEP = existingPeer.ActiveEndpoint
 					preservedDirect = existingPeer.DirectP2P
 					preservedLat = existingPeer.PingMs
+				}
+			}
+			if preservedEP == "" {
+				if p.STUNAddr != "" {
+					preservedEP = p.STUNAddr
+				} else if p.LocalAddr != "" {
+					preservedEP = p.LocalAddr
 				}
 			}
 

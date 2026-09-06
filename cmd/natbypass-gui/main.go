@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.4"
+	Version = "1.9.223-beta.5"
 	Commit  = "release"
 )
 
@@ -4141,7 +4141,8 @@ func startEngineFromConfig(c *config.Config) {
 	// Порт берётся из конфига (Network.UDPPort). По умолчанию 0 = OS назначает случайный порт.
 	// Это критично чтобы не конфликтовать с локальным AWG/WireGuard на порту 51820.
 	udpListenPort := c.Network.UDPPort
-	puncher, err := network.NewUDPPuncher(udpListenPort, myDevID, c.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+	var puncher *network.UDPPuncher
+	puncher, err = network.NewUDPPuncher(udpListenPort, myDevID, c.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		atomic.AddUint64(&packetsRecvCount, 1)
 		if guiMagicSock != nil {
 			guiMagicSock.RecordProbeSuccess(remoteDevID, fromAddr, rtt)
@@ -4157,7 +4158,25 @@ func startEngineFromConfig(c *config.Config) {
 				}
 				p.PingMs = p.Latency.Milliseconds()
 			}
-			p.ActiveEndpoint = fromAddr
+			var myPubIP string
+			if puncher != nil {
+				if cachedSTUN := puncher.GetCachedSTUNAddr(); cachedSTUN != "" {
+					if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
+						myPubIP = h
+					} else {
+						myPubIP = cachedSTUN
+					}
+				}
+			}
+			if peer.IsValidEndpointForPeer(fromAddr, p, myPubIP) {
+				p.ActiveEndpoint = fromAddr
+			} else if p.ActiveEndpoint == "" {
+				if p.STUNAddr != "" {
+					p.ActiveEndpoint = p.STUNAddr
+				} else if p.LocalAddr != "" {
+					p.ActiveEndpoint = p.LocalAddr
+				}
+			}
 			p.Online = true
 			p.LastSeen = time.Now()
 			registry.Upsert(p)
@@ -4222,17 +4241,35 @@ func startEngineFromConfig(c *config.Config) {
 				}
 
 				if targetPeer != nil {
+					var myPubIP string
+					if udpPuncher != nil {
+						if cachedSTUN := udpPuncher.GetCachedSTUNAddr(); cachedSTUN != "" {
+							if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
+								myPubIP = h
+							} else {
+								myPubIP = cachedSTUN
+							}
+						}
+					}
 					targetPeer.DirectP2P = true
-					targetPeer.ActiveEndpoint = fromAddrStr
+					if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
+						targetPeer.ActiveEndpoint = fromAddrStr
+					} else if targetPeer.ActiveEndpoint == "" {
+						if targetPeer.STUNAddr != "" {
+							targetPeer.ActiveEndpoint = targetPeer.STUNAddr
+						} else if targetPeer.LocalAddr != "" {
+							targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+						}
+					}
 					targetPeer.Online = true
 					targetPeer.LastSeen = time.Now()
 					targetPeer.LastDirectSeen = time.Now()
 					registry.Upsert(targetPeer)
-					if guiMagicSock != nil {
-						guiMagicSock.RecordProbeSuccess(targetPeer.DeviceID, fromAddrStr, 0)
+					if guiMagicSock != nil && targetPeer.ActiveEndpoint != "" {
+						guiMagicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
 					}
-					if udpPuncher != nil {
-						udpPuncher.AddKeepAliveTarget(fromAddrStr)
+					if udpPuncher != nil && targetPeer.ActiveEndpoint != "" {
+						udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
 					}
 				}
 			}
@@ -5164,6 +5201,13 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				}
 				if p.ActiveEndpoint != "" {
 					preservedEP = p.ActiveEndpoint
+				}
+				if preservedEP == "" {
+					if p.STUNAddr != "" {
+						preservedEP = p.STUNAddr
+					} else if p.LocalAddr != "" {
+						preservedEP = p.LocalAddr
+					}
 				}
 
 				registry.Upsert(&peer.Peer{
