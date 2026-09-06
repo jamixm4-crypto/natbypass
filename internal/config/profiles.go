@@ -163,6 +163,18 @@ func (c *Config) EnsureActiveProfile() *Profile {
 			c.Profiles[i].HeaderProtectionKey = hpKey
 			c.Profiles[i].RandomTrailers = true
 			c.Profiles[i].DisableCookies = true
+		} else {
+			// Миграция профилей, созданных до добавления полей random_trailers / disable_cookies.
+			// Эти поля могут отсутствовать в старых YAML-файлах (zero-value = false),
+			// но AWG 3.1 всегда предполагает их включёнными.
+			// Принудительно проставляем true для всех профилей с H1 != 0,
+			// у которых поля ещё не были установлены.
+			if !c.Profiles[i].RandomTrailers {
+				c.Profiles[i].RandomTrailers = true
+			}
+			if !c.Profiles[i].DisableCookies {
+				c.Profiles[i].DisableCookies = true
+			}
 		}
 	}
 

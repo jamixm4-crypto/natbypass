@@ -4746,42 +4746,54 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					h3, _ := strconv.ParseUint(h3Str, 10, 32)
 					h4, _ := strconv.ParseUint(h4Str, 10, 32)
 
-					cachedAWGParams = wireguard.AWGParams{
-						Enabled:                 true,
-						Version:                 wireguard.AWGVersion31,
-						Jc:                      jc,
-						Jmin:                    jmin,
-						Jmax:                    jmax,
-						S1:                      s1,
-						S2:                      s2,
-						H1:                      uint32(h1),
-						H2:                      uint32(h2),
-						H3:                      uint32(h3),
-						H4:                      uint32(h4),
-						HeaderProtectionEnabled: cfg.WireGuard.AWG.HeaderProtectionKey != "",
-						RandomTrailers:          cfg.WireGuard.AWG.RandomTrailers,
-						DisableCookies:          cfg.WireGuard.AWG.DisableCookies,
-					}
-					awgParams = &signaling.AWGParams{
-						Jc:                      jc,
-						Jmin:                    jmin,
-						Jmax:                    jmax,
-						S1:                      s1,
-						S2:                      s2,
-						S3:                      20,
-						S4:                      20,
-						H1:                      h1Str,
-						H2:                      h2Str,
-						H3:                      h3Str,
-						H4:                      h4Str,
-						Pmax:                    100,
-						Version:                 "3.1",
-						Preset:                  cfg.WireGuard.AWGPreset,
-						HeaderProtectionEnabled: true,
-						RandomTrailers:          cfg.WireGuard.AWG.RandomTrailers,
-						DisableCookies:          cfg.WireGuard.AWG.DisableCookies,
-					}
-				} else if cachedAWGParams.Enabled {
+					// cfg.WireGuard.AWG.RandomTrailers / DisableCookies могут быть false если
+							// в config.yaml поле не прописано явно (zero-value Go).
+							// Preset awg31_strict всегда требует RandomTrailers=true, DisableCookies=true.
+							// Также сверяемся с cachedAWGParams (мог быть правильно инициализирован при загрузке).
+							rtVal := cfg.WireGuard.AWG.RandomTrailers
+							dcVal := cfg.WireGuard.AWG.DisableCookies
+							if !rtVal && (cfg.WireGuard.AWGPreset == "awg31_strict" || cachedAWGParams.RandomTrailers) {
+								rtVal = true
+							}
+							if !dcVal && (cfg.WireGuard.AWGPreset == "awg31_strict" || cachedAWGParams.DisableCookies) {
+								dcVal = true
+							}
+							cachedAWGParams = wireguard.AWGParams{
+								Enabled:                 true,
+								Version:                 wireguard.AWGVersion31,
+								Jc:                      jc,
+								Jmin:                    jmin,
+								Jmax:                    jmax,
+								S1:                      s1,
+								S2:                      s2,
+								H1:                      uint32(h1),
+								H2:                      uint32(h2),
+								H3:                      uint32(h3),
+								H4:                      uint32(h4),
+								HeaderProtectionEnabled: cfg.WireGuard.AWG.HeaderProtectionKey != "",
+								RandomTrailers:          rtVal,
+								DisableCookies:          dcVal,
+							}
+							awgParams = &signaling.AWGParams{
+								Jc:                      jc,
+								Jmin:                    jmin,
+								Jmax:                    jmax,
+								S1:                      s1,
+								S2:                      s2,
+								S3:                      20,
+								S4:                      20,
+								H1:                      h1Str,
+								H2:                      h2Str,
+								H3:                      h3Str,
+								H4:                      h4Str,
+								Pmax:                    100,
+								Version:                 "3.1",
+								Preset:                  cfg.WireGuard.AWGPreset,
+								HeaderProtectionEnabled: true,
+								RandomTrailers:          rtVal,
+								DisableCookies:          dcVal,
+							}
+					} else if cachedAWGParams.Enabled {
 					awgVer := string(cachedAWGParams.Version)
 					if awgVer == "" {
 						awgVer = "3.1"
