@@ -96,7 +96,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.222-beta.22"
+	Version = "1.9.222-beta.23"
 	Commit  = "beta"
 )
 
@@ -5479,6 +5479,10 @@ func publishCurrentState(ctx context.Context) {
 			H3:      uint32(h3),
 			H4:      uint32(h4),
 		}
+		rt, dc := getAWGBoolParams()
+		cachedAWGParams.RandomTrailers = rt
+		cachedAWGParams.DisableCookies = dc
+		cachedAWGParams.HeaderProtectionEnabled = cfg != nil && cfg.WireGuard.AWG.HeaderProtectionKey != ""
 		awgParams = &signaling.AWGParams{
 			Jc:                      jc,
 			Jmin:                    jmin,
@@ -5495,6 +5499,8 @@ func publishCurrentState(ctx context.Context) {
 			Version:                 "3.1",
 			Preset:                  "awg31_strict",
 			HeaderProtectionEnabled: true,
+			RandomTrailers:          rt,
+			DisableCookies:          dc,
 		}
 	} else if cachedAWGParams.Enabled {
 		awgVer := string(cachedAWGParams.Version)
@@ -6136,6 +6142,34 @@ func renderAWGTextFromUI() {
 	setControlText(hEditAwgConf, conf)
 }
 
+// getAWGBoolParams возвращает корректные значения RandomTrailers и DisableCookies.
+// Приоритет: cfg.WireGuard.AWG → cachedAWGParams → название preset'а.
+// Решает проблему старых конфигов где эти поля отсутствуют в yaml (zero-value = false).
+func getAWGBoolParams() (randomTrailers bool, disableCookies bool) {
+	if cfg != nil {
+		randomTrailers = cfg.WireGuard.AWG.RandomTrailers
+		disableCookies = cfg.WireGuard.AWG.DisableCookies
+	}
+	// Если из конфига false, проверяем cachedAWGParams (мог быть проинициализирован правильно)
+	if !randomTrailers && cachedAWGParams.RandomTrailers {
+		randomTrailers = true
+	}
+	if !disableCookies && cachedAWGParams.DisableCookies {
+		disableCookies = true
+	}
+	// Последний резерв: preset awg31_strict всегда подразумевает оба = true
+	if cfg != nil && (cfg.WireGuard.AWGPreset == "awg31_strict" || cfg.WireGuard.AWGPreset == "awg31_balanced") {
+		randomTrailers = true
+		disableCookies = true
+	}
+	// Если включён HeaderProtection и H1 задан — это AWG 3.1, оба должны быть true
+	if cfg != nil && cfg.WireGuard.AWG.HeaderProtectionKey != "" && cfg.WireGuard.AWG.H1 != 0 {
+		randomTrailers = true
+		disableCookies = true
+	}
+	return
+}
+
 func setAWGPreset(p wireguard.AWGParams) {
 	cachedAWGParams = p
 	setControlText(hEditAwgJc, strconv.Itoa(p.Jc))
@@ -6358,6 +6392,7 @@ func saveConfigFromUI() {
 		h3, _ := strconv.ParseUint(strings.TrimSpace(getControlText(hEditAwgH3)), 10, 32)
 		h4, _ := strconv.ParseUint(strings.TrimSpace(getControlText(hEditAwgH4)), 10, 32)
 
+		rt, dc := getAWGBoolParams()
 		cachedAWGParams = wireguard.AWGParams{
 			Enabled:                   true,
 			Version:                   wireguard.AWGVersion31,
@@ -6374,6 +6409,8 @@ func saveConfigFromUI() {
 			H3:                        uint32(h3),
 			H4:                        uint32(h4),
 			HeaderProtectionEnabled:   true,
+			RandomTrailers:            rt,
+			DisableCookies:            dc,
 		}
 		cfg.WireGuard.AWG = config.AWGConfig{
 			Enabled:                 true,
@@ -6391,6 +6428,8 @@ func saveConfigFromUI() {
 			H3:                      uint32(h3),
 			H4:                      uint32(h4),
 			HeaderProtectionEnabled: true,
+			RandomTrailers:          rt,
+			DisableCookies:          dc,
 		}
 	}
 
