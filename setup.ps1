@@ -98,6 +98,32 @@ function Build-Target {
     return $true
 }
 
+function Ensure-Wintun {
+    param([string]$DestinationDir)
+    $target = Join-Path $DestinationDir "wintun.dll"
+    if (Test-Path $target) { return }
+    if (Test-Path "$ProjectRoot\wintun.dll") {
+        Copy-Item "$ProjectRoot\wintun.dll" $target -Force
+        return
+    }
+    Write-Host ">> Скачивание официального драйвера Wintun 0.14.1 с https://www.wintun.net..." -ForegroundColor Yellow
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $zipTemp = Join-Path $env:TEMP "wintun-0.14.1.zip"
+        $extractTemp = Join-Path $env:TEMP "wintun-0.14.1-extract"
+        Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile $zipTemp -UseBasicParsing -TimeoutSec 30
+        Expand-Archive -Path $zipTemp -DestinationPath $extractTemp -Force
+        $archDll = Join-Path $extractTemp "wintun\bin\amd64\wintun.dll"
+        if (Test-Path $archDll) {
+            Copy-Item $archDll $target -Force
+            Write-Host "   OK: Драйвер Wintun установлен в $target" -ForegroundColor Green
+        }
+        Remove-Item -Path $zipTemp, $extractTemp -Recurse -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "   Предупреждение: не удалось автоматически скачать wintun.dll: $_" -ForegroundColor Yellow
+    }
+}
+
 # ── 4. Сборка ────────────────────────────────────────────────
 New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 Write-Host ""
@@ -109,6 +135,7 @@ $ok = $true
 switch ($Target) {
     "all" {
         $ok = $ok -and (Build-Target "windows" "amd64" ".exe")
+        Ensure-Wintun $DistDir
         $ok = $ok -and (Build-Target "linux"   "amd64")
         $ok = $ok -and (Build-Target "linux"   "arm64")
         $ok = $ok -and (Build-Target "linux"   "mips"   "" @{"GOMIPS"="softfloat"})
@@ -120,6 +147,7 @@ switch ($Target) {
     }
     "windows" {
         $ok = $ok -and (Build-Target "windows" "amd64" ".exe")
+        Ensure-Wintun $DistDir
     }
     "router" {
         $ok = $ok -and (Build-Target "linux" "arm64")

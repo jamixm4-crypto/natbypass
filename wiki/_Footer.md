@@ -1,2 +1,2 @@
-﻿---
-© 2026 **NatBypass Project** — P2P Mesh VPN & DPI Bypass. Лицензия MIT.
+---
+© 2026 **NatBypass Project** — P2P Mesh VPN & DPI Bypass. Лицензия GNU GPLv3.

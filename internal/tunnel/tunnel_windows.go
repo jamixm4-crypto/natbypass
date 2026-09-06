@@ -3,14 +3,18 @@
 package tunnel
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
-	_ "embed"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -19,8 +23,155 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-//go:embed wintun.dll
-var embeddedWintunDLL []byte
+const (
+	// Official Wintun release zip URL
+	officialWintunZipURL = "https://www.wintun.net/builds/wintun-0.14.1.zip"
+	minWintunDLLSize     = 50000 // Wintun DLL is ~400KB
+)
+
+// FindExistingWintunDLL returns the file path of a valid wintun.dll on the system, or empty string.
+func FindExistingWintunDLL() string {
+	candidates := make([]string, 0, 6)
+
+	// 1. Next to the current running executable
+	if exePath, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exePath), "wintun.dll"))
+	}
+	// 2. Current working directory
+	candidates = append(candidates, "wintun.dll")
+	// 3. User LocalAppData
+	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+		candidates = append(candidates, filepath.Join(localAppData, "NatBypass", "wintun.dll"))
+	}
+	// 4. System temp directory
+	if tempDir := os.TempDir(); tempDir != "" {
+		candidates = append(candidates, filepath.Join(tempDir, "wintun.dll"))
+	}
+	// 5. System32 directory
+	if sysRoot := os.Getenv("SystemRoot"); sysRoot != "" {
+		candidates = append(candidates, filepath.Join(sysRoot, "System32", "wintun.dll"))
+	}
+
+	for _, p := range candidates {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() >= minWintunDLLSize {
+			return p
+		}
+	}
+	return ""
+}
+
+// downloadOfficialWintunDLL downloads and extracts the official signed wintun.dll from wintun.net
+// matching the current CPU architecture.
+func downloadOfficialWintunDLL() ([]byte, error) {
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", officialWintunZipURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create http request: %w", err)
+	}
+	req.Header.Set("User-Agent", "NatBypass-Wintun-Downloader/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("network request failed (%s): %w", officialWintunZipURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected HTTP status %s from %s", resp.Status, officialWintunZipURL)
+	}
+
+	zipData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read zip content: %w", err)
+	}
+
+	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse zip archive: %w", err)
+	}
+
+	var targetSubpath string
+	switch runtime.GOARCH {
+	case "amd64":
+		targetSubpath = "wintun/bin/amd64/wintun.dll"
+	case "arm64":
+		targetSubpath = "wintun/bin/arm64/wintun.dll"
+	case "386":
+		targetSubpath = "wintun/bin/x86/wintun.dll"
+	case "arm":
+		targetSubpath = "wintun/bin/arm/wintun.dll"
+	default:
+		targetSubpath = "wintun/bin/amd64/wintun.dll"
+	}
+
+	for _, f := range zipReader.File {
+		if filepath.ToSlash(f.Name) == targetSubpath {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("failed to open %s from archive: %w", f.Name, err)
+			}
+			defer rc.Close()
+
+			dllBytes, err := io.ReadAll(rc)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s from archive: %w", f.Name, err)
+			}
+			if len(dllBytes) < minWintunDLLSize {
+				return nil, fmt.Errorf("extracted %s is suspiciously small (%d bytes)", f.Name, len(dllBytes))
+			}
+			return dllBytes, nil
+		}
+	}
+
+	return nil, fmt.Errorf("architecture binary %s not found in official wintun zip", targetSubpath)
+}
+
+// EnsureWintunDLL ensures that wintun.dll is available on the local machine.
+// If not found locally, it automatically downloads and extracts the official
+// driver from https://www.wintun.net. Returns the absolute or relative path to wintun.dll.
+func EnsureWintunDLL() (string, error) {
+	if existing := FindExistingWintunDLL(); existing != "" {
+		return existing, nil
+	}
+
+	dllBytes, err := downloadOfficialWintunDLL()
+	if err != nil {
+		return "", fmt.Errorf("драйвер Wintun (wintun.dll) не найден, и автозагрузка с %s не удалась: %w\nПожалуйста, скачайте официальный архив с https://www.wintun.net/builds/wintun-0.14.1.zip и поместите wintun.dll рядом с программой", officialWintunZipURL, err)
+	}
+
+	// Try saving in order:
+	// 1. Alongside executable (best for portability)
+	// 2. LocalAppData\NatBypass (best for non-admin installs)
+	// 3. TempDir
+	destCandidates := make([]string, 0, 3)
+	if exePath, err := os.Executable(); err == nil {
+		destCandidates = append(destCandidates, filepath.Join(filepath.Dir(exePath), "wintun.dll"))
+	}
+	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+		destCandidates = append(destCandidates, filepath.Join(localAppData, "NatBypass", "wintun.dll"))
+	}
+	if tempDir := os.TempDir(); tempDir != "" {
+		destCandidates = append(destCandidates, filepath.Join(tempDir, "wintun.dll"))
+	}
+
+	var writeErr error
+	for _, dest := range destCandidates {
+		dir := filepath.Dir(dest)
+		if dir != "" {
+			_ = os.MkdirAll(dir, 0755)
+		}
+		if err := os.WriteFile(dest, dllBytes, 0755); err == nil {
+			return dest, nil
+		} else {
+			writeErr = err
+		}
+	}
+
+	return "", fmt.Errorf("не удалось сохранить скачанный wintun.dll: %w", writeErr)
+}
 
 var (
 	modkernel32                    = windows.NewLazySystemDLL("kernel32.dll")
@@ -46,29 +197,15 @@ var (
 func initWintun() error {
 	var initErr error
 	wintunInitOnce.Do(func() {
-		dllPath := "wintun.dll"
-		if _, err := os.Stat(dllPath); err != nil {
-			tempDll := filepath.Join(os.TempDir(), "wintun.dll")
-			if _, tErr := os.Stat(tempDll); tErr == nil {
-				dllPath = tempDll
-			} else if len(embeddedWintunDLL) > 0 {
-				if wErr := os.WriteFile(dllPath, embeddedWintunDLL, 0755); wErr == nil {
-					// written locally
-				} else if twErr := os.WriteFile(tempDll, embeddedWintunDLL, 0755); twErr == nil {
-					dllPath = tempDll
-				} else {
-					initErr = fmt.Errorf("не удалось извлечь wintun.dll: %v", twErr)
-					return
-				}
-			} else {
-				initErr = fmt.Errorf("wintun.dll не найден и не встроен")
-				return
-			}
+		dllPath, err := EnsureWintunDLL()
+		if err != nil {
+			initErr = err
+			return
 		}
 
 		wintunDLL = windows.NewLazyDLL(dllPath)
 		if err := wintunDLL.Load(); err != nil {
-			initErr = fmt.Errorf("ошибка загрузки wintun.dll: %w", err)
+			initErr = fmt.Errorf("ошибка загрузки %s: %w", dllPath, err)
 			return
 		}
 		procWintunCreateAdapter = wintunDLL.NewProc("WintunCreateAdapter")

@@ -19,3 +19,7 @@
 ## 5. L3 Data-Plane Routing (Direct UDP + MQTT Fallback)
 - **Decision:** Read raw IPv4 packets from Wintun, inspect destination IP from header bytes 16..20, lookup peer by VIP in `peer.Registry`, and transmit directly over UDP punch socket (`NATBYPASS:TUN:` protocol header) if `direct_p2p == true`, or fallback to MQTT tunnel topic `natbypass/mesh/<topic>/tunnel/<targetDevID>`.
 - **Rationale:** Enables true transparent mesh IP packet exchange (ICMP ping, TCP, UDP) across Symmetric NATs, CGNATs, and direct LAN/WAN connections.
+
+## 6. Zero Wintun Binary Embedding & GPLv3 Licensing Transition
+- **Decision:** Completely removed all `wintun.dll` binary files and `//go:embed` references from the repository. Implemented `EnsureWintunDLL()` which discovers local copies or downloads the official signed driver directly from `https://www.wintun.net/builds/wintun-0.14.1.zip` at runtime. Transitioned project license to GNU GPLv3.
+- **Rationale:** Strictly eliminates GPLv2 license contamination and distribution risks associated with bundling WireGuard's Wintun driver binary in git repositories, while providing seamless 100% automated driver setup for Windows users.

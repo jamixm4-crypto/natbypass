@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 #  NatBypass — PowerShell Updater for Windows
 #  Usage: irm https://.../scripts/update.ps1 | iex
 #         irm https://.../scripts/update.ps1 | iex -ArgumentList "-Beta"
@@ -71,6 +71,26 @@ try {
     }
     Move-Item -Path $TempFile -Destination $DestFile -Force
     Write-Host "✓ Исполняемый файл успешно обновлен: $DestFile" -ForegroundColor Green
+
+    # Проверка наличия официального драйвера Wintun
+    $WintunDest = Join-Path $DestDir "wintun.dll"
+    if (-not (Test-Path $WintunDest)) {
+        Write-Host ">> Скачивание официального драйвера Wintun с https://www.wintun.net..." -ForegroundColor Cyan
+        try {
+            $zipTemp = Join-Path $env:TEMP "wintun-0.14.1.zip"
+            $extractTemp = Join-Path $env:TEMP "wintun-0.14.1-extract"
+            Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile $zipTemp -UseBasicParsing -TimeoutSec 30
+            Expand-Archive -Path $zipTemp -DestinationPath $extractTemp -Force
+            $archDll = Join-Path $extractTemp "wintun\bin\amd64\wintun.dll"
+            if (Test-Path $archDll) {
+                Copy-Item $archDll $WintunDest -Force
+                Write-Host "✓ Драйвер Wintun успешно установлен в $WintunDest" -ForegroundColor Green
+            }
+            Remove-Item -Path $zipTemp, $extractTemp -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {
+            Write-Host "  [i] Wintun будет автоматически загружен приложением при старте" -ForegroundColor Gray
+        }
+    }
 
     Write-Host ">> Запуск обновленного приложения..." -ForegroundColor Cyan
     Start-Process -FilePath $DestFile

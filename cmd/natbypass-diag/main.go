@@ -131,16 +131,23 @@ func checkWindowsEnvironment() {
 	wintunFound := false
 	exePath, _ := os.Executable()
 	exeDir := filepath.Dir(exePath)
-	pathsToCheck := []string{"wintun.dll", filepath.Join(exeDir, "wintun.dll"), "dist/wintun.dll"}
+	pathsToCheck := []string{
+		"wintun.dll",
+		filepath.Join(exeDir, "wintun.dll"),
+		"dist/wintun.dll",
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "NatBypass", "wintun.dll"),
+		filepath.Join(os.TempDir(), "wintun.dll"),
+		filepath.Join(os.Getenv("SystemRoot"), "System32", "wintun.dll"),
+	}
 	for _, p := range pathsToCheck {
-		if _, err := os.Stat(p); err == nil {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 10240 {
 			wintunFound = true
 			fmt.Printf(colorGreen+" [✓] Драйвер Wintun.dll найден: %s\n"+colorReset, p)
 			break
 		}
 	}
 	if !wintunFound {
-		fmt.Println(colorRed + " [✗] wintun.dll НЕ найден рядом с программой! Туннель не сможет запуститься." + colorReset)
+		fmt.Println(colorYellow + " [i] wintun.dll не найден локально (будет автоматически скачан с https://www.wintun.net при старте NatBypass)" + colorReset)
 	}
 
 	// 3. Проверка сетевого интерфейса NatBypass

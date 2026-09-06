@@ -5,8 +5,6 @@ bin/
 *.exe
 *.exe~
 *.dll
-!internal/tunnel/wintun.dll
-!wintun.dll
 *.so
 *.dylib
 *.aar

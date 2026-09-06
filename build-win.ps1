@@ -327,10 +327,27 @@ wireguard:
 [System.IO.File]::WriteAllText($configOut, $cfgYaml, [System.Text.UTF8Encoding]::new($false))
 Write-Info "Generated config saved to $configOut"
 
+# Ensure Wintun driver is present in dist
+$wintunTarget = Join-Path $DistDir "wintun.dll"
 if (Test-Path "$ProjectRoot\wintun.dll") {
-    Copy-Item "$ProjectRoot\wintun.dll" "$DistDir\wintun.dll" -Force
-} elseif (Test-Path "$ProjectRoot\internal\tunnel\wintun.dll") {
-    Copy-Item "$ProjectRoot\internal\tunnel\wintun.dll" "$DistDir\wintun.dll" -Force
+    Copy-Item "$ProjectRoot\wintun.dll" $wintunTarget -Force
+} elseif (-not (Test-Path $wintunTarget)) {
+    Write-Info "Downloading official Wintun driver (v0.14.1) from https://www.wintun.net..."
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $zipTemp = Join-Path $env:TEMP "wintun-0.14.1.zip"
+        $extractTemp = Join-Path $env:TEMP "wintun-0.14.1-extract"
+        Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile $zipTemp -UseBasicParsing -TimeoutSec 30
+        Expand-Archive -Path $zipTemp -DestinationPath $extractTemp -Force
+        $archDll = Join-Path $extractTemp "wintun\bin\amd64\wintun.dll"
+        if (Test-Path $archDll) {
+            Copy-Item $archDll $wintunTarget -Force
+            Write-Info "Official Wintun driver placed in $wintunTarget"
+        }
+        Remove-Item -Path $zipTemp, $extractTemp -Recurse -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-Warn "Automatic Wintun download skipped: $_"
+    }
 }
 
 Write-Host ""
