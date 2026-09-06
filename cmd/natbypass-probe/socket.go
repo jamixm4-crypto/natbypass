@@ -93,6 +93,8 @@ func NewProbeSocket(preferredPort int, myNodeID string, cfg *ProbeConfig) (*Prob
 
 	localPort := conn.LocalAddr().(*net.UDPAddr).Port
 
+	DisableUDPConnReset(conn)
+
 	_ = conn.SetReadBuffer(4 * 1024 * 1024)
 	_ = conn.SetWriteBuffer(4 * 1024 * 1024)
 
@@ -198,16 +200,24 @@ func (ps *ProbeSocket) sendPunchStep(state *PeerPunchState) {
 	// 1. Если пробив UDP ещё не подтверждён, шлём NATPROBE
 	if !state.PunchSuccess || state.PunchSent < 20 {
 		probePayload := []byte(fmt.Sprintf("NATPROBE:%s>%s", ps.myNodeID, state.Peer.NodeID))
+		// Основной целевой порт
 		_, _ = ps.conn.WriteToUDP(probePayload, state.TargetAddr)
 		state.PunchSent++
 
-		// Если у пира Symmetric NAT или известен delta — веерный опрос портов
-		delta := state.Peer.NATDelta
-		if delta <= 0 {
-			delta = 1
+		// ВСЕГДА опрашиваем последовательных соседей (±1, ±2, ±3, ±4, ±8) вокруг basePort!
+		// Это критично для роутеров Белтелеком / Ростелеком, которые смещают порт при открытии новой сессии.
+		neighborSteps := []int{1, -1, 2, -2, 3, -3, 4, -4, 8, -8}
+		for _, offset := range neighborSteps {
+			cPort := state.TargetAddr.Port + offset
+			if cPort > 1024 && cPort < 65535 {
+				_, _ = ps.conn.WriteToUDP(probePayload, &net.UDPAddr{IP: state.TargetAddr.IP, Port: cPort})
+			}
 		}
-		if state.Peer.NATType == "symmetric" || state.Peer.NATDelta > 0 {
-			for step := 1; step <= 3; step++ {
+
+		// Если известен delta — дополнительный веерный опрос
+		delta := state.Peer.NATDelta
+		if delta > 0 {
+			for step := 1; step <= 6; step++ {
 				pHigh := state.TargetAddr.Port + step*delta
 				pLow := state.TargetAddr.Port - step*delta
 				if pHigh > 1024 && pHigh < 65535 {
@@ -375,8 +385,9 @@ func (ps *ProbeSocket) readLoop() {
 
 		// 2. Проверяем текстовые маркеры NATPROBE / NATREPLY
 		payloadStr := string(packet)
-		if strings.HasPrefix(payloadStr, "NATPROBE:") {
-			body := strings.TrimPrefix(payloadStr, "NATPROBE:")
+		if strings.Contains(payloadStr, "NATPROBE:") {
+			idx := strings.Index(payloadStr, "NATPROBE:")
+			body := payloadStr[idx+len("NATPROBE:"):]
 			parts := strings.Split(body, ">")
 			fromID := parts[0]
 
@@ -388,14 +399,18 @@ func (ps *ProbeSocket) readLoop() {
 				st := val.(*PeerPunchState)
 				st.mu.Lock()
 				st.PunchRemote = remoteAddr.String()
+				st.TargetAddr = remoteAddr // обновляем точный сопоставленный адрес!
 				st.mu.Unlock()
 			}
 			continue
 		}
 
-		if strings.HasPrefix(payloadStr, "NATREPLY:") {
-			fromID := strings.TrimPrefix(payloadStr, "NATREPLY:")
-			fromID = strings.TrimSpace(fromID)
+		if strings.Contains(payloadStr, "NATREPLY:") {
+			idx := strings.Index(payloadStr, "NATREPLY:")
+			fromID := strings.TrimSpace(payloadStr[idx+len("NATREPLY:"):])
+			if len(fromID) > 32 {
+				fromID = fromID[:32]
+			}
 
 			if val, ok := ps.peerStates.Load(fromID); ok {
 				st := val.(*PeerPunchState)
@@ -404,6 +419,7 @@ func (ps *ProbeSocket) readLoop() {
 					st.PunchSuccess = true
 					st.PunchRTT = time.Since(st.LastSent).Milliseconds()
 					st.PunchRemote = remoteAddr.String()
+					st.TargetAddr = remoteAddr // фиксируем рабочий адрес
 					logf("[PUNCH-OK] %s <-> %s: Direct UDP hole punched! RTT=%dms (remote: %s)",
 						ps.myNodeID, fromID, st.PunchRTT, remoteAddr)
 				}

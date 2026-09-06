@@ -54,8 +54,9 @@ func DefaultConfig(probeID string) *ProbeConfig {
 		MQTTTopic:  "natbypass/probe/" + probeID,
 		STUNServers: []string{
 			"stun.cloudflare.com:3478",
-			"stun.syncthing.net:3478",
+			"stun.sipnet.ru:3478",
 			"stun.miwifi.com:3478",
+			"stun.syncthing.net:3478",
 			"stun.l.google.com:19302",
 			"stun1.l.google.com:3478",
 		},
@@ -90,9 +91,30 @@ func LoadConfig(path string) (*ProbeConfig, error) {
 	if cfg.TestDurationSec == 0 {
 		cfg.TestDurationSec = 300
 	}
-	if len(cfg.STUNServers) == 0 {
-		cfg.STUNServers = []string{"stun.l.google.com:19302", "stun1.l.google.com:3478"}
+	// Ensure high-reliability STUN servers including Russian-accessible ones (sipnet.ru, miwifi, cloudflare)
+	prioritySTUNs := []string{
+		"stun.cloudflare.com:3478",
+		"stun.sipnet.ru:3478",
+		"stun.miwifi.com:3478",
+		"stun.syncthing.net:3478",
+		"stun.l.google.com:19302",
+		"stun1.l.google.com:3478",
 	}
+	seen := make(map[string]bool)
+	var finalSTUNs []string
+	for _, s := range prioritySTUNs {
+		if !seen[s] {
+			seen[s] = true
+			finalSTUNs = append(finalSTUNs, s)
+		}
+	}
+	for _, s := range cfg.STUNServers {
+		if !seen[s] {
+			seen[s] = true
+			finalSTUNs = append(finalSTUNs, s)
+		}
+	}
+	cfg.STUNServers = finalSTUNs
 	return &cfg, nil
 }
 

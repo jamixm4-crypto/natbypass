@@ -18,6 +18,7 @@ func EnsureProbeFirewallRule(port int) {
 
 	ruleName := "NatBypass-Probe"
 
+	// 1. Program rule with EdgeTraversal (edge=yes)
 	checkCmd := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+ruleName)
 	checkCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := checkCmd.CombinedOutput()
@@ -27,12 +28,23 @@ func EnsureProbeFirewallRule(port int) {
 			"dir=in",
 			"action=allow",
 			"program="+exePath,
+			"edge=yes",
 			"enable=yes",
 		)
 		addCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		_ = addCmd.Run()
+	} else {
+		// Update existing rule to enable NAT edge traversal
+		setCmd := exec.Command("netsh", "advfirewall", "firewall", "set", "rule",
+			"name="+ruleName,
+			"new",
+			"edge=yes",
+		)
+		setCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		_ = setCmd.Run()
 	}
 
+	// 2. Port rule with EdgeTraversal (edge=yes)
 	if port > 0 {
 		portRule := fmt.Sprintf("NatBypass-Probe-UDP-%d", port)
 		portCheck := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+portRule)
@@ -45,11 +57,20 @@ func EnsureProbeFirewallRule(port int) {
 				"action=allow",
 				"protocol=UDP",
 				fmt.Sprintf("localport=%d", port),
+				"edge=yes",
 				"enable=yes",
 			)
 			portAdd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 			_ = portAdd.Run()
+		} else {
+			setPortCmd := exec.Command("netsh", "advfirewall", "firewall", "set", "rule",
+				"name="+portRule,
+				"new",
+				"edge=yes",
+			)
+			setPortCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+			_ = setPortCmd.Run()
 		}
 	}
-	logf("[FW] Ensured Windows Defender Firewall allows inbound UDP for port %d", port)
+	logf("[FW] Ensured Windows Defender Firewall allows inbound UDP with NAT Edge Traversal for port %d", port)
 }

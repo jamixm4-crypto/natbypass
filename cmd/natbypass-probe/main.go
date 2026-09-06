@@ -209,7 +209,9 @@ phase3:
 		// 3c. TCP tests
 		if peer.STUNAddr != "" {
 			host := strings.Split(peer.STUNAddr, ":")[0]
-			pair.TCPTests = TestTCPConnectivity(ctx, myNodeID, peer.NodeID, host)
+			tcpCtx, tcpCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			pair.TCPTests = TestTCPConnectivity(tcpCtx, myNodeID, peer.NodeID, host)
+			tcpCancel()
 		}
 
 		// 3d. DPI probe (if AWG failed but UDP ok)
