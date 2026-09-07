@@ -776,6 +776,10 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			if !p.DirectP2P && !p.DirectTCP && p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" {
+				p.PingMs = 0
+				p.Latency = 0
+			}
 
 			activePeers = append(activePeers, p)
 		}
@@ -1890,10 +1894,10 @@ func (s *Server) handlePeerPing(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Если ICMP не ответил (например, таймаут или временный сбой), возвращаем ошибку без разрушения метрики пира
+			// Если ICMP не ответил (например, таймаут или временный сбой), возвращаем ошибку
 			s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 				"device_id":  req.DeviceID,
-				"latency_ms": p.PingMs,
+				"latency_ms": 0,
 				"direct_p2p": p.DirectP2P,
 				"vip":        vip,
 				"error":      "узел не отвечает на пинг (превышен интервал ожидания)",

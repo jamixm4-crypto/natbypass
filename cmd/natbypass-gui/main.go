@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.224-beta5"
+	Version = "1.9.224-beta6"
 	Commit  = "release"
 )
 
@@ -4589,19 +4589,7 @@ func startEngineFromConfig(c *config.Config) {
 							}
 						}
 					}
-					// 3. Relay fallback: return via MQTT
-					if !sent && targetPeer != nil && activeMQTT != nil {
-						dataToSend := reply
-						if cfg != nil {
-							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-								cKey := crypto.DeriveKey(activeProf.NetworkKey)
-								if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
-									dataToSend = enc
-								}
-							}
-						}
-						_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, dataToSend)
-					}
+					// Relay fallback for TUN data disabled: MQTT channel is strictly control plane / signaling
 				}
 			}
 
@@ -4828,17 +4816,7 @@ func startEngineFromConfig(c *config.Config) {
 										}(targetPeer.DeviceID, tcpTarget, lPort)
 									}
 								}
-								// 1e. Relay fallback via MQTT/Signaling if direct connection is not confirmed or UDP dropped
-								if (!sentDirect || !targetPeer.DirectP2P) && activeMQTT != nil {
-									dataToSend := packet
-									if prof := c.EnsureActiveProfile(); prof != nil && prof.NetworkKey != "" {
-										cKey := crypto.DeriveKey(prof.NetworkKey)
-										if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
-											dataToSend = enc
-										}
-									}
-									_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, dataToSend)
-								}
+								// Data transmission over MQTT relay disabled: signaling is strictly for connection establishment. Data only travels via Direct AWG (UDP) or Direct ShadowTLS (TCP).
 								atomic.AddUint64(&packetsSentCount, 1)
 							}
 						}
@@ -5056,6 +5034,17 @@ func startEngineFromConfig(c *config.Config) {
 					if !p.Online || p.DeviceID == myDevID {
 						continue
 					}
+					// User rule: Only ping peers that have an established direct connection (DirectP2P or DirectTCP)!
+					// Do NOT ping relay peers through TUN to avoid MQTT spam and fake pings.
+					isDirect := p.DirectP2P || p.DirectTCP || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID))
+					if !isDirect {
+						if p.PingMs > 0 || p.Latency > 0 {
+							p.PingMs = 0
+							p.Latency = 0
+							registry.Upsert(p)
+						}
+						continue
+					}
 					vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 					if vip != "" {
 						pingCtx, pingCancel := context.WithTimeout(ctx, 1500*time.Millisecond)
@@ -5071,9 +5060,14 @@ func startEngineFromConfig(c *config.Config) {
 							p.PingMs = p.Latency.Milliseconds()
 							registry.Upsert(p)
 						} else {
+							// ICMP failure: clear ping and latency
 							p.ProbeCount++
+							p.Latency = 0
+							p.PingMs = 0
 							if p.ProbeCount >= 2 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) {
-								p.DirectP2P = false
+								if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (guiTCPDirectMgr == nil || !guiTCPDirectMgr.HasConn(p.DeviceID)) {
+									p.DirectP2P = false
+								}
 							}
 							registry.Upsert(p)
 						}
@@ -5660,8 +5654,13 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					} else {
 						preservedEP = existingPeer.ActiveEndpoint
 						preservedDirect = existingPeer.DirectP2P
-						preservedLat = existingPeer.Latency
-						preservedPingMs = existingPeer.PingMs
+						if existingPeer.DirectP2P || existingPeer.DirectTCP || existingPeer.Transport == "tcp_tls" || existingPeer.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID)) {
+							preservedLat = existingPeer.Latency
+							preservedPingMs = existingPeer.PingMs
+						} else {
+							preservedLat = 0
+							preservedPingMs = 0
+						}
 					}
 				}
 				if preservedEP == "" {
@@ -6488,11 +6487,7 @@ func updateData() {
 							}
 						} else {
 							icon = "[NAT]"
-							if p.Latency > 0 {
-								statusDisplay = fmt.Sprintf("Релей/Пробитие (%v)", p.Latency.Round(time.Millisecond))
-							} else {
-								statusDisplay = "Пробитие NAT..."
-							}
+							statusDisplay = "Релей (без прямого P2P/TCP)"
 						}
 					} else {
 						icon = "[OFF]"

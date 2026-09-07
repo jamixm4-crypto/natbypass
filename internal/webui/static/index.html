@@ -3447,7 +3447,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       peers.forEach((p, idx) => {
         const vIP = (p.virtual_ip ? p.virtual_ip.split('/')[0].trim() : '') || ('10.200.0.' + (idx + 2));
         const name = p.nickname ? `⭐ ${p.nickname}` : p.device_id;
-        const isDirect = Boolean((p.direct_p2p && (p.active_endpoint || p.ping_ms > 0)) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct');
+        const isDirect = Boolean((p.direct_p2p && p.active_endpoint) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct');
         const hasAWG = Boolean(p.awg || p.wg_pubkey || p.wg_pub_key || (p.public_key && p.public_key.length > 20));
         const pAWGVer = (p.awg && p.awg.version) ? p.awg.version : '3.1';
         let p2pBadge = '';
@@ -3477,12 +3477,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
 
         
-        // Реальный пинг с корректной градацией цветов: <100ms Зеленый, 100-300ms Желтый, >=300ms Красный
+        // Реальный пинг: отображается ТОЛЬКО при наличии прямого канала (Direct P2P / ShadowTLS), в режиме Relay пинг отсутствует
         const latMs = (p.latency_ms !== undefined && p.latency_ms !== null && p.latency_ms > 0) 
           ? p.latency_ms 
           : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
         let latDisplay = `<span style="color:var(--text-dim);">—</span>`;
-        if (latMs > 0) {
+        if (isDirect && latMs > 0) {
           let dot = '🟢';
           let col = '#4ade80'; // Зеленый (< 100 ms)
           if (latMs >= 300) { 
@@ -3493,7 +3493,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             col = '#fbbf24'; // Желтый (100-300 ms)
           }
           latDisplay = `<span style="color:${col}; font-weight:700;" class="mono">${dot} ${latMs} ms</span>`;
-        } else if (p.direct_p2p || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct') {
+        } else if (isDirect) {
           latDisplay = `<span style="color:#4ade80; font-weight:600;" class="mono">🟢 P2P (OK)</span>`;
         } else {
           latDisplay = `<span style="color:var(--text-dim);" class="mono">—</span>`;
@@ -3789,7 +3789,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const relayPeers = [];
 
       pList.forEach(p => {
-        const isDirect = Boolean((p.direct_p2p && (p.active_endpoint || p.ping_ms > 0)) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct');
+        const isDirect = Boolean((p.direct_p2p && p.active_endpoint) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct');
         if (isDirect) {
           directPeers.push(p);
         } else {

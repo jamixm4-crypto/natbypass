@@ -652,17 +652,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}
-						// 3. Relay fallback: return via MQTT Relay
-						if !sent && senderPeer != nil && sigMgr != nil {
-							dataToSend := reply
-							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-								cKey := crypto.DeriveKey(activeProf.NetworkKey)
-								if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
-									dataToSend = enc
-								}
-							}
-							_ = sigMgr.PublishTunnelData(senderPeer.DeviceID, dataToSend)
-						}
+						// Relay fallback for TUN data disabled: MQTT/Telegram channels are strictly control plane / signaling
 					}
 				}
 
@@ -922,17 +912,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}(p.DeviceID, tcpTarget, lPort)
 							}
 						}
-						// 1e. Relay fallback via MQTT/Signaling if direct P2P is not confirmed or UDP dropped
-						if (!sentDirect || !p.DirectP2P) && sigMgr != nil {
-							dataToSend := pkt
-							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-								cKey := crypto.DeriveKey(activeProf.NetworkKey)
-								if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
-									dataToSend = enc
-								}
-							}
-							_ = sigMgr.PublishTunnelData(p.DeviceID, dataToSend)
-						}
+						// Data transmission over MQTT/Telegram relay disabled: signaling channels are strictly for connection establishment. Data only travels via Direct AWG (UDP) or Direct ShadowTLS (TCP).
 					}
 				}
 			}
@@ -1171,6 +1151,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						if !p.Online || p.DeviceID == deviceID {
 							continue
 						}
+						// User rule: Only ping peers that have an established direct connection (DirectP2P or DirectTCP)!
+						// Do NOT ping relay peers through TUN to avoid MQTT spam and fake pings.
+						isDirect := p.DirectP2P || p.DirectTCP || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID))
+						if !isDirect {
+							if p.PingMs > 0 || p.Latency > 0 {
+								p.PingMs = 0
+								p.Latency = 0
+								registry.Upsert(p)
+							}
+							continue
+						}
 						vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 						if vip != "" {
 							pingCtx, pingCancel := context.WithTimeout(engineCtx, 1500*time.Millisecond)
@@ -1178,21 +1169,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							pingCancel()
 							if err == nil && rtt > 0 {
 								p.ProbeCount = 0
-								// FIX-N3: Keep latency and ping_ms in sync — EWMA smoothing
+								// Keep latency and ping_ms in sync — EWMA smoothing
 								if p.Latency > 0 {
 									p.Latency = time.Duration(float64(p.Latency)*0.6 + float64(rtt)*0.4)
 								} else {
 									p.Latency = rtt
 								}
 								p.PingMs = p.Latency.Milliseconds()
-								// ВАЖНО: НЕ устанавливаем p.DirectP2P = true по L3-пингу!
-								// Пинг может успешно проходить через сигнальный Relay. Флаг DirectP2P должен
-								// подтверждаться исключительно прямыми UDP-пробами (onPingResult в puncher/magicsock).
-								// Иначе ложный DirectP2P выключает дублирование в Relay и трафик гибнет при блокировке UDP ТСПУ.
 								registry.Upsert(p)
 							} else {
-								// FIX-N3b: Increment ProbeCount on ICMP failure; if repeated failures, demote DirectP2P
+								// ICMP failure: clear ping and latency
 								p.ProbeCount++
+								p.Latency = 0
+								p.PingMs = 0
 								if p.ProbeCount >= 2 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) {
 									if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (tcpDirectMgr == nil || !tcpDirectMgr.HasConn(p.DeviceID)) {
 										p.DirectP2P = false
@@ -2109,7 +2098,11 @@ func receiveLoop(
 				} else {
 					preservedEP = existingPeer.ActiveEndpoint
 					preservedDirect = existingPeer.DirectP2P
-					preservedLat = existingPeer.PingMs
+					if existingPeer.DirectP2P || existingPeer.DirectTCP || existingPeer.Transport == "tcp_tls" || existingPeer.Transport == "tcp_shadowtls" || (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) {
+						preservedLat = existingPeer.PingMs
+					} else {
+						preservedLat = 0
+					}
 				}
 			}
 			if preservedEP == "" {

@@ -698,9 +698,14 @@ func StartEngine(configYAML string, tunFd int) string {
 						} else {
 							directP2P = existingPeer.DirectP2P
 							activeEP = existingPeer.ActiveEndpoint
-							latency = existingPeer.Latency
-							if existingPeer.PingMs > 0 {
-								pingMs = existingPeer.PingMs
+							if existingPeer.DirectP2P || existingPeer.DirectTCP || existingPeer.Transport == "tcp_tls" || existingPeer.Transport == "tcp_shadowtls" || (globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(p.DeviceID)) {
+								latency = existingPeer.Latency
+								if existingPeer.PingMs > 0 {
+									pingMs = existingPeer.PingMs
+								}
+							} else {
+								latency = 0
+								pingMs = 0
 							}
 						}
 					}
@@ -1123,19 +1128,7 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// 1e. Relay fallback via MQTT/Signaling if direct connection is not confirmed or UDP dropped
-							if (!sentDirect || !targetPeer.DirectP2P) && globalSigMgr != nil {
-								dataToSend := pkt
-								if globalConfig != nil {
-									if prof := globalConfig.EnsureActiveProfile(); prof != nil && prof.NetworkKey != "" {
-										cKey := crypto.DeriveKey(prof.NetworkKey)
-										if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
-											dataToSend = enc
-										}
-									}
-								}
-								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, dataToSend)
-							}
+							// Data transmission over MQTT relay disabled: signaling is strictly for connection establishment. Data only travels via Direct AWG (UDP) or Direct ShadowTLS (TCP).
 
 							logger.Debug().
 								Str("dst", destIP.String()).

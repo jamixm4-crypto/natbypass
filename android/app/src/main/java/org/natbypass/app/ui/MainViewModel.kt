@@ -225,15 +225,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
 
+                val isTCP = obj.optBoolean("direct_tcp", false) || obj.optString("transport", "") == "tcp_shadowtls" || obj.optString("transport", "") == "tcp_tls"
                 val channelType = when {
                     !isOnline -> "offline"
                     directP2p -> "p2p"
+                    isTCP -> "tcp"
                     else -> "relay"
                 }
 
+                // If peer is in relay status (no direct P2P and no direct TCP), do NOT show fake/cached ping
+                val effectivePingMs = if (channelType == "relay" || !isOnline) 0L else pingMs
+
                 if (isOnline) {
                     onlineCount++
-                    if (pingMs > 0) { totalRtt += pingMs; rttCount++ }
+                    if (effectivePingMs > 0) { totalRtt += effectivePingMs; rttCount++ }
                 }
 
                 peers.add(PeerUiModel(
@@ -242,7 +247,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     virtualIp          = vip,
                     platform           = plat,
                     channelType        = channelType,
-                    pingMs             = pingMs,
+                    pingMs             = effectivePingMs,
                     isOnline           = isOnline,
                     isExitNode         = isExit,
                     natType            = peerNat,

@@ -34,6 +34,7 @@ type Peer struct {
 	WGPort           int                  `json:"wg_port,omitempty"`
 	VirtualIP        string               `json:"virtual_ip,omitempty"`
 	DirectP2P        bool                 `json:"direct_p2p"`
+	DirectTCP        bool                 `json:"direct_tcp,omitempty"`
 	Transport        string               `json:"transport,omitempty"` // "tcp_tls", "udp_direct", "relay_mqtt"
 	ActiveEndpoint   string               `json:"active_endpoint,omitempty"`
 	PingMs           int64                `json:"ping_ms"`
@@ -128,6 +129,9 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		if !newer.DirectP2P {
 			newer.DirectP2P = existing.DirectP2P
 		}
+		if !newer.DirectTCP {
+			newer.DirectTCP = existing.DirectTCP
+		}
 	}
 
 	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty, never seen direct, or failing UDP probes
@@ -151,9 +155,12 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.ActiveEndpoint = newer.STUNAddr
 	}
 
-	if newer.Latency == 0 && existing.Latency > 0 && existing.DirectP2P {
+	if newer.Latency == 0 && existing.Latency > 0 && (existing.DirectP2P || existing.DirectTCP || existing.Transport == "tcp_tls" || existing.Transport == "tcp_shadowtls") && (newer.DirectP2P || newer.DirectTCP || newer.Transport == "tcp_tls" || newer.Transport == "tcp_shadowtls") {
 		newer.Latency = existing.Latency
 		newer.PingMs = existing.PingMs
+	} else if !newer.DirectP2P && !newer.DirectTCP && newer.Transport != "tcp_tls" && newer.Transport != "tcp_shadowtls" {
+		newer.Latency = 0
+		newer.PingMs = 0
 	}
 
 	if newer.TCPAddr == "" && existing.TCPAddr != "" {
@@ -239,7 +246,10 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.Channel = "mqtt"
 	}
 
-	if newer.Latency > 0 {
+	if !newer.DirectP2P && !newer.DirectTCP && newer.Transport != "tcp_tls" && newer.Transport != "tcp_shadowtls" {
+		newer.Latency = 0
+		newer.PingMs = 0
+	} else if newer.Latency > 0 {
 		newer.PingMs = newer.Latency.Milliseconds()
 	}
 
@@ -396,7 +406,10 @@ func (r *Registry) Upsert(p *Peer) {
 		existing.MergeFrom(p)
 		r.peers[p.DeviceID] = p // ✅ Сохраняем обогащенный объект
 	} else {
-		if p.Latency > 0 {
+		if !p.DirectP2P && !p.DirectTCP && p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" {
+			p.Latency = 0
+			p.PingMs = 0
+		} else if p.Latency > 0 {
 			p.PingMs = p.Latency.Milliseconds()
 		}
 		if p.ActiveEndpoint == "" {
