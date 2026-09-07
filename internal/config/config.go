@@ -159,8 +159,14 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 		params.H2 = activeProf.H2
 		params.H3 = activeProf.H3
 		params.H4 = activeProf.H4
-		if activeProf.S1 != 0 { params.S1 = activeProf.S1 }
-		if activeProf.S2 != 0 { params.S2 = activeProf.S2 }
+		if activeProf.S1 != 0 {
+			params.S1 = activeProf.S1
+			params.S3 = activeProf.S1
+		}
+		if activeProf.S2 != 0 {
+			params.S2 = activeProf.S2
+			params.S4 = activeProf.S2
+		}
 		if activeProf.Jc != 0 { params.Jc = activeProf.Jc }
 		if activeProf.Jmin != 0 { params.Jmin = activeProf.Jmin }
 		if activeProf.Jmax != 0 { params.Jmax = activeProf.Jmax }
@@ -174,6 +180,12 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 		params.RandomTrailers = activeProf.RandomTrailers
 		params.DisableCookies = activeProf.DisableCookies
 		params.Version = wireguard.AWGVersion31
+		if params.S3 == 0 && params.S1 != 0 {
+			params.S3 = params.S1
+		}
+		if params.S4 == 0 && params.S2 != 0 {
+			params.S4 = params.S2
+		}
 		return params
 	}
 
@@ -186,9 +198,11 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 	}
 	if c.WireGuard.AWG.S1 != 0 {
 		params.S1 = c.WireGuard.AWG.S1
+		params.S3 = c.WireGuard.AWG.S1
 	}
 	if c.WireGuard.AWG.S2 != 0 {
 		params.S2 = c.WireGuard.AWG.S2
+		params.S4 = c.WireGuard.AWG.S2
 	}
 	if c.WireGuard.AWG.Jc != 0 {
 		params.Jc = c.WireGuard.AWG.Jc
@@ -198,6 +212,13 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 	}
 	if c.WireGuard.AWG.Jmax != 0 {
 		params.Jmax = c.WireGuard.AWG.Jmax
+	}
+
+	if params.S3 == 0 && params.S1 != 0 {
+		params.S3 = params.S1
+	}
+	if params.S4 == 0 && params.S2 != 0 {
+		params.S4 = params.S2
 	}
 
 	// Override Header Protection Key если задан в конфиге

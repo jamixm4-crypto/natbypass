@@ -41,6 +41,7 @@ import (
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/natbypass/natbypass/internal/tray"
 	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/updater"
 	"github.com/natbypass/natbypass/internal/webui"
@@ -104,7 +105,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.12"
+	Version = "1.9.223-beta.13"
 	Commit  = "release"
 )
 
@@ -912,29 +913,9 @@ func main() {
 	if err != nil {
 		showDiagnostics = false
 	}
-	cachedAWGParams = wireguard.DefaultAWGParams()
-	// Запускаем миграцию профилей (random_trailers, disable_cookies и пр.) и
 	// сразу инициализируем cachedAWGParams из реального конфига профиля,
-	// чтобы первый publish-бекон содержал корректные AWG-параметры.
-	if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
-		awg := cfg.WireGuard.AWG
-		cachedAWGParams = wireguard.AWGParams{
-			Enabled:                 awg.Enabled,
-			Version:                 wireguard.AWGVersion31,
-			Jc:                      awg.Jc,
-			Jmin:                    awg.Jmin,
-			Jmax:                    awg.Jmax,
-			S1:                      awg.S1,
-			S2:                      awg.S2,
-			H1:                      awg.H1,
-			H2:                      awg.H2,
-			H3:                      awg.H3,
-			H4:                      awg.H4,
-			HeaderProtectionEnabled: awg.HeaderProtectionKey != "",
-			RandomTrailers:          awg.RandomTrailers,
-			DisableCookies:          awg.DisableCookies,
-		}
-	}
+	// чтобы первый publish-бекон содержал корректные AWG-параметры (включая S1..S4, H1..H4).
+	cachedAWGParams = cfg.GetAWGParams()
 
 
 	// 4. Создание постоянных ресурсов GDI, иконок и курсора
@@ -4232,6 +4213,10 @@ func startEngineFromConfig(c *config.Config) {
 			writeDebug(fmt.Sprintf("🧲 Magicsock GUI: путь к %s переключен: %s -> %s (%s)", devID, oldPath, newPath, pType))
 		})
 		writeDebug(fmt.Sprintf("UDPPuncher слушает локальный UDP порт :%d", puncher.LocalPort()))
+		pPort := puncher.LocalPort()
+		go func() {
+			_ = tray.EnsureFirewallRule(pPort)
+		}()
 
 		// Фоновый NetworkWatchdog для мгновенной реакции на смену сети в GUI (Wi-Fi ↔ Ethernet / roaming)
 		network.NewNetworkWatchdog(ctx, 2*time.Second, func(oldInfo, newInfo *network.EgressInfo) {
@@ -4896,6 +4881,8 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 							if !dcVal && (cfg.WireGuard.AWGPreset == "awg31_strict" || cachedAWGParams.DisableCookies) {
 								dcVal = true
 							}
+							s3 := s1
+							s4 := s2
 							cachedAWGParams = wireguard.AWGParams{
 								Enabled:                 true,
 								Version:                 wireguard.AWGVersion31,
@@ -4904,6 +4891,8 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 								Jmax:                    jmax,
 								S1:                      s1,
 								S2:                      s2,
+								S3:                      s3,
+								S4:                      s4,
 								H1:                      uint32(h1),
 								H2:                      uint32(h2),
 								H3:                      uint32(h3),
@@ -4918,8 +4907,8 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 								Jmax:                    jmax,
 								S1:                      s1,
 								S2:                      s2,
-								S3:                      20,
-								S4:                      20,
+								S3:                      s3,
+								S4:                      s4,
 								H1:                      h1Str,
 								H2:                      h2Str,
 								H3:                      h3Str,
@@ -4945,11 +4934,19 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					}
 					s3 := cachedAWGParams.S3
 					if s3 == 0 {
-						s3 = 20
+						if cachedAWGParams.S1 != 0 {
+							s3 = cachedAWGParams.S1
+						} else {
+							s3 = 20
+						}
 					}
 					s4 := cachedAWGParams.S4
 					if s4 == 0 {
-						s4 = 20
+						if cachedAWGParams.S2 != 0 {
+							s4 = cachedAWGParams.S2
+						} else {
+							s4 = 20
+						}
 					}
 					pmax := cachedAWGParams.ContentPaddingAdditionMax
 					if pmax == 0 {
@@ -5587,13 +5584,18 @@ func publishCurrentState(ctx context.Context) {
 		h3, _ := strconv.ParseUint(h3Str, 10, 32)
 		h4, _ := strconv.ParseUint(h4Str, 10, 32)
 
+		s3 := s1
+		s4 := s2
 		cachedAWGParams = wireguard.AWGParams{
 			Enabled: true,
+			Version: wireguard.AWGVersion31,
 			Jc:      jc,
 			Jmin:    jmin,
 			Jmax:    jmax,
 			S1:      s1,
 			S2:      s2,
+			S3:      s3,
+			S4:      s4,
 			H1:      uint32(h1),
 			H2:      uint32(h2),
 			H3:      uint32(h3),
@@ -5609,8 +5611,8 @@ func publishCurrentState(ctx context.Context) {
 			Jmax:                    jmax,
 			S1:                      s1,
 			S2:                      s2,
-			S3:                      20,
-			S4:                      20,
+			S3:                      s3,
+			S4:                      s4,
 			H1:                      h1Str,
 			H2:                      h2Str,
 			H3:                      h3Str,
@@ -5636,11 +5638,19 @@ func publishCurrentState(ctx context.Context) {
 		}
 		s3 := cachedAWGParams.S3
 		if s3 == 0 {
-			s3 = 20
+			if cachedAWGParams.S1 != 0 {
+				s3 = cachedAWGParams.S1
+			} else {
+				s3 = 20
+			}
 		}
 		s4 := cachedAWGParams.S4
 		if s4 == 0 {
-			s4 = 20
+			if cachedAWGParams.S2 != 0 {
+				s4 = cachedAWGParams.S2
+			} else {
+				s4 = 20
+			}
 		}
 		pmax := cachedAWGParams.ContentPaddingAdditionMax
 		if pmax == 0 {
@@ -6516,6 +6526,15 @@ func saveConfigFromUI() {
 		h3, _ := strconv.ParseUint(strings.TrimSpace(getControlText(hEditAwgH3)), 10, 32)
 		h4, _ := strconv.ParseUint(strings.TrimSpace(getControlText(hEditAwgH4)), 10, 32)
 
+		s3 := s1
+		s4 := s2
+		if cachedAWGParams.S3 != 0 {
+			s3 = cachedAWGParams.S3
+		}
+		if cachedAWGParams.S4 != 0 {
+			s4 = cachedAWGParams.S4
+		}
+
 		rt, dc := getAWGBoolParams()
 		cachedAWGParams = wireguard.AWGParams{
 			Enabled:                   true,
@@ -6525,8 +6544,8 @@ func saveConfigFromUI() {
 			Jmax:                      jmax,
 			S1:                        s1,
 			S2:                        s2,
-			S3:                        20,
-			S4:                        20,
+			S3:                        s3,
+			S4:                        s4,
 			ContentPaddingAdditionMax: 100,
 			H1:                        uint32(h1),
 			H2:                        uint32(h2),
@@ -6545,8 +6564,8 @@ func saveConfigFromUI() {
 			Jmax:                    jmax,
 			S1:                      s1,
 			S2:                      s2,
-			S3:                      20,
-			S4:                      20,
+			S3:                      s3,
+			S4:                      s4,
 			H1:                      uint32(h1),
 			H2:                      uint32(h2),
 			H3:                      uint32(h3),

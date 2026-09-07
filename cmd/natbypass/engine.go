@@ -1305,6 +1305,12 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 	if punchErr != nil {
 		log.Warn().Err(punchErr).Msg("Failed to initialize UDP puncher socket")
 	} else if puncher != nil {
+		if runtime.GOOS == "windows" {
+			pPort := puncher.LocalPort()
+			go func() {
+				_ = tray.EnsureFirewallRule(pPort)
+			}()
+		}
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 			puncher.SetCipherKey(activeProf.NetworkKey)
 		}

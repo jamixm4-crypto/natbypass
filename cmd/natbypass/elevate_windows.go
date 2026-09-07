@@ -53,24 +53,37 @@ foreach ($n in $names) { Remove-NetFirewallRule -DisplayName $n -ErrorAction Sil
 }
 
 // ensureFirewallRule создаёт правила Windows Firewall для NatBypass (без дубликатов):
-// входящий UDP 47832, входящий ICMPv4, и разрешение всего трафика через адаптер.
+// входящие UDP 443, 47832, 51820, исполняемый файл, входящий ICMPv4, и разрешение всего трафика через адаптер.
 func ensureFirewallRule() {
+	exePath, _ := os.Executable()
 	rules := []struct {
 		name    string
 		netshArgs []string
 		psNew   string
 	}{
 		{
+			name: "NatBypass UDP P2P (443)",
+			netshArgs: []string{"dir=in", "action=allow", "protocol=UDP", "localport=443", "enable=yes", "profile=any", "edge=yes"},
+		},
+		{
 			name: "NatBypass UDP P2P (47832)",
-			netshArgs: []string{"dir=in", "action=allow", "protocol=UDP", "localport=47832", "enable=yes", "profile=any"},
+			netshArgs: []string{"dir=in", "action=allow", "protocol=UDP", "localport=47832", "enable=yes", "profile=any", "edge=yes"},
+		},
+		{
+			name: "NatBypass UDP P2P (51820)",
+			netshArgs: []string{"dir=in", "action=allow", "protocol=UDP", "localport=51820", "enable=yes", "profile=any", "edge=yes"},
+		},
+		{
+			name: "NatBypass App In",
+			netshArgs: []string{"dir=in", "action=allow", "program=" + exePath, "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
 			name: "NatBypass ICMPv4 In",
-			psNew: `New-NetFirewallRule -DisplayName 'NatBypass ICMPv4 In' -Name 'NatBypass ICMPv4 In' -Direction Inbound -Action Allow -Protocol ICMPv4 -ErrorAction SilentlyContinue`,
+			psNew: `New-NetFirewallRule -DisplayName 'NatBypass ICMPv4 In' -Name 'NatBypass ICMPv4 In' -Direction Inbound -Action Allow -Protocol ICMPv4 -Profile Any -ErrorAction SilentlyContinue`,
 		},
 		{
 			name: "NatBypass Adapter All",
-			psNew: `New-NetFirewallRule -DisplayName 'NatBypass Adapter All' -Name 'NatBypass Adapter All' -Direction Inbound -Action Allow -InterfaceAlias 'NatBypass' -ErrorAction SilentlyContinue`,
+			psNew: `New-NetFirewallRule -DisplayName 'NatBypass Adapter All' -Name 'NatBypass Adapter All' -Direction Inbound -Action Allow -InterfaceAlias 'NatBypass' -Profile Any -ErrorAction SilentlyContinue`,
 		},
 	}
 

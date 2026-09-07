@@ -84,7 +84,7 @@ EGRESS_GW="$(echo "$DEFAULT_ROUTE" | awk '{for(i=1;i<=NF;i++) if($i=="via") prin
 if [ -n "$EGRESS_DEV" ]; then
     EGRESS_IP="$(ip -4 addr show dev "$EGRESS_DEV" 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n 1)"
     EGRESS_MTU="$(cat /sys/class/net/"$EGRESS_DEV"/mtu 2>/dev/null || echo '1500')"
-    CANARY_PING="$(ping -c 1 -W 2 1.1.1.1 2>/dev/null | awk -F'/' '/rtt|round-trip/ {print $5}')"
+    CANARY_PING="$(ping -c 1 -w 2 1.1.1.1 2>/dev/null | awk -F'/' '/rtt|round-trip/ {print $5}')"
     if [ -n "$CANARY_PING" ]; then
         log_ok "Интернет-выход: dev $EGRESS_DEV (IP: $EGRESS_IP, Шлюз: $EGRESS_GW, MTU: $EGRESS_MTU) | Canary RTT: ${CANARY_PING}ms"
     else
@@ -368,20 +368,20 @@ fi
 # 9.2 Path MTU (PMTU) Discovery
 log_info "[9.2] Проверка Path MTU (PMTU) и нефрагментированного прохождения пакетов:"
 PING_DF="-M do"
-if ! ping -c 1 -W 1 -M do -s 56 127.0.0.1 >/dev/null 2>&1; then
+if ! ping -c 1 -w 1 -M do -s 56 127.0.0.1 >/dev/null 2>&1; then
     PING_DF=""
 fi
 
 for MTU_TEST in 1420 1360 1280; do
     PAYLOAD_SIZE=$((MTU_TEST - 28))
     if [ -n "$PING_DF" ]; then
-        if ping -c 1 -W 1 -M do -s $PAYLOAD_SIZE 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 1 -M do -s $PAYLOAD_SIZE 1.1.1.1 >/dev/null 2>&1; then
+        if ping -c 1 -w 1 -M do -s $PAYLOAD_SIZE 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -w 1 -M do -s $PAYLOAD_SIZE 1.1.1.1 >/dev/null 2>&1; then
             log_ok "MTU $MTU_TEST (Payload $PAYLOAD_SIZE байт): УСПЕШНО без фрагментации"
         else
             log_warn "MTU $MTU_TEST: ТРЕБУЕТСЯ ФРАГМЕНТАЦИЯ (или блокируется промежуточными маршрутизаторами)"
         fi
     else
-        if ping -c 1 -W 1 -s $PAYLOAD_SIZE 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 1 -s $PAYLOAD_SIZE 1.1.1.1 >/dev/null 2>&1; then
+        if ping -c 1 -w 1 -s $PAYLOAD_SIZE 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -w 1 -s $PAYLOAD_SIZE 1.1.1.1 >/dev/null 2>&1; then
             log_ok "MTU $MTU_TEST (Payload $PAYLOAD_SIZE байт): УСПЕШНО (ICMP доставлен)"
         else
             log_warn "MTU $MTU_TEST: Пакет размером $PAYLOAD_SIZE байт не доставлен"
@@ -536,12 +536,16 @@ test_ping() {
         return
     fi
     PING_OK=0
-    # Быстрая проверка с таймаутом 1 секунда (без 13-секундных зависаний на Keenetic)
-    if ping -c 1 -W 1 -w 1 "$CLEAN_IP" >/dev/null 2>&1; then
+    # Универсальная проверка для standard iputils ping и BusyBox ping (Keenetic / OpenWrt / routers).
+    # Используем -c 2 -w 3: отправляет 2 пакета с общим дедлайном 3с (учитывает трансграничный RTT 350-700мс).
+    # Флаг -W опущен, так как он не поддерживается в BusyBox и вызывает ошибку синтаксиса.
+    if ping -c 2 -w 3 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
-    elif ping -c 1 -W 1 -w 1 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
+    elif ping -c 2 -w 3 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
-    elif ping -c 1 -w 1 "$CLEAN_IP" >/dev/null 2>&1; then
+    elif ping -c 1 -w 2 "$CLEAN_IP" >/dev/null 2>&1; then
+        PING_OK=1
+    elif ping -c 1 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
     fi
     if [ "$PING_OK" -eq 1 ]; then

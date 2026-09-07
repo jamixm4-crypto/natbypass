@@ -541,7 +541,11 @@ function Test-PeerPing($ip, $name) {
     $rtt = 0
     try {
         $pObj = New-Object System.Net.NetworkInformation.Ping
-        $reply = $pObj.Send($cleanIp, 1000)
+        $reply = $pObj.Send($cleanIp, 2500)
+        if ($reply.Status -ne [System.Net.NetworkInformation.IPStatus]::Success) {
+            # Вторая попытка с учетом возможного initial route resolution / packet queueing
+            $reply = $pObj.Send($cleanIp, 2500)
+        }
         if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
             $pingOk = $true
             $rtt = $reply.RoundtripTime
