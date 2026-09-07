@@ -248,15 +248,14 @@ func checkUpdateFromGitHub(ctx context.Context, currentVersion string, includePr
 		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 			return nil, fmt.Errorf("ошибка парсинга списка релизов: %w", err)
 		}
-		// Находим релиз с максимальной семантической версией среди non-draft
+		// Находим самый свежий релиз среди non-draft (GitHub API возвращает в хронологическом порядке)
 		for i := range releases {
 			rel := &releases[i]
 			if rel.Draft {
 				continue
 			}
-			if targetRelease == nil || compareSemVer(rel.TagName, targetRelease.TagName) > 0 {
-				targetRelease = rel
-			}
+			targetRelease = rel
+			break
 		}
 		if targetRelease == nil {
 			return nil, fmt.Errorf("нет доступных релизов на GitHub")
@@ -271,6 +270,11 @@ func checkUpdateFromGitHub(ctx context.Context, currentVersion string, includePr
 
 	hasUpdate := isNewer(targetRelease.TagName, currentVersion)
 	isRollback := false
+
+	// Если включен канал бета-версий, любое отличие тега от текущего считается доступным обновлением
+	if includePrerelease && strings.TrimPrefix(targetRelease.TagName, "v") != strings.TrimPrefix(currentVersion, "v") {
+		hasUpdate = true
+	}
 
 	// Если текущая версия — бета/пре-релиз, а запрошен стабильный канал,
 	// то стабильный релиз отличается от текущей версии, и мы предлагаем откат на стабильную версию:

@@ -69,9 +69,8 @@ object AppUpdateManager {
                     for (i in 0 until arr.length()) {
                         val obj = arr.getJSONObject(i)
                         if (obj.optBoolean("draft", false)) continue
-                        if (best == null || compareSemVer(obj.optString("tag_name", ""), best.optString("tag_name", "")) > 0) {
-                            best = obj
-                        }
+                        best = obj
+                        break
                     }
                     best ?: throw Exception("Нет доступных релизов на GitHub")
                 } else {
@@ -107,7 +106,11 @@ object AppUpdateManager {
                     currentVersion.contains("rc", ignoreCase = true) ||
                     currentVersion.contains("-")
                 val isRollback = !includePrerelease && isCurrentBeta && (tagName != currentVersion.removePrefix("v"))
-                val isNewer = isNewerVersion(currentVersion, tagName) || isRollback
+                val isNewer = if (includePrerelease) {
+                    tagName != currentVersion.removePrefix("v")
+                } else {
+                    isNewerVersion(currentVersion, tagName) || isRollback
+                }
 
                 if (apkDownloadUrl.isNotEmpty()) {
                     val state = UpdateState.Available(
