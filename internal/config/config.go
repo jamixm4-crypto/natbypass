@@ -68,6 +68,13 @@ type NetworkConfig struct {
 	// Задайте явно (например, 47832) если нужен фиксированный порт для firewall-правил.
 	// НЕ используйте 51820 если на этой машине работает локальный WireGuard/AmneziaWG!
 	UDPPort int `mapstructure:"udp_port" yaml:"udp_port,omitempty"`
+	// TCPPort — локальный порт TCP слушателя (ShadowTLS / mTLS).
+	// По умолчанию 8443 (альтернативные порты: 4443, 47832).
+	TCPPort int `mapstructure:"tcp_port" yaml:"tcp_port,omitempty"`
+	// TransportMode определяет стратегию выбора транспорта: "auto" (по умолчанию), "force_tcp", "force_udp"
+	TransportMode string `mapstructure:"transport_mode" yaml:"transport_mode,omitempty"`
+	// TLSMode определяет режим TLS: "shadowtls" (по умолчанию, стелс-маскировка DPI) или "standard_mtls" (взаимные сертификаты)
+	TLSMode string `mapstructure:"tls_mode" yaml:"tls_mode,omitempty"`
 	// EnableTCPFallback включает обфусцированный TCP P2P фэлбэк (ShadowTLS v3) при блокировке UDP
 	EnableTCPFallback bool `mapstructure:"enable_tcp_fallback" yaml:"enable_tcp_fallback"`
 	// ObfuscationSNI — домен маскировки TLS 1.3 ClientHello (по умолчанию gateway.icloud.com)
@@ -301,6 +308,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("web_ui.port", 8080)
 
 	v.SetDefault("network.upnp_enabled", true)
+	v.SetDefault("network.tcp_port", 8443)
+	v.SetDefault("network.transport_mode", "auto")
+	v.SetDefault("network.tls_mode", "shadowtls")
 	v.SetDefault("network.enable_tcp_fallback", true)
 	v.SetDefault("network.obfuscation_sni", "gateway.icloud.com")
 	v.SetDefault("network.ip_timeout", 10)

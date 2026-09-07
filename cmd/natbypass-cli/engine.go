@@ -808,15 +808,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						// If an active direct TCP ShadowTLS stream is connected, send through it (bypasses UDP DPI)
 						sentDirect := false
 						sentTCP := false
-						if tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID) {
+						isForceTCP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_tcp"
+						isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
+
+						if !isForceUDP && tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID) {
 							if tcpErr := tcpDirectMgr.SendPacket(p.DeviceID, pkt); tcpErr == nil {
 								sentDirect = true
 								sentTCP = true
 							}
 						}
 
-						// 2. Pure P2P Direct UDP packet transmission
-						if !sentTCP && targetEP != "" && puncher != nil {
+						// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
+						if !isForceTCP && !sentTCP && targetEP != "" && puncher != nil {
 							srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
 							log.Debug().Str("src", srcIP).Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Int("len", len(pkt)).Msg("📤 TUN→UDP outbound")
 							err := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
@@ -827,11 +830,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 						// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
-						if !sentTCP && !p.DirectP2P && puncher != nil && p.STUNAddr != "" && p.STUNAddr != targetEP {
+						if !isForceTCP && !sentTCP && !p.DirectP2P && puncher != nil && p.STUNAddr != "" && p.STUNAddr != targetEP {
 							_ = puncher.SendDataPacketWithPadding(p.STUNAddr, pkt, pmin, pmax)
 						}
 						// 1c. Reactive instant hole punching if direct P2P is not yet confirmed or packet wasn't sent
-						if (!sentDirect || !p.DirectP2P) && puncher != nil {
+						if !isForceTCP && (!sentDirect || !p.DirectP2P) && puncher != nil {
 							if targetEP != "" {
 								_ = puncher.SendHolePunchProbe(targetEP)
 							}
@@ -844,7 +847,32 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}
-						// 1d. Relay fallback via MQTT/Signaling if direct P2P is not confirmed or UDP dropped
+						// 1d. If force_tcp and not connected yet, trigger immediate dial
+						if isForceTCP && !sentTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+							tcpTarget := p.TCPAddr
+							if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
+								tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
+							}
+							if tcpTarget == "" && p.STUNAddr != "" && p.WGPort > 0 {
+								tcpTarget = fmt.Sprintf("%s:%d", strings.Split(p.STUNAddr, ":")[0], p.WGPort)
+							}
+							if tcpTarget == "" && p.LocalAddr != "" {
+								tcpTarget = p.LocalAddr
+							}
+							if tcpTarget == "" {
+								tcpTarget = p.STUNAddr
+							}
+							if tcpTarget != "" {
+								lPort := tcpDirectMgr.Port()
+								if lPort <= 0 && puncher != nil {
+									lPort = puncher.LocalPort()
+								}
+								go func(devID, target string, localP int) {
+									_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
+								}(p.DeviceID, tcpTarget, lPort)
+							}
+						}
+						// 1e. Relay fallback via MQTT/Signaling if direct P2P is not confirmed or UDP dropped
 						if (!sentDirect || !p.DirectP2P) && sigMgr != nil {
 							dataToSend := pkt
 							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
@@ -883,24 +911,29 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					return
 				case <-kaTicker.C:
 					now := time.Now()
+					isForceTCP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_tcp"
+					isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
 					for _, p := range registry.List() {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
-							// Connected peer: just send keepalive and probe if STUN drifted
-							_ = puncher.SendKeepAlive(p.ActiveEndpoint)
-							if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-								_ = puncher.SendHolePunchProbe(p.STUNAddr)
+							// Connected peer: send keepalive and probe if STUN drifted
+							if !isForceTCP && puncher != nil && p.Transport != "tcp_direct" {
+								_ = puncher.SendKeepAlive(p.ActiveEndpoint)
+								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+									_ = puncher.SendHolePunchProbe(p.STUNAddr)
+								}
 							}
 							// Clear backoff on successful connection
 							delete(probeBackoff, p.DeviceID)
 							delete(activeSymSessions, p.DeviceID)
 						} else {
 							// R3: Backoff logic for unconnected peers (UDP hole punch probes only)
-							udpInBackoff := false
-							if until, ok := probeBackoff[p.DeviceID]; ok && now.Before(until) {
-								udpInBackoff = true
-							}
+							if !isForceTCP && puncher != nil {
+								udpInBackoff := false
+								if until, ok := probeBackoff[p.DeviceID]; ok && now.Before(until) {
+									udpInBackoff = true
+								}
 
-							if !udpInBackoff {
+								if !udpInBackoff {
 								// FIX-N4: Extended exponential backoff for persistent relay-only peers.
 								// Stages based on ProbeCount (at default 4s ticker):
 								//   0-15   probes (~1 min):  no backoff (aggressive punching)
@@ -1019,10 +1052,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									}
 								}
 							}
+							}
 
 							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
 							// Evaluated on every tick, NOT blocked by UDP probe backoff!
-							if (!p.DirectP2P || p.ProbeCount >= 2) && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+							if !isForceUDP && (isForceTCP || !p.DirectP2P || p.ProbeCount >= 2) && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
 								tcpTarget := p.TCPAddr
 								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
 									tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
@@ -1350,6 +1384,10 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDP puncher active on persistent socket with MagicSock and KeepAlive")
 		tcpDirectMgr = network.NewTCPDirectManager(ctx)
 		tcpDirectMgr.SetDeviceID(deviceID)
+		desiredTCPPort := cfg.Network.TCPPort
+		if desiredTCPPort <= 0 {
+			desiredTCPPort = 8443
+		}
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
 			if activeProf.NetworkKey != "" {
 				tcpDirectMgr.SetNetworkKey(activeProf.NetworkKey)
@@ -1359,6 +1397,19 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 				sni = "gateway.icloud.com"
 			}
 			tcpDirectMgr.SetSNI(sni)
+			if activeProf.TCPPort > 0 {
+				desiredTCPPort = activeProf.TCPPort
+			}
+			if activeProf.TransportMode != "" {
+				tcpDirectMgr.SetTransportMode(activeProf.TransportMode)
+			} else if cfg.Network.TransportMode != "" {
+				tcpDirectMgr.SetTransportMode(cfg.Network.TransportMode)
+			}
+			if activeProf.TLSMode != "" {
+				tcpDirectMgr.SetTLSMode(activeProf.TLSMode)
+			} else if cfg.Network.TLSMode != "" {
+				tcpDirectMgr.SetTLSMode(cfg.Network.TLSMode)
+			}
 		}
 		if magicSock != nil {
 			magicSock.SetTCPManager(tcpDirectMgr)
@@ -1374,8 +1425,8 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 				registry.Upsert(regPeer)
 			}
 		})
-		if tcpPort, err := tcpDirectMgr.StartListener(puncher.LocalPort()); err == nil {
-			log.Info().Int("port", tcpPort).Msg("Direct P2P TCP (ShadowTLS) listener active")
+		if tcpPort, err := tcpDirectMgr.StartListener(desiredTCPPort); err == nil {
+			log.Info().Int("port", tcpPort).Str("mode", tcpDirectMgr.TransportMode()).Msg("Direct P2P TCP (ShadowTLS) listener active")
 		}
 	}
 

@@ -54,7 +54,9 @@ func EnsureFirewallRule(port int) error {
 	}
 
 	// 2. Specific UDP & TCP Port rules with EdgeTraversal (edge=yes) and profile=any
-	// Always ensure standard stealth ports 443 and 47832 are permitted for both UDP (WireGuard/AWG) and TCP (ShadowTLS)
+	// Always ensure standard stealth ports 8443, 4443, 443 and 47832 are permitted for both UDP (WireGuard/AWG) and TCP (ShadowTLS)
+	ensurePortRule("NatBypass-TCP-8443", 8443, "TCP")
+	ensurePortRule("NatBypass-TCP-4443", 4443, "TCP")
 	ensurePortRule("NatBypass-UDP-443", 443, "UDP")
 	ensurePortRule("NatBypass-UDP-47832", 47832, "UDP")
 	ensurePortRule("NatBypass-TCP-443", 443, "TCP")

@@ -107,7 +107,7 @@ func TestHandshake_SuccessAndTransmission(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		err := ClientHandshake(clientConn, sni, key, 3*time.Second)
+		_, err := ClientHandshake(clientConn, sni, key, 3*time.Second)
 		if err != nil {
 			clientErr = err
 			return
@@ -178,7 +178,7 @@ func TestHandshake_WrongKeyRejection_ActiveProbing(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		clientErr = ClientHandshake(clientConn, "gateway.icloud.com", keyAttacker, 2*time.Second)
+		_, clientErr = ClientHandshake(clientConn, "gateway.icloud.com", keyAttacker, 2*time.Second)
 	}()
 
 	wg.Wait()
@@ -189,5 +189,81 @@ func TestHandshake_WrongKeyRejection_ActiveProbing(t *testing.T) {
 	}
 	if clientErr == nil {
 		t.Fatalf("expected ClientHandshake to fail, but succeeded!")
+	}
+}
+
+func TestHandshake_SimultaneousOpen_CollisionResolution(t *testing.T) {
+	key := crypto.DeriveKey("mesh-secret-key")
+	sni := "gateway.icloud.com"
+
+	connA, connB, err := tcpLoopbackPair()
+	if err != nil {
+		t.Fatalf("tcpLoopbackPair failed: %v", err)
+	}
+	defer connA.Close()
+	defer connB.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	var roleA, roleB bool
+	var errA, errB error
+	var tlsA, tlsB *ShadowTLSConn
+
+	// Both sides run ClientHandshake simultaneously (simulating TCP Simultaneous Open)
+	go func() {
+		defer wg.Done()
+		roleA, errA = ClientHandshake(connA, sni, key, 3*time.Second)
+		if errA == nil {
+			tlsA = NewShadowTLSConn(connA, key)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		roleB, errB = ClientHandshake(connB, sni, key, 3*time.Second)
+		if errB == nil {
+			tlsB = NewShadowTLSConn(connB, key)
+		}
+	}()
+
+	wg.Wait()
+
+	if errA != nil {
+		t.Fatalf("Peer A Simultaneous Open handshake failed: %v", errA)
+	}
+	if errB != nil {
+		t.Fatalf("Peer B Simultaneous Open handshake failed: %v", errB)
+	}
+
+	// Exactly one peer must win the tie-break and become Server
+	if roleA == roleB {
+		t.Fatalf("Expected exactly one peer to become Server, but got roleA=%v, roleB=%v", roleA, roleB)
+	}
+
+	// Test encrypted communication between the two simultaneous open peers
+	msg := []byte("SIMULTANEOUS_OPEN_VERIFIED")
+	if roleA { // Peer A is Server
+		if err := tlsB.WritePacket(msg); err != nil {
+			t.Fatalf("tlsB.WritePacket failed: %v", err)
+		}
+		got, err := tlsA.ReadPacket()
+		if err != nil {
+			t.Fatalf("tlsA.ReadPacket failed: %v", err)
+		}
+		if !bytes.Equal(got, msg) {
+			t.Fatalf("payload mismatch: expected %q, got %q", msg, got)
+		}
+	} else { // Peer B is Server
+		if err := tlsA.WritePacket(msg); err != nil {
+			t.Fatalf("tlsA.WritePacket failed: %v", err)
+		}
+		got, err := tlsB.ReadPacket()
+		if err != nil {
+			t.Fatalf("tlsB.ReadPacket failed: %v", err)
+		}
+		if !bytes.Equal(got, msg) {
+			t.Fatalf("payload mismatch: expected %q, got %q", msg, got)
+		}
 	}
 }

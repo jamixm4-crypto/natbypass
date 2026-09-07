@@ -2107,6 +2107,9 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		TgChat          string `json:"tg_chat"`
 		TgProxy         string `json:"tg_proxy"`
 		WGPort          int    `json:"wg_port"`
+		TCPPort         int    `json:"tcp_port"`
+		TransportMode   string `json:"transport_mode"`
+		TLSMode         string `json:"tls_mode"`
 		MTU             int    `json:"mtu"`
 		UpnpEnabled     bool   `json:"upnp_enabled"`
 		DoHEnabled      bool   `json:"doh_enabled"`
@@ -2156,6 +2159,24 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.WGPort > 0 {
 		cfg.WireGuard.ListenPort = req.WGPort
+	}
+	if req.TCPPort > 0 {
+		cfg.Network.TCPPort = req.TCPPort
+		if active := cfg.EnsureActiveProfile(); active != nil {
+			active.TCPPort = req.TCPPort
+		}
+	}
+	if req.TransportMode != "" {
+		cfg.Network.TransportMode = req.TransportMode
+		if active := cfg.EnsureActiveProfile(); active != nil {
+			active.TransportMode = req.TransportMode
+		}
+	}
+	if req.TLSMode != "" {
+		cfg.Network.TLSMode = req.TLSMode
+		if active := cfg.EnsureActiveProfile(); active != nil {
+			active.TLSMode = req.TLSMode
+		}
 	}
 	if req.MTU > 0 {
 		cfg.WireGuard.MTU = req.MTU
@@ -2564,6 +2585,9 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		HeaderProtectionKey string `json:"header_protection_key"`
 		RandomTrailers      bool   `json:"random_trailers"`
 		DisableCookies      bool   `json:"disable_cookies"`
+		TCPPort             int    `json:"tcp_port"`
+		TransportMode       string `json:"transport_mode"`
+		TLSMode             string `json:"tls_mode"`
 		AutoSwitch          bool   `json:"auto_switch"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -2620,6 +2644,9 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		HeaderProtectionKey: hpKey,
 		RandomTrailers:      req.RandomTrailers || true,
 		DisableCookies:      req.DisableCookies || true,
+		TCPPort:             req.TCPPort,
+		TransportMode:       req.TransportMode,
+		TLSMode:             req.TLSMode,
 		IsActive:            req.AutoSwitch || len(cfg.Profiles) == 0,
 		CreatedAt:           time.Now(),
 	}
@@ -2689,6 +2716,9 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		HeaderProtectionKey string `json:"header_protection_key"`
 		RandomTrailers      bool   `json:"random_trailers"`
 		DisableCookies      bool   `json:"disable_cookies"`
+		TCPPort             int    `json:"tcp_port"`
+		TransportMode       string `json:"transport_mode"`
+		TLSMode             string `json:"tls_mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка JSON: "+err.Error())
@@ -2753,6 +2783,15 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AWGPreset != "" {
 		target.AWGPreset = req.AWGPreset
+	}
+	if req.TCPPort > 0 {
+		target.TCPPort = req.TCPPort
+	}
+	if req.TransportMode != "" {
+		target.TransportMode = req.TransportMode
+	}
+	if req.TLSMode != "" {
+		target.TLSMode = req.TLSMode
 	}
 
 	cfg.SyncSignalingWithProfile(target)

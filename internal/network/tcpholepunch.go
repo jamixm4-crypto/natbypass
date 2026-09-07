@@ -106,21 +106,63 @@ type TCPDirectManager struct {
 	myDeviceID string
 	networkKey [32]byte
 	hasKey     bool
-	sni        string
-	onPacket   func(remoteAddr *net.UDPAddr, payload []byte)
-	onPeerUp   func(peerID string, remoteAddr string)
+	sni           string
+	transportMode string
+	tlsMode       string
+	onPacket      func(remoteAddr *net.UDPAddr, payload []byte)
+	onPeerUp      func(peerID string, remoteAddr string)
 }
 
 // NewTCPDirectManager creates a new manager for P2P TCP streams.
 func NewTCPDirectManager(ctx context.Context) *TCPDirectManager {
 	cCtx, cancel := context.WithCancel(ctx)
 	return &TCPDirectManager{
-		conns:      make(map[string]net.Conn),
-		connecting: make(map[string]time.Time),
-		ctx:        cCtx,
-		cancel:     cancel,
-		sni:        shadowtls.DefaultSNI,
+		conns:         make(map[string]net.Conn),
+		connecting:    make(map[string]time.Time),
+		ctx:           cCtx,
+		cancel:        cancel,
+		sni:           shadowtls.DefaultSNI,
+		transportMode: "auto",
+		tlsMode:       "shadowtls",
 	}
+}
+
+// SetTransportMode sets the transport strategy: "auto", "force_tcp", "force_udp"
+func (m *TCPDirectManager) SetTransportMode(mode string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mode != "" {
+		m.transportMode = mode
+	}
+}
+
+// TransportMode returns the active transport strategy.
+func (m *TCPDirectManager) TransportMode() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.transportMode == "" {
+		return "auto"
+	}
+	return m.transportMode
+}
+
+// SetTLSMode sets the TLS flavor: "shadowtls" or "standard_mtls"
+func (m *TCPDirectManager) SetTLSMode(mode string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mode != "" {
+		m.tlsMode = mode
+	}
+}
+
+// TLSMode returns the active TLS flavor.
+func (m *TCPDirectManager) TLSMode() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.tlsMode == "" {
+		return "shadowtls"
+	}
+	return m.tlsMode
 }
 
 // SetNetworkKey sets the secret network key used for ShadowTLS TLS 1.3 obfuscation.
@@ -190,14 +232,38 @@ func (m *TCPDirectManager) StartListener(preferredPort int) (int, error) {
 		},
 	}
 
+	candidatePorts := []int{}
 	if preferredPort > 0 {
-		ln, err = lc.Listen(m.ctx, "tcp4", fmt.Sprintf("0.0.0.0:%d", preferredPort))
-	}
-	if err != nil || preferredPort <= 0 {
-		ln, err = lc.Listen(m.ctx, "tcp4", "0.0.0.0:0")
-		if err != nil {
-			return 0, fmt.Errorf("failed to start TCP listener: %w", err)
+		candidatePorts = append(candidatePorts, preferredPort)
+		// Fallback ports cascade: 8443 (default HTTPS alternate), 4443, 47832 (P2P default)
+		for _, fallbackP := range []int{8443, 4443, 47832} {
+			alreadyPresent := false
+			for _, cp := range candidatePorts {
+				if cp == fallbackP {
+					alreadyPresent = true
+					break
+				}
+			}
+			if !alreadyPresent {
+				candidatePorts = append(candidatePorts, fallbackP)
+			}
 		}
+	}
+	candidatePorts = append(candidatePorts, 0) // dynamic port as final guarantee
+
+	for _, p := range candidatePorts {
+		addr := "0.0.0.0:0"
+		if p > 0 {
+			addr = fmt.Sprintf("0.0.0.0:%d", p)
+		}
+		ln, err = lc.Listen(m.ctx, "tcp4", addr)
+		if err == nil && ln != nil {
+			break
+		}
+	}
+
+	if ln == nil {
+		return 0, fmt.Errorf("failed to start TCP listener on any candidate port: %w", err)
 	}
 
 	m.listener = ln
@@ -391,31 +457,50 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 	m.mu.RUnlock()
 
 	if hasKey {
-		// 1. Stealth TLS 1.3 Client Handshake (DPI bypass)
-		if err := shadowtls.ClientHandshake(conn, sni, netKey, 5*time.Second); err != nil {
+		// 1. Stealth TLS 1.3 Client Handshake (DPI bypass) with Simultaneous Open collision resolution
+		isServer, err := shadowtls.ClientHandshake(conn, sni, netKey, 5*time.Second)
+		if err != nil {
 			_ = conn.Close()
 			return fmt.Errorf("shadowtls handshake failed: %w", err)
 		}
 		tlsConn := shadowtls.NewShadowTLSConn(conn, netKey)
 		_ = tlsConn.SetDeadline(time.Now().Add(5 * time.Second))
 
-		// 2. Send our peer ID inside encrypted TLS 1.3 Application Data frame
-		if err := tlsConn.WritePacket([]byte(myID)); err != nil {
-			_ = tlsConn.Close()
-			return err
-		}
-
-		// 3. Receive remote peer ID inside encrypted TLS 1.3 Application Data frame
-		respPkt, err := tlsConn.ReadPacket()
-		if err != nil || len(respPkt) == 0 {
-			_ = tlsConn.Close()
-			return fmt.Errorf("failed to read remote peer id: %w", err)
+		var remotePeerID string
+		if isServer {
+			// Simultaneous Open tie-break winner: act as Server during peer ID exchange
+			peerIDPkt, err := tlsConn.ReadPacket()
+			if err != nil || len(peerIDPkt) == 0 {
+				_ = tlsConn.Close()
+				return fmt.Errorf("failed to read remote peer id in simultaneous server role: %w", err)
+			}
+			remotePeerID = string(peerIDPkt)
+			if err := tlsConn.WritePacket([]byte(myID)); err != nil {
+				_ = tlsConn.Close()
+				return err
+			}
+		} else {
+			// Normal Client role: send our ID first, then read remote peer ID
+			if err := tlsConn.WritePacket([]byte(myID)); err != nil {
+				_ = tlsConn.Close()
+				return err
+			}
+			respPkt, err := tlsConn.ReadPacket()
+			if err != nil || len(respPkt) == 0 {
+				_ = tlsConn.Close()
+				return fmt.Errorf("failed to read remote peer id: %w", err)
+			}
+			remotePeerID = string(respPkt)
 		}
 		_ = tlsConn.SetDeadline(time.Time{})
 
-		m.RegisterConn(peerID, tlsConn, onPkt)
+		actualPeerID := peerID
+		if actualPeerID == "" {
+			actualPeerID = remotePeerID
+		}
+		m.RegisterConn(actualPeerID, tlsConn, onPkt)
 		if onUp != nil {
-			onUp(peerID, targetAddr)
+			onUp(actualPeerID, targetAddr)
 		}
 		return nil
 	}

@@ -206,13 +206,15 @@ func BuildServerHello(clientRandom [32]byte, clientSessionID [32]byte, networkKe
 }
 
 // ClientHandshake performs client-side ShadowTLS handshake over existing TCP connection.
-func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout time.Duration) error {
+// It returns (isServerRole, err). When a TCP Simultaneous Open collision is detected (both sides sent
+// ClientHello simultaneously), a deterministic tie-break determines which side acts as Server.
+func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout time.Duration) (bool, error) {
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	defer conn.SetDeadline(time.Time{})
 
 	chPkt, err := BuildClientHello(sni, networkKey)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Extract clientRandom and authTag for later server verification
@@ -220,46 +222,117 @@ func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout tim
 	copy(clientRandom[:], chPkt[11:43])
 
 	if _, err := conn.Write(chPkt); err != nil {
-		return fmt.Errorf("failed to send ClientHello: %w", err)
+		return false, fmt.Errorf("failed to send ClientHello: %w", err)
 	}
 
-	// Read ServerHello Record Header (5 bytes)
+	// Read response Record Header (5 bytes)
 	hdr := make([]byte, 5)
 	if _, err := io.ReadFull(conn, hdr); err != nil {
-		return fmt.Errorf("failed to read ServerHello header: %w", err)
+		return false, fmt.Errorf("failed to read ServerHello header: %w", err)
 	}
 	if hdr[0] != RecordHandshake {
-		return ErrInvalidTLSHandshake
+		return false, ErrInvalidTLSHandshake
 	}
 	recLen := binary.BigEndian.Uint16(hdr[3:5])
-	if recLen < 38 || recLen > 4096 {
-		return ErrInvalidTLSHandshake
+	if recLen < 38 || recLen > 8192 {
+		return false, ErrInvalidTLSHandshake
 	}
 
 	body := make([]byte, recLen)
 	if _, err := io.ReadFull(conn, body); err != nil {
-		return fmt.Errorf("failed to read ServerHello body: %w", err)
+		return false, fmt.Errorf("failed to read handshake response body: %w", err)
 	}
 
-	// Parse Server Random (offset 6..38 in handshake body)
-	if body[0] != HandshakeServerHello || len(body) < 38 {
-		return ErrInvalidTLSHandshake
-	}
-	serverRandom := body[6:38]
-	expectedAuth := computeHMAC(networkKey, append(clientRandom[:], []byte("server")...))
-	if !hmac.Equal(serverRandom[:16], expectedAuth) {
-		return ErrAuthFailed
+	// 1. Standard Client path: Server responded with ServerHello (HandshakeServerHello = 0x02)
+	if body[0] == HandshakeServerHello {
+		if len(body) < 38 {
+			return false, ErrInvalidTLSHandshake
+		}
+		serverRandom := body[6:38]
+		expectedAuth := computeHMAC(networkKey, append(clientRandom[:], []byte("server")...))
+		if !hmac.Equal(serverRandom[:16], expectedAuth) {
+			return false, ErrAuthFailed
+		}
+
+		// Read optional ChangeCipherSpec (6 bytes: 0x14 0x03 0x03 0x00 0x01 0x01)
+		ccsHdr := make([]byte, 6)
+		_ = conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
+		if n, err := io.ReadFull(conn, ccsHdr); err == nil && n == 6 && ccsHdr[0] == RecordChangeCipherSpec {
+			// ChangeCipherSpec successfully consumed
+		}
+		_ = conn.SetDeadline(time.Time{})
+		return false, nil // We are Client
 	}
 
-	// Read optional ChangeCipherSpec (6 bytes: 0x14 0x03 0x03 0x00 0x01 0x01)
-	ccsHdr := make([]byte, 6)
-	_ = conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
-	if n, err := io.ReadFull(conn, ccsHdr); err == nil && n == 6 && ccsHdr[0] == RecordChangeCipherSpec {
-		// ChangeCipherSpec successfully consumed
-	}
-	_ = conn.SetDeadline(time.Time{})
+	// 2. TCP Simultaneous Open collision resolution: Both sides sent ClientHello (HandshakeClientHello = 0x01)!
+	if body[0] == HandshakeClientHello {
+		if len(body) < 70 {
+			return false, ErrInvalidTLSHandshake
+		}
+		var remoteClientRandom [32]byte
+		copy(remoteClientRandom[:], body[6:38])
 
-	return nil
+		sessIDLen := int(body[38])
+		if sessIDLen != 32 || len(body) < 39+32 {
+			return false, ErrInvalidTLSHandshake
+		}
+		var remoteSessionID [32]byte
+		copy(remoteSessionID[:], body[39:39+32])
+
+		// Validate remote peer's HMAC token
+		expectedTag := computeHMAC(networkKey, remoteClientRandom[:])
+		if !hmac.Equal(remoteSessionID[:16], expectedTag) {
+			return false, ErrAuthFailed
+		}
+
+		// Tie-break: compare our clientRandom vs remoteClientRandom
+		cmp := bytes.Compare(clientRandom[:], remoteClientRandom[:])
+		if cmp > 0 {
+			// WE WIN: We transition to SERVER role!
+			shResp, err := BuildServerHello(remoteClientRandom, remoteSessionID, networkKey)
+			if err != nil {
+				return false, err
+			}
+			if _, err := conn.Write(shResp); err != nil {
+				return false, fmt.Errorf("failed to write ServerHello in simultaneous open: %w", err)
+			}
+			return true, nil // We act as Server
+		} else {
+			// WE LOSE: We remain CLIENT role and wait for ServerHello from the winner
+			_ = conn.SetDeadline(time.Now().Add(timeout))
+			sHdr := make([]byte, 5)
+			if _, err := io.ReadFull(conn, sHdr); err != nil {
+				return false, fmt.Errorf("failed to read ServerHello from simultaneous open peer: %w", err)
+			}
+			if sHdr[0] != RecordHandshake {
+				return false, ErrInvalidTLSHandshake
+			}
+			sRecLen := binary.BigEndian.Uint16(sHdr[3:5])
+			if sRecLen < 38 || sRecLen > 4096 {
+				return false, ErrInvalidTLSHandshake
+			}
+			sBody := make([]byte, sRecLen)
+			if _, err := io.ReadFull(conn, sBody); err != nil {
+				return false, fmt.Errorf("failed to read ServerHello body from simultaneous open peer: %w", err)
+			}
+			if sBody[0] != HandshakeServerHello || len(sBody) < 38 {
+				return false, ErrInvalidTLSHandshake
+			}
+			serverRandom := sBody[6:38]
+			expectedAuth := computeHMAC(networkKey, append(clientRandom[:], []byte("server")...))
+			if !hmac.Equal(serverRandom[:16], expectedAuth) {
+				return false, ErrAuthFailed
+			}
+			// Read optional ChangeCipherSpec
+			ccsHdr := make([]byte, 6)
+			_ = conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
+			_, _ = io.ReadFull(conn, ccsHdr)
+			_ = conn.SetDeadline(time.Time{})
+			return false, nil // We remain Client
+		}
+	}
+
+	return false, ErrInvalidTLSHandshake
 }
 
 // ServerHandshake handles incoming connection on server side, validates HMAC, and responds.

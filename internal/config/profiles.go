@@ -49,6 +49,9 @@ type Profile struct {
 	RandomTrailers      bool      `json:"random_trailers,omitempty" mapstructure:"random_trailers" yaml:"random_trailers,omitempty"`
 	DisableCookies      bool      `json:"disable_cookies,omitempty" mapstructure:"disable_cookies" yaml:"disable_cookies,omitempty"`
 	ObfuscationSNI      string    `json:"obfuscation_sni,omitempty" mapstructure:"obfuscation_sni" yaml:"obfuscation_sni,omitempty"`
+	TCPPort             int       `json:"tcp_port,omitempty" mapstructure:"tcp_port" yaml:"tcp_port,omitempty"`
+	TransportMode       string    `json:"transport_mode,omitempty" mapstructure:"transport_mode" yaml:"transport_mode,omitempty"`
+	TLSMode             string    `json:"tls_mode,omitempty" mapstructure:"tls_mode" yaml:"tls_mode,omitempty"`
 	EnableTCPFallback   bool      `json:"enable_tcp_fallback" mapstructure:"enable_tcp_fallback" yaml:"enable_tcp_fallback"`
 	WSSRelayURL         string    `json:"wss_relay_url,omitempty" mapstructure:"wss_relay_url" yaml:"wss_relay_url,omitempty"`
 	IsActive            bool      `json:"is_active" mapstructure:"is_active" yaml:"is_active"`

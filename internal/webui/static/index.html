@@ -1778,7 +1778,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
 
       <div class="glass-card">
-        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">🔒 Сетевые параметры WireGuard & DNS</h2>
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">🔒 Сетевые параметры WireGuard, TLS & DNS</h2>
 
         <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
           <div class="form-group">
@@ -1786,8 +1786,30 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <input type="number" id="cfgWgPort" class="form-input mono" value="51820">
           </div>
           <div class="form-group">
+            <label class="form-label">TCP Порт (ShadowTLS / mTLS):</label>
+            <input type="number" id="cfgTcpPort" class="form-input mono" value="8443">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Режим транспорта:</label>
+            <select id="cfgTransportMode" class="form-input">
+              <option value="auto">Авто (UDP Hole Punch + TCP ShadowTLS)</option>
+              <option value="force_tcp">Принудительно TCP (ShadowTLS 8443)</option>
+              <option value="force_udp">Принудительно UDP</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+          <div class="form-group">
             <label class="form-label">MTU пакета:</label>
             <input type="number" id="cfgMTU" class="form-input mono" value="1420">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Режим TLS шифрования:</label>
+            <select id="cfgTLSMode" class="form-input">
+              <option value="shadowtls">ShadowTLS 1.3 (DPI Stealth / SNI Camouflage)</option>
+              <option value="standard_mtls">Стандартный TLS 1.3 mTLS (RFC Mutual Auth)</option>
+            </select>
           </div>
           <div style="display:flex; align-items:center; padding-top:16px;">
             <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
@@ -3425,7 +3447,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       peers.forEach((p, idx) => {
         const vIP = (p.virtual_ip ? p.virtual_ip.split('/')[0].trim() : '') || ('10.200.0.' + (idx + 2));
         const name = p.nickname ? `⭐ ${p.nickname}` : p.device_id;
-        const isDirect = Boolean((p.direct_p2p && (p.active_endpoint || p.ping_ms > 0)) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls');
+        const isDirect = Boolean((p.direct_p2p && (p.active_endpoint || p.ping_ms > 0)) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct');
         const hasAWG = Boolean(p.awg || p.wg_pubkey || p.wg_pub_key || (p.public_key && p.public_key.length > 20));
         const pAWGVer = (p.awg && p.awg.version) ? p.awg.version : '3.1';
         let p2pBadge = '';
@@ -3437,7 +3459,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           p2pBadge = '<span class="badge" style="background:rgba(100,116,139,0.2); border:1px solid rgba(100,116,139,0.4); color:#94a3b8; font-size:0.72rem;">⚫ Офлайн</span>';
         } else if (p.awg_mismatch) {
           p2pBadge = '<span class="badge" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.6); color:#fca5a5; font-size:0.72rem; font-weight:700;" title="Параметры AWG (H1-H4, S1-S2, Jc) на этом узле не совпадают с вашими! Связь по WireGuard невозможна. Обновите профиль или синхронизируйте настройки">⚠️ AWG Различается (нет связи)</span>';
-        } else if (p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls') {
+        } else if (p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct') {
           p2pBadge = '<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; background:linear-gradient(135deg, #10b981, #059669);">⚡ Direct P2P • 🔒 ShadowTLS 1.3</span>';
         } else if (isDirect) {
           if (hasAWG) {
@@ -3471,7 +3493,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             col = '#fbbf24'; // Желтый (100-300 ms)
           }
           latDisplay = `<span style="color:${col}; font-weight:700;" class="mono">${dot} ${latMs} ms</span>`;
-        } else if (p.direct_p2p || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls') {
+        } else if (p.direct_p2p || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct') {
           latDisplay = `<span style="color:#4ade80; font-weight:600;" class="mono">🟢 P2P (OK)</span>`;
         } else {
           latDisplay = `<span style="color:var(--text-dim);" class="mono">—</span>`;
@@ -3767,7 +3789,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const relayPeers = [];
 
       pList.forEach(p => {
-        const isDirect = Boolean((p.direct_p2p && (p.active_endpoint || p.ping_ms > 0)) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls');
+        const isDirect = Boolean((p.direct_p2p && (p.active_endpoint || p.ping_ms > 0)) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct');
         if (isDirect) {
           directPeers.push(p);
         } else {
@@ -4441,7 +4463,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               '<div style="font-size:0.78rem; color:var(--text-muted);">' +
                 '<span style="color:var(--text-dim);">Локальные подсети (LAN):</span> <span class="mono" style="color:#e2e8f0; font-weight:600;">' + escapeHtml(routesStr) + '</span> • ' +
                 '<span>ОС: ' + escapeHtml(p.os || 'Linux') + ' (' + escapeHtml(p.arch || 'amd64') + ')</span> • ' +
-                '<span>Связь: ' + (p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' ? '⚡ Direct TCP ShadowTLS (' + (p.latency_ms || p.ping_ms || 0) + 'ms)' : (p.direct_p2p ? '⚡ Direct P2P AWG (' + (p.latency_ms || p.ping_ms || 0) + 'ms)' : '📡 Relay')) + '</span>' +
+                '<span>Связь: ' + (p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct' ? '⚡ Direct TCP ShadowTLS (' + (p.latency_ms || p.ping_ms || 0) + 'ms)' : (p.direct_p2p ? '⚡ Direct P2P AWG (' + (p.latency_ms || p.ping_ms || 0) + 'ms)' : '📡 Relay')) + '</span>' +
               '</div>' +
             '</div>' +
             '<div style="display:flex; gap:6px;">' +
@@ -4568,6 +4590,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             document.getElementById('cfgVirtualIP').value = c.network.address || '';
             document.getElementById('chkUpnp').checked = c.network.upnp_enabled || false;
             document.getElementById('chkDoH').checked = c.network.doh_enabled || false;
+            if (document.getElementById('cfgTcpPort')) {
+              document.getElementById('cfgTcpPort').value = c.network.tcp_port || 8443;
+            }
+            if (document.getElementById('cfgTransportMode')) {
+              document.getElementById('cfgTransportMode').value = c.network.transport_mode || 'auto';
+            }
+            if (document.getElementById('cfgTLSMode')) {
+              document.getElementById('cfgTLSMode').value = c.network.tls_mode || 'shadowtls';
+            }
             const chkExit = document.getElementById('cfgAllowExitNode') || document.getElementById('chkAllowExitNode');
             if (chkExit) chkExit.checked = c.network.allow_exit_node || false;
             currentSelectedExitNode = c.network.selected_exit_node || '';
@@ -4642,6 +4673,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const mqtt_user = document.getElementById('cfgMqttUser').value.trim();
       const mqtt_pass = document.getElementById('cfgMqttPass').value.trim();
       const wg_port = parseInt(document.getElementById('cfgWgPort').value) || 51820;
+      const tcp_port = parseInt(document.getElementById('cfgTcpPort') ? document.getElementById('cfgTcpPort').value : '8443') || 8443;
+      const transport_mode = document.getElementById('cfgTransportMode') ? document.getElementById('cfgTransportMode').value : 'auto';
+      const tls_mode = document.getElementById('cfgTLSMode') ? document.getElementById('cfgTLSMode').value : 'shadowtls';
       const mtu = parseInt(document.getElementById('cfgMTU').value) || 1420;
       const upnp_enabled = document.getElementById('chkUpnp').checked;
       const doh_enabled = document.getElementById('chkDoH').checked;
@@ -4664,6 +4698,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           mqtt_user,
           mqtt_pass,
           wg_port,
+          tcp_port,
+          transport_mode,
+          tls_mode,
           mtu,
           upnp_enabled,
           doh_enabled,

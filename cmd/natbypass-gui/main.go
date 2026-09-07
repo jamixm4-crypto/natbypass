@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.224-beta3"
+	Version = "1.9.224-beta4"
 	Commit  = "release"
 )
 
@@ -4217,6 +4217,10 @@ func startEngineFromConfig(c *config.Config) {
 		})
 		guiTCPDirectMgr = network.NewTCPDirectManager(ctx)
 		guiTCPDirectMgr.SetDeviceID(myDevID)
+		desiredTCPPort := c.Network.TCPPort
+		if desiredTCPPort <= 0 {
+			desiredTCPPort = 8443
+		}
 		if activeProf := c.EnsureActiveProfile(); activeProf != nil {
 			if activeProf.NetworkKey != "" {
 				guiTCPDirectMgr.SetNetworkKey(activeProf.NetworkKey)
@@ -4226,6 +4230,19 @@ func startEngineFromConfig(c *config.Config) {
 				sni = "gateway.icloud.com"
 			}
 			guiTCPDirectMgr.SetSNI(sni)
+			if activeProf.TCPPort > 0 {
+				desiredTCPPort = activeProf.TCPPort
+			}
+			if activeProf.TransportMode != "" {
+				guiTCPDirectMgr.SetTransportMode(activeProf.TransportMode)
+			} else if c.Network.TransportMode != "" {
+				guiTCPDirectMgr.SetTransportMode(c.Network.TransportMode)
+			}
+			if activeProf.TLSMode != "" {
+				guiTCPDirectMgr.SetTLSMode(activeProf.TLSMode)
+			} else if c.Network.TLSMode != "" {
+				guiTCPDirectMgr.SetTLSMode(c.Network.TLSMode)
+			}
 		}
 		if guiMagicSock != nil {
 			guiMagicSock.SetTCPManager(guiTCPDirectMgr)
@@ -4241,10 +4258,8 @@ func startEngineFromConfig(c *config.Config) {
 				registry.Upsert(regPeer)
 			}
 		})
-		if pPort := puncher.LocalPort(); pPort > 0 {
-			if tcpPort, err := guiTCPDirectMgr.StartListener(pPort); err == nil {
-				writeDebug(fmt.Sprintf("Direct P2P TCP (ShadowTLS) listener active on :%d", tcpPort))
-			}
+		if tcpPort, err := guiTCPDirectMgr.StartListener(desiredTCPPort); err == nil {
+			writeDebug(fmt.Sprintf("Direct P2P TCP (ShadowTLS) listener active on :%d [mode=%s]", tcpPort, guiTCPDirectMgr.TransportMode()))
 		}
 		writeDebug(fmt.Sprintf("UDPPuncher слушает локальный UDP порт :%d", puncher.LocalPort()))
 		pPort := puncher.LocalPort()
@@ -4572,25 +4587,28 @@ func startEngineFromConfig(c *config.Config) {
 								// If an active direct TCP ShadowTLS stream is connected, send through it (bypasses UDP DPI)
 								sentDirect := false
 								sentTCP := false
-								if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+								isForceTCP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp"
+								isForceUDP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_udp"
+
+								if !isForceUDP && guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
 									if tcpErr := guiTCPDirectMgr.SendPacket(targetPeer.DeviceID, packet); tcpErr == nil {
 										sentDirect = true
 										sentTCP = true
 									}
 								}
 
-								// 2. Pure P2P Direct UDP packet transmission
-								if !sentTCP && udpPuncher != nil && targetEP != "" {
+								// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
+								if !isForceTCP && !sentTCP && udpPuncher != nil && targetEP != "" {
 									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
 										sentDirect = true
 									}
 								}
 								// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
-								if !sentTCP && !targetPeer.DirectP2P && udpPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+								if !isForceTCP && !sentTCP && !targetPeer.DirectP2P && udpPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 									_ = udpPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, packet, pmin, pmax)
 								}
 								// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
-								if (!sentDirect || !targetPeer.DirectP2P) && udpPuncher != nil {
+								if !isForceTCP && (!sentDirect || !targetPeer.DirectP2P) && udpPuncher != nil {
 									if targetEP != "" {
 										_ = udpPuncher.SendHolePunchProbe(targetEP)
 									}
@@ -4603,7 +4621,32 @@ func startEngineFromConfig(c *config.Config) {
 										}
 									}
 								}
-								// 1d. Relay fallback via MQTT/Signaling if direct connection is not confirmed or UDP dropped
+								// 1d. If force_tcp and not connected yet, trigger immediate dial
+								if isForceTCP && !sentTCP && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+									tcpTarget := targetPeer.TCPAddr
+									if tcpTarget == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
+										tcpTarget = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
+									}
+									if tcpTarget == "" && targetPeer.STUNAddr != "" && targetPeer.WGPort > 0 {
+										tcpTarget = fmt.Sprintf("%s:%d", strings.Split(targetPeer.STUNAddr, ":")[0], targetPeer.WGPort)
+									}
+									if tcpTarget == "" && targetPeer.LocalAddr != "" {
+										tcpTarget = targetPeer.LocalAddr
+									}
+									if tcpTarget == "" {
+										tcpTarget = targetPeer.STUNAddr
+									}
+									if tcpTarget != "" {
+										lPort := guiTCPDirectMgr.Port()
+										if lPort <= 0 && udpPuncher != nil {
+											lPort = udpPuncher.LocalPort()
+										}
+										go func(devID, target string, localP int) {
+											_ = guiTCPDirectMgr.ConnectPeer(devID, target, localP)
+										}(targetPeer.DeviceID, tcpTarget, lPort)
+									}
+								}
+								// 1e. Relay fallback via MQTT/Signaling if direct connection is not confirmed or UDP dropped
 								if (!sentDirect || !targetPeer.DirectP2P) && activeMQTT != nil {
 									dataToSend := packet
 									if prof := c.EnsureActiveProfile(); prof != nil && prof.NetworkKey != "" {
@@ -4731,31 +4774,37 @@ func startEngineFromConfig(c *config.Config) {
 			case <-ctx.Done():
 				return
 			case <-probeTicker.C:
-				if udpPuncher != nil && registry != nil {
+				if registry != nil {
+					isForceTCP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp"
+					isForceUDP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_udp"
 					peers := registry.List()
 					for _, p := range peers {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
-							_ = udpPuncher.SendKeepAlive(p.ActiveEndpoint)
+							if !isForceTCP && udpPuncher != nil && p.Transport != "tcp_tls" {
+								_ = udpPuncher.SendKeepAlive(p.ActiveEndpoint)
+							}
 						} else {
-							if p.ActiveEndpoint != "" {
-								_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
-							}
-							if p.STUNAddr != "" {
-								_ = udpPuncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
-							}
-							if p.LocalAddr != "" {
-								_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
-							}
-							if p.IPv6Addr != "" {
-								_ = udpPuncher.SendHolePunchProbe(p.IPv6Addr)
-							}
-							for _, cand := range p.Candidates {
-								if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
-									_ = udpPuncher.SendHolePunchProbe(cand)
+							if !isForceTCP && udpPuncher != nil {
+								if p.ActiveEndpoint != "" {
+									_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
+								}
+								if p.STUNAddr != "" {
+									_ = udpPuncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
+								}
+								if p.LocalAddr != "" {
+									_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
+								}
+								if p.IPv6Addr != "" {
+									_ = udpPuncher.SendHolePunchProbe(p.IPv6Addr)
+								}
+								for _, cand := range p.Candidates {
+									if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
+										_ = udpPuncher.SendHolePunchProbe(cand)
+									}
 								}
 							}
 							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
-							if (!p.DirectP2P || p.ProbeCount >= 2) && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) {
+							if !isForceUDP && (isForceTCP || !p.DirectP2P || p.ProbeCount >= 2) && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) {
 								tcpTarget := p.TCPAddr
 								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
 									tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)

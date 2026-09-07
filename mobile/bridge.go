@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.224-beta3"
+const Version = "1.9.224-beta4"
 
 
 
@@ -384,6 +384,10 @@ func StartEngine(configYAML string, tunFd int) string {
 
 	globalTCPDirectMgr = network.NewTCPDirectManager(ctx)
 	globalTCPDirectMgr.SetDeviceID(devID)
+	desiredTCPPort := cfg.Network.TCPPort
+	if desiredTCPPort <= 0 {
+		desiredTCPPort = 8443
+	}
 	if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
 		if activeProf.NetworkKey != "" {
 			globalTCPDirectMgr.SetNetworkKey(activeProf.NetworkKey)
@@ -393,6 +397,19 @@ func StartEngine(configYAML string, tunFd int) string {
 			sni = "gateway.icloud.com"
 		}
 		globalTCPDirectMgr.SetSNI(sni)
+		if activeProf.TCPPort > 0 {
+			desiredTCPPort = activeProf.TCPPort
+		}
+		if activeProf.TransportMode != "" {
+			globalTCPDirectMgr.SetTransportMode(activeProf.TransportMode)
+		} else if cfg.Network.TransportMode != "" {
+			globalTCPDirectMgr.SetTransportMode(cfg.Network.TransportMode)
+		}
+		if activeProf.TLSMode != "" {
+			globalTCPDirectMgr.SetTLSMode(activeProf.TLSMode)
+		} else if cfg.Network.TLSMode != "" {
+			globalTCPDirectMgr.SetTLSMode(cfg.Network.TLSMode)
+		}
 	}
 	globalTCPDirectMgr.SetOnPacket(func(srcAddr *net.UDPAddr, payload []byte) {
 		atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
@@ -413,12 +430,8 @@ func StartEngine(configYAML string, tunFd int) string {
 			globalRegistry.Upsert(regPeer)
 		}
 	})
-	if puncher != nil {
-		if pPort := puncher.LocalPort(); pPort > 0 {
-			if tcpPort, err := globalTCPDirectMgr.StartListener(pPort); err == nil {
-				logger.Info().Int("port", tcpPort).Msg("Android Direct P2P TCP listener active")
-			}
-		}
+	if tcpPort, err := globalTCPDirectMgr.StartListener(desiredTCPPort); err == nil {
+		logger.Info().Int("port", tcpPort).Str("mode", globalTCPDirectMgr.TransportMode()).Msg("Android Direct P2P TCP listener active")
 	}
 
 	// Определение IP и STUN на постоянном UDP Puncher сокете:
@@ -777,17 +790,21 @@ func StartEngine(configYAML string, tunFd int) string {
 			case <-ctx.Done():
 				return
 			case <-probeTicker.C:
-				if puncher != nil && globalRegistry != nil {
+				if globalRegistry != nil {
+					isForceTCP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_tcp"
+					isForceUDP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_udp"
 					for _, peerItem := range globalRegistry.List() {
 						if peerItem.Online {
-							if peerItem.STUNAddr != "" {
-								_ = puncher.SendHolePunchProbe(peerItem.STUNAddr)
-							}
-							if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr {
-								_ = puncher.SendHolePunchProbe(peerItem.LocalAddr)
+							if !isForceTCP && puncher != nil {
+								if peerItem.STUNAddr != "" {
+									_ = puncher.SendHolePunchProbe(peerItem.STUNAddr)
+								}
+								if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr {
+									_ = puncher.SendHolePunchProbe(peerItem.LocalAddr)
+								}
 							}
 							// Trigger Direct TCP ShadowTLS fallback when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
-							if (!peerItem.DirectP2P || peerItem.ProbeCount >= 2) && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) {
+							if !isForceUDP && (isForceTCP || !peerItem.DirectP2P || peerItem.ProbeCount >= 2) && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) {
 								tcpTarget := peerItem.TCPAddr
 								if tcpTarget == "" && peerItem.PublicIP != "" && peerItem.WGPort > 0 {
 									tcpTarget = fmt.Sprintf("%s:%d", peerItem.PublicIP, peerItem.WGPort)
@@ -1033,26 +1050,29 @@ func attachTUNLocked(tunFd int) {
 							// If an active direct TCP ShadowTLS stream is connected, send through it (bypasses UDP DPI)
 							sentDirect := false
 							sentTCP := false
-							if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+							isForceTCP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_tcp"
+							isForceUDP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_udp"
+
+							if !isForceUDP && globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
 								if tcpErr := globalTCPDirectMgr.SendPacket(targetPeer.DeviceID, pkt); tcpErr == nil {
 									sentDirect = true
 									sentTCP = true
 								}
 							}
 
-							// 2. Pure P2P Direct UDP packet transmission
-							if !sentTCP && targetEP != "" && globalPuncher != nil {
+							// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
+							if !isForceTCP && !sentTCP && targetEP != "" && globalPuncher != nil {
 								if err := globalPuncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
 									sentDirect = true
 								}
 							}
 							// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
-							if !sentTCP && !targetPeer.DirectP2P && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+							if !isForceTCP && !sentTCP && !targetPeer.DirectP2P && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 								_ = globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax)
 							}
 
 							// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
-							if (!sentDirect || !targetPeer.DirectP2P) && globalPuncher != nil {
+							if !isForceTCP && (!sentDirect || !targetPeer.DirectP2P) && globalPuncher != nil {
 								if targetEP != "" {
 									_ = globalPuncher.SendHolePunchProbe(targetEP)
 								}
@@ -1069,7 +1089,33 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// 1d. Relay fallback via MQTT/Signaling if direct connection is not confirmed or UDP dropped
+							// 1d. If force_tcp and not connected yet, trigger immediate dial
+							if isForceTCP && !sentTCP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+								tcpTarget := targetPeer.TCPAddr
+								if tcpTarget == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
+									tcpTarget = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
+								}
+								if tcpTarget == "" && targetPeer.STUNAddr != "" && targetPeer.WGPort > 0 {
+									tcpTarget = fmt.Sprintf("%s:%d", strings.Split(targetPeer.STUNAddr, ":")[0], targetPeer.WGPort)
+								}
+								if tcpTarget == "" && targetPeer.LocalAddr != "" {
+									tcpTarget = targetPeer.LocalAddr
+								}
+								if tcpTarget == "" {
+									tcpTarget = targetPeer.STUNAddr
+								}
+								if tcpTarget != "" {
+									lPort := globalTCPDirectMgr.Port()
+									if lPort <= 0 && globalPuncher != nil {
+										lPort = globalPuncher.LocalPort()
+									}
+									go func(devID, target string, localP int) {
+										_ = globalTCPDirectMgr.ConnectPeer(devID, target, localP)
+									}(targetPeer.DeviceID, tcpTarget, lPort)
+								}
+							}
+
+							// 1e. Relay fallback via MQTT/Signaling if direct connection is not confirmed or UDP dropped
 							if (!sentDirect || !targetPeer.DirectP2P) && globalSigMgr != nil {
 								dataToSend := pkt
 								if globalConfig != nil {
