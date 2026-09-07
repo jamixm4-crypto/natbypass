@@ -105,7 +105,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.14"
+	Version = "1.9.5-beta1"
 	Commit  = "release"
 )
 
@@ -520,6 +520,7 @@ var (
 	sigMode          string
 	ipDisc           *network.Discoverer
 	udpPuncher       *network.UDPPuncher
+	guiTCPDirectMgr  *network.TCPDirectManager
 	activeMQTT       *signaling.MQTTChannel
 	uiServer         *webui.Server
 	tunDev           *tunnel.Device
@@ -4212,6 +4213,35 @@ func startEngineFromConfig(c *config.Config) {
 		guiMagicSock = network.NewMagicSock(puncher, func(devID, oldPath, newPath string, pType network.PathType) {
 			writeDebug(fmt.Sprintf("🧲 Magicsock GUI: путь к %s переключен: %s -> %s (%s)", devID, oldPath, newPath, pType))
 		})
+		guiTCPDirectMgr = network.NewTCPDirectManager(ctx)
+		guiTCPDirectMgr.SetDeviceID(myDevID)
+		if activeProf := c.EnsureActiveProfile(); activeProf != nil {
+			if activeProf.NetworkKey != "" {
+				guiTCPDirectMgr.SetNetworkKey(activeProf.NetworkKey)
+			}
+			sni := activeProf.ObfuscationSNI
+			if sni == "" {
+				sni = "gateway.icloud.com"
+			}
+			guiTCPDirectMgr.SetSNI(sni)
+		}
+		if guiMagicSock != nil {
+			guiMagicSock.SetTCPManager(guiTCPDirectMgr)
+		}
+		guiTCPDirectMgr.SetOnPeerUp(func(peerID string, remoteAddr string) {
+			writeDebug(fmt.Sprintf("⚡ Direct P2P TCP (ShadowTLS) активен с %s (%s)", peerID, remoteAddr))
+			if regPeer, ok := registry.Get(peerID); ok && regPeer != nil {
+				regPeer.DirectP2P = true
+				regPeer.ActiveEndpoint = remoteAddr
+				regPeer.LastDirectSeen = time.Now()
+				registry.Upsert(regPeer)
+			}
+		})
+		if pPort := puncher.LocalPort(); pPort > 0 {
+			if tcpPort, err := guiTCPDirectMgr.StartListener(pPort); err == nil {
+				writeDebug(fmt.Sprintf("Direct P2P TCP (ShadowTLS) listener active on :%d", tcpPort))
+			}
+		}
 		writeDebug(fmt.Sprintf("UDPPuncher слушает локальный UDP порт :%d", puncher.LocalPort()))
 		pPort := puncher.LocalPort()
 		go func() {
@@ -4252,7 +4282,7 @@ func startEngineFromConfig(c *config.Config) {
 		})
 
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
-		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+		onInboundPacket := func(srcAddr *net.UDPAddr, payload []byte) {
 			if len(payload) < 20 {
 				return
 			}
@@ -4332,7 +4362,9 @@ func startEngineFromConfig(c *config.Config) {
 				_ = tunDev.WritePacket(payload)
 				atomic.AddUint64(&packetsRecvCount, 1)
 			}
-		})
+		}
+		puncher.SetDataCallback(onInboundPacket)
+		guiTCPDirectMgr.SetOnPacket(onInboundPacket)
 	} else {
 		writeDebug("Ошибка создания UDPPuncher: " + err.Error())
 	}
@@ -4469,7 +4501,14 @@ func startEngineFromConfig(c *config.Config) {
 										sentDirect = true
 									}
 								}
-								// 1b. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
+								// 1b. Direct TCP ShadowTLS fallback path:
+								// If direct UDP is not confirmed OR failed, send via active TCP ShadowTLS stream
+								if (!sentDirect || !targetPeer.DirectP2P) && guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+									if tcpErr := guiTCPDirectMgr.SendPacket(targetPeer.DeviceID, packet); tcpErr == nil {
+										sentDirect = true
+									}
+								}
+								// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
 								if (!sentDirect || !targetPeer.DirectP2P) && udpPuncher != nil {
 									if targetEP != "" {
 										_ = udpPuncher.SendHolePunchProbe(targetEP)
@@ -4482,6 +4521,17 @@ func startEngineFromConfig(c *config.Config) {
 											_ = udpPuncher.SendHolePunchProbe(cand)
 										}
 									}
+								}
+								// 1d. Relay fallback via MQTT/Signaling if direct connection is not confirmed or UDP dropped
+								if (!sentDirect || !targetPeer.DirectP2P) && activeMQTT != nil {
+									dataToSend := packet
+									if prof := c.EnsureActiveProfile(); prof != nil && prof.NetworkKey != "" {
+										cKey := crypto.DeriveKey(prof.NetworkKey)
+										if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
+											dataToSend = enc
+										}
+									}
+									_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, dataToSend)
 								}
 								atomic.AddUint64(&packetsSentCount, 1)
 							}
@@ -4621,6 +4671,22 @@ func startEngineFromConfig(c *config.Config) {
 							for _, cand := range p.Candidates {
 								if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
 									_ = udpPuncher.SendHolePunchProbe(cand)
+								}
+							}
+							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is dropped (> 8 probes)
+							if p.ProbeCount > 8 && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) {
+								tcpTarget := p.TCPAddr
+								if tcpTarget == "" {
+									tcpTarget = p.STUNAddr
+								}
+								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
+									tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
+								}
+								if tcpTarget != "" {
+									lPort := udpPuncher.LocalPort()
+									go func(devID, target string, localP int) {
+										_ = guiTCPDirectMgr.ConnectPeer(devID, target, localP)
+									}(p.DeviceID, tcpTarget, lPort)
 								}
 							}
 						}
@@ -6056,13 +6122,24 @@ func updateData() {
 						if p.DirectP2P {
 							icon = "[P2P]"
 							if p.Latency > 0 {
-								statusDisplay = fmt.Sprintf("Прямой P2P (%v)", p.Latency.Round(time.Millisecond))
+								statusDisplay = fmt.Sprintf("Прямой AWG (%v)", p.Latency.Round(time.Millisecond))
 							} else {
-								statusDisplay = "Прямой P2P (OK)"
+								statusDisplay = "Прямой AWG (OK)"
+							}
+						} else if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID) {
+							icon = "[TLS]"
+							if p.Latency > 0 {
+								statusDisplay = fmt.Sprintf("Прямой TLS/DPI (%v)", p.Latency.Round(time.Millisecond))
+							} else {
+								statusDisplay = "Прямой TLS/DPI (OK)"
 							}
 						} else {
 							icon = "[NAT]"
-							statusDisplay = "Пробитие NAT..."
+							if p.Latency > 0 {
+								statusDisplay = fmt.Sprintf("Релей/Пробитие (%v)", p.Latency.Round(time.Millisecond))
+							} else {
+								statusDisplay = "Пробитие NAT..."
+							}
 						}
 					} else {
 						icon = "[OFF]"
@@ -6081,7 +6158,9 @@ func updateData() {
 					}
 
 					var extraTags []string
-					if p.AWG != nil || p.DirectP2P {
+					if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID) {
+						extraTags = append(extraTags, "[ShadowTLS v3]")
+					} else if p.AWG != nil || p.DirectP2P {
 						extraTags = append(extraTags, "[AWG 3.1]")
 					}
 					pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])

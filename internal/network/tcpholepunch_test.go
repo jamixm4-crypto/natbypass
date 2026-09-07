@@ -9,6 +9,7 @@ package network
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -128,6 +129,95 @@ func TestTCPDirectManager_RegisterAndClose(t *testing.T) {
 	mgr.Close()
 	if mgr.HasConn("peer-x") {
 		t.Fatalf("expected HasConn false after Close")
+	}
+}
+
+func TestTCPDirectManager_ShadowTLS_Integration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	netKey := "test-secret-shadowtls-key-12345"
+
+	// 1. Setup Server
+	serverMgr := NewTCPDirectManager(ctx)
+	defer serverMgr.Close()
+	serverMgr.SetDeviceID("server-node")
+	serverMgr.SetNetworkKey(netKey)
+
+	serverPktCh := make(chan []byte, 1)
+	serverMgr.SetOnPacket(func(remoteAddr *net.UDPAddr, payload []byte) {
+		serverPktCh <- payload
+	})
+
+	listenPort, err := serverMgr.StartListener(0)
+	if err != nil {
+		t.Fatalf("serverMgr.StartListener failed: %v", err)
+	}
+
+	// 2. Setup Client
+	clientMgr := NewTCPDirectManager(ctx)
+	defer clientMgr.Close()
+	clientMgr.SetDeviceID("client-node")
+	clientMgr.SetNetworkKey(netKey)
+	clientMgr.SetSNI("gateway.icloud.com")
+
+	clientPktCh := make(chan []byte, 1)
+	clientMgr.SetOnPacket(func(remoteAddr *net.UDPAddr, payload []byte) {
+		clientPktCh <- payload
+	})
+
+	// 3. Client connects to server via ShadowTLS
+	serverTarget := fmt.Sprintf("127.0.0.1:%d", listenPort)
+	if err := clientMgr.ConnectPeer("server-node", serverTarget, 0); err != nil {
+		t.Fatalf("clientMgr.ConnectPeer failed: %v", err)
+	}
+
+	// Verify both sides registered the connection
+	if !clientMgr.HasConn("server-node") {
+		t.Fatalf("expected clientMgr to have connection for server-node")
+	}
+
+	// Wait briefly for server acceptLoop to register client-node
+	var serverHasConn bool
+	for i := 0; i < 30; i++ {
+		if serverMgr.HasConn("client-node") {
+			serverHasConn = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !serverHasConn {
+		t.Fatalf("expected serverMgr to have connection for client-node")
+	}
+
+	// 4. Test Client -> Server transmission through TLS Application Data
+	clientPayload := []byte("DATA_FROM_CLIENT_THROUGH_SHADOWTLS_TLS13")
+	if err := clientMgr.SendPacket("server-node", clientPayload); err != nil {
+		t.Fatalf("clientMgr.SendPacket failed: %v", err)
+	}
+
+	select {
+	case pkt := <-serverPktCh:
+		if string(pkt) != string(clientPayload) {
+			t.Fatalf("server received payload mismatch: expected %q, got %q", clientPayload, pkt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for packet on server")
+	}
+
+	// 5. Test Server -> Client reply
+	serverReply := []byte("REPLY_FROM_SERVER_THROUGH_SHADOWTLS_TLS13")
+	if err := serverMgr.SendPacket("client-node", serverReply); err != nil {
+		t.Fatalf("serverMgr.SendPacket failed: %v", err)
+	}
+
+	select {
+	case pkt := <-clientPktCh:
+		if string(pkt) != string(serverReply) {
+			t.Fatalf("client received payload mismatch: expected %q, got %q", serverReply, pkt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for packet on client")
 	}
 }
 

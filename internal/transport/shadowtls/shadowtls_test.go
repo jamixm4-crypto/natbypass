@@ -1,0 +1,193 @@
+// Copyright (C) 2026 jamixm4-crypto
+//
+// NatBypass is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+package shadowtls
+
+import (
+	"bytes"
+	"net"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/natbypass/natbypass/internal/crypto"
+)
+
+func TestBuildClientHello_Structure(t *testing.T) {
+	key := crypto.DeriveKey("test-network-secret-key-123456789")
+	sni := "gateway.icloud.com"
+
+	chPkt, err := BuildClientHello(sni, key)
+	if err != nil {
+		t.Fatalf("BuildClientHello failed: %v", err)
+	}
+
+	if len(chPkt) < 100 {
+		t.Fatalf("ClientHello record unexpectedly small: %d bytes", len(chPkt))
+	}
+
+	// Byte 0 must be 0x16 (RecordHandshake)
+	if chPkt[0] != RecordHandshake {
+		t.Fatalf("expected RecordHandshake (0x16), got 0x%02x", chPkt[0])
+	}
+
+	// Bytes 1..2 must be 0x03 0x01 (VersionTLS10 record layer for middlebox compatibility)
+	if chPkt[1] != 0x03 || chPkt[2] != 0x01 {
+		t.Fatalf("expected TLS 1.0 record layer (0x0301), got 0x%02x%02x", chPkt[1], chPkt[2])
+	}
+
+	// Handshake type at offset 5 must be 0x01 (ClientHello)
+	if chPkt[5] != HandshakeClientHello {
+		t.Fatalf("expected HandshakeClientHello (0x01), got 0x%02x", chPkt[5])
+	}
+
+	// SNI string must exist within record
+	if !bytes.Contains(chPkt, []byte(sni)) {
+		t.Fatalf("ClientHello does not contain SNI '%s'", sni)
+	}
+}
+
+func tcpLoopbackPair() (net.Conn, net.Conn, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer ln.Close()
+
+	var serverConn net.Conn
+	var acceptErr error
+	done := make(chan struct{})
+	go func() {
+		serverConn, acceptErr = ln.Accept()
+		close(done)
+	}()
+
+	clientConn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		return nil, nil, err
+	}
+	<-done
+	if acceptErr != nil {
+		_ = clientConn.Close()
+		return nil, nil, acceptErr
+	}
+	return clientConn, serverConn, nil
+}
+
+func TestHandshake_SuccessAndTransmission(t *testing.T) {
+	key := crypto.DeriveKey("shared-mesh-secret-key-999999999")
+	sni := "www.microsoft.com"
+
+	clientConn, serverConn, err := tcpLoopbackPair()
+	if err != nil {
+		t.Fatalf("tcpLoopbackPair failed: %v", err)
+	}
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	var serverErr, clientErr error
+	var serverTLS, clientTLS *ShadowTLSConn
+
+	go func() {
+		defer wg.Done()
+		err := ServerHandshake(serverConn, key, 3*time.Second)
+		if err != nil {
+			serverErr = err
+			return
+		}
+		serverTLS = NewShadowTLSConn(serverConn, key)
+	}()
+
+	go func() {
+		defer wg.Done()
+		err := ClientHandshake(clientConn, sni, key, 3*time.Second)
+		if err != nil {
+			clientErr = err
+			return
+		}
+		clientTLS = NewShadowTLSConn(clientConn, key)
+	}()
+
+	wg.Wait()
+
+	if serverErr != nil {
+		t.Fatalf("ServerHandshake failed: %v", serverErr)
+	}
+	if clientErr != nil {
+		t.Fatalf("ClientHandshake failed: %v", clientErr)
+	}
+
+	// Test bidirectional encrypted packet transmission with dynamic padding
+	testPayload := []byte("GET /tunnel-ping HTTP/1.1\r\nHost: 10.1.1.1\r\n\r\n")
+
+	// Client -> Server
+	if err := clientTLS.WritePacket(testPayload); err != nil {
+		t.Fatalf("clientTLS.WritePacket failed: %v", err)
+	}
+
+	recvOnServer, err := serverTLS.ReadPacket()
+	if err != nil {
+		t.Fatalf("serverTLS.ReadPacket failed: %v", err)
+	}
+	if !bytes.Equal(recvOnServer, testPayload) {
+		t.Fatalf("server received payload mismatch: expected %q, got %q", testPayload, recvOnServer)
+	}
+
+	// Server -> Client reply
+	replyPayload := []byte("HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nPONG")
+	if err := serverTLS.WritePacket(replyPayload); err != nil {
+		t.Fatalf("serverTLS.WritePacket failed: %v", err)
+	}
+
+	recvOnClient, err := clientTLS.ReadPacket()
+	if err != nil {
+		t.Fatalf("clientTLS.ReadPacket failed: %v", err)
+	}
+	if !bytes.Equal(recvOnClient, replyPayload) {
+		t.Fatalf("client received payload mismatch: expected %q, got %q", replyPayload, recvOnClient)
+	}
+}
+
+func TestHandshake_WrongKeyRejection_ActiveProbing(t *testing.T) {
+	keyAlice := crypto.DeriveKey("key-alice-valid")
+	keyAttacker := crypto.DeriveKey("key-attacker-probe")
+
+	clientConn, serverConn, err := tcpLoopbackPair()
+	if err != nil {
+		t.Fatalf("tcpLoopbackPair failed: %v", err)
+	}
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	var serverErr, clientErr error
+
+	go func() {
+		defer wg.Done()
+		serverErr = ServerHandshake(serverConn, keyAlice, 2*time.Second)
+	}()
+
+	go func() {
+		defer wg.Done()
+		clientErr = ClientHandshake(clientConn, "gateway.icloud.com", keyAttacker, 2*time.Second)
+	}()
+
+	wg.Wait()
+
+	// Server MUST reject with ErrAuthFailed, successfully protecting against active probing
+	if serverErr == nil {
+		t.Fatalf("expected ServerHandshake to fail due to wrong HMAC key, but succeeded!")
+	}
+	if clientErr == nil {
+		t.Fatalf("expected ClientHandshake to fail, but succeeded!")
+	}
+}

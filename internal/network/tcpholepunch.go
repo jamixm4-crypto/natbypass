@@ -16,6 +16,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/natbypass/natbypass/internal/crypto"
+	"github.com/natbypass/natbypass/internal/transport/shadowtls"
 )
 
 // AttemptTCPSimultaneousOpen attempts TCP Simultaneous Open (RFC 9293 Section 3.5 / RFC 5382).
@@ -95,6 +98,9 @@ type TCPDirectManager struct {
 	listener   net.Listener
 	listenPort int
 	myDeviceID string
+	networkKey [32]byte
+	hasKey     bool
+	sni        string
 	onPacket   func(remoteAddr *net.UDPAddr, payload []byte)
 	onPeerUp   func(peerID string, remoteAddr string)
 }
@@ -106,6 +112,29 @@ func NewTCPDirectManager(ctx context.Context) *TCPDirectManager {
 		conns:  make(map[string]net.Conn),
 		ctx:    cCtx,
 		cancel: cancel,
+		sni:    shadowtls.DefaultSNI,
+	}
+}
+
+// SetNetworkKey sets the secret network key used for ShadowTLS TLS 1.3 obfuscation.
+func (m *TCPDirectManager) SetNetworkKey(key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if key == "" {
+		m.hasKey = false
+		m.networkKey = [32]byte{}
+		return
+	}
+	m.networkKey = crypto.DeriveKey(key)
+	m.hasKey = true
+}
+
+// SetSNI sets the target server name indication domain for TLS 1.3 masquerade.
+func (m *TCPDirectManager) SetSNI(sni string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if sni != "" {
+		m.sni = sni
 	}
 }
 
@@ -179,6 +208,46 @@ func (m *TCPDirectManager) acceptLoop(ln net.Listener) {
 		}
 
 		go func(c net.Conn) {
+			m.mu.RLock()
+			hasKey := m.hasKey
+			netKey := m.networkKey
+			myID := m.myDeviceID
+			onPkt := m.onPacket
+			onUp := m.onPeerUp
+			m.mu.RUnlock()
+
+			if hasKey {
+				// 1. Stealth TLS 1.3 Server Handshake (DPI bypass)
+				if err := shadowtls.ServerHandshake(c, netKey, 5*time.Second); err != nil {
+					_ = c.Close()
+					return
+				}
+				tlsConn := shadowtls.NewShadowTLSConn(c, netKey)
+				_ = tlsConn.SetDeadline(time.Now().Add(5 * time.Second))
+
+				// 2. Read remote peer ID inside encrypted TLS 1.3 Application Data frame
+				peerIDPkt, err := tlsConn.ReadPacket()
+				if err != nil || len(peerIDPkt) == 0 {
+					_ = tlsConn.Close()
+					return
+				}
+				remotePeerID := string(peerIDPkt)
+
+				// 3. Send our peer ID inside encrypted TLS 1.3 Application Data frame
+				if err := tlsConn.WritePacket([]byte(myID)); err != nil {
+					_ = tlsConn.Close()
+					return
+				}
+				_ = tlsConn.SetDeadline(time.Time{})
+
+				m.RegisterConn(remotePeerID, tlsConn, onPkt)
+				if onUp != nil {
+					onUp(remotePeerID, c.RemoteAddr().String())
+				}
+				return
+			}
+
+			// Fallback: plaintext NBTCP handshake
 			_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 			magic := make([]byte, 5)
 			if _, err := io.ReadFull(c, magic); err != nil || string(magic) != "NBTCP" {
@@ -196,12 +265,6 @@ func (m *TCPDirectManager) acceptLoop(ln net.Listener) {
 				return
 			}
 			remotePeerID := string(peerIDBuf)
-
-			m.mu.RLock()
-			myID := m.myDeviceID
-			onPkt := m.onPacket
-			onUp := m.onPeerUp
-			m.mu.RUnlock()
 
 			resp := []byte("NBTCP")
 			resp = append(resp, byte(len(myID)))
@@ -242,11 +305,45 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 	}
 
 	m.mu.RLock()
+	hasKey := m.hasKey
+	netKey := m.networkKey
+	sni := m.sni
 	myID := m.myDeviceID
 	onPkt := m.onPacket
 	onUp := m.onPeerUp
 	m.mu.RUnlock()
 
+	if hasKey {
+		// 1. Stealth TLS 1.3 Client Handshake (DPI bypass)
+		if err := shadowtls.ClientHandshake(conn, sni, netKey, 5*time.Second); err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("shadowtls handshake failed: %w", err)
+		}
+		tlsConn := shadowtls.NewShadowTLSConn(conn, netKey)
+		_ = tlsConn.SetDeadline(time.Now().Add(5 * time.Second))
+
+		// 2. Send our peer ID inside encrypted TLS 1.3 Application Data frame
+		if err := tlsConn.WritePacket([]byte(myID)); err != nil {
+			_ = tlsConn.Close()
+			return err
+		}
+
+		// 3. Receive remote peer ID inside encrypted TLS 1.3 Application Data frame
+		respPkt, err := tlsConn.ReadPacket()
+		if err != nil || len(respPkt) == 0 {
+			_ = tlsConn.Close()
+			return fmt.Errorf("failed to read remote peer id: %w", err)
+		}
+		_ = tlsConn.SetDeadline(time.Time{})
+
+		m.RegisterConn(peerID, tlsConn, onPkt)
+		if onUp != nil {
+			onUp(peerID, targetAddr)
+		}
+		return nil
+	}
+
+	// Fallback: plaintext NBTCP handshake
 	_ = conn.SetDeadline(time.Now().Add(4 * time.Second))
 	req := []byte("NBTCP")
 	req = append(req, byte(len(myID)))
@@ -288,7 +385,7 @@ func (m *TCPDirectManager) HasConn(deviceID string) bool {
 	return ok
 }
 
-// RegisterConn registers a newly established TCP connection and starts reading length-prefixed frames.
+// RegisterConn registers a newly established TCP connection and starts reading packets.
 func (m *TCPDirectManager) RegisterConn(deviceID string, conn net.Conn, onPacket func(remoteAddr *net.UDPAddr, payload []byte)) {
 	if onPacket == nil {
 		m.mu.RLock()
@@ -318,6 +415,26 @@ func (m *TCPDirectManager) RegisterConn(deviceID string, conn net.Conn, onPacket
 			remoteUDP = &net.UDPAddr{IP: rTCP.IP, Port: rTCP.Port}
 		}
 
+		// If wrapped in ShadowTLSConn, read via ReadPacket (decrypts and removes padding)
+		if sConn, ok := conn.(*shadowtls.ShadowTLSConn); ok {
+			for {
+				select {
+				case <-m.ctx.Done():
+					return
+				default:
+				}
+				_ = sConn.SetReadDeadline(time.Now().Add(25 * time.Second))
+				pkt, err := sConn.ReadPacket()
+				if err != nil {
+					return
+				}
+				if onPacket != nil && len(pkt) > 0 {
+					onPacket(remoteUDP, pkt)
+				}
+			}
+		}
+
+		// Fallback for standard length-prefixed raw TCP frames
 		lenBuf := make([]byte, 2)
 		for {
 			select {
@@ -344,13 +461,18 @@ func (m *TCPDirectManager) RegisterConn(deviceID string, conn net.Conn, onPacket
 	}()
 }
 
-// SendPacket writes a length-prefixed frame to the peer's TCP connection.
+// SendPacket writes a packet to the peer's TCP connection (encapsulated in TLS Application Data).
 func (m *TCPDirectManager) SendPacket(deviceID string, payload []byte) error {
 	m.mu.RLock()
 	conn, exists := m.conns[deviceID]
 	m.mu.RUnlock()
 	if !exists || conn == nil {
 		return fmt.Errorf("no active tcp stream for peer %s", deviceID)
+	}
+
+	if sConn, ok := conn.(*shadowtls.ShadowTLSConn); ok {
+		_ = sConn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		return sConn.WritePacket(payload)
 	}
 
 	frame := make([]byte, 2+len(payload))

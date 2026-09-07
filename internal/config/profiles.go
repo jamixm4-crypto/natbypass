@@ -48,6 +48,9 @@ type Profile struct {
 	WGPort              int       `json:"wg_port,omitempty" mapstructure:"wg_port" yaml:"wg_port,omitempty"`
 	RandomTrailers      bool      `json:"random_trailers,omitempty" mapstructure:"random_trailers" yaml:"random_trailers,omitempty"`
 	DisableCookies      bool      `json:"disable_cookies,omitempty" mapstructure:"disable_cookies" yaml:"disable_cookies,omitempty"`
+	ObfuscationSNI      string    `json:"obfuscation_sni,omitempty" mapstructure:"obfuscation_sni" yaml:"obfuscation_sni,omitempty"`
+	EnableTCPFallback   bool      `json:"enable_tcp_fallback" mapstructure:"enable_tcp_fallback" yaml:"enable_tcp_fallback"`
+	WSSRelayURL         string    `json:"wss_relay_url,omitempty" mapstructure:"wss_relay_url" yaml:"wss_relay_url,omitempty"`
 	IsActive            bool      `json:"is_active" mapstructure:"is_active" yaml:"is_active"`
 	CreatedAt           time.Time `json:"created_at" mapstructure:"created_at" yaml:"created_at"`
 }
@@ -119,6 +122,8 @@ func GenerateDefaultProfile(name string) Profile {
 		HeaderProtectionKey: hpKey,
 		RandomTrailers:      true,
 		DisableCookies:      true,
+		ObfuscationSNI:      "gateway.icloud.com",
+		EnableTCPFallback:   true,
 		IsActive:            true,
 		CreatedAt:           time.Now(),
 	}
@@ -192,6 +197,10 @@ func (c *Config) EnsureActiveProfile() *Profile {
 			if !c.Profiles[i].DisableCookies {
 				c.Profiles[i].DisableCookies = true
 			}
+		}
+		if c.Profiles[i].ObfuscationSNI == "" {
+			c.Profiles[i].ObfuscationSNI = "gateway.icloud.com"
+			c.Profiles[i].EnableTCPFallback = true
 		}
 	}
 
@@ -495,6 +504,13 @@ func ExportProfileURI(p Profile) string {
 	}
 	q.Set("rt", fmt.Sprintf("%t", rt))
 	q.Set("dc", fmt.Sprintf("%t", dc))
+	if p.ObfuscationSNI != "" {
+		q.Set("sni", p.ObfuscationSNI)
+	}
+	if p.WSSRelayURL != "" {
+		q.Set("wss", p.WSSRelayURL)
+	}
+	q.Set("tcp_fb", fmt.Sprintf("%t", p.EnableTCPFallback))
 
 	return "natbypass://profile?" + q.Encode()
 }
@@ -532,21 +548,33 @@ func ImportProfileURI(raw string) (*Profile, error) {
 			if id == "" {
 				id = "p-" + GenerateRandomHex(4)
 			}
+			sni := q.Get("sni")
+			if sni == "" {
+				sni = "gateway.icloud.com"
+			}
+			tcpFb := true
+			if q.Get("tcp_fb") == "false" {
+				tcpFb = false
+			}
+
 			p := &Profile{
-				ID:         id,
-				Name:       name,
-				NetworkKey: q.Get("key"),
-				Subnet:     q.Get("subnet"),
-				MQTTBroker: broker,
-				MQTTTopic:  topic,
-				MQTTUser:   q.Get("user"),
-				MQTTPass:   q.Get("pass"),
-				TGToken:    q.Get("tg_token"),
-				TGChatID:   tgChat,
-				TGProxy:    q.Get("tg_proxy"),
-				AWGPreset:  q.Get("awg"),
-				IsActive:   true,
-				CreatedAt:  time.Now(),
+				ID:                id,
+				Name:              name,
+				NetworkKey:        q.Get("key"),
+				Subnet:            q.Get("subnet"),
+				MQTTBroker:        broker,
+				MQTTTopic:         topic,
+				MQTTUser:          q.Get("user"),
+				MQTTPass:          q.Get("pass"),
+				TGToken:           q.Get("tg_token"),
+				TGChatID:          tgChat,
+				TGProxy:           q.Get("tg_proxy"),
+				AWGPreset:         q.Get("awg"),
+				ObfuscationSNI:    sni,
+				EnableTCPFallback: tcpFb,
+				WSSRelayURL:       q.Get("wss"),
+				IsActive:          true,
+				CreatedAt:         time.Now(),
 			}
 			if h1Str := q.Get("h1"); h1Str != "" {
 				if v, err := strconv.ParseUint(h1Str, 10, 32); err == nil { p.H1 = uint32(v) }

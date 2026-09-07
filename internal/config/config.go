@@ -68,6 +68,10 @@ type NetworkConfig struct {
 	// Задайте явно (например, 47832) если нужен фиксированный порт для firewall-правил.
 	// НЕ используйте 51820 если на этой машине работает локальный WireGuard/AmneziaWG!
 	UDPPort int `mapstructure:"udp_port" yaml:"udp_port,omitempty"`
+	// EnableTCPFallback включает обфусцированный TCP P2P фэлбэк (ShadowTLS v3) при блокировке UDP
+	EnableTCPFallback bool `mapstructure:"enable_tcp_fallback" yaml:"enable_tcp_fallback"`
+	// ObfuscationSNI — домен маскировки TLS 1.3 ClientHello (по умолчанию gateway.icloud.com)
+	ObfuscationSNI string `mapstructure:"obfuscation_sni" yaml:"obfuscation_sni,omitempty"`
 }
 
 // ChannelConfig — настройки одного сигнального канала
@@ -297,6 +301,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("web_ui.port", 8080)
 
 	v.SetDefault("network.upnp_enabled", true)
+	v.SetDefault("network.enable_tcp_fallback", true)
+	v.SetDefault("network.obfuscation_sni", "gateway.icloud.com")
 	v.SetDefault("network.ip_timeout", 10)
 	v.SetDefault("network.mtu", 1280)
 	v.SetDefault("network.allow_exit_node", false)

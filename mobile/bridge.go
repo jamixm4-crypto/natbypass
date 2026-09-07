@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.223-beta.14"
+const Version = "1.9.5-beta1"
 
 
 
@@ -136,6 +136,7 @@ var (
 	globalAdvertisedRoutes []string
 	globalAWGPreset        string = "dpi"
 	globalPuncher          *network.UDPPuncher
+	globalTCPDirectMgr     *network.TCPDirectManager
 	globalTunFile   *os.File
 	globalTunCancel context.CancelFunc // controls TUN read goroutine lifecycle
 	globalTxBytes   uint64
@@ -378,6 +379,45 @@ func StartEngine(configYAML string, tunFd int) string {
 	if puncher != nil {
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 			puncher.SetCipherKey(activeProf.NetworkKey)
+		}
+	}
+
+	globalTCPDirectMgr = network.NewTCPDirectManager(ctx)
+	globalTCPDirectMgr.SetDeviceID(devID)
+	if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+		if activeProf.NetworkKey != "" {
+			globalTCPDirectMgr.SetNetworkKey(activeProf.NetworkKey)
+		}
+		sni := activeProf.ObfuscationSNI
+		if sni == "" {
+			sni = "gateway.icloud.com"
+		}
+		globalTCPDirectMgr.SetSNI(sni)
+	}
+	globalTCPDirectMgr.SetOnPacket(func(srcAddr *net.UDPAddr, payload []byte) {
+		atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
+		respondICMPEcho(payload, srcAddr)
+		engineMu.Lock()
+		tf := globalTunFile
+		engineMu.Unlock()
+		if tf != nil {
+			_, _ = tf.Write(payload)
+		}
+	})
+	globalTCPDirectMgr.SetOnPeerUp(func(peerID string, remoteAddr string) {
+		logger.Info().Str("peer", peerID).Str("addr", remoteAddr).Msg("⚡ Android Direct P2P TCP (ShadowTLS) ACTIVE")
+		if regPeer, ok := globalRegistry.Get(peerID); ok && regPeer != nil {
+			regPeer.DirectP2P = true
+			regPeer.ActiveEndpoint = remoteAddr
+			regPeer.LastDirectSeen = time.Now()
+			globalRegistry.Upsert(regPeer)
+		}
+	})
+	if puncher != nil {
+		if pPort := puncher.LocalPort(); pPort > 0 {
+			if tcpPort, err := globalTCPDirectMgr.StartListener(pPort); err == nil {
+				logger.Info().Int("port", tcpPort).Msg("Android Direct P2P TCP listener active")
+			}
 		}
 	}
 
@@ -732,6 +772,22 @@ func StartEngine(configYAML string, tunFd int) string {
 							if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr {
 								_ = puncher.SendHolePunchProbe(peerItem.LocalAddr)
 							}
+							// Trigger Direct TCP ShadowTLS fallback when UDP is persistently dropped (> 8 probes)
+							if peerItem.ProbeCount > 8 && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) {
+								tcpTarget := peerItem.TCPAddr
+								if tcpTarget == "" {
+									tcpTarget = peerItem.STUNAddr
+								}
+								if tcpTarget == "" && peerItem.PublicIP != "" && peerItem.WGPort > 0 {
+									tcpTarget = fmt.Sprintf("%s:%d", peerItem.PublicIP, peerItem.WGPort)
+								}
+								if tcpTarget != "" {
+									lPort := puncher.LocalPort()
+									go func(devID, target string, localP int) {
+										_ = globalTCPDirectMgr.ConnectPeer(devID, target, localP)
+									}(peerItem.DeviceID, tcpTarget, lPort)
+								}
+							}
 						}
 					}
 				}
@@ -956,8 +1012,14 @@ func attachTUNLocked(tunFd int) {
 									sentDirect = true
 								}
 							}
+							// 1b. Direct TCP ShadowTLS fallback path:
+							if (!sentDirect || !targetPeer.DirectP2P) && globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+								if tcpErr := globalTCPDirectMgr.SendPacket(targetPeer.DeviceID, pkt); tcpErr == nil {
+									sentDirect = true
+								}
+							}
 
-							// 1b. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
+							// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
 							if (!sentDirect || !targetPeer.DirectP2P) && globalPuncher != nil {
 								if targetEP != "" {
 									_ = globalPuncher.SendHolePunchProbe(targetEP)
@@ -973,6 +1035,20 @@ func attachTUNLocked(tunFd int) {
 										_ = globalPuncher.SendDataPacketWithPadding(cand, pkt, pmin, pmax)
 									}
 								}
+							}
+
+							// 1d. Relay fallback via MQTT/Signaling if direct connection is not confirmed or UDP dropped
+							if (!sentDirect || !targetPeer.DirectP2P) && globalSigMgr != nil {
+								dataToSend := pkt
+								if globalConfig != nil {
+									if prof := globalConfig.EnsureActiveProfile(); prof != nil && prof.NetworkKey != "" {
+										cKey := crypto.DeriveKey(prof.NetworkKey)
+										if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+											dataToSend = enc
+										}
+									}
+								}
+								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, dataToSend)
 							}
 
 							logger.Debug().
@@ -1174,6 +1250,10 @@ func StopEngine() {
 	if globalPuncher != nil {
 		globalPuncher.Close()
 		globalPuncher = nil
+	}
+	if globalTCPDirectMgr != nil {
+		globalTCPDirectMgr.Close()
+		globalTCPDirectMgr = nil
 	}
 	if globalSigMgr != nil {
 		// FallbackManager останавливается через engineCancel() — контекст уже отменён

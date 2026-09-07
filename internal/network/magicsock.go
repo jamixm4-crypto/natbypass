@@ -94,8 +94,8 @@ const (
 )
 
 // TCPFallbackProbeThreshold is the number of failed UDP probe attempts before
-// MagicSock automatically tries a TCP Simultaneous Open to the peer.
-const TCPFallbackProbeThreshold = 200
+// MagicSock automatically tries a TCP Simultaneous Open / ShadowTLS fallback to the peer.
+const TCPFallbackProbeThreshold = 10
 
 // WANHairpin represents the relative network location of two peers with respect to NAT.
 type WANHairpin int
@@ -457,7 +457,23 @@ func (ms *MagicSock) RecordProbeAttempt(deviceID string) {
 	}
 }
 
-// triggerTCPFallback initiates a TCP Simultaneous Open to the peer if not already attempted.
+// SetTCPManager replaces the internal TCP manager with an external one (e.g. shared with engine).
+func (ms *MagicSock) SetTCPManager(mgr *TCPDirectManager) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	if mgr != nil {
+		ms.tcpManager = mgr
+	}
+}
+
+// TCPManager returns the active TCPDirectManager instance.
+func (ms *MagicSock) TCPManager() *TCPDirectManager {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+	return ms.tcpManager
+}
+
+// triggerTCPFallback initiates a TCP Simultaneous Open / ShadowTLS to the peer if not already attempted.
 // It runs the dial in a goroutine so it never blocks the caller.
 func (ms *MagicSock) triggerTCPFallback(deviceID string) {
 	ms.probeCountMu.Lock()
@@ -476,21 +492,20 @@ func (ms *MagicSock) triggerTCPFallback(deviceID string) {
 	}
 
 	go func() {
-		ctx, cancel := context.WithTimeout(ms.ctx, 10*time.Second)
-		defer cancel()
+		ms.mu.RLock()
+		mgr := ms.tcpManager
+		ms.mu.RUnlock()
+		if mgr == nil {
+			return
+		}
 
-		conn, err := AttemptTCPSimultaneousOpen(ctx, localPort, stunAddr)
-		if err != nil {
+		if err := mgr.ConnectPeer(deviceID, stunAddr, localPort); err != nil {
 			// Allow a retry next time the threshold is crossed again.
 			ms.probeCountMu.Lock()
 			ms.tcpAttempted[deviceID] = false
 			ms.probeCountMu.Unlock()
 			return
 		}
-
-		ms.tcpManager.RegisterConn(deviceID, conn, func(addr *net.UDPAddr, payload []byte) {
-			ms.notifyTCPPacket(deviceID, addr, payload)
-		})
 
 		// Register the TCP endpoint as a successful route so path selection picks it up.
 		ms.RecordProbeSuccess(deviceID, stunAddr, 0)
@@ -511,6 +526,8 @@ func (ms *MagicSock) notifyTCPPacket(deviceID string, remoteAddr *net.UDPAddr, p
 
 // HasTCPConn reports whether a live TCP Simultaneous Open stream exists for the peer.
 func (ms *MagicSock) HasTCPConn(deviceID string) bool {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
 	if ms.tcpManager == nil {
 		return false
 	}

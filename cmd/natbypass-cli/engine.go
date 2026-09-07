@@ -796,13 +796,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
 							}
 						}
-						// Direct TCP Simultaneous Open fallback path
-						if !sentDirect && tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID) {
+						// 1b. Direct TCP ShadowTLS fallback path:
+						// If direct UDP is not confirmed OR failed, send via active TCP ShadowTLS stream
+						if (!sentDirect || !p.DirectP2P) && tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID) {
 							if tcpErr := tcpDirectMgr.SendPacket(p.DeviceID, pkt); tcpErr == nil {
 								sentDirect = true
 							}
 						}
-						// 1b. Reactive instant hole punching if direct P2P is not yet confirmed or packet wasn't sent
+						// 1c. Reactive instant hole punching if direct P2P is not yet confirmed or packet wasn't sent
 						if (!sentDirect || !p.DirectP2P) && puncher != nil {
 							if targetEP != "" {
 								_ = puncher.SendHolePunchProbe(targetEP)
@@ -815,6 +816,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									_ = puncher.SendHolePunchProbe(cand)
 								}
 							}
+						}
+						// 1d. Relay fallback via MQTT/Signaling if direct P2P is not confirmed or UDP dropped
+						if (!sentDirect || !p.DirectP2P) && sigMgr != nil {
+							dataToSend := pkt
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+								cKey := crypto.DeriveKey(activeProf.NetworkKey)
+								if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+									dataToSend = enc
+								}
+							}
+							_ = sigMgr.PublishTunnelData(p.DeviceID, dataToSend)
 						}
 					}
 				}
@@ -1291,8 +1303,21 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDP puncher active on persistent socket with MagicSock and KeepAlive")
 		tcpDirectMgr = network.NewTCPDirectManager(ctx)
 		tcpDirectMgr.SetDeviceID(deviceID)
+		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+			if activeProf.NetworkKey != "" {
+				tcpDirectMgr.SetNetworkKey(activeProf.NetworkKey)
+			}
+			sni := activeProf.ObfuscationSNI
+			if sni == "" {
+				sni = "gateway.icloud.com"
+			}
+			tcpDirectMgr.SetSNI(sni)
+		}
+		if magicSock != nil {
+			magicSock.SetTCPManager(tcpDirectMgr)
+		}
 		tcpDirectMgr.SetOnPeerUp(func(peerID string, remoteAddr string) {
-			log.Info().Str("peer", peerID).Str("addr", remoteAddr).Msg("⚡ Direct P2P TCP connection ACTIVE")
+			log.Info().Str("peer", peerID).Str("addr", remoteAddr).Msg("⚡ Direct P2P TCP (ShadowTLS) ACTIVE")
 			if regPeer, ok := registry.Get(peerID); ok && regPeer != nil {
 				regPeer.DirectP2P = true
 				regPeer.ActiveEndpoint = remoteAddr
@@ -1301,7 +1326,7 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			}
 		})
 		if tcpPort, err := tcpDirectMgr.StartListener(puncher.LocalPort()); err == nil {
-			log.Info().Int("port", tcpPort).Msg("Direct P2P TCP listener active")
+			log.Info().Int("port", tcpPort).Msg("Direct P2P TCP (ShadowTLS) listener active")
 		}
 	}
 
