@@ -3461,12 +3461,19 @@ func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
 	exitStr, _ := syscall.UTF16PtrFromString(exitLabel)
 	subnetStr, _ := syscall.UTF16PtrFromString("🏠 Маршрутизировать подсеть узла")
 
+	tcpConnLabel := "⚡ Подключиться по Direct TCP (ShadowTLS)"
+	if targetPeer.Transport == "tcp_tls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID)) {
+		tcpConnLabel = "⚡ Переподключить Direct TCP (ShadowTLS)"
+	}
+	tcpConnStr, _ := syscall.UTF16PtrFromString(tcpConnLabel)
+
 	procAppendMenuW.Call(hMenu, 0, 6001, uintptr(unsafe.Pointer(copyVIPStr)))
 	procAppendMenuW.Call(hMenu, 0, 6002, uintptr(unsafe.Pointer(copyPubStr)))
 	procAppendMenuW.Call(hMenu, 0, 0x00000800 /* MF_SEPARATOR */, 0)
 	procAppendMenuW.Call(hMenu, 0, 6003, uintptr(unsafe.Pointer(pingStr)))
 	procAppendMenuW.Call(hMenu, 0, 6004, uintptr(unsafe.Pointer(bmStr)))
 	procAppendMenuW.Call(hMenu, 0, 0x00000800 /* MF_SEPARATOR */, 0)
+	procAppendMenuW.Call(hMenu, 0, 6007, uintptr(unsafe.Pointer(tcpConnStr)))
 	procAppendMenuW.Call(hMenu, 0, 6005, uintptr(unsafe.Pointer(exitStr)))
 	procAppendMenuW.Call(hMenu, 0, 6006, uintptr(unsafe.Pointer(subnetStr)))
 
@@ -3501,6 +3508,38 @@ func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
 		}
 	case 6006:
 		handleToggleSubnetRoute()
+	case 6007:
+		if guiTCPDirectMgr != nil {
+			tcpTarget := targetPeer.TCPAddr
+			if tcpTarget == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
+				tcpTarget = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
+			}
+			if tcpTarget == "" && targetPeer.STUNAddr != "" && targetPeer.WGPort > 0 {
+				tcpTarget = fmt.Sprintf("%s:%d", strings.Split(targetPeer.STUNAddr, ":")[0], targetPeer.WGPort)
+			}
+			if tcpTarget == "" && targetPeer.LocalAddr != "" {
+				tcpTarget = targetPeer.LocalAddr
+			}
+			if tcpTarget == "" {
+				tcpTarget = targetPeer.STUNAddr
+			}
+			if tcpTarget != "" {
+				lPort := guiTCPDirectMgr.Port()
+				if lPort <= 0 && udpPuncher != nil {
+					lPort = udpPuncher.LocalPort()
+				}
+				addLog(fmt.Sprintf("⚡ Запуск Direct TCP ShadowTLS к %s (%s)...", targetPeer.Nickname, tcpTarget))
+				go func(devID, target string, localP int) {
+					if err := guiTCPDirectMgr.ConnectPeer(devID, target, localP); err == nil {
+						addLog(fmt.Sprintf("⚡ Direct TCP с %s успешно установлен!", devID))
+					} else {
+						addLog(fmt.Sprintf("⚠️ Direct TCP ошибка с %s: %v", devID, err))
+					}
+				}(targetPeer.DeviceID, tcpTarget, lPort)
+			} else {
+				addLog("⚠️ У узла нет известного TCP/STUN адреса для подключения")
+			}
+		}
 	}
 }
 
