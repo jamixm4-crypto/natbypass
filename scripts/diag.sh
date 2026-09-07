@@ -537,13 +537,16 @@ test_ping() {
     fi
     PING_OK=0
     # Универсальная проверка для standard iputils ping и BusyBox ping (Keenetic / OpenWrt / routers).
-    # Используем -c 2 -w 3: отправляет 2 пакета с общим дедлайном 3с (учитывает трансграничный RTT 350-700мс).
-    # Флаг -W опущен, так как он не поддерживается в BusyBox и вызывает ошибку синтаксиса.
-    if ping -c 2 -w 3 "$CLEAN_IP" >/dev/null 2>&1; then
+    # Дедлайн 5с для учета трансграничного RTT и пробива NAT.
+    if ping -c 2 -w 5 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
-    elif ping -c 2 -w 3 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
+    elif ping -c 2 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
-    elif ping -c 1 -w 2 "$CLEAN_IP" >/dev/null 2>&1; then
+    elif ping -c 2 -w 5 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
+        PING_OK=1
+    elif ping -c 2 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
+        PING_OK=1
+    elif ping -c 1 -w 3 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
     elif ping -c 1 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1

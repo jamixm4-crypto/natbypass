@@ -71,7 +71,7 @@ func TestUDPPuncher_EncryptedTunnelData(t *testing.T) {
 		0x00, 0x01, 0x00, 0x01,
 	}
 
-	nodeB, err := NewUDPPuncher(0, "node-b", nil, nil)
+	nodeB, err := NewUDPPuncher(-1, "node-b", nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create nodeB: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestUDPPuncher_EncryptedTunnelData(t *testing.T) {
 		receivedCh <- payload
 	})
 
-	nodeA, err := NewUDPPuncher(0, "node-a", nil, nil)
+	nodeA, err := NewUDPPuncher(-1, "node-a", nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create nodeA: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestUDPPuncher_EncryptedTunnelData_WrongKeyRejection(t *testing.T) {
 		0x08, 0x00, 0x4d, 0x5a,
 	}
 
-	nodeB, err := NewUDPPuncher(0, "node-b-wrong", nil, nil)
+	nodeB, err := NewUDPPuncher(-1, "node-b-wrong", nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create nodeB: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestUDPPuncher_EncryptedTunnelData_WrongKeyRejection(t *testing.T) {
 		receivedCh <- payload
 	})
 
-	nodeA, err := NewUDPPuncher(0, "node-a-right", nil, nil)
+	nodeA, err := NewUDPPuncher(-1, "node-a-right", nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create nodeA: %v", err)
 	}

@@ -203,25 +203,28 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 
 	// Try binding UDP socket.
 	// 1. If preferredPort > 0, try it first.
-	// 2. If preferredPort <= 0 or fails, try stealth candidate ports that bypass DPI:
-	//    - 443: HTTP/3 / QUIC stealth mode, matches AmneziaWG and bypasses TSPU on cross-border links
+	// 2. If preferredPort <= 0 or fails, try unprivileged candidate ports (>1024) that avoid NAT privileged remapping:
+	//    - 47832: NatBypass default mesh port (constants.DefaultUDPPort)
 	//    - 51820: Standard WireGuard default
-	//    - 47832: NatBypass legacy default
-	//    - 0: OS dynamic ephemeral port fallback
+	//    - 0: OS dynamic ephemeral port fallback (>50000, Full Cone compatible)
 	candidates := make([]int, 0, 5)
-	if preferredPort > 0 {
-		candidates = append(candidates, preferredPort)
-	}
-	for _, p := range []int{constants.DefaultUDPPort, 51820, 47832, 0} {
-		found := false
-		for _, c := range candidates {
-			if c == p {
-				found = true
-				break
-			}
+	if preferredPort < 0 {
+		candidates = append(candidates, 0)
+	} else {
+		if preferredPort > 0 {
+			candidates = append(candidates, preferredPort)
 		}
-		if !found {
-			candidates = append(candidates, p)
+		for _, p := range []int{constants.DefaultUDPPort, 51820, 0} {
+			found := false
+			for _, c := range candidates {
+				if c == p {
+					found = true
+					break
+				}
+			}
+			if !found {
+				candidates = append(candidates, p)
+			}
 		}
 	}
 

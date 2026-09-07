@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.223-beta.13"
+const Version = "1.9.223-beta.14"
 
 
 
@@ -957,8 +957,11 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// Если прямой P2P еще не подтвержден — пробуем все известные адреса узла
-							if !targetPeer.DirectP2P && globalPuncher != nil {
+							// 1b. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
+							if (!sentDirect || !targetPeer.DirectP2P) && globalPuncher != nil {
+								if targetEP != "" {
+									_ = globalPuncher.SendHolePunchProbe(targetEP)
+								}
 								if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 									_ = globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax)
 								}
@@ -970,21 +973,6 @@ func attachTUNLocked(tunFd int) {
 										_ = globalPuncher.SendDataPacketWithPadding(cand, pkt, pmin, pmax)
 									}
 								}
-							}
-
-							// Резервный транспорт через сигнальный MQTT брокер (Relay Fallback), если прямой P2P не подтвержден или устарел (>10s / failed probes)
-							isDirectHealthy := targetPeer.DirectP2P && !targetPeer.LastDirectSeen.IsZero() && time.Since(targetPeer.LastDirectSeen) <= 10*time.Second && targetPeer.ProbeCount == 0
-							if (!sentDirect || !isDirectHealthy) && globalSigMgr != nil {
-								dataToSend := pkt
-								if globalConfig != nil {
-									if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-										cKey := crypto.DeriveKey(activeProf.NetworkKey)
-										if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
-											dataToSend = enc
-										}
-									}
-								}
-								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, dataToSend)
 							}
 
 							logger.Debug().
@@ -1050,28 +1038,17 @@ func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
 		}
 	}
 
-	// Если входящий запрос пришел через Relay (fromAddr == nil) ИЛИ прямой P2P не подтвержден / устарел — шлём через сигнальный MQTT-канал
-	if globalSigMgr != nil && globalRegistry != nil {
+	// Если прямой пакет не ушел по fromAddr, пробуем отправить по ActiveEndpoint или STUNAddr узла
+	if !sent && globalPuncher != nil && globalRegistry != nil {
 		for _, p := range globalRegistry.List() {
 			pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 			if pVIP == srcIP.String() || p.VirtualIP == srcIP.String() {
-				isDirectHealthy := fromAddr != nil && p.DirectP2P && !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) <= 10*time.Second && p.ProbeCount == 0
-				if !sent && globalPuncher != nil && isDirectHealthy && p.ActiveEndpoint != "" {
-					if err := globalPuncher.SendDataPacket(p.ActiveEndpoint, reply); err == nil {
-						sent = true
-					}
+				ep := p.ActiveEndpoint
+				if ep == "" {
+					ep = p.STUNAddr
 				}
-				if !sent || !isDirectHealthy {
-					replyToSend := reply
-					if globalConfig != nil {
-						if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-							cKey := crypto.DeriveKey(activeProf.NetworkKey)
-							if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
-								replyToSend = enc
-							}
-						}
-					}
-					_ = globalSigMgr.PublishTunnelData(p.DeviceID, replyToSend)
+				if ep != "" {
+					_ = globalPuncher.SendDataPacket(ep, reply)
 				}
 				break
 			}

@@ -105,7 +105,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.13"
+	Version = "1.9.223-beta.14"
 	Commit  = "release"
 )
 
@@ -4469,22 +4469,11 @@ func startEngineFromConfig(c *config.Config) {
 										sentDirect = true
 									}
 								}
-								// Резервный транспорт: релей через зашифрованный MQTT, если прямой P2P не подтвержден или устарел (>10s / failed probes)
-								isDirectHealthy := targetPeer.DirectP2P && !targetPeer.LastDirectSeen.IsZero() && time.Since(targetPeer.LastDirectSeen) <= 10*time.Second && targetPeer.ProbeCount == 0
-								if (!sentDirect || !isDirectHealthy) && activeMQTT != nil {
-									dataToSend := packet
-									if cfg != nil {
-										if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-											cKey := crypto.DeriveKey(activeProf.NetworkKey)
-											if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
-												dataToSend = enc
-											}
-										}
-									}
-									_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, dataToSend)
-								}
 								// 1b. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
-								if !targetPeer.DirectP2P && udpPuncher != nil {
+								if (!sentDirect || !targetPeer.DirectP2P) && udpPuncher != nil {
+									if targetEP != "" {
+										_ = udpPuncher.SendHolePunchProbe(targetEP)
+									}
 									if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 										_ = udpPuncher.SendHolePunchProbe(targetPeer.STUNAddr)
 									}

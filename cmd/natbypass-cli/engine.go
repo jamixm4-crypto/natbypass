@@ -584,8 +584,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 						if registry != nil {
 							if senderPeer, ok := registry.GetByVirtualIP(inSrcIP); ok && senderPeer != nil {
-								isDirectHealthy := directAddr != nil && senderPeer.DirectP2P && !senderPeer.LastDirectSeen.IsZero() && time.Since(senderPeer.LastDirectSeen) <= 10*time.Second && senderPeer.ProbeCount == 0
-								if !sent && puncher != nil && isDirectHealthy {
+								if !sent && puncher != nil {
 									ep := senderPeer.ActiveEndpoint
 									if ep == "" {
 										ep = senderPeer.STUNAddr
@@ -595,17 +594,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 											sent = true
 										}
 									}
-								}
-								// If packet arrived via Relay (directAddr == nil) OR direct path is not healthy, ALWAYS send reply via Relay!
-								if (!sent || !isDirectHealthy) && sigMgr != nil {
-									replyToSend := reply
-									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-										cKey := crypto.DeriveKey(activeProf.NetworkKey)
-										if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
-											replyToSend = enc
-										}
-									}
-									_ = sigMgr.PublishTunnelData(senderPeer.DeviceID, replyToSend)
 								}
 							}
 						}
@@ -813,40 +801,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							if tcpErr := tcpDirectMgr.SendPacket(p.DeviceID, pkt); tcpErr == nil {
 								sentDirect = true
 							}
-						} else if !sentDirect && targetEP == "" {
-							// FIX-B: No direct P2P endpoint — try relay as fallback
-							log.Warn().Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Bool("puncher_nil", puncher == nil).Msg("📤 TUN→UDP no direct endpoint, trying relay fallback")
-							if sigMgr != nil {
-								dataToSend := pkt
-								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-									cKey := crypto.DeriveKey(activeProf.NetworkKey)
-									if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
-										dataToSend = enc
-									}
-								}
-								_ = sigMgr.PublishTunnelData(p.DeviceID, dataToSend)
-							}
 						}
-
-						// FIX-N1: Relay fallback — when direct P2P is not confirmed (!DirectP2P) or stale (>10s / failed probes),
-						// always send via relay IN PARALLEL with P2P attempt, not just when UDP sendto() fails.
-						// Rationale: UDP sendto() never returns an error for unreachable peers (EHOSTUNREACH
-						// comes back async as ICMP), so sentDirect=true even when packet is dropped.
-						// Without parallel relay, ICMP/UDP traffic to relay-mode peers is silently lost.
-						isDirectHealthy := p.DirectP2P && !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) <= 10*time.Second && p.ProbeCount == 0
-						if (!sentDirect || !isDirectHealthy) && sigMgr != nil {
-							dataToSend := pkt
-							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-								cKey := crypto.DeriveKey(activeProf.NetworkKey)
-								if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
-									dataToSend = enc
-								}
+						// 1b. Reactive instant hole punching if direct P2P is not yet confirmed or packet wasn't sent
+						if (!sentDirect || !p.DirectP2P) && puncher != nil {
+							if targetEP != "" {
+								_ = puncher.SendHolePunchProbe(targetEP)
 							}
-							_ = sigMgr.PublishTunnelData(p.DeviceID, dataToSend)
-						}
-
-						// 1b. Reactive instant hole punching if direct P2P is not yet confirmed
-						if !p.DirectP2P && puncher != nil {
 							if p.STUNAddr != "" && p.STUNAddr != targetEP {
 								_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 							}
