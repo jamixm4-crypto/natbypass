@@ -86,12 +86,12 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.LastDirectSeen = existing.LastDirectSeen
 	}
 
-	// Dynamic P2P health check: if direct UDP packets haven't been seen for 15 seconds,
-	// or if LastDirectSeen is zero (never confirmed direct), demote DirectP2P to false
-	// so traffic immediately falls back to parallel relay.
+	// Dynamic P2P health check: if direct UDP packets haven't been seen for 10 seconds,
+	// or if LastDirectSeen is zero (never confirmed direct), or if ProbeCount >= 2,
+	// demote DirectP2P to false so traffic immediately falls back to parallel relay.
 	directP2PExpired := false
 	if existing.DirectP2P {
-		if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 15*time.Second {
+		if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 10*time.Second || existing.ProbeCount >= 2 {
 			directP2PExpired = true
 		}
 	}
@@ -118,8 +118,8 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
-	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty or never seen direct
-	if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() {
+	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty, never seen direct, or failing probes with stale direct packet
+	if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() || (existing.ProbeCount >= 2 && time.Since(newer.LastDirectSeen) > 10*time.Second) {
 		newer.DirectP2P = false
 	}
 
@@ -235,11 +235,22 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 }
 
 
+// PeerUpdateCallback is called whenever a peer is discovered, registered or updated in the registry.
+type PeerUpdateCallback func(p *Peer)
+
 // Registry manages thread-safe tracking of discovered mesh peers.
 type Registry struct {
-	mu       sync.RWMutex
-	peers    map[string]*Peer
-	maxPeers int
+	mu           sync.RWMutex
+	peers        map[string]*Peer
+	maxPeers     int
+	onPeerUpdate PeerUpdateCallback
+}
+
+// SetOnPeerUpdate registers a callback called asynchronously when any peer is added or updated.
+func (r *Registry) SetOnPeerUpdate(cb PeerUpdateCallback) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onPeerUpdate = cb
 }
 
 // NewRegistry creates a new peer registry.
@@ -389,6 +400,12 @@ func (r *Registry) Upsert(p *Peer) {
 		if !first {
 			delete(r.peers, oldestID)
 		}
+	}
+
+	cb := r.onPeerUpdate
+	if cb != nil {
+		cp := *p
+		go cb(&cp)
 	}
 }
 

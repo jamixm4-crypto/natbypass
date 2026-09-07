@@ -103,7 +103,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.9"
+	Version = "1.9.223-beta.11"
 	Commit  = "release"
 )
 
@@ -4481,8 +4481,9 @@ func startEngineFromConfig(c *config.Config) {
 										sentDirect = true
 									}
 								}
-								// Резервный транспорт: релей через зашифрованный MQTT, если прямой P2P не подтвержден
-								if (!sentDirect || !targetPeer.DirectP2P) && activeMQTT != nil {
+								// Резервный транспорт: релей через зашифрованный MQTT, если прямой P2P не подтвержден или устарел (>10s / failed probes)
+								isDirectHealthy := targetPeer.DirectP2P && !targetPeer.LastDirectSeen.IsZero() && time.Since(targetPeer.LastDirectSeen) <= 10*time.Second && targetPeer.ProbeCount == 0
+								if (!sentDirect || !isDirectHealthy) && activeMQTT != nil {
 									dataToSend := packet
 									if cfg != nil {
 										if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
@@ -4701,6 +4702,9 @@ func startEngineFromConfig(c *config.Config) {
 							registry.Upsert(p)
 						} else {
 							p.ProbeCount++
+							if p.ProbeCount >= 2 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) {
+								p.DirectP2P = false
+							}
 							registry.Upsert(p)
 						}
 					}

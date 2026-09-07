@@ -269,6 +269,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		adapterName = "NatBypass"
 	}
 	tunDev, tunErr := tunnel.CreateAdapter(adapterName, myVirtualIP)
+	if runtime.GOOS == "linux" && registry != nil {
+		for _, p := range registry.List() {
+			if p.VirtualIP != "" {
+				tunnel.EnsurePeerHostRoute(p.VirtualIP)
+			}
+		}
+	}
 
 	if uiServer != nil {
 		onCfgReload := func() {
@@ -577,7 +584,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 						if registry != nil {
 							if senderPeer, ok := registry.GetByVirtualIP(inSrcIP); ok && senderPeer != nil {
-								if !sent && puncher != nil {
+								isDirectHealthy := directAddr != nil && senderPeer.DirectP2P && !senderPeer.LastDirectSeen.IsZero() && time.Since(senderPeer.LastDirectSeen) <= 10*time.Second && senderPeer.ProbeCount == 0
+								if !sent && puncher != nil && isDirectHealthy {
 									ep := senderPeer.ActiveEndpoint
 									if ep == "" {
 										ep = senderPeer.STUNAddr
@@ -588,7 +596,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										}
 									}
 								}
-								if !sent && sigMgr != nil {
+								// If packet arrived via Relay (directAddr == nil) OR direct path is not healthy, ALWAYS send reply via Relay!
+								if (!sent || !isDirectHealthy) && sigMgr != nil {
 									replyToSend := reply
 									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 										cKey := crypto.DeriveKey(activeProf.NetworkKey)
@@ -604,12 +613,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 
 				log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
-				_ = tunDev.WritePacket(payload)
 				// FIX-A: Ensure Linux kernel has a /32 host route back to peer VIP via nb0
-				// Without this, kernel ICMP replies and NAT return packets escape via WAN
+				// BEFORE writing packet to TUN, so kernel ICMP replies and NAT return packets don't escape via WAN
 				if runtime.GOOS == "linux" && inSrcIP != "" {
 					tunnel.EnsurePeerHostRoute(inSrcIP)
 				}
+				_ = tunDev.WritePacket(payload)
 			}
 		}
 
@@ -819,12 +828,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 
-						// FIX-N1: Relay fallback — when direct P2P is not confirmed (!DirectP2P), always send
-						// via relay IN PARALLEL with P2P attempt, not just when UDP sendto() fails.
+						// FIX-N1: Relay fallback — when direct P2P is not confirmed (!DirectP2P) or stale (>10s / failed probes),
+						// always send via relay IN PARALLEL with P2P attempt, not just when UDP sendto() fails.
 						// Rationale: UDP sendto() never returns an error for unreachable peers (EHOSTUNREACH
 						// comes back async as ICMP), so sentDirect=true even when packet is dropped.
 						// Without parallel relay, ICMP/UDP traffic to relay-mode peers is silently lost.
-						if (!sentDirect || !p.DirectP2P) && sigMgr != nil {
+						isDirectHealthy := p.DirectP2P && !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) <= 10*time.Second && p.ProbeCount == 0
+						if (!sentDirect || !isDirectHealthy) && sigMgr != nil {
 							dataToSend := pkt
 							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 								cKey := crypto.DeriveKey(activeProf.NetworkKey)
@@ -1070,8 +1080,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								// Иначе ложный DirectP2P выключает дублирование в Relay и трафик гибнет при блокировке UDP ТСПУ.
 								registry.Upsert(p)
 							} else {
-								// FIX-N3b: Increment ProbeCount on ICMP failure; latency stays at last known good value
+								// FIX-N3b: Increment ProbeCount on ICMP failure; if repeated failures, demote DirectP2P
 								p.ProbeCount++
+								if p.ProbeCount >= 2 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) {
+									p.DirectP2P = false
+								}
 								registry.Upsert(p)
 							}
 						}
@@ -1118,6 +1131,13 @@ func resolveVirtualIP(cfg *config.Config, deviceID string) string {
 func startPeerRegistry(ctx context.Context) *peer.Registry {
 	registry := peer.NewRegistry()
 	registry.StartMonitor(ctx, constants.PeerMonitorInterval)
+	if runtime.GOOS == "linux" {
+		registry.SetOnPeerUpdate(func(p *peer.Peer) {
+			if p != nil && p.VirtualIP != "" {
+				tunnel.EnsurePeerHostRoute(p.VirtualIP)
+			}
+		})
+	}
 	return registry
 }
 

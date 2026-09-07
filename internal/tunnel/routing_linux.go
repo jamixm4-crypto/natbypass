@@ -432,7 +432,7 @@ func FlushAllRouting(gatewayVIP string, subnets []string) {
 // EnsurePeerHostRoute adds a /32 host route for a peer's VirtualIP via the nb0 TUN interface.
 // Required on Linux routers (Keenetic/OpenWrt/mipsle) so the kernel routes ICMP replies and
 // forwarded return traffic back through nb0 instead of escaping via the WAN interface.
-// Idempotent — "file exists" errors (route already present) are silently ignored.
+// Idempotent — replaces route in main and default tables, and sets Keenetic rule priority 40.
 func EnsurePeerHostRoute(peerVIP string) {
 	if peerVIP == "" {
 		return
@@ -441,7 +441,12 @@ func EnsurePeerHostRoute(peerVIP string) {
 	if net.ParseIP(cleanVIP) == nil {
 		return
 	}
-	_ = runLinuxCmd("ip", "route", "add", cleanVIP+"/32", "dev", "nb0", "onlink")
+	_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "table", "main", "onlink")
+	_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "onlink")
+	if isKeeneticDevice() {
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
+	}
 }
 
 // EnableMSSClamping принудительно снижает MSS для TCP-соединений через TUN.

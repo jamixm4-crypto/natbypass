@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.223-beta.10"
+const Version = "1.9.223-beta.11"
 
 
 
@@ -972,8 +972,9 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// Резервный транспорт через сигнальный MQTT брокер (Relay Fallback), если прямой P2P не подтвержден или UDP заблокирован
-							if (!sentDirect || !targetPeer.DirectP2P) && globalSigMgr != nil {
+							// Резервный транспорт через сигнальный MQTT брокер (Relay Fallback), если прямой P2P не подтвержден или устарел (>10s / failed probes)
+							isDirectHealthy := targetPeer.DirectP2P && !targetPeer.LastDirectSeen.IsZero() && time.Since(targetPeer.LastDirectSeen) <= 10*time.Second && targetPeer.ProbeCount == 0
+							if (!sentDirect || !isDirectHealthy) && globalSigMgr != nil {
 								dataToSend := pkt
 								if globalConfig != nil {
 									if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
@@ -1047,33 +1048,31 @@ func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
 		if err := globalPuncher.SendDataPacket(fromAddr.String(), reply); err == nil {
 			sent = true
 		}
-	} else if globalPuncher != nil && globalRegistry != nil {
-		for _, p := range globalRegistry.List() {
-			pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-			if (pVIP == srcIP.String() || p.VirtualIP == srcIP.String()) && p.ActiveEndpoint != "" {
-				if err := globalPuncher.SendDataPacket(p.ActiveEndpoint, reply); err == nil {
-					sent = true
-				}
-				break
-			}
-		}
 	}
 
-	// Если через прямой UDP не отправлено (или узел в Relay) — шлём через сигнальный MQTT-канал
-	if !sent && globalSigMgr != nil && globalRegistry != nil {
+	// Если входящий запрос пришел через Relay (fromAddr == nil) ИЛИ прямой P2P не подтвержден / устарел — шлём через сигнальный MQTT-канал
+	if globalSigMgr != nil && globalRegistry != nil {
 		for _, p := range globalRegistry.List() {
 			pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 			if pVIP == srcIP.String() || p.VirtualIP == srcIP.String() {
-				replyToSend := reply
-				if globalConfig != nil {
-					if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-						cKey := crypto.DeriveKey(activeProf.NetworkKey)
-						if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
-							replyToSend = enc
-						}
+				isDirectHealthy := fromAddr != nil && p.DirectP2P && !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) <= 10*time.Second && p.ProbeCount == 0
+				if !sent && globalPuncher != nil && isDirectHealthy && p.ActiveEndpoint != "" {
+					if err := globalPuncher.SendDataPacket(p.ActiveEndpoint, reply); err == nil {
+						sent = true
 					}
 				}
-				_ = globalSigMgr.PublishTunnelData(p.DeviceID, replyToSend)
+				if !sent || !isDirectHealthy {
+					replyToSend := reply
+					if globalConfig != nil {
+						if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+							cKey := crypto.DeriveKey(activeProf.NetworkKey)
+							if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
+								replyToSend = enc
+							}
+						}
+					}
+					_ = globalSigMgr.PublishTunnelData(p.DeviceID, replyToSend)
+				}
 				break
 			}
 		}

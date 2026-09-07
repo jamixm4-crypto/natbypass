@@ -14,6 +14,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -174,6 +177,20 @@ func (p *UDPPuncher) resolveAddr(targetAddr string) (*net.UDPAddr, error) {
 }
 
 
+// tuneLinuxSocketBuffers enlarges system-wide UDP socket buffer limits so SetReadBuffer is not clamped to ~160KB on Linux/Keenetic.
+func tuneLinuxSocketBuffers() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	// Write directly to /proc/sys (works on Keenetic, OpenWrt, embedded Linux without sysctl binary)
+	_ = os.WriteFile("/proc/sys/net/core/rmem_max", []byte("4194304\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/core/wmem_max", []byte("4194304\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/core/rmem_default", []byte("2097152\n"), 0644)
+	_ = os.WriteFile("/proc/sys/net/core/wmem_default", []byte("2097152\n"), 0644)
+	_ = exec.Command("sysctl", "-w", "net.core.rmem_max=4194304").Run()
+	_ = exec.Command("sysctl", "-w", "net.core.wmem_max=4194304").Run()
+}
+
 // NewUDPPuncher creates a new persistent UDP socket for STUN, hole punching, and data transfer.
 func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPing DirectPingCallback) (*UDPPuncher, error) {
 	if len(stunServers) == 0 {
@@ -208,10 +225,8 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 
 	localPort := conn.LocalAddr().(*net.UDPAddr).Port
 
-	// Enlarge UDP socket buffers to 4MB to reduce packet loss on MIPS/ARM routers
-	// where the kernel default (net.core.rmem_default) is only ~212KB.
-	// SetReadBuffer / SetWriteBuffer use SO_RCVBUF / SO_SNDBUF internally and work on
-	// Windows, Linux (amd64/arm64/mipsle), and Android — no CGO or syscall needed.
+	// Enlarge UDP socket buffers to 4MB to eliminate packet loss on MIPS/ARM routers (Keenetic RcvbufErrors).
+	tuneLinuxSocketBuffers()
 	const udpSocketBufSize = 4 * 1024 * 1024 // 4 MB
 	_ = conn.SetReadBuffer(udpSocketBufSize)
 	_ = conn.SetWriteBuffer(udpSocketBufSize)
