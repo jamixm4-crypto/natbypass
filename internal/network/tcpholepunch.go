@@ -40,22 +40,27 @@ func AttemptTCPSimultaneousOpen(ctx context.Context, localPort int, targetAddr s
 	// 1. Open Listener on the same local port to accept incoming SYN-ACK
 	listener, err := lc.Listen(ctx, "tcp4", localAddrStr)
 	if err != nil {
-		return nil, fmt.Errorf("tcp simultaneous listen error: %w", err)
+		// If port is already listened on by manager's main listener or another socket,
+		// don't abort — proceed with simultaneous dial from the same local port
+		listener = nil
+	} else {
+		defer listener.Close()
 	}
-	defer listener.Close()
 
 	connChan := make(chan net.Conn, 2)
 	errChan := make(chan error, 2)
 
-	// Accept worker
-	go func() {
-		conn, err := listener.Accept()
-		if err == nil {
-			connChan <- conn
-		} else {
-			errChan <- err
-		}
-	}()
+	// Accept worker only if listener successfully bound
+	if listener != nil {
+		go func() {
+			conn, err := listener.Accept()
+			if err == nil {
+				connChan <- conn
+			} else {
+				errChan <- err
+			}
+		}()
+	}
 
 	// 2. Simultaneously dial the target address from the same local port
 	dialer := net.Dialer{
@@ -92,6 +97,7 @@ func AttemptTCPSimultaneousOpen(ctx context.Context, localPort int, targetAddr s
 // TCPDirectManager manages direct P2P TCP streams established via TCP Simultaneous Open or direct TCP dial.
 type TCPDirectManager struct {
 	conns      map[string]net.Conn
+	connecting map[string]time.Time
 	mu         sync.RWMutex
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -109,10 +115,11 @@ type TCPDirectManager struct {
 func NewTCPDirectManager(ctx context.Context) *TCPDirectManager {
 	cCtx, cancel := context.WithCancel(ctx)
 	return &TCPDirectManager{
-		conns:  make(map[string]net.Conn),
-		ctx:    cCtx,
-		cancel: cancel,
-		sni:    shadowtls.DefaultSNI,
+		conns:      make(map[string]net.Conn),
+		connecting: make(map[string]time.Time),
+		ctx:        cCtx,
+		cancel:     cancel,
+		sni:        shadowtls.DefaultSNI,
 	}
 }
 
@@ -177,11 +184,17 @@ func (m *TCPDirectManager) StartListener(preferredPort int) (int, error) {
 	var ln net.Listener
 	var err error
 
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			return setSocketReusePort(c)
+		},
+	}
+
 	if preferredPort > 0 {
-		ln, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", preferredPort))
+		ln, err = lc.Listen(m.ctx, "tcp4", fmt.Sprintf("0.0.0.0:%d", preferredPort))
 	}
 	if err != nil || preferredPort <= 0 {
-		ln, err = net.Listen("tcp", "0.0.0.0:0")
+		ln, err = lc.Listen(m.ctx, "tcp4", "0.0.0.0:0")
 		if err != nil {
 			return 0, fmt.Errorf("failed to start TCP listener: %w", err)
 		}
@@ -189,6 +202,14 @@ func (m *TCPDirectManager) StartListener(preferredPort int) (int, error) {
 
 	m.listener = ln
 	m.listenPort = ln.Addr().(*net.TCPAddr).Port
+
+	// Attempt UPnP TCP port mapping for gateway router traversal
+	go func(port int) {
+		up := NewUPnPClient()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = up.AddPortMapping(ctx, port, port, "TCP", "NatBypass ShadowTLS TCP", 3600)
+	}(m.listenPort)
 
 	go m.acceptLoop(ln)
 	return m.listenPort, nil
@@ -288,20 +309,76 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 	if targetAddr == "" {
 		return fmt.Errorf("empty target address")
 	}
-	if m.HasConn(peerID) {
+
+	m.mu.Lock()
+	if _, ok := m.conns[peerID]; ok {
+		m.mu.Unlock()
 		return nil
 	}
+	if lastAttempt, inProgress := m.connecting[peerID]; inProgress && time.Since(lastAttempt) < 6*time.Second {
+		m.mu.Unlock()
+		return nil // Dial already in-flight
+	}
+	m.connecting[peerID] = time.Now()
+	m.mu.Unlock()
 
-	dialer := net.Dialer{Timeout: 3500 * time.Millisecond}
-	conn, err := dialer.DialContext(m.ctx, "tcp", targetAddr)
+	defer func() {
+		m.mu.Lock()
+		delete(m.connecting, peerID)
+		m.mu.Unlock()
+	}()
+
+	if localPort <= 0 {
+		localPort = m.Port()
+	}
+
+	var conn net.Conn
+	var err error
+
+	// 1. Dial with local port binding + SO_REUSEADDR for simultaneous open NAT hole punching
+	if localPort > 0 {
+		dialer := net.Dialer{
+			LocalAddr: &net.TCPAddr{
+				IP:   net.ParseIP("0.0.0.0"),
+				Port: localPort,
+			},
+			Control: func(network, address string, c syscall.RawConn) error {
+				return setSocketReusePort(c)
+			},
+			Timeout: 4 * time.Second,
+		}
+		conn, err = dialer.DialContext(m.ctx, "tcp4", targetAddr)
+	}
+
+	// 2. Fallback to standard dialer
+	if err != nil || conn == nil {
+		if m.HasConn(peerID) {
+			return nil
+		}
+		stdDialer := net.Dialer{Timeout: 3500 * time.Millisecond}
+		conn, err = stdDialer.DialContext(m.ctx, "tcp", targetAddr)
+	}
+
+	// 3. Fallback to full simultaneous open
 	if err != nil && localPort > 0 {
-		// Fall back to simultaneous open
-		sCtx, sCancel := context.WithTimeout(m.ctx, 3500*time.Millisecond)
+		if m.HasConn(peerID) {
+			return nil
+		}
+		sCtx, sCancel := context.WithTimeout(m.ctx, 3600*time.Millisecond)
 		defer sCancel()
 		conn, err = AttemptTCPSimultaneousOpen(sCtx, localPort, targetAddr)
 	}
+
 	if err != nil || conn == nil {
+		if m.HasConn(peerID) {
+			return nil
+		}
 		return fmt.Errorf("tcp connect to %s failed: %w", targetAddr, err)
+	}
+
+	if m.HasConn(peerID) {
+		_ = conn.Close()
+		return nil
 	}
 
 	m.mu.RLock()

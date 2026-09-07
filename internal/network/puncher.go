@@ -304,10 +304,11 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		}
 	}()
 
-	// Try UPnP automatic port mapping on gateway router in background
+	// Try UPnP automatic port mapping on gateway router in background (both UDP and TCP for ShadowTLS)
 	go func() {
 		upnpClient := NewUPnPClient()
-		_ = upnpClient.AddPortMapping(ctx, localPort, localPort, "UDP", "NatBypass P2P", 3600)
+		_ = upnpClient.AddPortMapping(ctx, localPort, localPort, "UDP", "NatBypass P2P UDP", 3600)
+		_ = upnpClient.AddPortMapping(ctx, localPort, localPort, "TCP", "NatBypass P2P TCP", 3600)
 	}()
 
 	return p, nil

@@ -150,6 +150,7 @@ type EndpointCandidate struct {
 // PeerRouteState maintains the candidate paths and active path for a single peer.
 type PeerRouteState struct {
 	DeviceID       string
+	TCPAddr        string
 	Candidates     map[string]*EndpointCandidate
 	ActiveEndpoint string
 	ActiveType     PathType
@@ -239,6 +240,27 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 			}
 		}
 	}
+}
+
+// RegisterPeerTCPAddr stores the advertised TCP endpoint for ShadowTLS fallback.
+func (ms *MagicSock) RegisterPeerTCPAddr(deviceID, tcpAddr string) {
+	if deviceID == "" || tcpAddr == "" {
+		return
+	}
+	ms.mu.Lock()
+	pr, ok := ms.peerRoutes[deviceID]
+	if !ok {
+		pr = &PeerRouteState{
+			DeviceID:   deviceID,
+			Candidates: make(map[string]*EndpointCandidate),
+		}
+		ms.peerRoutes[deviceID] = pr
+	}
+	ms.mu.Unlock()
+
+	pr.mu.Lock()
+	pr.TCPAddr = tcpAddr
+	pr.mu.Unlock()
 }
 
 // RegisterPeerWithTopology updates candidate endpoints taking into account NAT hairpinning and topology.
@@ -484,22 +506,37 @@ func (ms *MagicSock) triggerTCPFallback(deviceID string) {
 	ms.tcpAttempted[deviceID] = true
 	ms.probeCountMu.Unlock()
 
-	stunAddr, _, _ := ms.GetActiveRoute(deviceID)
+	ms.mu.RLock()
+	route := ms.peerRoutes[deviceID]
+	mgr := ms.tcpManager
+	ms.mu.RUnlock()
+
+	targetAddr := ""
+	if route != nil {
+		route.mu.RLock()
+		targetAddr = route.TCPAddr
+		if targetAddr == "" {
+			targetAddr = route.ActiveEndpoint
+		}
+		route.mu.RUnlock()
+	}
+	if targetAddr == "" {
+		targetAddr, _, _ = ms.GetActiveRoute(deviceID)
+	}
 
 	var localPort int
-	if ms.puncher != nil {
+	if mgr != nil && mgr.Port() > 0 {
+		localPort = mgr.Port()
+	} else if ms.puncher != nil {
 		localPort = ms.puncher.LocalPort()
 	}
 
 	go func() {
-		ms.mu.RLock()
-		mgr := ms.tcpManager
-		ms.mu.RUnlock()
 		if mgr == nil {
 			return
 		}
 
-		if err := mgr.ConnectPeer(deviceID, stunAddr, localPort); err != nil {
+		if err := mgr.ConnectPeer(deviceID, targetAddr, localPort); err != nil {
 			// Allow a retry next time the threshold is crossed again.
 			ms.probeCountMu.Lock()
 			ms.tcpAttempted[deviceID] = false
@@ -508,10 +545,10 @@ func (ms *MagicSock) triggerTCPFallback(deviceID string) {
 		}
 
 		// Register the TCP endpoint as a successful route so path selection picks it up.
-		ms.RecordProbeSuccess(deviceID, stunAddr, 0)
+		ms.RecordProbeSuccess(deviceID, targetAddr, 0)
 
 		if ms.onPathSwitch != nil {
-			ms.onPathSwitch(deviceID, stunAddr, stunAddr, PathTypeTCP)
+			ms.onPathSwitch(deviceID, targetAddr, targetAddr, PathTypeTCP)
 		}
 	}()
 }

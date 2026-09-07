@@ -105,7 +105,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.224-beta1"
+	Version = "1.9.224-beta2"
 	Commit  = "release"
 )
 
@@ -4494,19 +4494,26 @@ func startEngineFromConfig(c *config.Config) {
 									pmax = targetPeer.AWG.Pmax
 								}
 
-								// 1. Прямая отправка пакета строго по прямому P2P UDP сокету
+								// 1. Direct TCP ShadowTLS path:
+								// If an active direct TCP ShadowTLS stream is connected, send through it (bypasses UDP DPI)
 								sentDirect := false
-								if udpPuncher != nil && targetEP != "" {
+								sentTCP := false
+								if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+									if tcpErr := guiTCPDirectMgr.SendPacket(targetPeer.DeviceID, packet); tcpErr == nil {
+										sentDirect = true
+										sentTCP = true
+									}
+								}
+
+								// 2. Pure P2P Direct UDP packet transmission
+								if !sentTCP && udpPuncher != nil && targetEP != "" {
 									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
 										sentDirect = true
 									}
 								}
-								// 1b. Direct TCP ShadowTLS fallback path:
-								// If direct UDP is not confirmed OR failed, send via active TCP ShadowTLS stream
-								if (!sentDirect || !targetPeer.DirectP2P) && guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
-									if tcpErr := guiTCPDirectMgr.SendPacket(targetPeer.DeviceID, packet); tcpErr == nil {
-										sentDirect = true
-									}
+								// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
+								if !sentTCP && !targetPeer.DirectP2P && udpPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+									_ = udpPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, packet, pmin, pmax)
 								}
 								// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
 								if (!sentDirect || !targetPeer.DirectP2P) && udpPuncher != nil {
@@ -4673,17 +4680,26 @@ func startEngineFromConfig(c *config.Config) {
 									_ = udpPuncher.SendHolePunchProbe(cand)
 								}
 							}
-							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is dropped (> 8 probes)
-							if p.ProbeCount > 8 && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) {
+							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
+							if (!p.DirectP2P || p.ProbeCount >= 2) && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) {
 								tcpTarget := p.TCPAddr
-								if tcpTarget == "" {
-									tcpTarget = p.STUNAddr
-								}
 								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
 									tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
 								}
+								if tcpTarget == "" && p.STUNAddr != "" && p.WGPort > 0 {
+									tcpTarget = fmt.Sprintf("%s:%d", strings.Split(p.STUNAddr, ":")[0], p.WGPort)
+								}
+								if tcpTarget == "" && p.LocalAddr != "" {
+									tcpTarget = p.LocalAddr
+								}
+								if tcpTarget == "" {
+									tcpTarget = p.STUNAddr
+								}
 								if tcpTarget != "" {
-									lPort := udpPuncher.LocalPort()
+									lPort := guiTCPDirectMgr.Port()
+									if lPort <= 0 && udpPuncher != nil {
+										lPort = udpPuncher.LocalPort()
+									}
 									go func(devID, target string, localP int) {
 										_ = guiTCPDirectMgr.ConnectPeer(devID, target, localP)
 									}(p.DeviceID, tcpTarget, lPort)
@@ -4853,6 +4869,9 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 
 					if guiMagicSock != nil {
 						guiMagicSock.RegisterPeerEndpoints(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr)
+						if p.TCPAddr != "" {
+							guiMagicSock.RegisterPeerTCPAddr(p.DeviceID, p.TCPAddr)
+						}
 					}
 					registry.Upsert(&peer.Peer{
 						DeviceID:         p.DeviceID,
@@ -4862,6 +4881,7 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						PublicIP:         p.PublicIP,
 						LocalAddr:        lanAddr,
 						STUNAddr:         p.STUNAddr,
+						TCPAddr:          p.TCPAddr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
 						LastSeen:         time.Now(),
@@ -5338,6 +5358,10 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					}
 				}
 
+				if guiMagicSock != nil && p.TCPAddr != "" {
+					guiMagicSock.RegisterPeerTCPAddr(p.DeviceID, p.TCPAddr)
+				}
+
 				registry.Upsert(&peer.Peer{
 					DeviceID:         p.DeviceID,
 					Nickname:         nick,
@@ -5347,6 +5371,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					PublicIP:         p.PublicIP,
 					LocalAddr:        p.LocalAddr,
 					STUNAddr:         p.STUNAddr,
+					TCPAddr:          p.TCPAddr,
 					ActiveEndpoint:   preservedEP,
 					DirectP2P:        preservedDirect,
 					Latency:          preservedLat,
@@ -5752,6 +5777,20 @@ func publishCurrentState(ctx context.Context) {
 		PublicIP:         ipStr,
 		LocalAddr:        localAddr,
 		STUNAddr:         mySTUNAddr,
+		TCPAddr: func() string {
+			if guiTCPDirectMgr != nil && guiTCPDirectMgr.Port() > 0 {
+				host := ipStr
+				if host == "" || host == "0.0.0.0" || host == "<nil>" || host == "Определяется..." {
+					if mySTUNAddr != "" {
+						host = strings.Split(mySTUNAddr, ":")[0]
+					}
+				}
+				if host != "" && host != "0.0.0.0" && host != "<nil>" && host != "Определяется..." {
+					return fmt.Sprintf("%s:%d", host, guiTCPDirectMgr.Port())
+				}
+			}
+			return ""
+		}(),
 		WGPubKey:         myWGPubKey,
 		WGPort:           pPort,
 		Timestamp:        time.Now(),

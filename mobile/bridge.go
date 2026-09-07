@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.224-beta1"
+const Version = "1.9.224-beta2"
 
 
 
@@ -560,6 +560,20 @@ func StartEngine(configYAML string, tunFd int) string {
 					PublicIP:         globalPublicIP,
 					LocalAddr:        localAddr,
 					STUNAddr:         globalSTUN,
+					TCPAddr: func() string {
+						if globalTCPDirectMgr != nil && globalTCPDirectMgr.Port() > 0 {
+							host := globalPublicIP
+							if host == "" || host == "0.0.0.0" || host == "<nil>" {
+								if globalSTUN != "" {
+									host = strings.Split(globalSTUN, ":")[0]
+								}
+							}
+							if host != "" && host != "0.0.0.0" && host != "<nil>" {
+								return fmt.Sprintf("%s:%d", host, globalTCPDirectMgr.Port())
+							}
+						}
+						return ""
+					}(),
 					IPv6Addr:         globalIPv6,
 					WGPubKey:         wgKey.PublicKey,
 					WGPort:           pPort,
@@ -772,17 +786,26 @@ func StartEngine(configYAML string, tunFd int) string {
 							if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr {
 								_ = puncher.SendHolePunchProbe(peerItem.LocalAddr)
 							}
-							// Trigger Direct TCP ShadowTLS fallback when UDP is persistently dropped (> 8 probes)
-							if peerItem.ProbeCount > 8 && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) {
+							// Trigger Direct TCP ShadowTLS fallback when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
+							if (!peerItem.DirectP2P || peerItem.ProbeCount >= 2) && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) {
 								tcpTarget := peerItem.TCPAddr
-								if tcpTarget == "" {
-									tcpTarget = peerItem.STUNAddr
-								}
 								if tcpTarget == "" && peerItem.PublicIP != "" && peerItem.WGPort > 0 {
 									tcpTarget = fmt.Sprintf("%s:%d", peerItem.PublicIP, peerItem.WGPort)
 								}
+								if tcpTarget == "" && peerItem.STUNAddr != "" && peerItem.WGPort > 0 {
+									tcpTarget = fmt.Sprintf("%s:%d", strings.Split(peerItem.STUNAddr, ":")[0], peerItem.WGPort)
+								}
+								if tcpTarget == "" && peerItem.LocalAddr != "" {
+									tcpTarget = peerItem.LocalAddr
+								}
+								if tcpTarget == "" {
+									tcpTarget = peerItem.STUNAddr
+								}
 								if tcpTarget != "" {
-									lPort := puncher.LocalPort()
+									lPort := globalTCPDirectMgr.Port()
+									if lPort <= 0 && puncher != nil {
+										lPort = puncher.LocalPort()
+									}
 									go func(devID, target string, localP int) {
 										_ = globalTCPDirectMgr.ConnectPeer(devID, target, localP)
 									}(peerItem.DeviceID, tcpTarget, lPort)
@@ -1006,17 +1029,26 @@ func attachTUNLocked(tunFd int) {
 								targetEP = targetPeer.LocalAddr
 							}
 
+							// 1. Direct TCP ShadowTLS path:
+							// If an active direct TCP ShadowTLS stream is connected, send through it (bypasses UDP DPI)
 							sentDirect := false
-							if targetEP != "" && globalPuncher != nil {
+							sentTCP := false
+							if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+								if tcpErr := globalTCPDirectMgr.SendPacket(targetPeer.DeviceID, pkt); tcpErr == nil {
+									sentDirect = true
+									sentTCP = true
+								}
+							}
+
+							// 2. Pure P2P Direct UDP packet transmission
+							if !sentTCP && targetEP != "" && globalPuncher != nil {
 								if err := globalPuncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
 									sentDirect = true
 								}
 							}
-							// 1b. Direct TCP ShadowTLS fallback path:
-							if (!sentDirect || !targetPeer.DirectP2P) && globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
-								if tcpErr := globalTCPDirectMgr.SendPacket(targetPeer.DeviceID, pkt); tcpErr == nil {
-									sentDirect = true
-								}
+							// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
+							if !sentTCP && !targetPeer.DirectP2P && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+								_ = globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax)
 							}
 
 							// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира

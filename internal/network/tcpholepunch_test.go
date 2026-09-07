@@ -221,3 +221,41 @@ func TestTCPDirectManager_ShadowTLS_Integration(t *testing.T) {
 	}
 }
 
+func TestTCPDirectManager_SimultaneousOpen_PortReuse(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	netKey := "test-simultaneous-open-port-reuse-key"
+
+	// Setup Server
+	serverMgr := NewTCPDirectManager(ctx)
+	defer serverMgr.Close()
+	serverMgr.SetDeviceID("server-reuse")
+	serverMgr.SetNetworkKey(netKey)
+
+	sPort, err := serverMgr.StartListener(0)
+	if err != nil {
+		t.Fatalf("server StartListener failed: %v", err)
+	}
+
+	// Setup Client with its own listener running on dynamic port
+	clientMgr := NewTCPDirectManager(ctx)
+	defer clientMgr.Close()
+	clientMgr.SetDeviceID("client-reuse")
+	clientMgr.SetNetworkKey(netKey)
+
+	cPort, err := clientMgr.StartListener(0)
+	if err != nil {
+		t.Fatalf("client StartListener failed: %v", err)
+	}
+
+	// Client connects using its own local listening port (simulating simultaneous open reuse)
+	serverTarget := fmt.Sprintf("127.0.0.1:%d", sPort)
+	if err := clientMgr.ConnectPeer("server-reuse", serverTarget, cPort); err != nil {
+		t.Fatalf("client ConnectPeer with localPort %d failed: %v", cPort, err)
+	}
+
+	if !clientMgr.HasConn("server-reuse") {
+		t.Fatalf("expected clientMgr to have conn for server-reuse")
+	}
+}

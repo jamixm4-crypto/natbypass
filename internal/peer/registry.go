@@ -123,6 +123,11 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.DirectP2P = false
 	}
 
+	// Prune stale/dead endpoints if peer is persistently failing probes and unconfirmed
+	if existing.ProbeCount >= 4 && !newer.DirectP2P && newer.STUNAddr != "" {
+		newer.ActiveEndpoint = newer.STUNAddr
+	}
+
 	if newer.Latency == 0 && existing.Latency > 0 && existing.DirectP2P {
 		newer.Latency = existing.Latency
 		newer.PingMs = existing.PingMs

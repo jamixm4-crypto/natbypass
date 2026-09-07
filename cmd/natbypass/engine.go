@@ -784,9 +784,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							pmax = p.AWG.Pmax
 						}
 
-						// 1. Pure P2P Direct UDP packet transmission
+						// 1. Direct TCP ShadowTLS path:
+						// If an active direct TCP ShadowTLS stream is connected, send through it (bypasses UDP DPI)
 						sentDirect := false
-						if targetEP != "" && puncher != nil {
+						sentTCP := false
+						if tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID) {
+							if tcpErr := tcpDirectMgr.SendPacket(p.DeviceID, pkt); tcpErr == nil {
+								sentDirect = true
+								sentTCP = true
+							}
+						}
+
+						// 2. Pure P2P Direct UDP packet transmission
+						if !sentTCP && targetEP != "" && puncher != nil {
 							srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
 							log.Debug().Str("src", srcIP).Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Int("len", len(pkt)).Msg("📤 TUN→UDP outbound")
 							err := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
@@ -796,12 +806,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
 							}
 						}
-						// 1b. Direct TCP ShadowTLS fallback path:
-						// If direct UDP is not confirmed OR failed, send via active TCP ShadowTLS stream
-						if (!sentDirect || !p.DirectP2P) && tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID) {
-							if tcpErr := tcpDirectMgr.SendPacket(p.DeviceID, pkt); tcpErr == nil {
-								sentDirect = true
-							}
+						// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
+						if !sentTCP && !p.DirectP2P && puncher != nil && p.STUNAddr != "" && p.STUNAddr != targetEP {
+							_ = puncher.SendDataPacketWithPadding(p.STUNAddr, pkt, pmin, pmax)
 						}
 						// 1c. Reactive instant hole punching if direct P2P is not yet confirmed or packet wasn't sent
 						if (!sentDirect || !p.DirectP2P) && puncher != nil {
@@ -991,18 +998,24 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 
-							// Trigger Direct TCP / TCP Simultaneous Open fallback when UDP is persistently dropped (> 8 probes)
-							if p.ProbeCount > 8 && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
+							if (!p.DirectP2P || p.ProbeCount >= 2) && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
 								tcpTarget := p.TCPAddr
-								if tcpTarget == "" {
-									tcpTarget = p.STUNAddr
-								}
 								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
 									tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
 								}
+								if tcpTarget == "" && p.STUNAddr != "" && p.WGPort > 0 {
+									tcpTarget = fmt.Sprintf("%s:%d", strings.Split(p.STUNAddr, ":")[0], p.WGPort)
+								}
+								if tcpTarget == "" && p.LocalAddr != "" {
+									tcpTarget = p.LocalAddr
+								}
+								if tcpTarget == "" {
+									tcpTarget = p.STUNAddr
+								}
 								if tcpTarget != "" {
-									lPort := 0
-									if puncher != nil {
+									lPort := tcpDirectMgr.Port()
+									if lPort <= 0 && puncher != nil {
 										lPort = puncher.LocalPort()
 									}
 									go func(devID, target string, localP int) {
@@ -1934,6 +1947,9 @@ func receiveLoop(
 					}
 				}
 				magicSock.RegisterPeerWithTopology(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr, myPub, "", p.PublicIP, "", p.Candidates...)
+				if p.TCPAddr != "" {
+					magicSock.RegisterPeerTCPAddr(p.DeviceID, p.TCPAddr)
+				}
 			}
 
 			preservedEP := ""
