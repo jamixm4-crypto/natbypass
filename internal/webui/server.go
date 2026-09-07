@@ -2254,21 +2254,35 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Динамическое применение нового MQTT топика в работающем демоне
+	topicChanged := false
 	if req.MqttTopic != "" && s.sigMgr != nil {
-		s.sigMgr.UpdateMQTTTopic(req.MqttTopic)
+		oldTopic := ""
+		if cfg != nil && len(cfg.Signaling.Channels) > 0 {
+			for _, ch := range cfg.Signaling.Channels {
+				if ch.Type == "mqtt" {
+					oldTopic = ch.Params["topic"]
+					break
+				}
+			}
+		}
+		if req.MqttTopic != oldTopic {
+			topicChanged = true
+			s.sigMgr.UpdateMQTTTopic(req.MqttTopic)
+		}
 	}
 
-	if s.registry != nil {
+	// Сброс кэша только если кардинально сменился топик сигнализации
+	if topicChanged && s.registry != nil {
 		s.registry.ClearAll()
 	}
 	if s.onConfigChange != nil {
 		s.onConfigChange()
 	}
-	msg := "Настройки успешно сохранены! Кэш устройств сброшен."
+	msg := "Настройки успешно сохранены и применены на лету!"
 	if isWindows {
-		s.AddEvent("info", "Конфигурация зашифрована DPAPI и сохранена — кэш устройств очищен", fmt.Sprintf("device=%s", req.DeviceName))
+		s.AddEvent("info", "Конфигурация зашифрована DPAPI и сохранена", fmt.Sprintf("device=%s", req.DeviceName))
 	} else {
-		s.AddEvent("info", "Конфигурация сохранена — кэш устройств очищен", fmt.Sprintf("device=%s file=%s", req.DeviceName, targetPath))
+		s.AddEvent("info", "Конфигурация сохранена", fmt.Sprintf("device=%s file=%s", req.DeviceName, targetPath))
 	}
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": msg}, "")
 }

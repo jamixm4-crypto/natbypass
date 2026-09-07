@@ -215,6 +215,13 @@ private fun NatBypassApp(
                 cm.setPrimaryClip(ClipData.newPlainText("Peer VIP", peer.virtualIp))
                 Toast.makeText(context, "IP ${peer.virtualIp} скопирован", Toast.LENGTH_SHORT).show()
             },
+            onPeerConnectTCP = { peer ->
+                Toast.makeText(context, "⚡ Подключение Direct TCP к ${peer.displayName}...", Toast.LENGTH_SHORT).show()
+                viewModel.connectPeerTCP(peer.id) { ok ->
+                    val msg = if (ok) "⚡ Запрос Direct TCP к ${peer.displayName} отправлен!" else "⚠️ Ошибка подключения Direct TCP к ${peer.displayName}"
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }
+            },
             onPeerSetExitNode = { peer ->
                 val enabled = viewModel.toggleExitNode(context, peer.id)
                 if (enabled) {

@@ -52,6 +52,7 @@ fun MainScreen(
     onToggleVpn: () -> Unit,
     onPeerPing: (PeerUiModel) -> Unit,
     onPeerCopyIp: (PeerUiModel) -> Unit,
+    onPeerConnectTCP: (PeerUiModel) -> Unit = {},
     onPeerSetExitNode: (PeerUiModel) -> Unit,
     onPeerDelete: (PeerUiModel) -> Unit,
     onOpenProfiles: () -> Unit,
@@ -297,6 +298,7 @@ fun MainScreen(
                         peer = peer,
                         onPing        = { onPeerPing(peer) },
                         onCopyIp      = { onPeerCopyIp(peer) },
+                        onConnectTCP  = { onPeerConnectTCP(peer) },
                         onSetExitNode = { onPeerSetExitNode(peer) },
                         onDelete      = { onPeerDelete(peer) },
                         modifier      = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)

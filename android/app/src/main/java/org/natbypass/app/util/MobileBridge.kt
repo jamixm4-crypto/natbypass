@@ -254,6 +254,47 @@ object MobileBridge {
         }
     }
 
+    fun connectPeerTCP(deviceId: String): Boolean {
+        val method = getMethod("connectPeerTCP") ?: return false
+        return try {
+            method.invoke(null, deviceId) as? Boolean ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun setTransportMode(mode: String) {
+        val method = getMethod("setTransportMode") ?: return
+        try {
+            method.invoke(null, mode)
+        } catch (e: Exception) {}
+    }
+
+    fun getTransportMode(): String {
+        val method = getMethod("getTransportMode") ?: return "auto"
+        return try {
+            method.invoke(null) as? String ?: "auto"
+        } catch (e: Exception) {
+            "auto"
+        }
+    }
+
+    fun setTCPPort(port: Int) {
+        val method = getMethod("setTCPPort") ?: return
+        try {
+            method.invoke(null, port)
+        } catch (e: Exception) {}
+    }
+
+    fun getTCPPort(): Int {
+        val method = getMethod("getTCPPort") ?: return 8443
+        return try {
+            method.invoke(null) as? Int ?: 8443
+        } catch (e: Exception) {
+            8443
+        }
+    }
+
     fun refreshPublicIP() {
         val method = getMethod("refreshPublicIP") ?: return
         try {

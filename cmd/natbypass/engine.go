@@ -290,6 +290,21 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if puncher != nil && activeProf.NetworkKey != "" {
 					puncher.SetCipherKey(activeProf.NetworkKey)
 				}
+				if tcpDirectMgr != nil {
+					if activeProf.TransportMode != "" {
+						tcpDirectMgr.SetTransportMode(activeProf.TransportMode)
+					} else if cfg.Network.TransportMode != "" {
+						tcpDirectMgr.SetTransportMode(cfg.Network.TransportMode)
+					}
+					if activeProf.TLSMode != "" {
+						tcpDirectMgr.SetTLSMode(activeProf.TLSMode)
+					} else if cfg.Network.TLSMode != "" {
+						tcpDirectMgr.SetTLSMode(cfg.Network.TLSMode)
+					}
+					if activeProf.NetworkKey != "" {
+						tcpDirectMgr.SetNetworkKey(activeProf.NetworkKey)
+					}
+				}
 			}
 			targetTopic := ""
 			if activeProf != nil && activeProf.MQTTTopic != "" {
@@ -306,8 +321,39 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if targetTopic != "" && sigMgr != nil {
 				sigMgr.UpdateMQTTTopic(targetTopic)
 			}
-			if registry != nil {
-				registry.ClearAll()
+			// Connect immediately to peers if force_tcp is active
+			if tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_tcp" && registry != nil {
+				defTCPPort := 8443
+				if activeProf != nil && activeProf.TCPPort > 0 {
+					defTCPPort = activeProf.TCPPort
+				}
+				for _, p := range registry.List() {
+					if p == nil || !p.Online || tcpDirectMgr.HasConn(p.DeviceID) {
+						continue
+					}
+					tcpTarget := p.TCPAddr
+					if tcpTarget == "" {
+						host := p.PublicIP
+						if host == "" && p.STUNAddr != "" {
+							host = strings.Split(p.STUNAddr, ":")[0]
+						}
+						if host != "" && host != "0.0.0.0" {
+							tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+						} else if p.LocalAddr != "" {
+							localHost := strings.Split(p.LocalAddr, ":")[0]
+							tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
+						}
+					}
+					if tcpTarget != "" {
+						lPort := tcpDirectMgr.Port()
+						if lPort <= 0 && puncher != nil {
+							lPort = puncher.LocalPort()
+						}
+						go func(devID, target string, localP int) {
+							_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
+						}(p.DeviceID, tcpTarget, lPort)
+					}
+				}
 			}
 			newVIP := resolveVirtualIP(cfg, deviceID)
 			if newVIP != "" {
@@ -849,18 +895,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 						// 1d. If force_tcp and not connected yet, trigger immediate dial
 						if isForceTCP && !sentTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+							defaultTCPPort := 8443
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+								defaultTCPPort = activeProf.TCPPort
+							}
 							tcpTarget := p.TCPAddr
-							if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
-								tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
-							}
-							if tcpTarget == "" && p.STUNAddr != "" && p.WGPort > 0 {
-								tcpTarget = fmt.Sprintf("%s:%d", strings.Split(p.STUNAddr, ":")[0], p.WGPort)
-							}
-							if tcpTarget == "" && p.LocalAddr != "" {
-								tcpTarget = p.LocalAddr
-							}
 							if tcpTarget == "" {
-								tcpTarget = p.STUNAddr
+								host := p.PublicIP
+								if host == "" && p.STUNAddr != "" {
+									host = strings.Split(p.STUNAddr, ":")[0]
+								}
+								if host != "" && host != "0.0.0.0" {
+									tcpTarget = fmt.Sprintf("%s:%d", host, defaultTCPPort)
+								} else if p.LocalAddr != "" {
+									localHost := strings.Split(p.LocalAddr, ":")[0]
+									tcpTarget = fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
+								}
 							}
 							if tcpTarget != "" {
 								lPort := tcpDirectMgr.Port()
@@ -1057,18 +1107,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
 							// Evaluated on every tick, NOT blocked by UDP probe backoff!
 							if !isForceUDP && (isForceTCP || !p.DirectP2P || p.ProbeCount >= 2) && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+								defaultTCPPort := 8443
+								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+									defaultTCPPort = activeProf.TCPPort
+								}
 								tcpTarget := p.TCPAddr
-								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
-									tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
-								}
-								if tcpTarget == "" && p.STUNAddr != "" && p.WGPort > 0 {
-									tcpTarget = fmt.Sprintf("%s:%d", strings.Split(p.STUNAddr, ":")[0], p.WGPort)
-								}
-								if tcpTarget == "" && p.LocalAddr != "" {
-									tcpTarget = p.LocalAddr
-								}
 								if tcpTarget == "" {
-									tcpTarget = p.STUNAddr
+									host := p.PublicIP
+									if host == "" && p.STUNAddr != "" {
+										host = strings.Split(p.STUNAddr, ":")[0]
+									}
+									if host != "" && host != "0.0.0.0" {
+										tcpTarget = fmt.Sprintf("%s:%d", host, defaultTCPPort)
+									} else if p.LocalAddr != "" {
+										localHost := strings.Split(p.LocalAddr, ":")[0]
+										tcpTarget = fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
+									}
 								}
 								if tcpTarget != "" {
 									lPort := tcpDirectMgr.Port()
@@ -1081,14 +1135,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										}
 									}(p.DeviceID, tcpTarget, lPort)
 								}
-								if p.LocalAddr != "" && p.LocalAddr != tcpTarget {
-									lPort := tcpDirectMgr.Port()
-									if lPort <= 0 && puncher != nil {
-										lPort = puncher.LocalPort()
+								if p.LocalAddr != "" {
+									localHost := strings.Split(p.LocalAddr, ":")[0]
+									localTarget := fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
+									if localTarget != tcpTarget {
+										lPort := tcpDirectMgr.Port()
+										if lPort <= 0 && puncher != nil {
+											lPort = puncher.LocalPort()
+										}
+										go func(devID, lTarget string, localP int) {
+											_ = tcpDirectMgr.ConnectPeer(devID, lTarget, localP)
+										}(p.DeviceID, localTarget, lPort)
 									}
-									go func(devID, localTarget string, localP int) {
-										_ = tcpDirectMgr.ConnectPeer(devID, localTarget, localP)
-									}(p.DeviceID, p.LocalAddr, lPort)
 								}
 							}
 						}
@@ -1136,7 +1194,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								// FIX-N3b: Increment ProbeCount on ICMP failure; if repeated failures, demote DirectP2P
 								p.ProbeCount++
 								if p.ProbeCount >= 2 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) {
-									p.DirectP2P = false
+									if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (tcpDirectMgr == nil || !tcpDirectMgr.HasConn(p.DeviceID)) {
+										p.DirectP2P = false
+									}
 								}
 								registry.Upsert(p)
 							}
@@ -2088,6 +2148,36 @@ func receiveLoop(
 				Version:          p.Version,
 				IsKeenetic:       p.IsKeenetic,
 			})
+
+			// Мгновенная попытка Direct TCP соединения при обнаружении узла (при force_tcp или не подтвержденном P2P)
+			if tcpDirectMgr != nil && (tcpDirectMgr.TransportMode() == "force_tcp" || !preservedDirect) && !tcpDirectMgr.HasConn(p.DeviceID) {
+				defTCPPort := 8443
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+					defTCPPort = activeProf.TCPPort
+				}
+				tcpTarget := p.TCPAddr
+				if tcpTarget == "" {
+					host := p.PublicIP
+					if host == "" && p.STUNAddr != "" {
+						host = strings.Split(p.STUNAddr, ":")[0]
+					}
+					if host != "" && host != "0.0.0.0" {
+						tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+					} else if p.LocalAddr != "" {
+						localHost := strings.Split(p.LocalAddr, ":")[0]
+						tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
+					}
+				}
+				if tcpTarget != "" {
+					lPort := tcpDirectMgr.Port()
+					if lPort <= 0 && puncher != nil {
+						lPort = puncher.LocalPort()
+					}
+					go func(devID, target string, localP int) {
+						_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
+					}(p.DeviceID, tcpTarget, lPort)
+				}
+			}
 
 			// Мгновенный ответный маяк при обнаружении нового узла, смене сокета или перезапуске клиента
 			if needsFastReply {

@@ -805,18 +805,22 @@ func StartEngine(configYAML string, tunFd int) string {
 							}
 							// Trigger Direct TCP ShadowTLS fallback when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
 							if !isForceUDP && (isForceTCP || !peerItem.DirectP2P || peerItem.ProbeCount >= 2) && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) {
+								defTCPPort := 8443
+								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+									defTCPPort = activeProf.TCPPort
+								}
 								tcpTarget := peerItem.TCPAddr
-								if tcpTarget == "" && peerItem.PublicIP != "" && peerItem.WGPort > 0 {
-									tcpTarget = fmt.Sprintf("%s:%d", peerItem.PublicIP, peerItem.WGPort)
-								}
-								if tcpTarget == "" && peerItem.STUNAddr != "" && peerItem.WGPort > 0 {
-									tcpTarget = fmt.Sprintf("%s:%d", strings.Split(peerItem.STUNAddr, ":")[0], peerItem.WGPort)
-								}
-								if tcpTarget == "" && peerItem.LocalAddr != "" {
-									tcpTarget = peerItem.LocalAddr
-								}
 								if tcpTarget == "" {
-									tcpTarget = peerItem.STUNAddr
+									host := peerItem.PublicIP
+									if host == "" && peerItem.STUNAddr != "" {
+										host = strings.Split(peerItem.STUNAddr, ":")[0]
+									}
+									if host != "" && host != "0.0.0.0" {
+										tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+									} else if peerItem.LocalAddr != "" {
+										localHost := strings.Split(peerItem.LocalAddr, ":")[0]
+										tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
+									}
 								}
 								if tcpTarget != "" {
 									lPort := globalTCPDirectMgr.Port()
@@ -1091,18 +1095,22 @@ func attachTUNLocked(tunFd int) {
 
 							// 1d. If force_tcp and not connected yet, trigger immediate dial
 							if isForceTCP && !sentTCP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+								defTCPPort := 8443
+								if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+									defTCPPort = activeProf.TCPPort
+								}
 								tcpTarget := targetPeer.TCPAddr
-								if tcpTarget == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
-									tcpTarget = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
-								}
-								if tcpTarget == "" && targetPeer.STUNAddr != "" && targetPeer.WGPort > 0 {
-									tcpTarget = fmt.Sprintf("%s:%d", strings.Split(targetPeer.STUNAddr, ":")[0], targetPeer.WGPort)
-								}
-								if tcpTarget == "" && targetPeer.LocalAddr != "" {
-									tcpTarget = targetPeer.LocalAddr
-								}
 								if tcpTarget == "" {
-									tcpTarget = targetPeer.STUNAddr
+									host := targetPeer.PublicIP
+									if host == "" && targetPeer.STUNAddr != "" {
+										host = strings.Split(targetPeer.STUNAddr, ":")[0]
+									}
+									if host != "" && host != "0.0.0.0" {
+										tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+									} else if targetPeer.LocalAddr != "" {
+										localHost := strings.Split(targetPeer.LocalAddr, ":")[0]
+										tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
+									}
 								}
 								if tcpTarget != "" {
 									lPort := globalTCPDirectMgr.Port()
@@ -2445,6 +2453,18 @@ func rebuildSignalingInternal(p *config.Profile) {
 		globalPuncher.SetCipherKey(p.NetworkKey)
 	}
 
+	if globalTCPDirectMgr != nil && p != nil {
+		if p.NetworkKey != "" {
+			globalTCPDirectMgr.SetNetworkKey(p.NetworkKey)
+		}
+		if p.TransportMode != "" {
+			globalTCPDirectMgr.SetTransportMode(p.TransportMode)
+		}
+		if p.TLSMode != "" {
+			globalTCPDirectMgr.SetTLSMode(p.TLSMode)
+		}
+	}
+
 	if globalConfig != nil && globalDevID != "" {
 		atomicSetVIP(config.ResolveVirtualIP(globalConfig, globalDevID))
 		globalConfig.Network.Address = atomicGetVIP()
@@ -2552,4 +2572,130 @@ func SetProfileVirtualIP(profileID, vip string) bool {
 		}
 	}
 	return false
+}
+
+
+// ConnectPeerTCP attempts to connect directly to the given peer via TCP ShadowTLS
+func ConnectPeerTCP(deviceID string) bool {
+	engineMu.Lock()
+	mgr := globalTCPDirectMgr
+	reg := globalRegistry
+	puncher := globalPuncher
+	cfg := globalConfig
+	engineMu.Unlock()
+
+	if mgr == nil || reg == nil || deviceID == "" {
+		return false
+	}
+
+	p, ok := reg.Get(deviceID)
+	if !ok || p == nil {
+		return false
+	}
+
+	defTCPPort := 8443
+	if cfg != nil {
+		if active := cfg.EnsureActiveProfile(); active != nil && active.TCPPort > 0 {
+			defTCPPort = active.TCPPort
+		}
+	}
+
+	tcpTarget := p.TCPAddr
+	if tcpTarget == "" {
+		host := p.PublicIP
+		if host == "" && p.STUNAddr != "" {
+			host = strings.Split(p.STUNAddr, ":")[0]
+		}
+		if host != "" && host != "0.0.0.0" {
+			tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+		} else if p.LocalAddr != "" {
+			localHost := strings.Split(p.LocalAddr, ":")[0]
+			tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
+		}
+	}
+
+	if tcpTarget == "" {
+		return false
+	}
+
+	lPort := mgr.Port()
+	if lPort <= 0 && puncher != nil {
+		lPort = puncher.LocalPort()
+	}
+
+	go func(devID, target string, localP int) {
+		if err := mgr.ConnectPeer(devID, target, localP); err == nil {
+			logger.Info().Str("peer", devID).Str("target", target).Msg("⚡ Android Direct TCP connected successfully")
+		} else {
+			logger.Warn().Str("peer", devID).Err(err).Msg("Android Direct TCP connect error")
+		}
+	}(p.DeviceID, tcpTarget, lPort)
+
+	return true
+}
+
+// SetTransportMode updates the transport selection mode ("auto", "force_tcp", "force_udp")
+func SetTransportMode(mode string) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalConfig != nil {
+		globalConfig.Network.TransportMode = mode
+		if active := globalConfig.EnsureActiveProfile(); active != nil {
+			active.TransportMode = mode
+		}
+	}
+	if globalTCPDirectMgr != nil {
+		globalTCPDirectMgr.SetTransportMode(mode)
+	}
+}
+
+// GetTransportMode returns the active transport selection mode
+func GetTransportMode() string {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalTCPDirectMgr != nil {
+		return globalTCPDirectMgr.TransportMode()
+	}
+	if globalConfig != nil {
+		if active := globalConfig.EnsureActiveProfile(); active != nil && active.TransportMode != "" {
+			return active.TransportMode
+		}
+		if globalConfig.Network.TransportMode != "" {
+			return globalConfig.Network.TransportMode
+		}
+	}
+	return "auto"
+}
+
+// SetTCPPort sets the listening TCP port (default 8443)
+func SetTCPPort(port int) {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if port <= 0 {
+		port = 8443
+	}
+	if globalConfig != nil {
+		globalConfig.Network.TCPPort = port
+		if active := globalConfig.EnsureActiveProfile(); active != nil {
+			active.TCPPort = port
+		}
+	}
+}
+
+// GetTCPPort returns the configured TCP port
+func GetTCPPort() int {
+	engineMu.Lock()
+	defer engineMu.Unlock()
+	if globalConfig != nil {
+		if active := globalConfig.EnsureActiveProfile(); active != nil && active.TCPPort > 0 {
+			return active.TCPPort
+		}
+		if globalConfig.Network.TCPPort > 0 {
+			return globalConfig.Network.TCPPort
+		}
+	}
+	if globalTCPDirectMgr != nil && globalTCPDirectMgr.Port() > 0 {
+		return globalTCPDirectMgr.Port()
+	}
+	return 8443
 }

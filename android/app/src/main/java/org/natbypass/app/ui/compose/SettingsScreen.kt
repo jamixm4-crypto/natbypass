@@ -61,6 +61,8 @@ fun SettingsScreen(
 
     // Network / Profile settings (loaded from Active Profile)
     var awgPreset       by remember { mutableStateOf("dpi") }
+    var transportMode   by remember { mutableStateOf(prefs.getString("transport_mode", "auto") ?: "auto") }
+    var tcpPort         by remember { mutableStateOf(prefs.getString("tcp_port", "8443") ?: "8443") }
     var mqttBroker      by remember { mutableStateOf("tcp://broker.emqx.io:1883") }
     var mqttTopic       by remember { mutableStateOf("natbypass/mynet/peers") }
     var mqttUser        by remember { mutableStateOf("") }
@@ -108,16 +110,21 @@ fun SettingsScreen(
                 tgChat            = if (chatVal != 0L) chatVal.toString() else ""
                 tgProxy           = active.optString("tg_proxy", "")
                 awgPreset         = active.optString("awg_preset", prefs.getString("awg_preset", "dpi") ?: "dpi")
+                transportMode     = active.optString("transport_mode", prefs.getString("transport_mode", "auto") ?: "auto")
+                val tpVal         = active.optInt("tcp_port", 8443)
+                tcpPort           = if (tpVal > 0) tpVal.toString() else (prefs.getString("tcp_port", "8443") ?: "8443")
             } else {
-                mqttBroker  = prefs.getString("mqtt_broker", "tcp://broker.emqx.io:1883") ?: ""
-                mqttTopic   = prefs.getString("mqtt_topic", "natbypass/mynet/peers") ?: ""
-                virtualIp   = prefs.getString("virtual_ip", MobileBridge.getVirtualIP()) ?: MobileBridge.getVirtualIP()
-                mqttUser    = prefs.getString("mqtt_user", "") ?: ""
-                mqttPass    = prefs.getString("mqtt_pass", "") ?: ""
-                tgToken     = prefs.getString("tg_token", "") ?: ""
-                tgChat      = prefs.getString("tg_chat", "") ?: ""
-                tgProxy     = prefs.getString("tg_proxy", "") ?: ""
-                awgPreset   = prefs.getString("awg_preset", "dpi") ?: "dpi"
+                mqttBroker    = prefs.getString("mqtt_broker", "tcp://broker.emqx.io:1883") ?: ""
+                mqttTopic     = prefs.getString("mqtt_topic", "natbypass/mynet/peers") ?: ""
+                virtualIp     = prefs.getString("virtual_ip", MobileBridge.getVirtualIP()) ?: MobileBridge.getVirtualIP()
+                mqttUser      = prefs.getString("mqtt_user", "") ?: ""
+                mqttPass      = prefs.getString("mqtt_pass", "") ?: ""
+                tgToken       = prefs.getString("tg_token", "") ?: ""
+                tgChat        = prefs.getString("tg_chat", "") ?: ""
+                tgProxy       = prefs.getString("tg_proxy", "") ?: ""
+                awgPreset     = prefs.getString("awg_preset", "dpi") ?: "dpi"
+                transportMode = prefs.getString("transport_mode", "auto") ?: "auto"
+                tcpPort       = prefs.getString("tcp_port", "8443") ?: "8443"
             }
 
             val rawSubnets = MobileBridge.getLocalSubnetsJSON()
@@ -170,9 +177,14 @@ fun SettingsScreen(
             putString("tg_token", tgToken.trim())
             putString("tg_chat", tgChat.trim())
             putString("tg_proxy", tgProxy.trim())
+            putString("transport_mode", transportMode)
+            putString("tcp_port", tcpPort.trim())
+            putInt("tcp_port_num", tcpPort.trim().toIntOrNull() ?: 8443)
             apply()
         }
 
+        MobileBridge.setTransportMode(transportMode)
+        MobileBridge.setTCPPort(tcpPort.trim().toIntOrNull() ?: 8443)
         MobileBridge.setAllowExitNode(allowExitNode)
         MobileBridge.setAdvertisedRoutes(advSubnets.trim())
 
@@ -592,6 +604,52 @@ fun SettingsScreen(
                 }
             }
 
+            // ── Transport Selection & ShadowTLS ────────────────────────────
+            SettingsSection(title = "Режим транспорта и ShadowTLS", icon = Icons.Outlined.Bolt) {
+                Text(
+                    text = "Стратегия выбора транспорта",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                val modes = listOf(
+                    "auto"      to "Авто",
+                    "force_tcp" to "Direct TCP",
+                    "force_udp" to "Только UDP"
+                )
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    modes.forEachIndexed { idx, (key, label) ->
+                        SegmentedButton(
+                            selected = transportMode == key,
+                            onClick  = { transportMode = key },
+                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = modes.size),
+                        ) { Text(label, fontSize = 11.sp) }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = when (transportMode) {
+                        "force_tcp" -> "⚡ Принудительно подключаться по TCP через ShadowTLS (маскировка TLS 1.3 под Apple/MS). Рекомендуется при блокировках UDP ТСПУ."
+                        "force_udp" -> "📡 Принудительно использовать только UDP P2P (WireGuard / AmneziaWG)."
+                        else        -> "🌐 Автоматический выбор: сначала прямой UDP P2P; при отсутствии прямого соединения — переход на Direct TCP ShadowTLS, затем Relay."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp
+                )
+
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = tcpPort,
+                    onValueChange = { tcpPort = it.filter { ch -> ch.isDigit() } },
+                    label = { Text("Порт TCP слушателя (ShadowTLS)") },
+                    placeholder = { Text("8443") },
+                    supportingText = { Text("По умолчанию: 8443 (альтернативы: 4443, 47832)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             // ── MQTT ──────────────────────────────────────────────────────
             SettingsSection(title = "MQTT Брокер ($activeProfileName)", icon = Icons.Outlined.Cloud) {

@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.224-beta4"
+	Version = "1.9.224-beta5"
 	Commit  = "release"
 )
 
@@ -635,6 +635,13 @@ const (
 	ID_BTN_PROF_EXPORT = 4064
 	ID_BTN_PROF_IMPORT = 4065
 	ID_BTN_PROF_QR     = 4066
+	ID_BTN_CONNECT_TCP       = 4070
+	ID_BTN_TOGGLE_TRANSPORT  = 4071
+)
+
+var (
+	hBtnConnectPeerTCP      uintptr
+	hBtnToggleTransportMode uintptr
 )
 
 
@@ -1565,6 +1572,12 @@ func handleCommand(id uint16) {
 	case ID_BTN_PING_PEER:
 		handlePingSelectedPeer()
 
+	case ID_BTN_CONNECT_TCP:
+		handleConnectTCPSelectedPeer()
+
+	case ID_BTN_TOGGLE_TRANSPORT:
+		handleToggleTransportMode()
+
 	case ID_BTN_TOGGLE_AUTOSTART:
 		handleToggleAutostart()
 
@@ -2438,6 +2451,17 @@ func applyActiveProfileLive(target *config.Profile) {
 	applyAWGProfileToGUI(target)
 	if udpPuncher != nil && target.NetworkKey != "" {
 		udpPuncher.SetCipherKey(target.NetworkKey)
+	}
+	if guiTCPDirectMgr != nil {
+		if target.NetworkKey != "" {
+			guiTCPDirectMgr.SetNetworkKey(target.NetworkKey)
+		}
+		if target.TransportMode != "" {
+			guiTCPDirectMgr.SetTransportMode(target.TransportMode)
+		}
+		if target.TLSMode != "" {
+			guiTCPDirectMgr.SetTLSMode(target.TLSMode)
+		}
 	}
 	setControlText(hEditMqttBr, target.MQTTBroker)
 	setControlText(hEditMqttTp, target.MQTTTopic)
@@ -3366,6 +3390,129 @@ func handlePingTargetPeer(p *peer.Peer) {
 	}()
 }
 
+func connectPeerTCPDirect(targetPeer *peer.Peer) {
+	if targetPeer == nil || guiTCPDirectMgr == nil {
+		return
+	}
+	defaultTCPPort := 8443
+	if cfg != nil {
+		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+			defaultTCPPort = activeProf.TCPPort
+		}
+	}
+	tcpTarget := targetPeer.TCPAddr
+	if tcpTarget == "" {
+		host := targetPeer.PublicIP
+		if host == "" && targetPeer.STUNAddr != "" {
+			host = strings.Split(targetPeer.STUNAddr, ":")[0]
+		}
+		if host != "" && host != "0.0.0.0" {
+			tcpTarget = fmt.Sprintf("%s:%d", host, defaultTCPPort)
+		} else if targetPeer.LocalAddr != "" {
+			localHost := strings.Split(targetPeer.LocalAddr, ":")[0]
+			tcpTarget = fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
+		}
+	}
+	if tcpTarget != "" {
+		lPort := guiTCPDirectMgr.Port()
+		if lPort <= 0 && udpPuncher != nil {
+			lPort = udpPuncher.LocalPort()
+		}
+		addLog(fmt.Sprintf("⚡ Запуск Direct TCP ShadowTLS к %s (%s)...", targetPeer.Nickname, tcpTarget))
+		go func(devID, target string, localP int) {
+			if err := guiTCPDirectMgr.ConnectPeer(devID, target, localP); err == nil {
+				addLog(fmt.Sprintf("⚡ Direct TCP с %s успешно установлен!", devID))
+			} else {
+				addLog(fmt.Sprintf("⚠️ Direct TCP ошибка с %s: %v", devID, err))
+			}
+		}(targetPeer.DeviceID, tcpTarget, lPort)
+	} else {
+		addLog("⚠️ У узла нет известного TCP/STUN адреса для подключения")
+	}
+}
+
+func handleConnectTCPSelectedPeer() {
+	if registry == nil {
+		return
+	}
+	peers := registry.List()
+	selIdx, _, _ := procSendMessageW.Call(hListPeers, 0x0188, 0, 0)
+	idx := int(int32(selIdx)) / 2
+	if idx >= 0 && idx < len(peers) {
+		connectPeerTCPDirect(peers[idx])
+	} else {
+		if hLblPeersDesc != 0 {
+			setControlText(hLblPeersDesc, "⚠️ Сначала выберите узел из списка ниже для подключения Direct TCP")
+		}
+	}
+}
+
+func handleToggleTransportMode() {
+	if cfg == nil {
+		return
+	}
+	activeProf := cfg.EnsureActiveProfile()
+	curMode := "auto"
+	if activeProf != nil && activeProf.TransportMode != "" {
+		curMode = activeProf.TransportMode
+	} else if cfg.Network.TransportMode != "" {
+		curMode = cfg.Network.TransportMode
+	}
+
+	var newMode string
+	switch curMode {
+	case "auto":
+		newMode = "force_tcp"
+	case "force_tcp":
+		newMode = "force_udp"
+	default:
+		newMode = "auto"
+	}
+
+	cfg.Network.TransportMode = newMode
+	if activeProf != nil {
+		activeProf.TransportMode = newMode
+	}
+	_ = config.Save(cfg, configPath, false)
+
+	if guiTCPDirectMgr != nil {
+		guiTCPDirectMgr.SetTransportMode(newMode)
+	}
+
+	updateTransportButtonUI(newMode)
+
+	if newMode == "force_tcp" && registry != nil && guiTCPDirectMgr != nil {
+		addLog("⚡ Принудительный режим Direct TCP (ShadowTLS) активирован! Подключение к узлам...")
+		for _, p := range registry.List() {
+			if p != nil && p.Online && !guiTCPDirectMgr.HasConn(p.DeviceID) {
+				connectPeerTCPDirect(p)
+			}
+		}
+	} else if newMode == "force_udp" {
+		addLog("📡 Принудительный режим Direct UDP P2P активирован")
+	} else {
+		addLog("🌐 Автоматический выбор транспорта (UDP P2P + TCP ShadowTLS) активирован")
+	}
+}
+
+func updateTransportButtonUI(mode string) {
+	switch mode {
+	case "force_tcp":
+		buttonLabels[ID_BTN_TOGGLE_TRANSPORT] = "⚡ Режим транспорта: Только Direct TCP (ShadowTLS)"
+		buttonTypes[ID_BTN_TOGGLE_TRANSPORT] = "primary"
+	case "force_udp":
+		buttonLabels[ID_BTN_TOGGLE_TRANSPORT] = "📡 Режим транспорта: Только UDP P2P"
+		buttonTypes[ID_BTN_TOGGLE_TRANSPORT] = "normal"
+	default:
+		buttonLabels[ID_BTN_TOGGLE_TRANSPORT] = "🌐 Режим транспорта: Авто (UDP P2P + TCP)"
+		buttonTypes[ID_BTN_TOGGLE_TRANSPORT] = "green"
+	}
+	if hBtnToggleTransportMode != 0 {
+		procInvalidateRect.Call(hBtnToggleTransportMode, 0, 1)
+	}
+}
+
+
 func handlePingSelectedPeer() {
 	if registry == nil {
 		return
@@ -3509,37 +3656,7 @@ func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
 	case 6006:
 		handleToggleSubnetRoute()
 	case 6007:
-		if guiTCPDirectMgr != nil {
-			tcpTarget := targetPeer.TCPAddr
-			if tcpTarget == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
-				tcpTarget = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
-			}
-			if tcpTarget == "" && targetPeer.STUNAddr != "" && targetPeer.WGPort > 0 {
-				tcpTarget = fmt.Sprintf("%s:%d", strings.Split(targetPeer.STUNAddr, ":")[0], targetPeer.WGPort)
-			}
-			if tcpTarget == "" && targetPeer.LocalAddr != "" {
-				tcpTarget = targetPeer.LocalAddr
-			}
-			if tcpTarget == "" {
-				tcpTarget = targetPeer.STUNAddr
-			}
-			if tcpTarget != "" {
-				lPort := guiTCPDirectMgr.Port()
-				if lPort <= 0 && udpPuncher != nil {
-					lPort = udpPuncher.LocalPort()
-				}
-				addLog(fmt.Sprintf("⚡ Запуск Direct TCP ShadowTLS к %s (%s)...", targetPeer.Nickname, tcpTarget))
-				go func(devID, target string, localP int) {
-					if err := guiTCPDirectMgr.ConnectPeer(devID, target, localP); err == nil {
-						addLog(fmt.Sprintf("⚡ Direct TCP с %s успешно установлен!", devID))
-					} else {
-						addLog(fmt.Sprintf("⚠️ Direct TCP ошибка с %s: %v", devID, err))
-					}
-				}(targetPeer.DeviceID, tcpTarget, lPort)
-			} else {
-				addLog("⚠️ У узла нет известного TCP/STUN адреса для подключения")
-			}
-		}
+		connectPeerTCPDirect(targetPeer)
 	}
 }
 
@@ -3672,12 +3789,13 @@ func buildModernUI(hInstance uintptr) {
 	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ Задать имя", cx, 68, 180, 34, ID_BTN_BOOKMARK_PEER, "normal")
 	hBtnCopyPeerVIP = createOwnerDrawButton(hInstance, "📋 Скопировать IP", cx+190, 68, 180, 34, ID_BTN_COPY_PEER_VIP, "normal")
 	hBtnPingPeer = createOwnerDrawButton(hInstance, "🧪 Ping узла", cx+380, 68, 160, 34, ID_BTN_PING_PEER, "normal")
-	btnExitNodeDirect := createOwnerDrawButton(hInstance, "🌐 Назначить шлюзом (Exit Node)", cx+550, 68, 290, 34, ID_BTN_EXIT_NODE_SELECT, "normal")
+	hBtnConnectPeerTCP = createOwnerDrawButton(hInstance, "⚡ Direct TCP", cx+442, 68, 150, 34, ID_BTN_CONNECT_TCP, "primary")
+	btnExitNodeDirect := createOwnerDrawButton(hInstance, "🌐 Шлюз (Exit Node)", cx+600, 68, 240, 34, ID_BTN_EXIT_NODE_SELECT, "normal")
 
 	hListPeers = createListBox(hInstance, cx, 108, cw, 600, hFontNormal)
 
 	tabPages[1] = []uintptr{
-		lblPeersPageTitle, hLblPeersDesc, hBtnBookmarkPeer, hBtnCopyPeerVIP, hBtnPingPeer, btnExitNodeDirect, hListPeers,
+		lblPeersPageTitle, hLblPeersDesc, hBtnBookmarkPeer, hBtnCopyPeerVIP, hBtnPingPeer, hBtnConnectPeerTCP, btnExitNodeDirect, hListPeers,
 	}
 
 	// СТРАНИЦА 2: ПРОФИЛИ СЕТЕЙ (PROFILES)
@@ -3924,14 +4042,33 @@ func buildModernUI(hInstance uintptr) {
 	}
 	hBtnToggleBetaChannel = createOwnerDrawButton(hInstance, betaText, cx+425, 204, 415, 38, ID_BTN_TOGGLE_BETA, betaType)
 
-	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx, 260, cw, 42, ID_BTN_SAVE_CFG, "primary")
-	hBtnCheckUpdate = createOwnerDrawButton(hInstance, "🚀 Проверить обновления NatBypass на GitHub", cx, 310, cw, 38, ID_BTN_CHECK_UPDATE, "green")
+	curTransMode := "auto"
+	if cfg != nil {
+		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TransportMode != "" {
+			curTransMode = activeProf.TransportMode
+		} else if cfg.Network.TransportMode != "" {
+			curTransMode = cfg.Network.TransportMode
+		}
+	}
+	transLabel := "🌐 Режим транспорта: Авто (UDP P2P + TCP)"
+	transType := "green"
+	if curTransMode == "force_tcp" {
+		transLabel = "⚡ Режим транспорта: Только Direct TCP (ShadowTLS)"
+		transType = "primary"
+	} else if curTransMode == "force_udp" {
+		transLabel = "📡 Режим транспорта: Только UDP P2P"
+		transType = "normal"
+	}
+	hBtnToggleTransportMode = createOwnerDrawButton(hInstance, transLabel, cx, 250, 415, 38, ID_BTN_TOGGLE_TRANSPORT, transType)
+
+	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx, 298, cw, 42, ID_BTN_SAVE_CFG, "primary")
+	hBtnCheckUpdate = createOwnerDrawButton(hInstance, "🚀 Проверить обновления NatBypass на GitHub", cx, 348, cw, 38, ID_BTN_CHECK_UPDATE, "green")
 	lblUpdateStatus = createLabel(hInstance, fmt.Sprintf("Текущая версия: v%s • Нажмите для проверки наличия обновлений с GitHub Releases", Version), cx, 354, cw, 20, hFontNormal)
 
 	tabPages[7] = []uintptr{
 		lblSetTitle, lblSetDesc, lblNick, hEditMyNick, lblNickHint,
 		lblSysHead, hBtnToggleAutostart, hBtnToggleMinimizeToTray, hBtnToggleLogs,
-		hBtnToggleBetaChannel,
+		hBtnToggleBetaChannel, hBtnToggleTransportMode,
 		hBtnSaveCfg, hBtnCheckUpdate, lblUpdateStatus,
 	}
 
@@ -4662,18 +4799,24 @@ func startEngineFromConfig(c *config.Config) {
 								}
 								// 1d. If force_tcp and not connected yet, trigger immediate dial
 								if isForceTCP && !sentTCP && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+									defTCPPort := 8443
+									if cfg != nil {
+										if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+											defTCPPort = activeProf.TCPPort
+										}
+									}
 									tcpTarget := targetPeer.TCPAddr
-									if tcpTarget == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
-										tcpTarget = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
-									}
-									if tcpTarget == "" && targetPeer.STUNAddr != "" && targetPeer.WGPort > 0 {
-										tcpTarget = fmt.Sprintf("%s:%d", strings.Split(targetPeer.STUNAddr, ":")[0], targetPeer.WGPort)
-									}
-									if tcpTarget == "" && targetPeer.LocalAddr != "" {
-										tcpTarget = targetPeer.LocalAddr
-									}
 									if tcpTarget == "" {
-										tcpTarget = targetPeer.STUNAddr
+										host := targetPeer.PublicIP
+										if host == "" && targetPeer.STUNAddr != "" {
+											host = strings.Split(targetPeer.STUNAddr, ":")[0]
+										}
+										if host != "" && host != "0.0.0.0" {
+											tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+										} else if targetPeer.LocalAddr != "" {
+											localHost := strings.Split(targetPeer.LocalAddr, ":")[0]
+											tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
+										}
 									}
 									if tcpTarget != "" {
 										lPort := guiTCPDirectMgr.Port()
@@ -4844,18 +4987,24 @@ func startEngineFromConfig(c *config.Config) {
 							}
 							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
 							if !isForceUDP && (isForceTCP || !p.DirectP2P || p.ProbeCount >= 2) && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) {
+								defTCPPort := 8443
+								if cfg != nil {
+									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+										defTCPPort = activeProf.TCPPort
+									}
+								}
 								tcpTarget := p.TCPAddr
-								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
-									tcpTarget = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
-								}
-								if tcpTarget == "" && p.STUNAddr != "" && p.WGPort > 0 {
-									tcpTarget = fmt.Sprintf("%s:%d", strings.Split(p.STUNAddr, ":")[0], p.WGPort)
-								}
-								if tcpTarget == "" && p.LocalAddr != "" {
-									tcpTarget = p.LocalAddr
-								}
 								if tcpTarget == "" {
-									tcpTarget = p.STUNAddr
+									host := p.PublicIP
+									if host == "" && p.STUNAddr != "" {
+										host = strings.Split(p.STUNAddr, ":")[0]
+									}
+									if host != "" && host != "0.0.0.0" {
+										tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+									} else if p.LocalAddr != "" {
+										localHost := strings.Split(p.LocalAddr, ":")[0]
+										tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
+									}
 								}
 								if tcpTarget != "" {
 									lPort := guiTCPDirectMgr.Port()
@@ -6861,6 +7010,19 @@ func saveConfigFromUI() {
 		active.TGToken = tgToken
 		if cid, err := strconv.ParseInt(tgChat, 10, 64); err == nil {
 			active.TGChatID = cid
+		}
+	}
+
+	if guiTCPDirectMgr != nil {
+		if active != nil && active.TransportMode != "" {
+			guiTCPDirectMgr.SetTransportMode(active.TransportMode)
+		} else if cfg.Network.TransportMode != "" {
+			guiTCPDirectMgr.SetTransportMode(cfg.Network.TransportMode)
+		}
+		if active != nil && active.TLSMode != "" {
+			guiTCPDirectMgr.SetTLSMode(active.TLSMode)
+		} else if cfg.Network.TLSMode != "" {
+			guiTCPDirectMgr.SetTLSMode(cfg.Network.TLSMode)
 		}
 	}
 

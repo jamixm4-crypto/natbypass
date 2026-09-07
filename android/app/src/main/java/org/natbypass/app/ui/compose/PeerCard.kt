@@ -90,6 +90,7 @@ fun PeerCard(
     peer: PeerUiModel,
     onPing: () -> Unit,
     onCopyIp: () -> Unit,
+    onConnectTCP: () -> Unit = {},
     onSetExitNode: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
@@ -222,6 +223,7 @@ fun PeerCard(
                 peer = peer,
                 onPing = { showSheet = false; onPing() },
                 onCopyIp = { showSheet = false; onCopyIp() },
+                onConnectTCP = { showSheet = false; onConnectTCP() },
                 onSetExitNode = { showSheet = false; onSetExitNode() },
                 onDelete = { showSheet = false; onDelete() },
             )
@@ -234,6 +236,7 @@ private fun PeerActionsContent(
     peer: PeerUiModel,
     onPing: () -> Unit,
     onCopyIp: () -> Unit,
+    onConnectTCP: () -> Unit,
     onSetExitNode: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -258,6 +261,7 @@ private fun PeerActionsContent(
 
         PeerActionItem(icon = Icons.Outlined.Speed,   label = "⚡ Проверить пинг (Ping)", onClick = onPing)
         PeerActionItem(icon = Icons.Outlined.ContentCopy, label = "📋 Скопировать IP (${peer.virtualIp})", onClick = onCopyIp)
+        PeerActionItem(icon = Icons.Outlined.Bolt, label = "⚡ Подключиться по Direct TCP (ShadowTLS)", onClick = onConnectTCP, tint = Color(0xFFF59E0B))
         
         // Показываем пункт выхода в интернет ТОЛЬКО если узел действительно является Exit Node
         if (peer.isExitNode) {

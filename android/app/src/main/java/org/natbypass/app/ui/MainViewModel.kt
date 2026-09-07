@@ -399,6 +399,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun connectPeerTCP(peerId: String, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { MobileBridge.connectPeerTCP(peerId) }
+            onResult(ok)
+            if (ok) refreshStatus()
+        }
+    }
+
     fun toggleSubnetRoute(context: Context, subnet: String): Boolean {
         val current = prefs.getString("adv_subnets", "") ?: ""
         val currentList = current.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
