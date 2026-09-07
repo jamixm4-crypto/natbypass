@@ -1,11 +1,8 @@
 name: Cleanup Releases and Workflow Runs
 
 on:
-  push:
-    branches:
-      - main
-  release:
-    types: [published]
+  schedule:
+    - cron: '0 3 * * 0' # Weekly at 03:00 UTC on Sunday
   workflow_dispatch:
 
 permissions:
@@ -16,7 +13,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete superseded releases and their tags
+      - name: Delete superseded releases
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -33,16 +30,34 @@ jobs:
 
             if (releases.length > 0) {
               const stables = releases.filter(r => !r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+              const prereleases = releases.filter(r => r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-              // Keep latest 2 stable releases
-              for (const stable of stables.slice(0, 2)) {
+              // Keep latest 3 stable releases
+              for (const stable of stables.slice(0, 3)) {
                 keepIds.add(stable.id);
                 keepTags.add(stable.tag_name);
                 console.log(`Keeping STABLE release: ${stable.tag_name} (ID: ${stable.id})`);
               }
 
+              // Keep latest 5 prereleases
+              for (const pre of prereleases.slice(0, 5)) {
+                keepIds.add(pre.id);
+                keepTags.add(pre.tag_name);
+                console.log(`Keeping PRERELEASE: ${pre.tag_name} (ID: ${pre.id})`);
+              }
+
+              const now = Date.now();
+              const minAgeMs = 48 * 3600 * 1000; // Do not touch anything created in the last 48 hours
+
               for (const release of releases) {
                 if (keepIds.has(release.id)) continue;
+
+                const createdAt = new Date(release.created_at).getTime();
+                if (now - createdAt < minAgeMs) {
+                  console.log(`Skipping recently created release: ${release.tag_name} (created ${release.created_at})`);
+                  continue;
+                }
+
                 console.log(`Deleting superseded release: ${release.name || release.tag_name} (${release.tag_name}) ID: ${release.id}`);
                 try {
                   await github.rest.repos.deleteRelease({
@@ -54,21 +69,10 @@ jobs:
                 } catch (e) {
                   console.error(`Failed to delete release ${release.tag_name}: ${e.message}`);
                 }
-
-                try {
-                  await github.rest.git.deleteRef({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    ref: `tags/${release.tag_name}`,
-                  });
-                  console.log(`✓ Deleted git tag ${release.tag_name}`);
-                } catch (e) {
-                  console.warn(`Could not delete tag ${release.tag_name}: ${e.message}`);
-                }
               }
             }
 
-      - name: Delete all old completed workflow runs
+      - name: Delete old completed workflow runs
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -81,11 +85,18 @@ jobs:
             });
 
             console.log(`Total workflow runs found: ${runs.total_count}`);
+            const now = Date.now();
+            const minAgeMs = 24 * 3600 * 1000; // Only clean runs older than 24 hours
+
             for (const run of runs.workflow_runs) {
               if (run.id === context.runId || run.status === 'in_progress' || run.status === 'queued') {
                 continue;
               }
-              console.log(`Deleting run: ${run.name} (ID: ${run.id}, Status: ${run.status}, Conclusion: ${run.conclusion})`);
+              const runAge = now - new Date(run.created_at).getTime();
+              if (runAge < minAgeMs) {
+                continue;
+              }
+              console.log(`Deleting old run: ${run.name} (ID: ${run.id}, Status: ${run.status})`);
               try {
                 await github.rest.actions.deleteWorkflowRun({
                   owner: context.repo.owner,

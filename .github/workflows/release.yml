@@ -94,18 +94,32 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $TAG = "${{ github.ref_name }}"
-          if ($TAG.Contains("-")) {
-            gh release view $TAG; if ($LASTEXITCODE -ne 0) { gh release create $TAG --title "NatBypass $TAG" --notes "NatBypass $TAG — P2P Mesh & AmneziaWG 2.0 Client." --prerelease --draft=false }
-          } else {
-            gh release view $TAG; if ($LASTEXITCODE -ne 0) { gh release create $TAG --title "NatBypass $TAG" --notes "NatBypass $TAG — P2P Mesh & AmneziaWG 2.0 Client." --latest --draft=false }
-          }
-          Get-ChildItem -Path "build/*" | ForEach-Object {
-            Write-Host "Uploading $($_.Name)..."
-            for ($attempt=1; $attempt -le 5; $attempt++) {
-              gh release upload $TAG $_.FullName --clobber
-              if ($LASTEXITCODE -eq 0) { break }
-              Start-Sleep -Seconds 3
+          $isPre = $TAG.Contains("-")
+          
+          # Check if release exists; if not, create as draft first
+          gh release view $TAG 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            if ($isPre) {
+              gh release create $TAG --title "NatBypass $TAG" --notes "NatBypass $TAG — P2P Mesh & AmneziaWG 2.0 Client." --prerelease --draft
+            } else {
+              gh release create $TAG --title "NatBypass $TAG" --notes "NatBypass $TAG — P2P Mesh & AmneziaWG 2.0 Client." --latest --draft
             }
+          }
+
+          $files = (Get-ChildItem -Path "build/*" | Select-Object -ExpandProperty FullName)
+          Write-Host "Uploading $($files.Count) assets to release $TAG..."
+          for ($attempt=1; $attempt -le 5; $attempt++) {
+            gh release upload $TAG @files --clobber
+            if ($LASTEXITCODE -eq 0) { break }
+            Write-Host "Batch upload attempt $attempt failed, retrying in 5s..."
+            Start-Sleep -Seconds 5
+          }
+
+          # Publish release
+          if ($isPre) {
+            gh release edit $TAG --draft=false --prerelease
+          } else {
+            gh release edit $TAG --draft=false --latest
           }
 
       - name: Setup Python for manifest generator
