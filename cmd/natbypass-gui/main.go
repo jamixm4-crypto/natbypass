@@ -34,6 +34,7 @@ import (
 
 	"github.com/natbypass/natbypass/internal/autostart"
 	"github.com/natbypass/natbypass/internal/config"
+	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/network"
@@ -103,7 +104,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.223-beta.11"
+	Version = "1.9.223-beta.12"
 	Commit  = "release"
 )
 
@@ -4170,9 +4171,11 @@ func startEngineFromConfig(c *config.Config) {
 	}
 
 	// Создание реального UDP Hole Punching сокета
-	// Порт берётся из конфига (Network.UDPPort). По умолчанию 0 = OS назначает случайный порт.
-	// Это критично чтобы не конфликтовать с локальным AWG/WireGuard на порту 51820.
+	// Приоритет: порт из конфига (Network.UDPPort) -> DefaultUDPPort (443 stealth QUIC) -> каскадный fallback
 	udpListenPort := c.Network.UDPPort
+	if udpListenPort <= 0 {
+		udpListenPort = constants.DefaultUDPPort
+	}
 	var puncher *network.UDPPuncher
 	puncher, err = network.NewUDPPuncher(udpListenPort, myDevID, c.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
 		atomic.AddUint64(&packetsRecvCount, 1)
@@ -6243,11 +6246,15 @@ func renderAWGTextFromUI() {
 	if cachedAWGParams.Version == "" {
 		cachedAWGParams = wireguard.GenerateAWG31StrictParams()
 	}
+	localAWGPort := constants.DefaultUDPPort
+	if udpPuncher != nil && udpPuncher.LocalPort() > 0 {
+		localAWGPort = udpPuncher.LocalPort()
+	}
 	awgCfg := wireguard.AWGConfig{
 		WGConfig: wireguard.WGConfig{
 			PrivateKey: privKeyDisplay,
 			Address:    fmt.Sprintf("%s/24", myVirtualIP),
-			ListenPort: 443,
+			ListenPort: localAWGPort,
 			MTU:        1420,
 			Peers:      wgPeers,
 		},

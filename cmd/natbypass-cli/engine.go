@@ -1714,7 +1714,15 @@ func publishLoop(
 			NATType:         natLabel,
 			NATDelta:        natDelta,
 			WGPubKey:        wgPubKey,
-			WGPort:          wgPort,
+			WGPort: func() int {
+				if wgPort > 0 {
+					return wgPort
+				}
+				if puncher != nil && puncher.LocalPort() > 0 {
+					return puncher.LocalPort()
+				}
+				return constants.DefaultUDPPort
+			}(),
 			Timestamp:       time.Now(),
 			VirtualIP:       strings.TrimSpace(strings.Split(currentVIP, "/")[0]),
 			OS:              runtime.GOOS,

@@ -13,7 +13,7 @@ import "time"
 const (
 	// Network and service defaults
 	DefaultWebUIPort       = 8080
-	DefaultUDPPort         = 47832
+	DefaultUDPPort         = 443
 	DefaultPublishInterval = 8 * time.Second
 	DefaultIPTimeout       = 10 * time.Second
 	DefaultWGListenPort    = 51820

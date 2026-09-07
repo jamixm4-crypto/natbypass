@@ -201,26 +201,51 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	var err error
 	var lAddr *net.UDPAddr
 
-	// Bind IPv4 socket (udp4) first for maximum compatibility with Linux/router NAT stacks
+	// Try binding UDP socket.
+	// 1. If preferredPort > 0, try it first.
+	// 2. If preferredPort <= 0 or fails, try stealth candidate ports that bypass DPI:
+	//    - 443: HTTP/3 / QUIC stealth mode, matches AmneziaWG and bypasses TSPU on cross-border links
+	//    - 51820: Standard WireGuard default
+	//    - 47832: NatBypass legacy default
+	//    - 0: OS dynamic ephemeral port fallback
+	candidates := make([]int, 0, 5)
 	if preferredPort > 0 {
-		lAddr, _ = net.ResolveUDPAddr("udp4", fmt.Sprintf("0.0.0.0:%d", preferredPort))
+		candidates = append(candidates, preferredPort)
+	}
+	for _, p := range []int{constants.DefaultUDPPort, 51820, 47832, 0} {
+		found := false
+		for _, c := range candidates {
+			if c == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			candidates = append(candidates, p)
+		}
+	}
+
+	for _, port := range candidates {
+		portStr := fmt.Sprintf(":%d", port)
+		if port == 0 {
+			portStr = ":0"
+		}
+		// Bind IPv4 socket (udp4) first for maximum compatibility with Linux/router NAT stacks
+		lAddr, _ = net.ResolveUDPAddr("udp4", "0.0.0.0"+portStr)
 		conn, err = net.ListenUDP("udp4", lAddr)
-		if err != nil {
-			lAddr, _ = net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", preferredPort))
-			conn, err = net.ListenUDP("udp", lAddr)
+		if err == nil && conn != nil {
+			break
+		}
+		// Try generic udp
+		lAddr, _ = net.ResolveUDPAddr("udp", portStr)
+		conn, err = net.ListenUDP("udp", lAddr)
+		if err == nil && conn != nil {
+			break
 		}
 	}
 
 	if err != nil || conn == nil {
-		lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
-		conn, err = net.ListenUDP("udp4", lAddr4)
-		if err != nil {
-			lAddr, _ = net.ResolveUDPAddr("udp", ":0")
-			conn, err = net.ListenUDP("udp", lAddr)
-			if err != nil {
-				return nil, fmt.Errorf("failed to bind UDP socket: %w", err)
-			}
-		}
+		return nil, fmt.Errorf("failed to bind UDP socket on any candidate port: %w", err)
 	}
 
 	localPort := conn.LocalAddr().(*net.UDPAddr).Port
