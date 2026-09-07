@@ -459,7 +459,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}()
 
 		// L3 Data-plane: Inbound packets from UDP Puncher & MQTT Relay -> Write directly to kernel TUN
-		onInboundPacket := func(payload []byte, directAddr *net.UDPAddr) {
+		onInboundPacket := func(payload []byte, directAddr *net.UDPAddr, isTCP bool, isRelay bool) {
 			if len(payload) < 20 {
 				return
 			}
@@ -477,8 +477,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				payload = payload[:totalLen]
 			}
 
-			// If direct UDP data packet arrived, immediately lock and promote direct P2P path with Dynamic IP Auto-Learning
-			if directAddr != nil && registry != nil {
+			// If direct data packet arrived, immediately lock and promote direct P2P path with Dynamic IP Auto-Learning
+			if directAddr != nil && registry != nil && !isRelay {
 				fromAddrStr := directAddr.String()
 				var targetPeer *peer.Peer
 				// 1. Match by Virtual IP
@@ -506,9 +506,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							break
 						}
 					}
-					// BUG-05 FIX: Fallback-3 removed — assigning VirtualIP based solely on being
-					// the only peer in registry is unsafe and allows VirtualIP hijack by any
-					// external UDP sender with a spoofed source IP. Removed entirely.
 				}
 
 				if targetPeer != nil {
@@ -525,6 +522,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					// BUG-01 FIX: targetPeer is already a copy (set above), safe to mutate
 					oldEP := targetPeer.ActiveEndpoint
 					targetPeer.DirectP2P = true
+					if isTCP {
+						targetPeer.Transport = "tcp_tls"
+					} else {
+						targetPeer.Transport = "udp_direct"
+					}
 					if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
 						targetPeer.ActiveEndpoint = fromAddrStr
 					} else if targetPeer.ActiveEndpoint == "" {
@@ -542,7 +544,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					if magicSock != nil && targetPeer.ActiveEndpoint != "" {
 						magicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
 					}
-					if puncher != nil && targetPeer.ActiveEndpoint != "" {
+					if puncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
 						if oldEP != "" && oldEP != targetPeer.ActiveEndpoint {
 							puncher.RemoveKeepAliveTarget(oldEP)
 						}
@@ -577,25 +579,43 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if inDstIP == cleanMyVIP && len(payload) >= ihl+8 && payload[9] == 1 && payload[ihl] == 8 {
 					if reply := createICMPEchoReply(payload); len(reply) > 0 {
 						sent := false
-						if directAddr != nil && puncher != nil {
+						var senderPeer *peer.Peer
+						if registry != nil {
+							senderPeer, _ = registry.GetByVirtualIP(inSrcIP)
+						}
+						// 1. If active TCP ShadowTLS connection with peer, return via TCP
+						if senderPeer != nil && tcpDirectMgr != nil && tcpDirectMgr.HasConn(senderPeer.DeviceID) {
+							if err := tcpDirectMgr.SendPacket(senderPeer.DeviceID, reply); err == nil {
+								sent = true
+							}
+						}
+						// 2. If direct UDP
+						if !sent && directAddr != nil && puncher != nil && !isTCP && !isRelay {
 							if err := puncher.SendDataPacketWithPadding(directAddr.String(), reply, 0, 0); err == nil {
 								sent = true
 							}
 						}
-						if registry != nil {
-							if senderPeer, ok := registry.GetByVirtualIP(inSrcIP); ok && senderPeer != nil {
-								if !sent && puncher != nil {
-									ep := senderPeer.ActiveEndpoint
-									if ep == "" {
-										ep = senderPeer.STUNAddr
-									}
-									if ep != "" {
-										if err := puncher.SendDataPacketWithPadding(ep, reply, 0, 0); err == nil {
-											sent = true
-										}
-									}
+						if !sent && senderPeer != nil && puncher != nil && !isRelay {
+							ep := senderPeer.ActiveEndpoint
+							if ep == "" {
+								ep = senderPeer.STUNAddr
+							}
+							if ep != "" {
+								if err := puncher.SendDataPacketWithPadding(ep, reply, 0, 0); err == nil {
+									sent = true
 								}
 							}
+						}
+						// 3. Relay fallback: return via MQTT Relay
+						if !sent && senderPeer != nil && sigMgr != nil {
+							dataToSend := reply
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+								cKey := crypto.DeriveKey(activeProf.NetworkKey)
+								if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
+									dataToSend = enc
+								}
+							}
+							_ = sigMgr.PublishTunnelData(senderPeer.DeviceID, dataToSend)
 						}
 					}
 				}
@@ -612,13 +632,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 		if puncher != nil {
 			puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
-				onInboundPacket(payload, srcAddr)
+				onInboundPacket(payload, srcAddr, false, false)
 			})
 		}
 
 		if tcpDirectMgr != nil {
 			tcpDirectMgr.SetOnPacket(func(srcAddr *net.UDPAddr, payload []byte) {
-				onInboundPacket(payload, srcAddr)
+				onInboundPacket(payload, srcAddr, true, false)
 			})
 		}
 
@@ -631,7 +651,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						dataToProcess = dec
 					}
 				}
-				onInboundPacket(dataToProcess, nil)
+				onInboundPacket(dataToProcess, nil, false, true)
 			})
 		}
 
@@ -874,97 +894,101 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							delete(probeBackoff, p.DeviceID)
 							delete(activeSymSessions, p.DeviceID)
 						} else {
-							// R3: Backoff logic for unconnected peers
+							// R3: Backoff logic for unconnected peers (UDP hole punch probes only)
+							udpInBackoff := false
 							if until, ok := probeBackoff[p.DeviceID]; ok && now.Before(until) {
-								// Still in backoff period — skip probe
-								continue
+								udpInBackoff = true
 							}
 
-							// FIX-N4: Extended exponential backoff for persistent relay-only peers.
-							// Stages based on ProbeCount (at default 4s ticker):
-							//   0-15   probes (~1 min):  no backoff (aggressive punching)
-							//  16-50   probes (~3 min):  16s backoff
-							//  51-150  probes (~10 min): 60s backoff
-							//  151-300 probes (~30 min): 120s backoff
-							//  >300    probes (>30 min): 300s backoff (probe once per 5 min)
-							var nextBackoff time.Duration
-							switch {
-							case p.ProbeCount > 300:
-								nextBackoff = 300 * time.Second
-							case p.ProbeCount > 150:
-								nextBackoff = 120 * time.Second
-							case p.ProbeCount > 50:
-								nextBackoff = 60 * time.Second
-							case p.ProbeCount > 15:
-								nextBackoff = 16 * time.Second
-							}
-							if nextBackoff > 0 {
-								probeBackoff[p.DeviceID] = now.Add(nextBackoff)
-							}
-
-							// Track probe attempt in MagicSock for automatic TCP Simultaneous Open fallback
-							if magicSock != nil {
-								magicSock.RecordProbeAttempt(p.DeviceID)
-							}
-
-							// Send probes to all known endpoints
-							if p.ActiveEndpoint != "" {
-								_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
-							}
-							if p.STUNAddr != "" {
-								_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
-							}
-							if p.LocalAddr != "" {
-								_ = puncher.SendHolePunchProbe(p.LocalAddr)
-							}
-							if p.IPv6Addr != "" {
-								_ = puncher.SendHolePunchProbe(p.IPv6Addr)
-							}
-							for _, cand := range p.Candidates {
-								if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
-									_ = puncher.SendHolePunchProbe(cand)
+							if !udpInBackoff {
+								// FIX-N4: Extended exponential backoff for persistent relay-only peers.
+								// Stages based on ProbeCount (at default 4s ticker):
+								//   0-15   probes (~1 min):  no backoff (aggressive punching)
+								//  16-50   probes (~3 min):  16s backoff
+								//  51-150  probes (~10 min): 60s backoff
+								//  151-300 probes (~30 min): 120s backoff
+								//  >300    probes (>30 min): 300s backoff (probe once per 5 min)
+								var nextBackoff time.Duration
+								switch {
+								case p.ProbeCount > 300:
+									nextBackoff = 300 * time.Second
+								case p.ProbeCount > 150:
+									nextBackoff = 120 * time.Second
+								case p.ProbeCount > 50:
+									nextBackoff = 60 * time.Second
+								case p.ProbeCount > 15:
+									nextBackoff = 16 * time.Second
 								}
-							}
-						if p.PublicIP != "" && p.WGPort > 0 {
-								_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
-							}
-
-							// Trigger Symmetric NAT wide-sweep multi-hop session when peer or local is behind Symmetric NAT
-							symSessionMu.Lock()
-							alreadyActive := activeSymSessions[p.DeviceID]
-							symSessionMu.Unlock()
-							if (p.NATType == "symmetric" || puncher.GetNATType().IsSymmetric()) && p.ProbeCount >= 8 && !alreadyActive {
-								targetAddr := p.STUNAddr
-								if targetAddr == "" && p.ActiveEndpoint != "" {
-									targetAddr = p.ActiveEndpoint
+								if nextBackoff > 0 {
+									probeBackoff[p.DeviceID] = now.Add(nextBackoff)
 								}
-								if targetAddr != "" {
-									if host, portStr, err := net.SplitHostPort(targetAddr); err == nil {
-										if bPort, err := strconv.Atoi(portStr); err == nil && bPort > 0 {
+
+								// Track probe attempt in MagicSock for automatic TCP Simultaneous Open fallback
+								if magicSock != nil {
+									magicSock.RecordProbeAttempt(p.DeviceID)
+								}
+
+								// Send probes to all known endpoints
+								if p.ActiveEndpoint != "" {
+									_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+								}
+								if p.STUNAddr != "" {
+									_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
+								}
+								if p.LocalAddr != "" {
+									_ = puncher.SendHolePunchProbe(p.LocalAddr)
+								}
+								if p.IPv6Addr != "" {
+									_ = puncher.SendHolePunchProbe(p.IPv6Addr)
+								}
+								for _, cand := range p.Candidates {
+									if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
+										_ = puncher.SendHolePunchProbe(cand)
+									}
+								}
+								if p.PublicIP != "" && p.WGPort > 0 {
+									_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+								}
+
+								// Trigger Symmetric NAT wide-sweep multi-hop session when peer or local is behind Symmetric NAT
+								symSessionMu.Lock()
+								alreadyActive := activeSymSessions[p.DeviceID]
+								symSessionMu.Unlock()
+								if (p.NATType == "symmetric" || puncher.GetNATType().IsSymmetric()) && p.ProbeCount >= 8 && !alreadyActive {
+									targetAddr := p.STUNAddr
+									if targetAddr == "" && p.ActiveEndpoint != "" {
+										targetAddr = p.ActiveEndpoint
+									}
+									if targetAddr != "" {
+										host, portStr, err := net.SplitHostPort(targetAddr)
+										if err == nil {
+											bPort, _ := strconv.Atoi(portStr)
 											symSessionMu.Lock()
 											activeSymSessions[p.DeviceID] = true
 											symSessionMu.Unlock()
+											log.Info().Str("peer", p.DeviceID).Str("host", host).Int("port", bPort).
+												Msg("⚡ Triggering Symmetric NAT wide-sweep multi-hop session")
 
-											// Broadcast SymPunch request so the remote peer probes us simultaneously.
+											// Broadcast symmetric punch request so remote peer also launches symmetric sweep
 											if sigMgr != nil {
 												mySTUN := puncher.GetCachedSTUNAddr()
-												myHopHint := puncher.LocalPort()
 												if mySTUN != "" {
 													symPunchPayload := &signaling.Payload{
 														DeviceID: deviceID,
 														SymPunch: &signaling.SymPunchSignal{
 															MySTUNAddr:     mySTUN,
 															TargetDeviceID: p.DeviceID,
-															HopHint:        myHopHint,
+															HopHint:        puncher.LocalPort(),
 														},
 													}
-											go func(pl *signaling.Payload) { _ = sigMgr.Send(engineCtx, pl) }(symPunchPayload)
+													go func(pl *signaling.Payload) { _ = sigMgr.Send(engineCtx, pl) }(symPunchPayload)
 													log.Info().Str("peer", p.DeviceID).Str("my_stun", mySTUN).
 														Msg("📡 SymPunch: broadcasting bilateral punch request to peer")
 												}
 											}
 
-											// Force STUN refresh when probe count is high
+											// Force STUN refresh before session when probe count is high
+											// (stale STUN address is the #1 cause of session failure).
 											if p.ProbeCount > 100 {
 												go puncher.ForceDiscoverMappedAddress(engineCtx)
 											}
@@ -997,6 +1021,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 
 							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
+							// Evaluated on every tick, NOT blocked by UDP probe backoff!
 							if (!p.DirectP2P || p.ProbeCount >= 2) && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
 								tcpTarget := p.TCPAddr
 								if tcpTarget == "" && p.PublicIP != "" && p.WGPort > 0 {
@@ -1021,6 +1046,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 											log.Info().Str("peer", devID).Str("target", target).Msg("⚡ P2P TCP connection established successfully")
 										}
 									}(p.DeviceID, tcpTarget, lPort)
+								}
+								if p.LocalAddr != "" && p.LocalAddr != tcpTarget {
+									lPort := tcpDirectMgr.Port()
+									if lPort <= 0 && puncher != nil {
+										lPort = puncher.LocalPort()
+									}
+									go func(devID, localTarget string, localP int) {
+										_ = tcpDirectMgr.ConnectPeer(devID, localTarget, localP)
+									}(p.DeviceID, p.LocalAddr, lPort)
 								}
 							}
 						}
@@ -1333,8 +1367,10 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			log.Info().Str("peer", peerID).Str("addr", remoteAddr).Msg("⚡ Direct P2P TCP (ShadowTLS) ACTIVE")
 			if regPeer, ok := registry.Get(peerID); ok && regPeer != nil {
 				regPeer.DirectP2P = true
+				regPeer.Transport = "tcp_tls"
 				regPeer.ActiveEndpoint = remoteAddr
 				regPeer.LastDirectSeen = time.Now()
+				regPeer.ProbeCount = 0
 				registry.Upsert(regPeer)
 			}
 		})

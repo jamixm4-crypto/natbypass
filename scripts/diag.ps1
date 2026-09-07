@@ -143,7 +143,7 @@ try {
     Log-Section "7. СПИСОК ПОДКЛЮЧЕННЫХ ПИРОВ"
     if ($peers.data) {
         foreach ($p in $peers.data) {
-            $directStr = if ($p.direct_p2p) { "Прямой P2P" } else { "Relay" }
+            $directStr = if ($p.transport -eq "tcp_tls" -or $p.transport -eq "tcp_shadowtls") { "🟢 Прямой P2P [TCP ShadowTLS 1.3]" } elseif ($p.direct_p2p) { "🟢 Прямой P2P [UDP AWG]" } else { "📡 Relay [MQTT]" }
             $pName = if ($p.device_name) { $p.device_name } else { $p.device_id }
             $pingStr = if ($p.ping_ms -gt 0) { "$($p.ping_ms) ms" } else { "N/A" }
             Log-Info "Пир: $pName | VIP: $($p.virtual_ip) | $directStr | EP: $($p.active_endpoint) | Ping: $pingStr"
@@ -454,14 +454,19 @@ if ($peers -and $peers.data) {
         $isDirect = [bool]$p.direct_p2p
         $probes = if ($p.probe_count) { [int]$p.probe_count } else { 0 }
         
+        $pTrans = if ($p.transport) { [string]$p.transport } else { "" }
+        
         Write-Host "`n  Пир '$pName' (VIP: $($p.virtual_ip)):" -ForegroundColor Cyan
         
-        if ($isDirect) {
-            Log-Ok "Прямой P2P установлен (Endpoint: $($p.active_endpoint), Ping: $($p.ping_ms) ms)"
+        if ($pTrans -eq "tcp_tls" -or $pTrans -eq "tcp_shadowtls") {
+            Log-Ok "Прямой P2P [TCP ShadowTLS 1.3] установлен (Endpoint: $($p.active_endpoint), Ping: $($p.ping_ms) ms)"
+            continue
+        } elseif ($isDirect) {
+            Log-Ok "Прямой P2P [UDP WireGuard/AWG] установлен (Endpoint: $($p.active_endpoint), Ping: $($p.ping_ms) ms)"
             continue
         }
         
-        Log-Warn "Текущий статус: Relay (прямой P2P не установлен)"
+        Log-Warn "Текущий статус: Relay [MQTT] (прямой UDP/TCP P2P не установлен)"
         
         # Check 1: Same Wi-Fi / NAT Hairpinning
         if ($myPublicIP -and $pPubIP -and ($myPublicIP -eq $pPubIP)) {

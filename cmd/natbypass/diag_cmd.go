@@ -47,7 +47,7 @@ func newDiagCmd() *cobra.Command {
 
 func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 	fmt.Println("\033[1;36m======================================================================")
-	fmt.Printf("   🔍 NatBypass Universal Network & L3 Diagnostic Tool (v%s)\n", Version)
+	fmt.Printf("   🔍 NatBypass Universal Network & L3 Diagnostic Tool (v%s)\n", strings.TrimPrefix(Version, "v"))
 	fmt.Println("======================================================================\033[0m")
 
 	report := diagnostic.RunFullDiagnostics()
@@ -129,9 +129,11 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 	fmt.Printf("\n\033[1;34m▶ 4. СПИСОК ПИРОВ И АКТИВНЫХ МАРШРУТОВ\033[0m\n")
 	if len(peers) > 0 {
 		for _, p := range peers {
-			p2pStatus := "📡 Relay"
-			if p.DirectP2P {
-				p2pStatus = "🟢 Прямой P2P"
+			p2pStatus := "📡 Relay [MQTT]"
+			if p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" {
+				p2pStatus = "🟢 Прямой P2P [TCP ShadowTLS 1.3]"
+			} else if p.DirectP2P {
+				p2pStatus = "🟢 Прямой P2P [UDP AWG]"
 			}
 			fmt.Printf("  • %s (%s) | VIP: %s | %s | EP: %s | Ping: %v\n",
 				p.DeviceName, p.DeviceID, p.VirtualIP, p2pStatus, p.ActiveEndpoint, p.Latency)
@@ -179,15 +181,25 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 		cleanIP := strings.TrimSpace(strings.Split(t.ip, "/")[0])
 		var cmd *exec.Cmd
 		if runtime.GOOS == "windows" {
-			cmd = exec.Command("ping", cleanIP, "-n", "2", "-w", "1500")
+			cmd = exec.Command("ping", cleanIP, "-n", "1", "-w", "1500")
+			out, pErr := cmd.CombinedOutput()
+			if pErr == nil && !strings.Contains(string(out), "100%") && (strings.Contains(string(out), "TTL=") || strings.Contains(string(out), "ttl=")) {
+				fmt.Printf("  \033[1;32m[✓]\033[0m Ping до %s (%s): УСПЕШНО!\n", t.name, cleanIP)
+			} else {
+				fmt.Printf("  \033[1;31m[✗]\033[0m Ping до %s (%s): ПРЕВЫШЕН ИНТЕРВАЛ ОЖИДАНИЯ (100%% потерь)\n", t.name, cleanIP)
+			}
 		} else {
-			cmd = exec.Command("ping", "-c", "2", "-W", "2", cleanIP)
-		}
-		out, pErr := cmd.CombinedOutput()
-		if pErr == nil && !strings.Contains(string(out), "100%") && (strings.Contains(string(out), "TTL=") || strings.Contains(string(out), "ttl=")) {
-			fmt.Printf("  \033[1;32m[✓]\033[0m Ping до %s (%s): УСПЕШНО!\n", t.name, cleanIP)
-		} else {
-			fmt.Printf("  \033[1;31m[✗]\033[0m Ping до %s (%s): ПРЕВЫШЕН ИНТЕРВАЛ ОЖИДАНИЯ (100%% потерь)\n", t.name, cleanIP)
+			cmd = exec.Command("ping", "-c", "1", "-W", "2", cleanIP)
+			out, pErr := cmd.CombinedOutput()
+			if pErr != nil || strings.Contains(string(out), "invalid option") {
+				cmd = exec.Command("ping", "-c", "1", "-w", "2", cleanIP)
+				out, pErr = cmd.CombinedOutput()
+			}
+			if pErr == nil && !strings.Contains(string(out), "100%") && (strings.Contains(string(out), "TTL=") || strings.Contains(string(out), "ttl=")) {
+				fmt.Printf("  \033[1;32m[✓]\033[0m Ping до %s (%s): УСПЕШНО!\n", t.name, cleanIP)
+			} else {
+				fmt.Printf("  \033[1;31m[✗]\033[0m Ping до %s (%s): ПРЕВЫШЕН ИНТЕРВАЛ ОЖИДАНИЯ (100%% потерь)\n", t.name, cleanIP)
+			}
 		}
 	}
 

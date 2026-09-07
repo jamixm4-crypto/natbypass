@@ -53,15 +53,17 @@ func EnsureFirewallRule(port int) error {
 		_ = addCmd.Run()
 	}
 
-	// 2. Specific UDP Port rules with EdgeTraversal (edge=yes) and profile=any
-	// Always ensure standard ports 443 and 47832 are permitted
-	ensurePortRule("NatBypass-UDP-443", 443)
-	ensurePortRule("NatBypass-UDP-47832", 47832)
+	// 2. Specific UDP & TCP Port rules with EdgeTraversal (edge=yes) and profile=any
+	// Always ensure standard stealth ports 443 and 47832 are permitted for both UDP (WireGuard/AWG) and TCP (ShadowTLS)
+	ensurePortRule("NatBypass-UDP-443", 443, "UDP")
+	ensurePortRule("NatBypass-UDP-47832", 47832, "UDP")
+	ensurePortRule("NatBypass-TCP-443", 443, "TCP")
+	ensurePortRule("NatBypass-TCP-47832", 47832, "TCP")
 
-	// If a custom or dynamically bound port is specified, ensure rule exists
+	// If a custom or dynamically bound port is specified, ensure rules exist
 	if port > 0 && port != 443 && port != 47832 {
-		portRule := fmt.Sprintf("NatBypass-P2P-%d", port)
-		ensurePortRule(portRule, port)
+		ensurePortRule(fmt.Sprintf("NatBypass-P2P-UDP-%d", port), port, "UDP")
+		ensurePortRule(fmt.Sprintf("NatBypass-P2P-TCP-%d", port), port, "TCP")
 	}
 
 	// 3. Ensure ICMPv4 echo requests are allowed through Firewall
@@ -73,7 +75,10 @@ func EnsureFirewallRule(port int) error {
 	return nil
 }
 
-func ensurePortRule(ruleName string, port int) {
+func ensurePortRule(ruleName string, port int, proto string) {
+	if proto == "" {
+		proto = "UDP"
+	}
 	pCheck := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+ruleName)
 	pCheck.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	pOut, pErr := pCheck.CombinedOutput()
@@ -82,7 +87,7 @@ func ensurePortRule(ruleName string, port int) {
 			"name="+ruleName,
 			"dir=in",
 			"action=allow",
-			"protocol=UDP",
+			fmt.Sprintf("protocol=%s", proto),
 			fmt.Sprintf("localport=%d", port),
 			"profile=any",
 			"edge=yes",

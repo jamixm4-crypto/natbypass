@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -105,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.224-beta2"
+	Version = "1.9.224-beta3"
 	Commit  = "release"
 )
 
@@ -550,6 +551,7 @@ var (
 	triggerPublishCh chan struct{}
 	isShuttingDown   int32
 	tgMuted          bool
+	guiInboundPacketHandler func(srcAddr *net.UDPAddr, payload []byte, isTCP, isRelay bool)
 
 	// Статистика дебаггера
 	startTime        time.Time
@@ -4232,8 +4234,10 @@ func startEngineFromConfig(c *config.Config) {
 			writeDebug(fmt.Sprintf("⚡ Direct P2P TCP (ShadowTLS) активен с %s (%s)", peerID, remoteAddr))
 			if regPeer, ok := registry.Get(peerID); ok && regPeer != nil {
 				regPeer.DirectP2P = true
+				regPeer.Transport = "tcp_tls"
 				regPeer.ActiveEndpoint = remoteAddr
 				regPeer.LastDirectSeen = time.Now()
+				regPeer.ProbeCount = 0
 				registry.Upsert(regPeer)
 			}
 		})
@@ -4282,23 +4286,27 @@ func startEngineFromConfig(c *config.Config) {
 		})
 
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
-		onInboundPacket := func(srcAddr *net.UDPAddr, payload []byte) {
-			if len(payload) < 20 {
+		onInboundPacket := func(srcAddr *net.UDPAddr, payload []byte, isTCP bool, isRelay bool) {
+			if len(payload) < 20 || payload[0]>>4 != 4 {
 				return
+			}
+			totalLen := int(binary.BigEndian.Uint16(payload[2:4]))
+			if totalLen >= 20 && totalLen <= len(payload) {
+				payload = payload[:totalLen]
 			}
 			srcIP := tunnel.GetSrcIP(payload)
 			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 			if srcIP != nil && srcIP.String() == cleanVIP {
 				return // Защита от петель
 			}
-			if srcIP != nil && registry != nil && srcAddr != nil {
-				fromAddrStr := srcAddr.String()
-				var targetPeer *peer.Peer
+			var targetPeer *peer.Peer
+			if srcIP != nil && registry != nil {
 				srcIPStr := srcIP.String()
 
 				if p, ok := registry.GetByVirtualIP(srcIPStr); ok && p != nil {
 					targetPeer = p
-				} else {
+				} else if srcAddr != nil {
+					fromAddrStr := srcAddr.String()
 					for _, item := range registry.List() {
 						if item.ActiveEndpoint == fromAddrStr || item.STUNAddr == fromAddrStr || item.LocalAddr == fromAddrStr {
 							targetPeer = item
@@ -4316,16 +4324,9 @@ func startEngineFromConfig(c *config.Config) {
 							break
 						}
 					}
-					if targetPeer == nil {
-						pList := registry.List()
-						if len(pList) == 1 {
-							targetPeer = pList[0]
-							targetPeer.VirtualIP = srcIPStr
-						}
-					}
 				}
 
-				if targetPeer != nil {
+				if targetPeer != nil && !isRelay {
 					var myPubIP string
 					if udpPuncher != nil {
 						if cachedSTUN := udpPuncher.GetCachedSTUNAddr(); cachedSTUN != "" {
@@ -4337,34 +4338,107 @@ func startEngineFromConfig(c *config.Config) {
 						}
 					}
 					targetPeer.DirectP2P = true
-					if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
-						targetPeer.ActiveEndpoint = fromAddrStr
-					} else if targetPeer.ActiveEndpoint == "" {
-						if targetPeer.STUNAddr != "" {
-							targetPeer.ActiveEndpoint = targetPeer.STUNAddr
-						} else if targetPeer.LocalAddr != "" {
-							targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+					if isTCP {
+						targetPeer.Transport = "tcp_tls"
+					} else {
+						targetPeer.Transport = "udp_direct"
+					}
+					if srcAddr != nil {
+						fromAddrStr := srcAddr.String()
+						if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
+							targetPeer.ActiveEndpoint = fromAddrStr
+						} else if targetPeer.ActiveEndpoint == "" {
+							if targetPeer.STUNAddr != "" {
+								targetPeer.ActiveEndpoint = targetPeer.STUNAddr
+							} else if targetPeer.LocalAddr != "" {
+								targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+							}
 						}
 					}
 					targetPeer.Online = true
 					targetPeer.LastSeen = time.Now()
 					targetPeer.LastDirectSeen = time.Now()
+					targetPeer.ProbeCount = 0
 					registry.Upsert(targetPeer)
 					if guiMagicSock != nil && targetPeer.ActiveEndpoint != "" {
 						guiMagicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
 					}
-					if udpPuncher != nil && targetPeer.ActiveEndpoint != "" {
+					if udpPuncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
 						udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
 					}
 				}
 			}
+
+			// Userspace ICMP reflection for instant ping response across Windows GUI nodes
+			ihl := int(payload[0]&0x0F) * 4
+			inDstIP := net.IPv4(payload[16], payload[17], payload[18], payload[19]).String()
+			if inDstIP == cleanVIP && len(payload) >= ihl+8 && payload[9] == 1 && payload[ihl] == 8 {
+				if reply := createICMPEchoReply(payload); len(reply) > 0 {
+					sent := false
+					// 1. If active TCP ShadowTLS connection exists with peer, return via TCP
+					if targetPeer != nil && guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+						if err := guiTCPDirectMgr.SendPacket(targetPeer.DeviceID, reply); err == nil {
+							sent = true
+						}
+					}
+					// 2. If direct UDP
+					if !sent && srcAddr != nil && udpPuncher != nil && !isTCP && !isRelay {
+						if err := udpPuncher.SendDataPacketWithPadding(srcAddr.String(), reply, 0, 0); err == nil {
+							sent = true
+						}
+					}
+					if !sent && targetPeer != nil && udpPuncher != nil && !isRelay {
+						ep := targetPeer.ActiveEndpoint
+						if ep == "" {
+							ep = targetPeer.STUNAddr
+						}
+						if ep != "" {
+							if err := udpPuncher.SendDataPacketWithPadding(ep, reply, 0, 0); err == nil {
+								sent = true
+							}
+						}
+					}
+					// 3. Relay fallback: return via MQTT
+					if !sent && targetPeer != nil && activeMQTT != nil {
+						dataToSend := reply
+						if cfg != nil {
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+								cKey := crypto.DeriveKey(activeProf.NetworkKey)
+								if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
+									dataToSend = enc
+								}
+							}
+						}
+						_ = activeMQTT.PublishTunnelData(targetPeer.DeviceID, dataToSend)
+					}
+				}
+			}
+
 			if tunDev != nil {
+				// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
+				if ihl >= 20 && ihl <= len(payload) {
+					payload[10] = 0
+					payload[11] = 0
+					var sum uint32
+					for i := 0; i < ihl; i += 2 {
+						sum += uint32(binary.BigEndian.Uint16(payload[i : i+2]))
+					}
+					for sum > 0xFFFF {
+						sum = (sum & 0xFFFF) + (sum >> 16)
+					}
+					binary.BigEndian.PutUint16(payload[10:12], ^uint16(sum))
+				}
 				_ = tunDev.WritePacket(payload)
 				atomic.AddUint64(&packetsRecvCount, 1)
 			}
 		}
-		puncher.SetDataCallback(onInboundPacket)
-		guiTCPDirectMgr.SetOnPacket(onInboundPacket)
+		guiInboundPacketHandler = onInboundPacket
+		puncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+			onInboundPacket(srcAddr, payload, false, false)
+		})
+		guiTCPDirectMgr.SetOnPacket(func(srcAddr *net.UDPAddr, payload []byte) {
+			onInboundPacket(srcAddr, payload, true, false)
+		})
 	} else {
 		writeDebug("Ошибка создания UDPPuncher: " + err.Error())
 	}
@@ -5181,10 +5255,13 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 			}
 			_ = destIP
 
-			// Все пакеты идут прямо в Wintun — OS сама обрабатывает ICMP, TCP, UDP
-			atomic.AddUint64(&packetsRecvCount, 1)
-			if tunDev != nil {
-				_ = tunDev.WritePacket(dataToProcess)
+			if guiInboundPacketHandler != nil {
+				guiInboundPacketHandler(nil, dataToProcess, false, true)
+			} else {
+				atomic.AddUint64(&packetsRecvCount, 1)
+				if tunDev != nil {
+					_ = tunDev.WritePacket(dataToProcess)
+				}
 			}
 		})
 	}
@@ -6158,19 +6235,19 @@ func updateData() {
 					var icon string
 					var statusDisplay string
 					if p.Online {
-						if p.DirectP2P {
+						if p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID)) {
+							icon = "[TLS]"
+							if p.Latency > 0 {
+								statusDisplay = fmt.Sprintf("Прямой ShadowTLS (%v)", p.Latency.Round(time.Millisecond))
+							} else {
+								statusDisplay = "Прямой ShadowTLS (OK)"
+							}
+						} else if p.DirectP2P {
 							icon = "[P2P]"
 							if p.Latency > 0 {
 								statusDisplay = fmt.Sprintf("Прямой AWG (%v)", p.Latency.Round(time.Millisecond))
 							} else {
 								statusDisplay = "Прямой AWG (OK)"
-							}
-						} else if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID) {
-							icon = "[TLS]"
-							if p.Latency > 0 {
-								statusDisplay = fmt.Sprintf("Прямой TLS/DPI (%v)", p.Latency.Round(time.Millisecond))
-							} else {
-								statusDisplay = "Прямой TLS/DPI (OK)"
 							}
 						} else {
 							icon = "[NAT]"
@@ -7110,6 +7187,60 @@ func copyToClipboard(text string) {
 
 func LOWORD(l uintptr) uint16 {
 	return uint16(l & 0xFFFF)
+}
+
+func createICMPEchoReply(pkt []byte) []byte {
+	if len(pkt) < 28 {
+		return nil
+	}
+	ihl := int(pkt[0]&0x0F) * 4
+	if len(pkt) < ihl+8 {
+		return nil
+	}
+	// Protocol must be ICMP (1) and Type must be Echo Request (8)
+	if pkt[9] != 1 || pkt[ihl] != 8 {
+		return nil
+	}
+	reply := make([]byte, len(pkt))
+	copy(reply, pkt)
+
+	// Swap Source IP (bytes 12..15) and Destination IP (bytes 16..19)
+	copy(reply[12:16], pkt[16:20])
+	copy(reply[16:20], pkt[12:16])
+
+	// Set TTL = 64
+	reply[8] = 64
+
+	// Reset and recalculate IPv4 header checksum (bytes 10..11)
+	reply[10] = 0
+	reply[11] = 0
+	ipChecksum := calculateChecksum(reply[:ihl])
+	binary.BigEndian.PutUint16(reply[10:12], ipChecksum)
+
+	// Change ICMP Type to 0 (Echo Reply)
+	reply[ihl] = 0
+
+	// Reset and recalculate ICMP checksum (bytes ihl+2..ihl+3)
+	reply[ihl+2] = 0
+	reply[ihl+3] = 0
+	icmpChecksum := calculateChecksum(reply[ihl:])
+	binary.BigEndian.PutUint16(reply[ihl+2:ihl+4], icmpChecksum)
+
+	return reply
+}
+
+func calculateChecksum(data []byte) uint16 {
+	var sum uint32
+	for i := 0; i < len(data)-1; i += 2 {
+		sum += uint32(binary.BigEndian.Uint16(data[i : i+2]))
+	}
+	if len(data)%2 == 1 {
+		sum += uint32(data[len(data)-1]) << 8
+	}
+	for sum > 0xffff {
+		sum = (sum >> 16) + (sum & 0xffff)
+	}
+	return ^uint16(sum)
 }
 
 

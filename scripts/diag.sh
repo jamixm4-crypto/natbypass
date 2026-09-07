@@ -464,15 +464,19 @@ if [ -n "$PEERS_JSON" ] && echo "$PEERS_JSON" | grep -q '"virtual_ip"'; then
         P_EP="$(echo "$p_line" | grep -o '"active_endpoint":"[^"]*' | cut -d'"' -f4)"
         P_PING="$(echo "$p_line" | grep -o '"ping_ms":[0-9]*' | cut -d':' -f2)"
         [ -z "$P_PING" ] && P_PING=0
+        P_TRANS="$(echo "$p_line" | grep -o '"transport":"[^"]*' | cut -d'"' -f4)"
         
         printf "\n  %bПир '%s' (VIP: %s):%b\n" "$C_CYAN" "$DEV_NAME" "$VIP" "$C_RESET"
         
-        if [ "$P_DIRECT" = "true" ]; then
-            log_ok "Прямой P2P установлен (Endpoint: $P_EP, Ping: ${P_PING} ms)"
+        if [ "$P_TRANS" = "tcp_tls" ] || [ "$P_TRANS" = "tcp_shadowtls" ]; then
+            log_ok "Прямой P2P [TCP ShadowTLS 1.3] установлен (Endpoint: $P_EP, Ping: ${P_PING} ms)"
+            continue
+        elif [ "$P_DIRECT" = "true" ]; then
+            log_ok "Прямой P2P [UDP WireGuard/AWG] установлен (Endpoint: $P_EP, Ping: ${P_PING} ms)"
             continue
         fi
         
-        log_warn "Текущий статус: Relay (прямой P2P не установлен)"
+        log_warn "Текущий статус: Relay [MQTT] (прямой P2P не установлен)"
         
         # Проверка 1: Одно Wi-Fi / NAT Hairpinning
         if [ -n "$MY_PUB_IP" ] && [ -n "$P_PUB_IP" ] && [ "$MY_PUB_IP" = "$P_PUB_IP" ]; then
@@ -536,19 +540,11 @@ test_ping() {
         return
     fi
     PING_OK=0
-    # Универсальная проверка для standard iputils ping и BusyBox ping (Keenetic / OpenWrt / routers).
-    # Дедлайн 5с для учета трансграничного RTT и пробива NAT.
-    if ping -c 2 -w 5 "$CLEAN_IP" >/dev/null 2>&1; then
+    # Универсальная и быстрая проверка (макс 2с на узел):
+    # iputils: ping -c 1 -W 2; busybox / keenetic: ping -c 1 -w 2
+    if ping -c 1 -W 2 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
-    elif ping -c 2 "$CLEAN_IP" >/dev/null 2>&1; then
-        PING_OK=1
-    elif ping -c 2 -w 5 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
-        PING_OK=1
-    elif ping -c 2 -I nb0 "$CLEAN_IP" >/dev/null 2>&1; then
-        PING_OK=1
-    elif ping -c 1 -w 3 "$CLEAN_IP" >/dev/null 2>&1; then
-        PING_OK=1
-    elif ping -c 1 "$CLEAN_IP" >/dev/null 2>&1; then
+    elif ping -c 1 -w 2 "$CLEAN_IP" >/dev/null 2>&1; then
         PING_OK=1
     fi
     if [ "$PING_OK" -eq 1 ]; then

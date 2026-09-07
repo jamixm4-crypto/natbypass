@@ -34,6 +34,7 @@ type Peer struct {
 	WGPort           int                  `json:"wg_port,omitempty"`
 	VirtualIP        string               `json:"virtual_ip,omitempty"`
 	DirectP2P        bool                 `json:"direct_p2p"`
+	Transport        string               `json:"transport,omitempty"` // "tcp_tls", "udp_direct", "relay_mqtt"
 	ActiveEndpoint   string               `json:"active_endpoint,omitempty"`
 	PingMs           int64                `json:"ping_ms"`
 	NATType          string               `json:"nat_type,omitempty"`
@@ -86,13 +87,23 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.LastDirectSeen = existing.LastDirectSeen
 	}
 
-	// Dynamic P2P health check: if direct UDP packets haven't been seen for 10 seconds,
-	// or if LastDirectSeen is zero (never confirmed direct), or if ProbeCount >= 2,
-	// demote DirectP2P to false so traffic immediately falls back to parallel relay.
+	if newer.Transport == "" {
+		newer.Transport = existing.Transport
+	}
+
+	// Dynamic P2P health check:
+	// If transport is TCP ShadowTLS, DirectP2P is backed by an active TCP stream, not UDP hole-punch probes.
+	// For UDP, if direct packets haven't been seen for 10 seconds or ProbeCount >= 2, demote to relay.
 	directP2PExpired := false
 	if existing.DirectP2P {
-		if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 10*time.Second || existing.ProbeCount >= 2 {
-			directP2PExpired = true
+		if existing.Transport == "tcp_tls" || existing.Transport == "tcp_shadowtls" {
+			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 25*time.Second {
+				directP2PExpired = true
+			}
+		} else {
+			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 10*time.Second || existing.ProbeCount >= 2 {
+				directP2PExpired = true
+			}
 		}
 	}
 
@@ -105,6 +116,7 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 			newer.ActiveEndpoint = existing.ActiveEndpoint
 		}
 		newer.DirectP2P = false
+		newer.Transport = "relay_mqtt"
 		if stunChanged {
 			newer.Latency = 0
 			newer.PingMs = 0
@@ -118,9 +130,20 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
-	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty, never seen direct, or failing probes with stale direct packet
-	if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() || (existing.ProbeCount >= 2 && time.Since(newer.LastDirectSeen) > 10*time.Second) {
-		newer.DirectP2P = false
+	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty, never seen direct, or failing UDP probes
+	if newer.Transport != "tcp_tls" && newer.Transport != "tcp_shadowtls" {
+		if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() || (existing.ProbeCount >= 2 && time.Since(newer.LastDirectSeen) > 10*time.Second) {
+			newer.DirectP2P = false
+			newer.Transport = "relay_mqtt"
+		}
+	}
+
+	if newer.Transport == "" {
+		if newer.DirectP2P {
+			newer.Transport = "udp_direct"
+		} else {
+			newer.Transport = "relay_mqtt"
+		}
 	}
 
 	// Prune stale/dead endpoints if peer is persistently failing probes and unconfirmed
@@ -294,6 +317,7 @@ func (r *Registry) MarkDeviceOffline(deviceID string) {
 	if p, ok := r.peers[deviceID]; ok {
 		p.Online = false
 		p.DirectP2P = false
+		p.Transport = "relay_mqtt"
 	}
 }
 
@@ -380,6 +404,13 @@ func (r *Registry) Upsert(p *Peer) {
 				p.ActiveEndpoint = p.STUNAddr
 			} else if p.LocalAddr != "" {
 				p.ActiveEndpoint = p.LocalAddr
+			}
+		}
+		if p.Transport == "" {
+			if p.DirectP2P {
+				p.Transport = "udp_direct"
+			} else {
+				p.Transport = "relay_mqtt"
 			}
 		}
 		// Only force Online=true and reset LastSeen when the peer has no explicit timestamp.
