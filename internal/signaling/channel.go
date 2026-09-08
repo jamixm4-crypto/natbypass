@@ -128,6 +128,23 @@ type SymPunchSignal struct {
 	HopHint int `json:"hop_hint,omitempty"`
 }
 
+// RemoteDiagSignal is used for remote cluster diagnostics collection and update orchestration in beta builds.
+type RemoteDiagSignal struct {
+	Action      string `json:"action"`                // "request_diag", "response_diag", "request_update", "response_update"
+	TargetID    string `json:"target_id,omitempty"`   // empty = all beta nodes in topic, or specific DeviceID
+	SenderID    string `json:"sender_id,omitempty"`   // DeviceID of the diagnostic controller
+	SessionID   string `json:"session_id,omitempty"`  // unique request session ID
+	ChunkIndex  int    `json:"chunk_index,omitempty"` // for chunked report responses
+	TotalChunks int    `json:"total_chunks,omitempty"`
+	Payload     string `json:"payload,omitempty"`     // diagnostic text output or status details
+	Status      string `json:"status,omitempty"`      // "ok", "error", "updating", "success"
+	OS          string `json:"os,omitempty"`
+	Platform    string `json:"platform,omitempty"`
+	Arch        string `json:"arch,omitempty"`
+	Version     string `json:"version,omitempty"`
+	Timestamp   int64  `json:"timestamp,omitempty"`
+}
+
 type Payload struct {
 	DeviceID         string     `json:"device_id"`
 	Nickname         string     `json:"nickname,omitempty"`
@@ -176,6 +193,9 @@ type Payload struct {
 	// SymPunch: coordinated simultaneous Symmetric NAT hole-punch request.
 	// Non-nil when this payload is a punch coordination signal, not a regular beacon.
 	SymPunch *SymPunchSignal `json:"sym_punch,omitempty"`
+
+	// RemoteDiag: beta-only remote cluster diagnostics collection and update coordination
+	RemoteDiag *RemoteDiagSignal `json:"remote_diag,omitempty"`
 }
 
 
@@ -212,9 +232,11 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		UpperDirectP2P        bool       `json:"DirectP2P"`
 		UpperActiveEndpoint   string     `json:"ActiveEndpoint"`
 		UpperPingMs           int64      `json:"PingMs"`
-		UpperNATType          string     `json:"NATType"`
-		UpperNATDelta         *int       `json:"NATDelta"`
-		CamelNATDelta         *int       `json:"natDelta"`
+		UpperNATType          string            `json:"NATType"`
+		UpperNATDelta         *int              `json:"NATDelta"`
+		CamelNATDelta         *int              `json:"natDelta"`
+		UpperRemoteDiag       *RemoteDiagSignal `json:"RemoteDiag"`
+		CamelRemoteDiag       *RemoteDiagSignal `json:"remoteDiag"`
 		*Alias
 	}{
 		Alias: (*Alias)(p),
@@ -319,6 +341,13 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 			p.NATDelta = *aux.UpperNATDelta
 		} else if aux.CamelNATDelta != nil {
 			p.NATDelta = *aux.CamelNATDelta
+		}
+	}
+	if p.RemoteDiag == nil {
+		if aux.UpperRemoteDiag != nil {
+			p.RemoteDiag = aux.UpperRemoteDiag
+		} else if aux.CamelRemoteDiag != nil {
+			p.RemoteDiag = aux.CamelRemoteDiag
 		}
 	}
 	return nil

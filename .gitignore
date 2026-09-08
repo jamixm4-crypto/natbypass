@@ -9,6 +9,9 @@ bin/
 *.dylib
 *.aar
 *.apk
+natbypass-diag
+NatBypass-Diag*
+cluster_diag_*.txt
 
 # Toolchain and local cache in soft/
 soft/

@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.224-beta6"
+	Version = "1.9.224-beta7"
 	Commit  = "release"
 )
 
@@ -5566,6 +5566,26 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 
 				if p.DeviceID == "" || p.DeviceID == myDevID {
 					continue
+				}
+
+				// RemoteDiag: beta cluster diagnostics and update orchestration
+				if p.RemoteDiag != nil {
+					activeKey := ""
+					if cfg != nil {
+						if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+							activeKey = activeProf.NetworkKey
+						}
+					}
+					sender := diagnostic.PayloadSenderFunc(func(sCtx context.Context, sPayload *signaling.Payload) error {
+						for _, sc := range sigChannels {
+							_ = sc.Send(sCtx, sPayload)
+						}
+						return nil
+					})
+					diagnostic.HandleRemoteDiagSignal(ctx, p.RemoteDiag, myDevID, Version, activeKey, sender)
+					if p.VirtualIP == "" || p.PublicKey == "" {
+						continue
+					}
 				}
 
 				// Принимаем все маяки внутри сигнальной комнаты

@@ -2006,6 +2006,18 @@ func receiveLoop(
 				}
 			}
 
+			// RemoteDiag: beta cluster diagnostics and update orchestration
+			if p.RemoteDiag != nil {
+				activeKey := ""
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+					activeKey = activeProf.NetworkKey
+				}
+				diagnostic.HandleRemoteDiagSignal(ctx, p.RemoteDiag, deviceID, Version, activeKey, sigMgr)
+				if p.VirtualIP == "" || p.PublicKey == "" {
+					continue
+				}
+			}
+
 			// Маяки внутри одной сигнальной комнаты принимаются безусловно
 
 			if p.Offline || p.Leave {
