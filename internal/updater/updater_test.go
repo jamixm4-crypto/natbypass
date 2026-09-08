@@ -30,6 +30,19 @@ func TestVersionCompare(t *testing.T) {
 }
 
 func TestSemVerCompare_BetaPrerelease(t *testing.T) {
+	// 0a. Beta10 without dot must be newer than Beta9 without dot
+	if !isNewer("v1.9.224-beta10", "v1.9.224-beta9") {
+		t.Fatalf("expected v1.9.224-beta10 > v1.9.224-beta9")
+	}
+
+	// 0b. Critical cluster migration: v1.9.225-beta1 must be newer than v1.9.224-beta9 and v1.9.224-beta10
+	if !isNewer("v1.9.225-beta1", "v1.9.224-beta9") {
+		t.Fatalf("expected v1.9.225-beta1 > v1.9.224-beta9")
+	}
+	if !isNewer("v1.9.225-beta1", "v1.9.224-beta10") {
+		t.Fatalf("expected v1.9.225-beta1 > v1.9.224-beta10")
+	}
+
 	// 1. Beta.1 of new version is newer than previous stable version
 	if !isNewer("v1.9.222-beta.1", "v1.9.221") {
 		t.Fatalf("expected v1.9.222-beta.1 > v1.9.221")

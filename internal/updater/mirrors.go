@@ -217,10 +217,15 @@ func mirrorManifestToReleaseInfo(m *MirrorManifest, currentVersion, assetKey str
 		_ = sigURL // используется в DownloadWithMirrors
 	}
 
+	hasUpdate := isNewer(m.Version, currentVersion)
+	if m.Prerelease && strings.TrimPrefix(m.Version, "v") != strings.TrimPrefix(currentVersion, "v") {
+		hasUpdate = true
+	}
+
 	return &ReleaseInfo{
 		CurrentVersion: currentVersion,
 		LatestVersion:  m.Version,
-		HasUpdate:      isNewer(m.Version, currentVersion),
+		HasUpdate:      hasUpdate,
 		IsPrerelease:   m.Prerelease,
 		Channel:        channel,
 		ReleaseNotes:   m.ReleaseNotes,

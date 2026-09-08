@@ -25,6 +25,7 @@ import (
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/natbypass/natbypass/internal/updater"
 )
 
 var (
@@ -818,7 +819,16 @@ func main() {
 			}
 
 		case "4":
-			fmt.Println(colorYellow + "[!] Внимание: всем beta-узлам сети будет отправлена команда обновиться до последней версии." + colorReset)
+			fmt.Println(colorCyan + "🔎 Проверка последней доступной beta-версии в репозитории..." + colorReset)
+			checkCtx, checkCancel := context.WithTimeout(ctx, 6*time.Second)
+			latestInfo, checkErr := updater.CheckUpdateWithOptions(checkCtx, "v1.9.224-beta0", updater.CheckOptions{Channel: "beta", IncludePrerelease: true})
+			checkCancel()
+			if checkErr == nil && latestInfo != nil {
+				fmt.Printf(colorGreen+"[✓] Актуальная beta-версия в репозитории: %s\n"+colorReset, latestInfo.LatestVersion)
+			} else {
+				fmt.Printf(colorYellow+"[!] Проверка репозитория: %v\n"+colorReset, checkErr)
+			}
+			fmt.Println(colorYellow + "[!] Всем beta-узлам сети будет отправлена команда обновиться до последней версии." + colorReset)
 			fmt.Print("Подтверждаете отправку команды обновления? [y/N]: ")
 			conf, _ := reader.ReadString('\n')
 			conf = strings.TrimSpace(strings.ToLower(conf))

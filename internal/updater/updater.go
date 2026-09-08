@@ -248,14 +248,15 @@ func checkUpdateFromGitHub(ctx context.Context, currentVersion string, includePr
 		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 			return nil, fmt.Errorf("ошибка парсинга списка релизов: %w", err)
 		}
-		// Находим самый свежий релиз среди non-draft (GitHub API возвращает в хронологическом порядке)
+		// Находим самый свежий релиз среди non-draft по SemVer
 		for i := range releases {
 			rel := &releases[i]
 			if rel.Draft {
 				continue
 			}
-			targetRelease = rel
-			break
+			if targetRelease == nil || isNewer(rel.TagName, targetRelease.TagName) {
+				targetRelease = rel
+			}
 		}
 		if targetRelease == nil {
 			return nil, fmt.Errorf("нет доступных релизов на GitHub")
@@ -393,6 +394,26 @@ func compareSemVer(v1, v2 string) int {
 	return 0
 }
 
+// splitPrereleaseToken splits an identifier like "beta10" into prefix ("beta") and numeric suffix (10).
+// If there are no trailing digits, it returns (s, -1).
+func splitPrereleaseToken(s string) (string, int) {
+	i := len(s)
+	for i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
+		i--
+	}
+	if i == len(s) {
+		return s, -1
+	}
+	prefix := s[:i]
+	numStr := s[i:]
+	var num int
+	_, err := fmt.Sscanf(numStr, "%d", &num)
+	if err == nil {
+		return prefix, num
+	}
+	return s, -1
+}
+
 func comparePrerelease(p1, p2 string) int {
 	parts1 := strings.Split(p1, ".")
 	parts2 := strings.Split(p2, ".")
@@ -432,6 +453,18 @@ func comparePrerelease(p1, p2 string) int {
 		} else if !isNum1 && isNum2 {
 			return 1
 		} else {
+			// Natural numeric comparison for mixed tokens without dots (e.g. "beta10" vs "beta9")
+			pfx1, num1 := splitPrereleaseToken(s1)
+			pfx2, num2 := splitPrereleaseToken(s2)
+			if pfx1 == pfx2 && num1 >= 0 && num2 >= 0 {
+				if num1 > num2 {
+					return 1
+				}
+				if num1 < num2 {
+					return -1
+				}
+				continue
+			}
 			if s1 > s2 {
 				return 1
 			}
