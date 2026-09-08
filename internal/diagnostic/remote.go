@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/natbypass/natbypass/internal/signaling"
@@ -85,6 +87,12 @@ func ExecuteLocalUpdate(ctx context.Context, currentVersion string) string {
 
 	return fmt.Sprintf("Successfully applied update to %s. Service restarting...", info.LatestVersion)
 }
+
+var (
+	isUpdatingInProgress atomic.Bool
+	lastUpdateSessionID  string
+	lastUpdateSessionMu  sync.Mutex
+)
 
 // HandleRemoteDiagSignal processes remote diagnostic and update requests.
 // Strictly active ONLY in beta builds (version string containing "beta").
@@ -164,8 +172,46 @@ func HandleRemoteDiagSignal(
 		}()
 
 	case "request_update":
+		lastUpdateSessionMu.Lock()
+		if sig.SessionID != "" && sig.SessionID == lastUpdateSessionID {
+			lastUpdateSessionMu.Unlock()
+			return // Duplicate request_update from burst repeat, silently drop!
+		}
+		if isUpdatingInProgress.Load() {
+			lastUpdateSessionMu.Unlock()
+			busySig := &signaling.RemoteDiagSignal{
+				Action:      "response_update",
+				TargetID:    sig.SenderID,
+				SenderID:    myDevID,
+				SessionID:   sig.SessionID,
+				ChunkIndex:  0,
+				TotalChunks: 1,
+				Payload:     "Update already in progress on this node",
+				Status:      "busy",
+				OS:          runtime.GOOS,
+				Arch:        runtime.GOARCH,
+				Version:     version,
+				Timestamp:   time.Now().Unix(),
+			}
+			busyPayload := &signaling.Payload{DeviceID: myDevID, RemoteDiag: busySig, Timestamp: time.Now()}
+			toSend := busyPayload
+			if networkKey != "" {
+				if enc, err := signaling.EncryptPayloadWithKey(busyPayload, networkKey); err == nil && enc != nil {
+					toSend = enc
+				}
+			}
+			_ = sender.Send(ctx, toSend)
+			return
+		}
+		if sig.SessionID != "" {
+			lastUpdateSessionID = sig.SessionID
+		}
+		isUpdatingInProgress.Store(true)
+		lastUpdateSessionMu.Unlock()
+
 		go func() {
-			updateCtx, updateCancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer isUpdatingInProgress.Store(false)
+			updateCtx, updateCancel := context.WithTimeout(context.Background(), 120*time.Second)
 			defer updateCancel()
 
 			// Send intermediate progress signal

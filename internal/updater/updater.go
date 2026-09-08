@@ -490,7 +490,7 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	var filtered []GitHubAsset
 	for _, a := range assets {
 		nl := strings.ToLower(a.Name)
-		if strings.Contains(nl, "diag") || strings.Contains(nl, "builder") || strings.Contains(nl, "toolkit") || strings.HasPrefix(nl, "test-") || strings.HasSuffix(nl, ".zip") || strings.HasSuffix(nl, ".tar.gz") || strings.HasSuffix(nl, ".example") {
+		if strings.Contains(nl, "diag") || strings.Contains(nl, "builder") || strings.Contains(nl, "toolkit") || strings.Contains(nl, "probe") || strings.HasPrefix(nl, "test-") || strings.HasSuffix(nl, ".zip") || strings.HasSuffix(nl, ".tar.gz") || strings.HasSuffix(nl, ".example") {
 			continue
 		}
 		if osName == "windows" {
@@ -575,6 +575,9 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 			if !strings.Contains(cand, "diag") && strings.Contains(nameLower, "-diag") {
 				continue
 			}
+			if !strings.Contains(cand, "probe") && strings.Contains(nameLower, "-probe") {
+				continue
+			}
 			if nameLower == cand || strings.Contains(nameLower, cand) {
 				return a.BrowserDownloadURL, a.Name, a.Size
 			}
@@ -614,8 +617,13 @@ func currentExeName() string {
 	return ""
 }
 
+var applyUpdateMu sync.Mutex
+
 // ApplyUpdate выполняет скачивание, атомарную замену бинарника и перезапуск
 func ApplyUpdate(ctx context.Context, assetURL string) error {
+	applyUpdateMu.Lock()
+	defer applyUpdateMu.Unlock()
+
 	if assetURL == "" {
 		return fmt.Errorf("URL для скачивания обновления не задан")
 	}
@@ -839,7 +847,12 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 			_ = os.Remove(tmpPath)
 		}
 		_ = os.Chmod(execPath, 0755)
-		_ = os.Remove(oldPath)
+		if _, statErr := os.Stat(execPath); statErr != nil {
+			// If execPath is missing, rollback from oldPath
+			_ = os.Rename(oldPath, execPath)
+		} else {
+			_ = os.Remove(oldPath)
+		}
 	}
 
 

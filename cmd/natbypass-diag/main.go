@@ -279,11 +279,13 @@ func runCollection(
 	}
 	fmt.Println(colorBold + "─────────────────────────────────────────────────────────────────────────" + colorReset)
 
-	// Burst repeat after 2s
-	go func() {
-		time.Sleep(2 * time.Second)
-		_ = ch.Send(ctx, toSend)
-	}()
+	// Burst repeat after 2s (ONLY for diagnostics, NEVER for OTA updates to prevent race conditions)
+	if !isUpdate {
+		go func() {
+			time.Sleep(2 * time.Second)
+			_ = ch.Send(ctx, toSend)
+		}()
+	}
 
 	nodes := make(map[string]*NodeResponse)
 	discoveredPeers := make(map[string]*DiscoveredNodeInfo)

@@ -160,6 +160,13 @@ main() {
     if [ "$IS_KEENETIC" -eq 1 ]; then
         mkdir -p /opt/usr/bin 2>/dev/null || true
         ln -sf /opt/bin/natbypass /opt/usr/bin/natbypass 2>/dev/null || true
+        for pfile in /opt/etc/profile /opt/root/.profile /root/.profile; do
+            if [ -f "$pfile" ]; then
+                if ! grep -q "/opt/bin" "$pfile" 2>/dev/null; then
+                    echo 'export PATH=/opt/bin:/opt/sbin:$PATH' >> "$pfile"
+                fi
+            fi
+        done
     fi
 
     print_green "✓ Исполняемый файл успешно установлен и проверен."
