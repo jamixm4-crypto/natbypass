@@ -54,7 +54,7 @@
       "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.225-beta5/natbypass-linux-arm64",
       "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.225-beta5/natbypass-linux-arm64.sig",
       "size": 11862168,
-      "sha256": "",
+      "sha256": "8550bcd0442623b93ae6c4a82f81ed9f7901e10a2170b2ed2ab380016126b3ba",
       "mirrors": [
         "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.225-beta5/natbypass-linux-arm64",
         "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.225-beta5/natbypass-linux-arm64"
