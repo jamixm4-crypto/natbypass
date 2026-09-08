@@ -27,12 +27,13 @@ import org.natbypass.app.ui.PeerUiModel
 
 // ── Status dot colors ─────────────────────────────────────────────────────────
 @Composable
-private fun statusColor(channelType: String): Color {
+private fun statusColor(channelType: String, transport: String = ""): Color {
     val colors = MaterialTheme.natColors
-    return when (channelType) {
-        "p2p"    -> colors.success
-        "relay"  -> colors.warning
-        else     -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    return when {
+        transport == "tls" || channelType == "tcp" -> Color(0xFFA855F7) // Purple for Direct TCP (ShadowTLS)
+        transport == "awg" || channelType == "p2p" -> colors.success   // Emerald for Direct UDP (AWG)
+        channelType == "relay"                     -> colors.warning   // Amber for Relay
+        else                                       -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
     }
 }
 
@@ -60,13 +61,14 @@ private fun PeerAvatar(displayName: String, modifier: Modifier = Modifier) {
     }
 }
 
-// ── Channel label ─────────────────────────────────────────────────────────────
+// ── Transport badge (AWG / TLS / Relay) ───────────────────────────────────────
 @Composable
-private fun ChannelBadge(channelType: String) {
-    val (label, color) = when (channelType) {
-        "p2p"   -> Pair("P2P",   MaterialTheme.natColors.success)
-        "relay" -> Pair("Relay", MaterialTheme.natColors.warning)
-        else    -> Pair("Offline", MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+private fun TransportBadge(transport: String, channelType: String) {
+    val (label, color) = when {
+        transport == "tls" || channelType == "tcp" -> Pair("TLS",   Color(0xFFA855F7))
+        transport == "awg" || channelType == "p2p" -> Pair("AWG",   MaterialTheme.natColors.success)
+        channelType == "relay"                     -> Pair("Relay", MaterialTheme.natColors.warning)
+        else                                       -> Pair("Offline", MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
     }
     Surface(
         shape = RoundedCornerShape(6.dp),
@@ -77,7 +79,7 @@ private fun ChannelBadge(channelType: String) {
             text = label,
             color = color,
             fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
     }
@@ -98,7 +100,7 @@ fun PeerCard(
     var showSheet by remember { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
     val dotColor by animateColorAsState(
-        targetValue = statusColor(peer.channelType),
+        targetValue = statusColor(peer.channelType, peer.transport),
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "dot_color"
     )
@@ -145,7 +147,7 @@ fun PeerCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (peer.isOnline) {
-                        ChannelBadge(channelType = peer.channelType)
+                        TransportBadge(transport = peer.transport, channelType = peer.channelType)
                     }
                     if (peer.isExitNode) {
                         Spacer(Modifier.width(4.dp))
@@ -250,11 +252,25 @@ private fun PeerActionsContent(
             Spacer(Modifier.width(12.dp))
             Column {
                 Text(text = peer.displayName, fontWeight = FontWeight.SemiBold)
-                Text(
-                    text = peer.virtualIp,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = peer.virtualIp.ifEmpty { "—" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "• " + peer.transportDetail.ifEmpty { peer.transport.uppercase() },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when {
+                            peer.transport == "tls" || peer.channelType == "tcp" -> Color(0xFFA855F7)
+                            peer.transport == "awg" || peer.channelType == "p2p" -> MaterialTheme.natColors.success
+                            peer.channelType == "relay"                          -> MaterialTheme.natColors.warning
+                            else                                                 -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))

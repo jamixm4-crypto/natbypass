@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.225-beta5"
+const Version = "1.9.225-beta6"
 
 
 
@@ -168,14 +168,21 @@ func deriveInitialVirtualIP(devID string) string {
 		}
 	}
 	if devID == "" {
-		return "100.64.200.10"
+		return "10.1.1.10"
 	}
-	var sum uint32
-	for i := 0; i < len(devID); i++ {
-		sum = (sum * 31) + uint32(devID[i])
+	prefix := "10.1.1"
+	if globalConfig != nil {
+		if active := globalConfig.EnsureActiveProfile(); active != nil && (active.VirtualIP != "" || active.Subnet != "") {
+			pfx := config.ExtractSubnetPrefix(active.VirtualIP)
+			if pfx == "" || pfx == "100.64.200" {
+				pfx = config.ExtractSubnetPrefix(active.Subnet)
+			}
+			if pfx != "" && pfx != "100.64.200" {
+				prefix = pfx
+			}
+		}
 	}
-	octet := 10 + int(sum%240) // range 10..249
-	return fmt.Sprintf("100.64.200.%d", octet)
+	return config.GenerateSubnetIP(prefix, devID)
 }
 
 func negotiateVirtualIP() {
@@ -345,6 +352,9 @@ func StartEngine(configYAML string, tunFd int) string {
 			}
 			if rtt > 0 {
 				p.DirectP2P = true
+				if p.Transport == "" || p.Transport == "relay_mqtt" {
+					p.Transport = "udp_direct"
+				}
 				p.LastDirectSeen = time.Now()
 				p.PingMs = rtt.Milliseconds()
 				if p.Latency > 0 {
@@ -425,6 +435,8 @@ func StartEngine(configYAML string, tunFd int) string {
 		logger.Info().Str("peer", peerID).Str("addr", remoteAddr).Msg("⚡ Android Direct P2P TCP (ShadowTLS) ACTIVE")
 		if regPeer, ok := globalRegistry.Get(peerID); ok && regPeer != nil {
 			regPeer.DirectP2P = true
+			regPeer.DirectTCP = true
+			regPeer.Transport = "tcp_shadowtls"
 			regPeer.ActiveEndpoint = remoteAddr
 			regPeer.LastDirectSeen = time.Now()
 			globalRegistry.Upsert(regPeer)
@@ -716,6 +728,24 @@ func StartEngine(configYAML string, tunFd int) string {
 							activeEP = p.LocalAddr
 						}
 					}
+					peerVIP := p.VirtualIP
+					directTCP := false
+					transport := ""
+					if hasExisting && existingPeer != nil {
+						if existingPeer.VirtualIP != "" {
+							if peerVIP == "" || (strings.HasPrefix(peerVIP, "100.64.200.") && !strings.HasPrefix(existingPeer.VirtualIP, "100.64.200.")) {
+								peerVIP = existingPeer.VirtualIP
+							}
+						}
+						directTCP = existingPeer.DirectTCP
+						transport = existingPeer.Transport
+					}
+					if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(p.DeviceID) {
+						directTCP = true
+						transport = "tcp_shadowtls"
+					} else if directP2P && transport == "" {
+						transport = "udp_direct"
+					}
 					globalRegistry.Upsert(&peer.Peer{
 						DeviceID:         p.DeviceID,
 						Nickname:         p.Nickname,
@@ -727,8 +757,10 @@ func StartEngine(configYAML string, tunFd int) string {
 						IPv6Addr:         p.IPv6Addr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
-						VirtualIP:        p.VirtualIP,
+						VirtualIP:        peerVIP,
 						DirectP2P:        directP2P,
+						DirectTCP:        directTCP,
+						Transport:        transport,
 						ActiveEndpoint:   activeEP,
 						PingMs:           pingMs,
 						Latency:          latency,
@@ -2008,6 +2040,14 @@ func GetPeersJSON() string {
 		return "[]"
 	}
 	peers := globalRegistry.List()
+	for _, p := range peers {
+		if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(p.DeviceID) {
+			p.DirectTCP = true
+			p.Transport = "tcp_shadowtls"
+		} else if p.DirectP2P && (p.Transport == "" || p.Transport == "relay_mqtt") {
+			p.Transport = "udp_direct"
+		}
+	}
 	data, _ := json.Marshal(peers)
 	return string(data)
 }

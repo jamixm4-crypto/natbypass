@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.225-beta5"
+	Version = "1.9.225-beta6"
 	Commit  = "release"
 )
 
@@ -3352,34 +3352,56 @@ func handlePingTargetPeer(p *peer.Peer) {
 			}
 		}()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 3500*time.Millisecond)
 		defer cancel()
 
-		rtt, err := diagnostic.PingVirtualIP(ctx, vip, 2*time.Second)
-		if err == nil && rtt > 0 {
-			p.Latency = rtt
-			p.PingMs = rtt.Milliseconds()
+		var totalRTT time.Duration
+		var minRTT time.Duration
+		successCount := 0
+		const totalProbes = 3
+
+		for i := 0; i < totalProbes; i++ {
+			pCtx, pCancel := context.WithTimeout(ctx, 1100*time.Millisecond)
+			rtt, err := diagnostic.PingVirtualIP(pCtx, vip, 900*time.Millisecond)
+			pCancel()
+			if err == nil && rtt > 0 {
+				successCount++
+				totalRTT += rtt
+				if minRTT == 0 || rtt < minRTT {
+					minRTT = rtt
+				}
+			}
+			if i < totalProbes-1 {
+				time.Sleep(80 * time.Millisecond)
+			}
+		}
+
+		if successCount > 0 {
+			avgRTT := totalRTT / time.Duration(successCount)
+			p.Latency = minRTT
+			p.PingMs = avgRTT.Milliseconds()
 			p.Online = true
+			p.ProbeCount = 0
 			if registry != nil {
 				registry.Upsert(p)
 			}
-			msg := fmt.Sprintf("🟢 Реальный ICMP Ping до %s (%s): %v (успешно)", p.Nickname, vip, rtt.Round(time.Millisecond))
+			msg := fmt.Sprintf("🟢 Реальный ICMP Ping до %s (%s): %d/%d ответов, avg: %v, min: %v (успешно)", p.Nickname, vip, successCount, totalProbes, avgRTT.Round(time.Millisecond), minRTT.Round(time.Millisecond))
 			addLog(msg)
 			if hLblPeersDesc != 0 {
-				setControlText(hLblPeersDesc, fmt.Sprintf("🟢 Ping до %s (%s): %d ms (успешно)", p.Nickname, vip, rtt.Milliseconds()))
+				setControlText(hLblPeersDesc, fmt.Sprintf("🟢 Ping %s (%s): %d ms (%d/%d)", p.Nickname, vip, avgRTT.Milliseconds(), successCount, totalProbes))
 			}
 		} else {
 			p.PingMs = 0
+			p.ProbeCount++
 			if registry != nil {
 				registry.Upsert(p)
 			}
-			errText := "таймаут ожидания ответа"
-			if err != nil {
-				errText = err.Error()
-			}
-			addLog(fmt.Sprintf("🔴 Ошибка реального ICMP Ping до %s (%s): %s", p.Nickname, vip, errText))
+			addLog(fmt.Sprintf("🔴 Ошибка ICMP Ping до %s (%s): 0/%d ответов (таймаут L3 туннеля)", p.Nickname, vip, totalProbes))
 			if hLblPeersDesc != 0 {
-				setControlText(hLblPeersDesc, fmt.Sprintf("🔴 Узел %s (%s) не отвечает: %s", p.Nickname, vip, errText))
+				setControlText(hLblPeersDesc, fmt.Sprintf("🔴 Узел %s (%s) не отвечает по ICMP (0/%d)", p.Nickname, vip, totalProbes))
+			}
+			if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() != "force_udp" && !guiTCPDirectMgr.HasConn(p.DeviceID) {
+				go connectPeerTCPDirect(p)
 			}
 		}
 
@@ -4388,7 +4410,9 @@ func startEngineFromConfig(c *config.Config) {
 				} else {
 					p.Latency = rtt
 				}
-				p.PingMs = p.Latency.Milliseconds()
+				if p.ProbeCount == 0 {
+					p.PingMs = p.Latency.Milliseconds()
+				}
 			}
 			var myPubIP string
 			if puncher != nil {
@@ -4515,6 +4539,29 @@ func startEngineFromConfig(c *config.Config) {
 			triggerPublish()
 		})
 
+		// isMeshSubnetIP checks if candIP belongs to the same /24 mesh subnet as myVIP (e.g. 10.1.1.x)
+		// and is not a loopback, broadcast, or carrier CGNAT (100.64.0.0/10) IP.
+		isMeshSubnetIP := func(candIP net.IP, myVIP string) bool {
+			if candIP == nil || candIP.IsLoopback() || candIP.IsMulticast() || candIP.IsUnspecified() {
+				return false
+			}
+			clean := strings.TrimSpace(strings.Split(myVIP, "/")[0])
+			baseIP := net.ParseIP(clean)
+			if baseIP == nil {
+				return false
+			}
+			c4 := candIP.To4()
+			b4 := baseIP.To4()
+			if c4 == nil || b4 == nil {
+				return false
+			}
+			// Do not accept carrier-grade NAT 100.64.0.0/10 if local mesh is not 100.64.x
+			if c4[0] == 100 && (c4[1]&0xC0) == 64 && b4[0] != 100 {
+				return false
+			}
+			return c4[0] == b4[0] && c4[1] == b4[1] && c4[2] == b4[2]
+		}
+
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
 		onInboundPacket := func(srcAddr *net.UDPAddr, payload []byte, isTCP bool, isRelay bool) {
 			if len(payload) >= 22 && payload[0]>>4 != 4 {
@@ -4546,18 +4593,23 @@ func startEngineFromConfig(c *config.Config) {
 					for _, item := range registry.List() {
 						if item.ActiveEndpoint == fromAddrStr || item.STUNAddr == fromAddrStr || item.LocalAddr == fromAddrStr {
 							targetPeer = item
-							targetPeer.VirtualIP = srcIPStr
 							break
 						}
 						for _, c := range item.Candidates {
 							if c == fromAddrStr {
 								targetPeer = item
-								targetPeer.VirtualIP = srcIPStr
 								break
 							}
 						}
 						if targetPeer != nil {
 							break
+						}
+					}
+					// Strictly prevent VIP hijacking: only set VirtualIP if targetPeer.VirtualIP is completely empty,
+					// AND srcIP belongs to the configured mesh subnet (e.g. 10.1.1.x).
+					if targetPeer != nil && targetPeer.VirtualIP == "" {
+						if isMeshSubnetIP(srcIP, cleanVIP) {
+							targetPeer.VirtualIP = srcIPStr
 						}
 					}
 				}
@@ -5749,8 +5801,23 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				atomic.AddUint64(&packetsRecvCount, 1)
 
 				peerVIP := p.VirtualIP
-				if peerVIP == "" {
-					peerVIP = "100.64.200.1"
+				if registry != nil {
+					if ex, ok := registry.Get(p.DeviceID); ok && ex != nil && ex.VirtualIP != "" {
+						if peerVIP == "" || (strings.HasPrefix(peerVIP, "100.64.200.") && !strings.HasPrefix(ex.VirtualIP, "100.64.200.")) {
+							peerVIP = ex.VirtualIP
+						}
+					}
+				}
+				if peerVIP == "" && cfg != nil {
+					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && (activeProf.VirtualIP != "" || activeProf.Subnet != "") {
+						prefix := config.ExtractSubnetPrefix(activeProf.VirtualIP)
+						if prefix == "" || prefix == "100.64.200" {
+							prefix = config.ExtractSubnetPrefix(activeProf.Subnet)
+						}
+						if prefix != "" && prefix != "100.64.200" {
+							peerVIP = config.GenerateSubnetIP(prefix, p.DeviceID)
+						}
+					}
 				}
 
 				nick := p.Nickname
@@ -6635,7 +6702,7 @@ func updateData() {
 
 					vip := p.VirtualIP
 					if vip == "" {
-						vip = "100.64.200.2"
+						vip = "—"
 					}
 
 					var icon string
@@ -6643,21 +6710,25 @@ func updateData() {
 					if p.Online {
 						if p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID)) {
 							icon = "[TLS]"
-							if p.Latency > 0 {
+							if p.PingMs > 0 {
+								statusDisplay = fmt.Sprintf("Прямой ShadowTLS (%d ms)", p.PingMs)
+							} else if p.Latency > 0 {
 								statusDisplay = fmt.Sprintf("Прямой ShadowTLS (%v)", p.Latency.Round(time.Millisecond))
 							} else {
 								statusDisplay = "Прямой ShadowTLS (OK)"
 							}
 						} else if p.DirectP2P {
 							icon = "[P2P]"
-							if p.Latency > 0 {
-								statusDisplay = fmt.Sprintf("Прямой AWG (%v)", p.Latency.Round(time.Millisecond))
+							if p.PingMs > 0 {
+								statusDisplay = fmt.Sprintf("Прямой AWG (%d ms)", p.PingMs)
+							} else if p.Latency > 0 {
+								statusDisplay = fmt.Sprintf("⚠️ AWG (L3 таймаут, UDP %v)", p.Latency.Round(time.Millisecond))
 							} else {
-								statusDisplay = "Прямой AWG (OK)"
+								statusDisplay = "AWG (ожидание ICMP)"
 							}
 						} else {
 							icon = "[NAT]"
-							statusDisplay = "Релей (без прямого P2P/TCP)"
+							statusDisplay = "Релей (MQTT / WSS)"
 						}
 					} else {
 						icon = "[OFF]"

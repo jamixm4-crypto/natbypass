@@ -197,8 +197,18 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	} else if newer.Nickname != "" && newer.DeviceName == "" {
 		newer.DeviceName = newer.Nickname
 	}
-	if newer.VirtualIP == "" && existing.VirtualIP != "" {
-		newer.VirtualIP = existing.VirtualIP
+	// Preserve existing valid VirtualIP if newer is empty or carries legacy 100.64.200.x fallback
+	if existing.VirtualIP != "" {
+		if newer.VirtualIP == "" || (strings.HasPrefix(newer.VirtualIP, "100.64.200.") && !strings.HasPrefix(existing.VirtualIP, "100.64.200.")) {
+			newer.VirtualIP = existing.VirtualIP
+		}
+	}
+
+	if newer.Transport == "" && existing.Transport != "" {
+		newer.Transport = existing.Transport
+	}
+	if !newer.DirectTCP && existing.DirectTCP {
+		newer.DirectTCP = true
 	}
 
 	if newer.STUNAddr == "" && existing.STUNAddr != "" {

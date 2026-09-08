@@ -614,6 +614,27 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				payload = payload[:totalLen]
 			}
 
+			// Helper to validate mesh subnet match and reject CGNAT/foreign IPs
+			isMeshSubnet := func(candIP, localVIP string) bool {
+				if candIP == "" || localVIP == "" {
+					return false
+				}
+				cIP := net.ParseIP(candIP)
+				lIP := net.ParseIP(strings.TrimSpace(strings.Split(localVIP, "/")[0]))
+				if cIP == nil || lIP == nil || cIP.IsLoopback() || cIP.IsMulticast() || cIP.IsUnspecified() {
+					return false
+				}
+				c4 := cIP.To4()
+				l4 := lIP.To4()
+				if c4 == nil || l4 == nil {
+					return false
+				}
+				if c4[0] == 100 && (c4[1]&0xC0) == 64 && l4[0] != 100 {
+					return false
+				}
+				return c4[0] == l4[0] && c4[1] == l4[1] && c4[2] == l4[2]
+			}
+
 			// If direct data packet arrived, immediately lock and promote direct P2P path with Dynamic IP Auto-Learning
 			if directAddr != nil && registry != nil && !isRelay {
 				fromAddrStr := directAddr.String()
@@ -623,18 +644,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					targetPeer = p
 				} else {
 					// 2. Dynamic Auto-learning: Match peer by sender socket address (STUNAddr, ActiveEndpoint, Candidates, LocalAddr)
-					// BUG-01 FIX: copy *Peer before mutation to avoid data race with concurrent readers
+					// Strictly prevent VIP hijacking: never overwrite existing VirtualIP!
 					for _, item := range registry.List() {
 						if item.ActiveEndpoint == fromAddrStr || item.STUNAddr == fromAddrStr || item.LocalAddr == fromAddrStr {
 							cp := *item
-							cp.VirtualIP = srcIP
+							if cp.VirtualIP == "" && isMeshSubnet(srcIP, cleanVIP) {
+								cp.VirtualIP = srcIP
+							}
 							targetPeer = &cp
 							break
 						}
 						for _, c := range item.Candidates {
 							if c == fromAddrStr {
 								cp := *item
-								cp.VirtualIP = srcIP
+								if cp.VirtualIP == "" && isMeshSubnet(srcIP, cleanVIP) {
+									cp.VirtualIP = srcIP
+								}
 								targetPeer = &cp
 								break
 							}

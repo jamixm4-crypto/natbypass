@@ -739,14 +739,18 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 				p.Online = false
 			}
 
+			curCfg, _ := config.Load(s.configPath)
 			if p.VirtualIP == "" {
-				p.VirtualIP = fmt.Sprintf("100.64.200.%d", peerIndex)
+				prefix := "10.1.1"
+				if myVIP := config.ResolveVirtualIP(curCfg, s.state.DeviceID); myVIP != "" {
+					prefix = config.ExtractSubnetPrefix(myVIP)
+				}
+				p.VirtualIP = config.GenerateSubnetIP(prefix, p.DeviceID)
 			}
 			peerIndex++
 
 			// Проверка коллизии IP-адресов
 			p.IPConflict = false
-			curCfg, _ := config.Load(s.configPath)
 			if myVIP := config.ResolveVirtualIP(curCfg, s.state.DeviceID); myVIP != "" {
 				pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 				cleanMyVIP := strings.TrimSpace(strings.Split(myVIP, "/")[0])

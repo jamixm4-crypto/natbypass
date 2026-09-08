@@ -40,6 +40,8 @@ data class PeerUiModel(
     val natType: String,
     val advertisedRoutes: List<String> = emptyList(),
     val isSelectedExitNode: Boolean = false,
+    val transport: String = "relay", // "awg" | "tls" | "relay" | "offline"
+    val transportDetail: String = "", // e.g. "Прямой AWG (UDP)", "Прямой ShadowTLS (TCP)"
 )
 
 data class ProfileUiModel(
@@ -225,12 +227,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
 
-                val isTCP = obj.optBoolean("direct_tcp", false) || obj.optString("transport", "") == "tcp_shadowtls" || obj.optString("transport", "") == "tcp_tls"
-                val channelType = when {
+                val rawTransport = obj.optString("transport", "").lowercase()
+                val isTCP = obj.optBoolean("direct_tcp", false) || rawTransport == "tcp_shadowtls" || rawTransport == "tcp_tls"
+                val isAWG = directP2p || rawTransport == "udp_direct"
+
+                val transport = when {
                     !isOnline -> "offline"
-                    directP2p -> "p2p"
-                    isTCP -> "tcp"
-                    else -> "relay"
+                    isTCP     -> "tls"
+                    isAWG     -> "awg"
+                    else      -> "relay"
+                }
+
+                val transportDetail = when (transport) {
+                    "tls"     -> "Прямой ShadowTLS (TCP)"
+                    "awg"     -> "Прямой AWG (UDP)"
+                    "relay"   -> "Релей (MQTT / WSS)"
+                    else      -> "Офлайн"
+                }
+
+                val channelType = when (transport) {
+                    "tls"     -> "tcp"
+                    "awg"     -> "p2p"
+                    "offline" -> "offline"
+                    else      -> "relay"
                 }
 
                 // If peer is in relay status (no direct P2P and no direct TCP), do NOT show fake/cached ping
@@ -253,6 +272,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     natType            = peerNat,
                     advertisedRoutes   = routesList,
                     isSelectedExitNode = (selectedExit.isNotEmpty() && selectedExit == id),
+                    transport          = transport,
+                    transportDetail    = transportDetail,
                 ))
             }
         } catch (_: Exception) {}
