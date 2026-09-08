@@ -2,7 +2,7 @@
   "version": "v1.9.225-beta5",
   "published_at": "2026-09-08T16:35:27Z",
   "prerelease": true,
-  "release_notes": "**Full Changelog**: https://github.com/jamixm4-crypto/natbypass/compare/v1.9.225-beta4...v1.9.225-beta5",
+  "release_notes": "## NatBypass v1.9.225-beta5\n\n### 🚀 L3 Health-Aware Transport Switcher & Авто-переход на ShadowTLS (Обход DPI / ТСПУ)\n- **Устранение Ghost P2P**: Ликвидирована фундаментальная ловушка ложной P2P-связности, когда единичные 1-байтовые STUN UDP-пробы пробивали NAT, но полноценный трафик глушился ТСПУ/DPI на трансграничном стыке (РФ ↔ РБ ↔ VPS), приводя к 73.8% потерям пакетов.\n- **Реактивный Fallback на TLS 1.3 TCP ShadowTLS**: При любой деградации UDP или тайм-ауте ICMP ping движок мгновенно и реактивно подключает зашифрованный туннель TLS 1.3 ShadowTLS (SNI `gateway.icloud.com`), обеспечивая 100% доставку и минимальный пинг (<40 мс).\n- **Периодический аудит состояния**: Keepalive-цикл непрерывно проверяет качество P2P-канала для всех узлов сети и превентивно поднимает резервный ShadowTLS до того, как связь прервется.\n\n### ⚡ Wire-Speed Userspace Mesh TCP Relay\n- **Полнодуплексный транзитный роутинг**: Входящие пакеты на публичных серверах кластера (VPS, `DSTR_Serv_RUS`), адресованные узлам за Double Symmetric NAT, пересылаются на уровне пространства пользователя напрямую через активные TCP ShadowTLS или прямые UDP-сессии с пересчетом контрольной суммы IPv4 и декрементом TTL.\n- **Разгрузка MQTT**: Передача данных между сложными NAT-топологиями перенесена на сверхбыстрый TCP-релей без задержек и ограничений брокеров сигналов.\n\n### 🛡️ Устранение блокировок ОС и сетевых фильтров (Firewall & Kernel Drops)\n- **Linux / Keenetic NDM / OpenWrt**:\n  - Безусловное открытие портов TCP 8443, 4443 и UDP 51820 в `iptables` и `nftables` (включая цепочки `_NDM_INPUT`).\n  - Принудительное разрешение входящего ICMP (`-p icmp -j ACCEPT`) и прямого интерфейсного трафика (`-i nb0 -j ACCEPT`).\n  - Отключение строгого обратного фильтра пакетов (`rp_filter = 0`).\n- **Брандмауэр Windows**:\n  - Автоматическое добавление разрешающих правил для портов TCP 8443, 4443, 443, 47832, 51820.\n  - Разрешение всех типов входящего ICMPv4.\n  - Создание двунаправленных правил Inbound/Outbound для Wintun-адаптера `NatBypass`.\n\n### 🔄 Кроссплатформенная синхронизация\n- Изменения синхронизированы во всех модулях: `cmd/natbypass` (демон), `cmd/natbypass-cli` (CLI), `cmd/natbypass-gui` (Win32 Native GUI), `mobile` (Android Go bridge).",
   "html_url": "https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.225-beta5",
   "assets": {
     "windows/amd64/cli": {
@@ -54,7 +54,7 @@
       "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.225-beta5/natbypass-linux-arm64",
       "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.225-beta5/natbypass-linux-arm64.sig",
       "size": 11862168,
-      "sha256": "8550bcd0442623b93ae6c4a82f81ed9f7901e10a2170b2ed2ab380016126b3ba",
+      "sha256": "",
       "mirrors": [
         "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.225-beta5/natbypass-linux-arm64",
         "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.225-beta5/natbypass-linux-arm64"
