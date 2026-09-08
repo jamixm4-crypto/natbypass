@@ -15,7 +15,7 @@ $lines += "=== NatBypass Windows Diagnostic Report ==="
 $lines += "Timestamp: $(Get-Date -Format 'o')"
 
 function Log-Section($title) {
-    Write-Host "`n▶ $title" -ForegroundColor Blue
+    Write-Host "`n▶ $title" -ForegroundColor Cyan
     $script:lines += "`n--- $title ---"
 }
 function Log-Ok($msg) {
@@ -31,7 +31,7 @@ function Log-Fail($msg) {
     $script:lines += "  [FAIL] $msg"
 }
 function Log-Info($msg) {
-    Write-Host "  [i] $msg" -ForegroundColor DarkCyan
+    Write-Host "  [i] $msg" -ForegroundColor White
     $script:lines += "  [INFO] $msg"
 }
 

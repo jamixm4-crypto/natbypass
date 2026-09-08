@@ -41,13 +41,29 @@ var (
 )
 
 const (
-	colorReset  = "\033[0m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorBlue   = "\033[34m"
-	colorCyan   = "\033[36m"
-	colorBold   = "\033[1m"
+	colorReset         = "\033[0m"
+	colorBold          = "\033[1m"
+	colorDim           = "\033[2m"
+	colorItalic        = "\033[3m"
+	colorUnderline     = "\033[4m"
+
+	// High-Contrast Vivid Bright ANSI Colors
+	colorBrightRed     = "\033[91m"
+	colorBrightGreen   = "\033[92m"
+	colorBrightYellow  = "\033[93m"
+	colorBrightBlue    = "\033[94m"
+	colorBrightMagenta = "\033[95m"
+	colorBrightCyan    = "\033[96m"
+	colorBrightWhite   = "\033[97m"
+
+	// Vibrant Aliases with maximum readability on dark terminal backgrounds
+	colorRed           = "\033[91m"
+	colorGreen         = "\033[92m"
+	colorYellow        = "\033[93m"
+	colorBlue          = "\033[94m"
+	colorCyan          = "\033[96m"
+	colorWhite         = "\033[97m"
+	colorGray          = "\033[90m"
 )
 
 type NodeResponse struct {
@@ -128,11 +144,11 @@ func parseShareLink(raw string) (broker, topic, key string) {
 }
 
 func printBanner() {
-	fmt.Print(colorCyan + colorBold + `
-╔═════════════════════════════════════════════════════════════════════════╗
-║          NATBYPASS CLUSTER REMOTE DIAGNOSTIC & CONTROL TOOL             ║
-║                  (v1.9.224-beta9 / Local Engineering)                   ║
-╚═════════════════════════════════════════════════════════════════════════╝
+	fmt.Print(colorBrightCyan + colorBold + `
+╔══════════════════════════════════════════════════════════════════════════════╗
+║               NATBYPASS CLUSTER DIAGNOSTIC & CONTROL CENTER                  ║
+║                  (v1.9.225-beta2 | Local Engineering)                        ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 ` + colorReset)
 }
 
@@ -184,7 +200,7 @@ func isBeta7OrNewer(ver string) bool {
 }
 
 func waitForEnter(reader *bufio.Reader) {
-	fmt.Print(colorYellow + "\n[⏎] Нажмите Enter для возврата в главное меню... " + colorReset)
+	fmt.Print(colorBrightYellow + colorBold + "\n  [ Нажмите ENTER для возврата в главное меню... ] " + colorReset)
 	_, _ = reader.ReadString('\n')
 }
 
@@ -415,11 +431,11 @@ func printSummaryTable(discoveredPeers map[string]*DiscoveredNodeInfo, nodes map
 	}
 	sort.Strings(allPeerIDs)
 
-	fmt.Println("\n" + colorBold + "═══════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
-	fmt.Println(colorBold + " 📊 СВОДНАЯ ТАБЛИЦА УЗЛОВ КЛАСТЕРА" + colorReset)
-	fmt.Println(colorBold + "═══════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
-	fmt.Printf("%-24s │ %-15s │ %-14s │ %-24s │ %-10s\n", "DEVICE ID", "ПЛАТФОРМА", "ВЕРСИЯ", "СТАТУС", "РАЗМЕР")
-	fmt.Println("─────────────────────────┼─────────────────┼────────────────┼──────────────────────────┼───────────")
+	fmt.Println("\n" + colorBrightCyan + colorBold + "═══════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
+	fmt.Println(colorBrightWhite + colorBold + " 📊 СВОДНАЯ ТАБЛИЦА УЗЛОВ КЛАСТЕРА" + colorReset)
+	fmt.Println(colorBrightCyan + colorBold + "═══════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
+	fmt.Printf(colorBrightCyan+colorBold+"%-24s │ %-15s │ %-14s │ %-24s │ %-10s\n"+colorReset, "DEVICE ID", "ПЛАТФОРМА", "ВЕРСИЯ", "СТАТУС", "РАЗМЕР")
+	fmt.Println(colorGray + "─────────────────────────┼─────────────────┼────────────────┼──────────────────────────┼───────────" + colorReset)
 	for _, id := range allPeerIDs {
 		dp := discoveredPeers[id]
 		plat := fmt.Sprintf("%s/%s", dp.OS, dp.Arch)
@@ -427,14 +443,17 @@ func printSummaryTable(discoveredPeers map[string]*DiscoveredNodeInfo, nodes map
 			plat = dp.OS
 		}
 		st := "Старая beta (нет RemoteDiag)"
+		stColor := colorBrightRed
 		if isBeta7OrNewer(dp.Version) {
 			st = "⌛ Таймаут / Занят"
+			stColor = colorBrightYellow
 		}
 		szStr := "-"
 		if n, ok := nodes[id]; ok {
 			st = n.Status
 			if n.Completed {
 				st = "✓ Получен"
+				stColor = colorBrightGreen
 			}
 			if len(n.FullReport) > 1024 {
 				szStr = fmt.Sprintf("%.1f КБ", float64(len(n.FullReport))/1024.0)
@@ -442,13 +461,17 @@ func printSummaryTable(discoveredPeers map[string]*DiscoveredNodeInfo, nodes map
 				szStr = fmt.Sprintf("%d Б", len(n.FullReport))
 			}
 		}
-		fmt.Printf("%-24s │ %-15s │ %-14s │ %-24s │ %-10s\n",
-			truncateStr(dp.DeviceID, 24), truncateStr(plat, 15), truncateStr(dp.Version, 14), truncateStr(st, 24), szStr)
+		fmt.Printf("%s%-24s%s │ %s%-15s%s │ %s%-14s%s │ %s%-24s%s │ %s%-10s%s\n",
+			colorBrightWhite+colorBold, truncateStr(dp.DeviceID, 24), colorReset,
+			colorBrightCyan, truncateStr(plat, 15), colorReset,
+			colorBrightYellow, truncateStr(dp.Version, 14), colorReset,
+			stColor+colorBold, truncateStr(st, 24), colorReset,
+			colorBrightWhite, szStr, colorReset)
 	}
 	if len(allPeerIDs) == 0 {
-		fmt.Println(" (Узлов в сети не обнаружено. Проверьте активность маяков и топик)")
+		fmt.Println(colorBrightYellow + " (Узлов в сети не обнаружено. Проверьте активность маяков и топик)" + colorReset)
 	}
-	fmt.Println(colorBold + "═══════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
+	fmt.Println(colorBrightCyan + colorBold + "═══════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
 }
 
 func printDpiMeshMatrix(discoveredPeers map[string]*DiscoveredNodeInfo, nodes map[string]*NodeResponse) {
@@ -539,37 +562,79 @@ func printDpiMeshMatrix(discoveredPeers map[string]*DiscoveredNodeInfo, nodes ma
 		return
 	}
 
-	fmt.Printf("%-22s │ %-18s │ %-24s │ %-21s │ %-10s │ %-16s │ %-24s\n",
+	fmt.Printf(colorBrightCyan+colorBold+"%-22s │ %-18s │ %-24s │ %-21s │ %-10s │ %-16s │ %-24s\n"+colorReset,
 		"ИСТОЧНИК (FROM)", "НАЗНАЧЕНИЕ (TO)", "РЕЖИМ ТРАНСПОРТА", "ENDPOINT", "PING", "ICMP L3", "DPI СТАТУС")
-	fmt.Println("───────────────────────┼────────────────────┼──────────────────────────┼───────────────────────┼────────────┼──────────────────┼─────────────────────────")
+	fmt.Println(colorGray + "───────────────────────┼────────────────────┼──────────────────────────┼───────────────────────┼────────────┼──────────────────┼─────────────────────────" + colorReset)
 
 	for _, link := range allLinks {
 		fromStr := fmt.Sprintf("%s (%s)", truncateStr(link.FromNode, 14), truncateStr(link.FromGeo, 6))
-		fmt.Printf("%-22s │ %-18s │ %-24s │ %-21s │ %-10s │ %-16s │ %-24s\n",
-			truncateStr(fromStr, 22),
-			truncateStr(link.ToNode, 18),
-			truncateStr(link.Transport, 24),
-			truncateStr(link.Endpoint, 21),
-			truncateStr(link.Ping, 10),
-			truncateStr(link.ICMP, 16),
-			truncateStr(link.DPIStatus, 24),
+
+		// Colorize transport
+		transColor := colorBrightGreen
+		if strings.Contains(link.Transport, "ShadowTLS") || strings.Contains(link.Transport, "TCP") {
+			transColor = colorBrightCyan
+		} else if strings.Contains(link.Transport, "Relay") || strings.Contains(link.Transport, "MQTT") {
+			transColor = colorBrightYellow
+		}
+
+		// Colorize ping
+		pingColor := colorBrightWhite
+		if strings.Contains(link.Ping, "N/A") || link.Ping == "" {
+			pingColor = colorGray
+		} else if strings.Contains(link.Ping, "ms") {
+			var msVal int
+			if _, err := fmt.Sscanf(link.Ping, "%d", &msVal); err == nil {
+				if msVal < 50 {
+					pingColor = colorBrightGreen
+				} else if msVal < 150 {
+					pingColor = colorBrightCyan
+				} else {
+					pingColor = colorBrightYellow
+				}
+			}
+		}
+
+		// Colorize ICMP
+		icmpColor := colorBrightRed
+		if strings.Contains(link.ICMP, "✓") || strings.Contains(link.ICMP, "OK") {
+			icmpColor = colorBrightGreen
+		}
+
+		// Colorize DPI
+		dpiColor := colorBrightGreen
+		if strings.Contains(link.DPIStatus, "🛡️") {
+			dpiColor = colorBrightCyan
+		} else if strings.Contains(link.DPIStatus, "❌") {
+			dpiColor = colorBrightRed
+		}
+
+		fmt.Printf("%s%-22s%s │ %s%-18s%s │ %s%-24s%s │ %s%-21s%s │ %s%-10s%s │ %s%-16s%s │ %s%-24s%s\n",
+			colorBrightWhite, truncateStr(fromStr, 22), colorReset,
+			colorBrightWhite, truncateStr(link.ToNode, 18), colorReset,
+			transColor, truncateStr(link.Transport, 24), colorReset,
+			colorBrightWhite, truncateStr(link.Endpoint, 21), colorReset,
+			pingColor, truncateStr(link.Ping, 10), colorReset,
+			icmpColor+colorBold, truncateStr(link.ICMP, 16), colorReset,
+			dpiColor, truncateStr(link.DPIStatus, 24), colorReset,
 		)
 	}
 
 	totalLinks := len(allLinks)
-	fmt.Println(colorBold + "══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
-	fmt.Println(colorBold + " 📊 СВОДНАЯ СТАТИСТИКА P2P / DPI КЛАСТЕРА:" + colorReset)
-	fmt.Printf("  • Всего обнаруженных каналов между узлами:  %d\n", totalLinks)
+	fmt.Println(colorBrightCyan + colorBold + "══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
+	fmt.Println(colorBrightWhite + colorBold + " 📊 СВОДНАЯ СТАТИСТИКА P2P / DPI КЛАСТЕРА:" + colorReset)
+	fmt.Printf(colorBrightWhite+"  • Всего обнаруженных каналов между узлами:  %s%d%s\n", colorBrightCyan+colorBold, totalLinks, colorReset)
 	if totalLinks > 0 {
-		fmt.Printf("  • Прямой P2P через UDP AWG:                 %d (%.1f%%) — Высокая скорость, низкий пинг\n",
-			totalUDP, float64(totalUDP)*100.0/float64(totalLinks))
-		fmt.Printf("  • Защищенный P2P через TCP ShadowTLS:       %d (%.1f%%) — Успешный обход DPI/ТСПУ\n",
-			totalTCP, float64(totalTCP)*100.0/float64(totalLinks))
-		fmt.Printf("  • Резервный Relay через MQTT брокер:        %d (%.1f%%) — Требуется диагностика\n",
-			totalRelay, float64(totalRelay)*100.0/float64(totalLinks))
-		fmt.Printf("  • Доставка ICMP L3 пакетов (Ping):          %d успешно / %d потерь\n", totalICMPOk, totalICMPFail)
+		fmt.Printf(colorBrightWhite+"  • Прямой P2P через UDP AWG:                 %s%d (%.1f%%)%s — Высокая скорость, низкий пинг\n",
+			colorBrightGreen+colorBold, totalUDP, float64(totalUDP)*100.0/float64(totalLinks), colorReset)
+		fmt.Printf(colorBrightWhite+"  • Защищенный P2P через TCP ShadowTLS:       %s%d (%.1f%%)%s — Успешный обход DPI/ТСПУ\n",
+			colorBrightCyan+colorBold, totalTCP, float64(totalTCP)*100.0/float64(totalLinks), colorReset)
+		fmt.Printf(colorBrightWhite+"  • Резервный Relay через MQTT брокер:        %s%d (%.1f%%)%s — Требуется диагностика\n",
+			colorBrightYellow+colorBold, totalRelay, float64(totalRelay)*100.0/float64(totalLinks), colorReset)
+		fmt.Printf(colorBrightWhite+"  • Доставка ICMP L3 пакетов (Ping):          %s%d успешно%s / %s%d потерь%s\n",
+			colorBrightGreen+colorBold, totalICMPOk, colorReset,
+			colorBrightRed+colorBold, totalICMPFail, colorReset)
 	}
-	fmt.Println(colorBold + "══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
+	fmt.Println(colorBrightCyan + colorBold + "══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
 }
 
 func saveConsolidatedReport(
@@ -663,6 +728,7 @@ func saveConsolidatedReport(
 }
 
 func main() {
+	initConsole()
 	os.Args = reorderArgs(os.Args)
 	flag.Parse()
 
@@ -778,18 +844,32 @@ func main() {
 				choice = "1"
 			}
 		} else {
-			fmt.Println(colorCyan + " ГЛАВНОЕ МЕНЮ ДИАГНОСТИКИ И УПРАВЛЕНИЯ:" + colorReset)
-			fmt.Println("  [1] 📋 Собрать полную диагностику со всех узлов в файл (Diag Collect)")
-			fmt.Println("  [2] 🌐 Межгеографическая P2P/DPI матрица связности (Mesh Matrix)")
-			fmt.Println("  [3] 🎯 Диагностика одного конкретного узла")
-			fmt.Println("  [4] 🚀 Принудительно обновить все beta-узлы сети (OTA Beta Update)")
-			fmt.Println("  [5] ⚙️  Сменить профиль / топик / брокер")
-			fmt.Println("  [0] 🚪 Выход")
-			fmt.Print(colorYellow + "Ваш выбор [1]: " + colorReset)
+			fmt.Println(colorBrightCyan + colorBold + " 📋 ГЛАВНОЕ МЕНЮ ДИАГНОСТИКИ И УПРАВЛЕНИЯ КЛАСТЕРОМ:" + colorReset)
+			fmt.Println(colorBrightYellow + "  [ 1 ] " + colorBrightWhite + "Собрать полную диагностику со всех узлов в файл" + colorReset + colorGray + " (Diag Collect)" + colorReset)
+			fmt.Println(colorBrightYellow + "  [ 2 ] " + colorBrightWhite + "Межгеографическая P2P/DPI матрица связности" + colorReset + colorGray + " (Mesh Matrix)" + colorReset)
+			fmt.Println(colorBrightYellow + "  [ 3 ] " + colorBrightWhite + "Диагностика одного конкретного узла по DeviceID" + colorReset)
+			fmt.Println(colorBrightYellow + "  [ 4 ] " + colorBrightWhite + "Принудительно обновить все beta-узлы сети" + colorReset + colorGray + " (OTA Beta Update)" + colorReset)
+			fmt.Println(colorBrightYellow + "  [ 5 ] " + colorBrightWhite + "Сменить профиль / топик / брокер" + colorReset)
+			fmt.Println(colorBrightYellow + "  [ 0 ] " + colorBrightWhite + "Выход из утилиты" + colorReset)
+			fmt.Println(colorGray + "─────────────────────────────────────────────────────────────────────────" + colorReset)
+			fmt.Print(colorBrightGreen + colorBold + "► Введите команду [1-5, 0] (по умолчанию 1): " + colorReset)
 			choice, _ = reader.ReadString('\n')
 			choice = strings.TrimSpace(choice)
 			if choice == "" {
 				choice = "1"
+			}
+			menuNames := map[string]string{
+				"1": "Сбор полной диагностики со всех узлов",
+				"2": "Межгеографическая P2P/DPI матрица связности",
+				"3": "Диагностика целевого узла",
+				"4": "OTA-обновление всех beta-узлов",
+				"5": "Смена комнаты / топика / брокера",
+				"0": "Выход",
+			}
+			if name, ok := menuNames[choice]; ok {
+				fmt.Printf(colorBrightCyan+"  >> Выбрано: [ %s ] %s\n\n"+colorReset, choice, name)
+			} else {
+				fmt.Printf(colorBrightRed+"  [!] Некорректный выбор '%s'. Введите цифру от 0 до 5.\n\n"+colorReset, choice)
 			}
 		}
 
