@@ -1,24 +1,25 @@
 module.exports = async ({ github, context }) => {
-  const targetBetaTag = 'v1.9.225-beta3';
+  const targetBetaTag = 'v1.9.225-beta4';
   const targetStableTag = 'v1.9.223';
   const keepTags = new Set([targetBetaTag, targetStableTag]);
 
-  const betaChangelog = `## NatBypass v1.9.225-beta3
+  const betaChangelog = `## NatBypass v1.9.225-beta4
 
-### 🛡️ Устойчивость ShadowTLS к активному зондированию ТСПУ (Active Probing Resistance)
-- **Защита от активных зондов ТСПУ**: При получении неаутентифицированного ClientHello сервер больше не сбрасывает соединение через TCP RST (сигнатура прокси), а прозрачно проксирует запрос на реальный SNI-хост (\`gateway.icloud.com:443\`), возвращая сканеру легитимные сертификаты и TLS-ответы Apple/Cloudflare. При HTTP-запросах отдается стандартный код \`HTTP 400 Bad Request\`.
-- **Строгая TLS 1.3 State Machine**: Введена строгая изоляция передачи прикладных данных (\`0x17\`), исключающая отправку Application Data до полного завершения стандартного рукопожатия (\`0x16\`).
+### 🛡️ Настоящий TLS 1.3 RFC 8446 в ShadowTLS (Обход DPI / ТСПУ)
+- **Устранение сигнатуры Fake TLS**: Полностью ликвидирована псевдо-TLS обертка с ручной записью 0x17. Все TCP-сессии ShadowTLS теперь используют полноценный стэк \`crypto/tls\` со стандартным рукопожатием TLS 1.3 (ClientHello → ServerHello → EncryptedExtensions → Certificate → CertificateVerify → Finished) и динамическим рандомизированным паддингом (16–48 байт).
+- **Стойкость к активному зондированию ТСПУ**: При несовпадении сетевого ключа или получении нелегитимных запросов соединение прозрачно проксируется на реальный SNI-хост (\`gateway.icloud.com:443\`), не выдавая присутствие туннеля.
+- **Разрешение коллизий Simultaneous Open**: Детерминированное согласование ролей (клиент/сервер) на основе сравнения 32-байтных nonce \`clientRandom\`, исключающее блокировки при одновременном TCP Hole Punching.
+- **Оптимизация для роутеров (MIPS/ARM)**: Кеширование mTLS-сертификатов узла в памяти предотвращает повторную генерацию ключей ECDSA и разгружает CPU.
 
-### 🔐 Криптография и KDF-цепочка (Double Ratchet для UDP)
-- **Устойчивость к потерям и нарушению порядка UDP-пакетов**: В заголовок зашифрованного пакета добавлен 4-байтный порядковый номер сообщения \`uint32\` и окно восстановления пропущенных ключей (skip-list до 64 сообщений). Потеря или перестановка UDP-пакетов больше не рассинхронизирует сессию.
-- **CSPRNG Fail-Fast**: Устранены предсказуемые фолбэки на базе \`time.Now().UnixNano()\`. При исчерпании системной энтропии программа немедленно завершается с ошибкой (fail-fast), исключая появление уязвимых сессионных параметров.
+### 🔐 Криптография: Stateless HKDF и CSPRNG Hardening
+- **Stateless HKDF на каждый UDP-пакет**: Переход от хрупкой последовательной цепочки KDF к независимому выводу сессионного ключа \`deriveMsgKeyStateless(rootKey, counter)\` через HKDF-Expand. Потеря или перестановка UDP-пакетов в ненадежных трансграничных сетях больше не приводит к потере синхронизации.
+- **Защита от атак повторного воспроизведения**: Реализован 64-битный скользящий фильтр анти-реплея по RFC 2401.
+- **CSPRNG Fail-Fast**: Полностью удалены небезопасные резервные генераторы на базе системного времени. При сбое системной энтропии приложение немедленно аварийно завершается (fail-fast).
 
-### 🌐 Сеть, релеи и обфускация (резервный транспорт)
-- **WSS Relay Race Condition**: Устранена паника при конкурентном отключении клиента во время пересылки пакета благодаря потокобезопасной сессии \`clientSession\` с атомарным жизненным циклом.
-- **AmneziaWG anti-TSPU**: Усилены параметры пресета (\`Jc = 5\`, \`Jmin = 40\`, \`Jmax = 120\`, \`S1 = 56\`, \`S2 = 100\`) и внедрен автоматический MTU \`1280\` для ликвидации стандартной сигнатуры WireGuard MTU (1420).
-
-### 🖥️ Локальная утилита диагностики
-- **Диагностика**: Включена поддержка Windows Virtual Terminal, высококонтрастная цветовая палитра и улучшенная навигация по меню.`;
+### 🌐 Сеть, релеи и стабильность
+- **WSS Relay Deadlock / Race Fix**: Потокобезопасная очистка сессий WebSocket Relay при отключении клиентов, устраняющая гонки и утечки ресурсов.
+- **AmneziaWG anti-TSPU**: Пресет обфускации (\`Jc = 5\`, \`Jmin = 40\`, \`Jmax = 120\`, \`S1 = 56\`, \`S2 = 100\`) с автоматическим MTU 1280.
+- **Диагностика**: Локальная инженерная консоль NatBypass-Diag с поддержкой Windows VT100 и высококонтрастным интерфейсом.`;
 
   console.log('--- STEP 1: Updating release notes and deleting old releases ---');
   try {
@@ -31,7 +32,7 @@ module.exports = async ({ github, context }) => {
 
     for (const r of releases) {
       if (r.tag_name === targetBetaTag) {
-        console.log(`Updating release notes and title for ${r.tag_name}...`);
+        console.log(`Updating release notes, publishing for ${r.tag_name}...`);
         try {
           await github.rest.repos.updateRelease({
             owner: context.repo.owner,
@@ -40,8 +41,9 @@ module.exports = async ({ github, context }) => {
             name: `NatBypass ${targetBetaTag}`,
             body: betaChangelog,
             prerelease: true,
+            draft: false,
           });
-          console.log(`✓ Updated release notes for ${r.tag_name}`);
+          console.log(`✓ Updated and published release notes for ${r.tag_name}`);
         } catch (e) {
           console.error(`Failed to update release ${r.tag_name}: ${e.message}`);
         }

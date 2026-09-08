@@ -95,30 +95,26 @@ jobs:
           $TAG = "${{ github.ref_name }}"
           $isPre = $TAG.Contains("-")
           
-          # Check if release exists; if not, create as draft first
+          # Check if release exists; if not, create as published prerelease/latest
           gh release view $TAG 2>&1 | Out-Null
           if ($LASTEXITCODE -ne 0) {
             if ($isPre) {
-              gh release create $TAG --title "NatBypass $TAG" --generate-notes --prerelease --draft
+              gh release create $TAG --title "NatBypass $TAG" --generate-notes --prerelease
             } else {
-              gh release create $TAG --title "NatBypass $TAG" --generate-notes --latest --draft
+              gh release create $TAG --title "NatBypass $TAG" --generate-notes --latest
             }
           }
 
-          $files = (Get-ChildItem -Path "build/*" | Select-Object -ExpandProperty FullName)
+          $files = Get-ChildItem -Path "build/*" -File
           Write-Host "Uploading $($files.Count) assets to release $TAG..."
-          for ($attempt=1; $attempt -le 5; $attempt++) {
-            gh release upload $TAG @files --clobber
-            if ($LASTEXITCODE -eq 0) { break }
-            Write-Host "Batch upload attempt $attempt failed, retrying in 5s..."
-            Start-Sleep -Seconds 5
-          }
-
-          # Publish release
-          if ($isPre) {
-            gh release edit $TAG --draft=false --prerelease
-          } else {
-            gh release edit $TAG --draft=false --latest
+          foreach ($file in $files) {
+            Write-Host "Uploading $($file.Name)..."
+            for ($attempt=1; $attempt -le 5; $attempt++) {
+              gh release upload $TAG $file.FullName --clobber
+              if ($LASTEXITCODE -eq 0) { break }
+              Write-Host "Upload attempt $attempt for $($file.Name) failed, retrying in 3s..."
+              Start-Sleep -Seconds 3
+            }
           }
 
       - name: Setup Python for manifest generator
