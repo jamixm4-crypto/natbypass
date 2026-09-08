@@ -41,7 +41,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout -B main origin/main
-          python scripts/gen_mirror_manifest.py --tag "v1.9.225-beta4" --out-dir mirror/releases
+          python scripts/gen_mirror_manifest.py --tag "v1.9.225-beta5" --out-dir mirror/releases
           git add mirror/releases/
           git commit -m "Update mirror manifests with detailed changelog [skip ci]" || echo "No manifest changes to commit"
           git push origin main || echo "Push failed or nothing to push"
