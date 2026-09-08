@@ -54,24 +54,26 @@ func EnsureFirewallRule(port int) error {
 	}
 
 	// 2. Specific UDP & TCP Port rules with EdgeTraversal (edge=yes) and profile=any
-	// Always ensure standard stealth ports 8443, 4443, 443 and 47832 are permitted for both UDP (WireGuard/AWG) and TCP (ShadowTLS)
+	// Always ensure standard stealth ports 8443, 4443, 443, 47832, and 51820 are permitted for both UDP (WireGuard/AWG) and TCP (ShadowTLS)
 	ensurePortRule("NatBypass-TCP-8443", 8443, "TCP")
 	ensurePortRule("NatBypass-TCP-4443", 4443, "TCP")
 	ensurePortRule("NatBypass-UDP-443", 443, "UDP")
 	ensurePortRule("NatBypass-UDP-47832", 47832, "UDP")
 	ensurePortRule("NatBypass-TCP-443", 443, "TCP")
 	ensurePortRule("NatBypass-TCP-47832", 47832, "TCP")
+	ensurePortRule("NatBypass-UDP-51820", 51820, "UDP")
+	ensurePortRule("NatBypass-TCP-51820", 51820, "TCP")
 
 	// If a custom or dynamically bound port is specified, ensure rules exist
-	if port > 0 && port != 443 && port != 47832 {
+	if port > 0 && port != 443 && port != 47832 && port != 51820 && port != 8443 {
 		ensurePortRule(fmt.Sprintf("NatBypass-P2P-UDP-%d", port), port, "UDP")
 		ensurePortRule(fmt.Sprintf("NatBypass-P2P-TCP-%d", port), port, "TCP")
 	}
 
-	// 3. Ensure ICMPv4 echo requests are allowed through Firewall
+	// 3. Ensure ICMPv4 echo requests and replies are allowed through Firewall
 	ensureICMPRule()
 
-	// 4. Ensure NatBypass Wintun interface adapter traffic is allowed
+	// 4. Ensure NatBypass Wintun interface adapter traffic is allowed (both in and out)
 	ensureAdapterRule()
 
 	return nil
@@ -119,7 +121,7 @@ func ensureICMPRule() {
 			"name="+ruleName,
 			"dir=in",
 			"action=allow",
-			"protocol=icmpv4:8,any",
+			"protocol=icmpv4",
 			"profile=any",
 			"enable=yes",
 		)
@@ -138,5 +140,15 @@ func ensureAdapterRule() {
 			`New-NetFirewallRule -DisplayName 'NatBypass Adapter All' -Name 'NatBypass Adapter All' -Direction Inbound -Action Allow -InterfaceAlias 'NatBypass' -Profile Any -ErrorAction SilentlyContinue`)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		_ = cmd.Run()
+
+		addNetshIn := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+			"name="+ruleName+" In", "dir=in", "action=allow", "interface=NatBypass", "profile=any", "enable=yes")
+		addNetshIn.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		_ = addNetshIn.Run()
+
+		addNetshOut := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+			"name="+ruleName+" Out", "dir=out", "action=allow", "interface=NatBypass", "profile=any", "enable=yes")
+		addNetshOut.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		_ = addNetshOut.Run()
 	}
 }

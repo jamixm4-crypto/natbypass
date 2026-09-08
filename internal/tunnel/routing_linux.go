@@ -116,10 +116,14 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	// 1. NAT Masquerading for mesh subnet ONLY when not exiting back to nb0
 	ensureIptablesRule(ipt, "nat", "POSTROUTING", "-s", cleanSubnet, "!", "-o", "nb0", "-j", "MASQUERADE")
 
-	// 2. Forwarding rules for nb0
-	// FIX-N2: Use -I (insert at top) for FORWARD rules so they take priority over Docker's DROP policies
+	// 2. Forwarding and Input rules for nb0
+	// FIX-N2: Use -I (insert at top) for FORWARD/INPUT rules so they take priority over Docker's DROP policies
 	insertIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
 	insertIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
+	insertIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-j", "ACCEPT")
+	insertIptablesRule(ipt, "", "INPUT", "-p", "icmp", "-j", "ACCEPT")
+	insertIptablesRule(ipt, "", "INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
+	insertIptablesRule(ipt, "", "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
 	// Try conntrack module first; fall back to 'state' module if conntrack not available (MIPS routers)
 	if exec.Command(ipt, "-w", "2", "-C", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run() != nil {
 		if err2 := exec.Command(ipt, "-w", "2", "-A", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run(); err2 != nil {
@@ -133,6 +137,9 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		ensureIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "nb0", "-j", "ACCEPT")
 		ensureIptablesRule(ipt, "", "_NDM_FORWARD", "-o", "nb0", "-j", "ACCEPT")
 		// S5: Keenetic NDM блокирует ICMP по умолчанию — добавляем правило для пинга
+		ensureIptablesRule(ipt, "", "_NDM_INPUT", "-i", "nb0", "-j", "ACCEPT")
+		ensureIptablesRule(ipt, "", "_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
+		ensureIptablesRule(ipt, "", "_NDM_INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
 		ensureIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-p", "icmp", "-j", "ACCEPT")
 	}
 

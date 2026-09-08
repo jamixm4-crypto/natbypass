@@ -74,6 +74,22 @@ func ensureFirewallRule() {
 			netshArgs: []string{"dir=in", "action=allow", "protocol=UDP", "localport=51820", "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
+			name: "NatBypass TCP Mesh (8443)",
+			netshArgs: []string{"dir=in", "action=allow", "protocol=TCP", "localport=8443", "enable=yes", "profile=any", "edge=yes"},
+		},
+		{
+			name: "NatBypass TCP Mesh (4443)",
+			netshArgs: []string{"dir=in", "action=allow", "protocol=TCP", "localport=4443", "enable=yes", "profile=any", "edge=yes"},
+		},
+		{
+			name: "NatBypass TCP Mesh (47832)",
+			netshArgs: []string{"dir=in", "action=allow", "protocol=TCP", "localport=47832", "enable=yes", "profile=any", "edge=yes"},
+		},
+		{
+			name: "NatBypass TCP Mesh (51820)",
+			netshArgs: []string{"dir=in", "action=allow", "protocol=TCP", "localport=51820", "enable=yes", "profile=any", "edge=yes"},
+		},
+		{
 			name: "NatBypass App In",
 			netshArgs: []string{"dir=in", "action=allow", "program=" + exePath, "enable=yes", "profile=any", "edge=yes"},
 		},
@@ -82,8 +98,12 @@ func ensureFirewallRule() {
 			psNew: `New-NetFirewallRule -DisplayName 'NatBypass ICMPv4 In' -Name 'NatBypass ICMPv4 In' -Direction Inbound -Action Allow -Protocol ICMPv4 -Profile Any -ErrorAction SilentlyContinue`,
 		},
 		{
-			name: "NatBypass Adapter All",
-			psNew: `New-NetFirewallRule -DisplayName 'NatBypass Adapter All' -Name 'NatBypass Adapter All' -Direction Inbound -Action Allow -InterfaceAlias 'NatBypass' -Profile Any -ErrorAction SilentlyContinue`,
+			name: "NatBypass Adapter All In",
+			psNew: `New-NetFirewallRule -DisplayName 'NatBypass Adapter All In' -Name 'NatBypass Adapter All In' -Direction Inbound -Action Allow -InterfaceAlias 'NatBypass' -Profile Any -ErrorAction SilentlyContinue`,
+		},
+		{
+			name: "NatBypass Adapter All Out",
+			psNew: `New-NetFirewallRule -DisplayName 'NatBypass Adapter All Out' -Name 'NatBypass Adapter All Out' -Direction Outbound -Action Allow -InterfaceAlias 'NatBypass' -Profile Any -ErrorAction SilentlyContinue`,
 		},
 	}
 

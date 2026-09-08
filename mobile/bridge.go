@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.225-beta4"
+const Version = "1.9.225-beta5"
 
 
 
@@ -808,8 +808,9 @@ func StartEngine(configYAML string, tunFd int) string {
 									_ = puncher.SendHolePunchProbe(peerItem.LocalAddr)
 								}
 							}
-							// Trigger Direct TCP ShadowTLS fallback when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
-							if !isForceUDP && (isForceTCP || !peerItem.DirectP2P || peerItem.ProbeCount >= 2) && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) {
+							// Trigger Direct TCP ShadowTLS fallback when UDP is not confirmed or failing ICMP
+							needsTCP := isForceTCP || (!isForceUDP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) && (peerItem.Transport != "tcp_tls" && peerItem.Transport != "tcp_shadowtls" && (!peerItem.DirectP2P || peerItem.PingMs == 0 || peerItem.ProbeCount >= 1)))
+							if needsTCP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) {
 								defTCPPort := 8443
 								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
 									defTCPPort = activeProf.TCPPort
@@ -1098,8 +1099,8 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// 1d. If force_tcp and not connected yet, trigger immediate dial
-							if isForceTCP && !sentTCP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+							// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing or unconfirmed
+							if !isForceUDP && !sentTCP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) && (!targetPeer.DirectP2P || targetPeer.PingMs == 0 || targetPeer.ProbeCount >= 1 || isForceTCP) {
 								defTCPPort := 8443
 								if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
 									defTCPPort = activeProf.TCPPort
@@ -1125,6 +1126,35 @@ func attachTUNLocked(tunFd int) {
 									go func(devID, target string, localP int) {
 										_ = globalTCPDirectMgr.ConnectPeer(devID, target, localP)
 									}(targetPeer.DeviceID, tcpTarget, lPort)
+								}
+							}
+							// 1e. Mesh Userspace TCP Relay Fallback:
+							if !sentTCP && !sentDirect && !isForceUDP && globalTCPDirectMgr != nil && globalRegistry != nil {
+								for _, rp := range globalRegistry.List() {
+									if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
+										continue
+									}
+									vip := strings.TrimSpace(strings.Split(rp.VirtualIP, "/")[0])
+									isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(rp.DeviceName), "serv") || strings.Contains(strings.ToLower(rp.Nickname), "serv")
+									if isServ && globalTCPDirectMgr.HasConn(rp.DeviceID) {
+										if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, pkt); err == nil {
+											sentDirect = true
+											break
+										}
+									}
+								}
+								if !sentDirect {
+									for _, rp := range globalRegistry.List() {
+										if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
+											continue
+										}
+										if globalTCPDirectMgr.HasConn(rp.DeviceID) {
+											if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, pkt); err == nil {
+												sentDirect = true
+												break
+											}
+										}
+									}
 								}
 							}
 

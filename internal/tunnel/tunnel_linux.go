@@ -368,10 +368,16 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		ensureRule("mangle", "PREROUTING", "-i", d.AdapterName, "-j", "ACCEPT")
 		ensureRule("mangle", "OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
 
-		// 4. Разрешение входящих UDP-пакетов
+		// 4. Разрешение входящих UDP и TCP портов (Mesh P2P, WireGuard и ShadowTLS)
 		ensureRule("", "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+		ensureRule("", "INPUT", "-p", "udp", "--dport", "51820", "-j", "ACCEPT")
+		ensureRule("", "INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
+		ensureRule("", "INPUT", "-p", "tcp", "--dport", "4443", "-j", "ACCEPT")
 		if isKeeneticDevice() {
 			ensureRule("", "_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+			ensureRule("", "_NDM_INPUT", "-p", "udp", "--dport", "51820", "-j", "ACCEPT")
+			ensureRule("", "_NDM_INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
+			ensureRule("", "_NDM_INPUT", "-p", "tcp", "--dport", "4443", "-j", "ACCEPT")
 		}
 
 		// 5. nftables (Ubuntu 22.04+, Debian 12+): добавляем разрешение для nb0 через nft напрямую
@@ -381,6 +387,9 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 			_ = exec.Command(nft, "add", "rule", "inet", "filter", "forward", "oifname", d.AdapterName, "accept").Run()
 			_ = exec.Command(nft, "add", "rule", "inet", "filter", "output", "oifname", d.AdapterName, "accept").Run()
 			_ = exec.Command(nft, "add", "rule", "inet", "filter", "input", "ip", "protocol", "icmp", "accept").Run()
+			_ = exec.Command(nft, "add", "rule", "inet", "filter", "input", "tcp", "dport", "8443", "accept").Run()
+			_ = exec.Command(nft, "add", "rule", "inet", "filter", "input", "udp", "dport", "47832", "accept").Run()
+			_ = exec.Command(nft, "add", "rule", "inet", "filter", "input", "udp", "dport", "51820", "accept").Run()
 		}
 
 		// 6. ufw (Ubuntu): разрешение через профиль ufw если доступен

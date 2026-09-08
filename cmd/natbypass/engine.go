@@ -98,6 +98,89 @@ func adaptivePublishInterval(cfgInterval int) time.Duration {
 	return constants.DefaultPublishInterval
 }
 
+// findMeshRelayPeer finds an online peer with an active TCP connection capable of acting as an L3 mesh relay.
+// Priority is given to public VPS/servers (e.g. DSTR_Serv_RUS / 10.1.1.102 / public IP nodes).
+func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectManager, excludeDevID string) *peer.Peer {
+	if registry == nil || tcpDirectMgr == nil {
+		return nil
+	}
+	// Priority 1: Known VPS / Server nodes (e.g. 10.1.1.102 or name containing Serv)
+	for _, p := range registry.List() {
+		if p.DeviceID == excludeDevID || !p.Online {
+			continue
+		}
+		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(p.DeviceName), "serv") || strings.Contains(strings.ToLower(p.Nickname), "serv")
+		if isServ && tcpDirectMgr.HasConn(p.DeviceID) {
+			return p
+		}
+	}
+	// Priority 2: Any peer with a public IP that has active TCP connection
+	for _, p := range registry.List() {
+		if p.DeviceID == excludeDevID || !p.Online {
+			continue
+		}
+		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && tcpDirectMgr.HasConn(p.DeviceID) {
+			return p
+		}
+	}
+	// Priority 3: Any peer with active TCP connection
+	for _, p := range registry.List() {
+		if p.DeviceID == excludeDevID || !p.Online {
+			continue
+		}
+		if tcpDirectMgr.HasConn(p.DeviceID) {
+			return p
+		}
+	}
+	return nil
+}
+
+// getPeerTCPTarget resolves the best TCP address for a peer (TCPAddr > PublicIP:port > LocalAddr:port).
+func getPeerTCPTarget(p *peer.Peer, defaultPort int) string {
+	if p == nil {
+		return ""
+	}
+	if p.TCPAddr != "" {
+		return p.TCPAddr
+	}
+	host := p.PublicIP
+	if (host == "" || host == "0.0.0.0" || host == "<nil>") && p.STUNAddr != "" {
+		host = strings.Split(p.STUNAddr, ":")[0]
+	}
+	if host != "" && host != "0.0.0.0" && host != "<nil>" {
+		return fmt.Sprintf("%s:%d", host, defaultPort)
+	}
+	if p.LocalAddr != "" {
+		localHost := strings.Split(p.LocalAddr, ":")[0]
+		return fmt.Sprintf("%s:%d", localHost, defaultPort)
+	}
+	return ""
+}
+
+// getSignalTCPTarget resolves the best TCP address from an incoming signaling beacon.
+func getSignalTCPTarget(p *signaling.Payload, defaultPort int) string {
+	if p == nil {
+		return ""
+	}
+	if p.TCPAddr != "" {
+		return p.TCPAddr
+	}
+	host := p.PublicIP
+	if (host == "" || host == "0.0.0.0" || host == "<nil>") && p.STUNAddr != "" {
+		host = strings.Split(p.STUNAddr, ":")[0]
+	}
+	if host != "" && host != "0.0.0.0" && host != "<nil>" {
+		return fmt.Sprintf("%s:%d", host, defaultPort)
+	}
+	if p.LocalAddr != "" {
+		localHost := strings.Split(p.LocalAddr, ":")[0]
+		return fmt.Sprintf("%s:%d", localHost, defaultPort)
+	}
+	return ""
+}
+
+
 
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	logTarget := ""
@@ -656,6 +739,50 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					}
 				}
 
+				// Mesh Userspace Relay Router:
+				// If destination is NOT my Virtual IP, forward directly to destination peer over active TCP/UDP connection
+				if inDstIP != cleanMyVIP && cleanMyVIP != "" && registry != nil {
+					if destPeer, ok := registry.GetByVirtualIP(inDstIP); ok && destPeer != nil && destPeer.DeviceID != deviceID {
+						// IPv4 TTL decrement to strictly prevent routing loops
+						if len(payload) >= 20 && payload[0]>>4 == 4 {
+							ttl := payload[8]
+							if ttl <= 1 {
+								log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("TTL expired in mesh relay, dropping packet")
+								return
+							}
+							payload[8] = ttl - 1
+							ihl := int(payload[0]&0x0F) * 4
+							if ihl >= 20 && ihl <= len(payload) {
+								payload[10] = 0
+								payload[11] = 0
+								var sum uint32
+								for i := 0; i < ihl; i += 2 {
+									sum += uint32(binary.BigEndian.Uint16(payload[i : i+2]))
+								}
+								for sum > 0xFFFF {
+									sum = (sum & 0xFFFF) + (sum >> 16)
+								}
+								binary.BigEndian.PutUint16(payload[10:12], ^uint16(sum))
+							}
+						}
+
+						// 1. Forward over active direct TCP ShadowTLS to destination peer
+						if tcpDirectMgr != nil && tcpDirectMgr.HasConn(destPeer.DeviceID) {
+							if err := tcpDirectMgr.SendPacket(destPeer.DeviceID, payload); err == nil {
+								log.Debug().Str("from", inSrcIP).Str("to", inDstIP).Str("via_tcp", destPeer.DeviceID).Msg("🔀 Mesh Relay: Forwarded packet via TCP ShadowTLS")
+								return
+							}
+						}
+						// 2. Forward over Direct UDP to destination peer
+						if puncher != nil && destPeer.DirectP2P && destPeer.ActiveEndpoint != "" {
+							if err := puncher.SendDataPacketWithPadding(destPeer.ActiveEndpoint, payload, 0, 0); err == nil {
+								log.Debug().Str("from", inSrcIP).Str("to", inDstIP).Str("via_udp", destPeer.DeviceID).Msg("🔀 Mesh Relay: Forwarded packet via Direct UDP")
+								return
+							}
+						}
+					}
+				}
+
 				log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 				// FIX-A: Ensure Linux kernel has a /32 host route back to peer VIP via nb0
 				// BEFORE writing packet to TUN, so kernel ICMP replies and NAT return packets don't escape via WAN
@@ -883,25 +1010,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}
-						// 1d. If force_tcp and not connected yet, trigger immediate dial
-						if isForceTCP && !sentTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+						// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing or unconfirmed
+						if !isForceUDP && !sentTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && (!p.DirectP2P || p.PingMs == 0 || p.ProbeCount >= 1 || isForceTCP) {
 							defaultTCPPort := 8443
 							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
 								defaultTCPPort = activeProf.TCPPort
 							}
-							tcpTarget := p.TCPAddr
-							if tcpTarget == "" {
-								host := p.PublicIP
-								if host == "" && p.STUNAddr != "" {
-									host = strings.Split(p.STUNAddr, ":")[0]
-								}
-								if host != "" && host != "0.0.0.0" {
-									tcpTarget = fmt.Sprintf("%s:%d", host, defaultTCPPort)
-								} else if p.LocalAddr != "" {
-									localHost := strings.Split(p.LocalAddr, ":")[0]
-									tcpTarget = fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
-								}
-							}
+							tcpTarget := getPeerTCPTarget(p, defaultTCPPort)
 							if tcpTarget != "" {
 								lPort := tcpDirectMgr.Port()
 								if lPort <= 0 && puncher != nil {
@@ -910,6 +1025,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								go func(devID, target string, localP int) {
 									_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
 								}(p.DeviceID, tcpTarget, lPort)
+							}
+						}
+						// 1e. Mesh Userspace TCP Relay Fallback:
+						// If neither direct TCP nor confirmed direct UDP succeeded, forward through an active relay peer
+						if !sentTCP && !sentDirect && !isForceUDP && tcpDirectMgr != nil {
+							if relayPeer := findMeshRelayPeer(registry, tcpDirectMgr, p.DeviceID); relayPeer != nil {
+								if err := tcpDirectMgr.SendPacket(relayPeer.DeviceID, pkt); err == nil {
+									sentDirect = true
+									log.Debug().Str("dst", dstIP).Str("via", relayPeer.DeviceID).Msg("🔀 Routed packet via Mesh TCP Relay peer")
+								}
 							}
 						}
 						// Data transmission over MQTT/Telegram relay disabled: signaling channels are strictly for connection establishment. Data only travels via Direct AWG (UDP) or Direct ShadowTLS (TCP).
@@ -1087,49 +1212,39 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 							}
 
-							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS when UDP is not confirmed (ProbeCount >= 2 or TCPAddr present)
-							// Evaluated on every tick, NOT blocked by UDP probe backoff!
-							if !isForceUDP && (isForceTCP || !p.DirectP2P || p.ProbeCount >= 2) && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
-								defaultTCPPort := 8443
-								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
-									defaultTCPPort = activeProf.TCPPort
+						}
+
+						// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS for ALL peers:
+						// Evaluated on every tick, NOT blocked by UDP probe backoff or ghost DirectP2P status!
+						needsTCP := isForceTCP || (!isForceUDP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && (p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (!p.DirectP2P || p.PingMs == 0 || p.ProbeCount >= 1)))
+						if needsTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+							defaultTCPPort := 8443
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+								defaultTCPPort = activeProf.TCPPort
+							}
+							tcpTarget := getPeerTCPTarget(p, defaultTCPPort)
+							if tcpTarget != "" {
+								lPort := tcpDirectMgr.Port()
+								if lPort <= 0 && puncher != nil {
+									lPort = puncher.LocalPort()
 								}
-								tcpTarget := p.TCPAddr
-								if tcpTarget == "" {
-									host := p.PublicIP
-									if host == "" && p.STUNAddr != "" {
-										host = strings.Split(p.STUNAddr, ":")[0]
+								go func(devID, target string, localP int) {
+									if err := tcpDirectMgr.ConnectPeer(devID, target, localP); err == nil {
+										log.Info().Str("peer", devID).Str("target", target).Msg("⚡ P2P TCP connection established successfully")
 									}
-									if host != "" && host != "0.0.0.0" {
-										tcpTarget = fmt.Sprintf("%s:%d", host, defaultTCPPort)
-									} else if p.LocalAddr != "" {
-										localHost := strings.Split(p.LocalAddr, ":")[0]
-										tcpTarget = fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
-									}
-								}
-								if tcpTarget != "" {
+								}(p.DeviceID, tcpTarget, lPort)
+							}
+							if p.LocalAddr != "" {
+								localHost := strings.Split(p.LocalAddr, ":")[0]
+								localTarget := fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
+								if localTarget != tcpTarget {
 									lPort := tcpDirectMgr.Port()
 									if lPort <= 0 && puncher != nil {
 										lPort = puncher.LocalPort()
 									}
-									go func(devID, target string, localP int) {
-										if err := tcpDirectMgr.ConnectPeer(devID, target, localP); err == nil {
-											log.Info().Str("peer", devID).Str("target", target).Msg("⚡ P2P TCP connection established successfully")
-										}
-									}(p.DeviceID, tcpTarget, lPort)
-								}
-								if p.LocalAddr != "" {
-									localHost := strings.Split(p.LocalAddr, ":")[0]
-									localTarget := fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
-									if localTarget != tcpTarget {
-										lPort := tcpDirectMgr.Port()
-										if lPort <= 0 && puncher != nil {
-											lPort = puncher.LocalPort()
-										}
-										go func(devID, lTarget string, localP int) {
-											_ = tcpDirectMgr.ConnectPeer(devID, lTarget, localP)
-										}(p.DeviceID, localTarget, lPort)
-									}
+									go func(devID, lTarget string, localP int) {
+										_ = tcpDirectMgr.ConnectPeer(devID, lTarget, localP)
+									}(p.DeviceID, localTarget, lPort)
 								}
 							}
 						}
@@ -1154,10 +1269,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						if !p.Online || p.DeviceID == deviceID {
 							continue
 						}
-						// User rule: Only ping peers that have an established direct connection (DirectP2P or DirectTCP)!
-						// Do NOT ping relay peers through TUN to avoid MQTT spam and fake pings.
+						// Ping peers that have an established connection OR have a valid target endpoint/TCPAddr
 						isDirect := p.DirectP2P || p.DirectTCP || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID))
-						if !isDirect {
+						if !isDirect && p.ActiveEndpoint == "" && p.TCPAddr == "" && p.STUNAddr == "" {
 							if p.PingMs > 0 || p.Latency > 0 {
 								p.PingMs = 0
 								p.Latency = 0
@@ -1179,9 +1293,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									p.Latency = rtt
 								}
 								p.PingMs = p.Latency.Milliseconds()
+								p.DirectP2P = true
+								p.LastDirectSeen = time.Now()
 								registry.Upsert(p)
 							} else {
-								// ICMP failure: clear ping and latency
+								// ICMP failure: UDP is blackholed by TSPU or dropped
 								p.ProbeCount++
 								p.Latency = 0
 								p.PingMs = 0
@@ -1191,6 +1307,25 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									}
 								}
 								registry.Upsert(p)
+
+								// Immediate reactive TCP ShadowTLS dial on ICMP failure:
+								isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
+								if !isForceUDP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+									defaultTCPPort := 8443
+									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+										defaultTCPPort = activeProf.TCPPort
+									}
+									tcpTarget := getPeerTCPTarget(p, defaultTCPPort)
+									if tcpTarget != "" {
+										lPort := tcpDirectMgr.Port()
+										if lPort <= 0 && puncher != nil {
+											lPort = puncher.LocalPort()
+										}
+										go func(devID, target string, localP int) {
+											_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
+										}(p.DeviceID, tcpTarget, lPort)
+									}
+								}
 							}
 						}
 					}
@@ -2157,25 +2292,14 @@ func receiveLoop(
 				IsKeenetic:       p.IsKeenetic,
 			})
 
-			// Мгновенная попытка Direct TCP соединения при обнаружении узла (при force_tcp или не подтвержденном P2P)
-			if tcpDirectMgr != nil && (tcpDirectMgr.TransportMode() == "force_tcp" || !preservedDirect) && !tcpDirectMgr.HasConn(p.DeviceID) {
+			// Мгновенная попытка Direct TCP соединения при обнаружении узла
+			isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
+			if tcpDirectMgr != nil && !isForceUDP && !tcpDirectMgr.HasConn(p.DeviceID) {
 				defTCPPort := 8443
 				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
 					defTCPPort = activeProf.TCPPort
 				}
-				tcpTarget := p.TCPAddr
-				if tcpTarget == "" {
-					host := p.PublicIP
-					if host == "" && p.STUNAddr != "" {
-						host = strings.Split(p.STUNAddr, ":")[0]
-					}
-					if host != "" && host != "0.0.0.0" {
-						tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
-					} else if p.LocalAddr != "" {
-						localHost := strings.Split(p.LocalAddr, ":")[0]
-						tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
-					}
-				}
+				tcpTarget := getSignalTCPTarget(p, defTCPPort)
 				if tcpTarget != "" {
 					lPort := tcpDirectMgr.Port()
 					if lPort <= 0 && puncher != nil {
