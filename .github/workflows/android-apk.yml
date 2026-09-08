@@ -154,7 +154,7 @@ jobs:
             RELEASE_FLAGS="--latest"
           fi
 
-          gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --notes "NatBypass ${TAG} — P2P Mesh & AmneziaWG 2.0 Client." --draft=false $RELEASE_FLAGS || true
+          gh release view "${TAG}" || gh release create "${TAG}" --title "NatBypass ${TAG}" --generate-notes --draft=false $RELEASE_FLAGS || true
           
           for apk in release_apk/*.apk; do
             if [ -f "$apk" ]; then

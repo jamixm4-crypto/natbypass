@@ -1,9 +1,12 @@
 name: Cleanup Releases and Workflow Runs
 
 on:
+  push:
+    paths:
+      - '.github/workflows/cleanup-releases.yml'
+  workflow_dispatch:
   schedule:
     - cron: '0 3 * * 0' # Weekly at 03:00 UTC on Sunday
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,11 +16,38 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete superseded releases
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update v1.9.225-beta2 Release Notes and Delete Superseded Releases
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const targetBetaTag = 'v1.9.225-beta2';
+            const targetStableTag = 'v1.9.223';
+
+            const betaChangelog = `## NatBypass v1.9.225-beta2
+
+### 🛡️ Исправления надежности автообновления и перезапуска служб (OTA)
+- **Linux (systemctl / systemd)**: Устранено аварийное прерывание службы при OTA-обновлении. Переход на асинхронный вызов \`systemctl --no-block restart natbypass\` напрямую через PID 1. Это гарантирует, что systemd не уничтожит процесс рестарта при выходе родительского демона из control-group.
+- **Keenetic (MarNet / Entware) и OpenWrt (BusyBox ash)**: В фоновый скрипт перезапуска \`/opt/etc/init.d/S99natbypass restart\` добавлены ловушки сигналов \`trap '' HUP INT TERM\`, предотвращающие сброс службы при выходе родительского процесса.
+
+### 🌐 P2P Mesh & NAT Traversal
+- **Мгновенный сброс таймаутов пробива**: При изменении внешнего STUN-адреса узла или восстановлении связи счетчик проб \`ProbeCount\` сбрасывается в \`0\`, а таймер \`probeBackoff\` очищается. Прямое P2P-соединение восстанавливается сразу, без ожидания 5-минутного таймаута.
+- **Отказоустойчивость**: Улучшена координация между прямыми P2P UDP-каналами и сигнальным транспортом. AmneziaWG и зашифрованный Relay задействуются как автоматический резервный канал при блокировке чистого P2P/UDP.
+
+### 🔐 Криптография и безопасность
+- **Стандартизация KDF-цепочки**: Реализована симметричная KDF-цепочка на базе RFC 5869 HKDF-SHA256 с гарантией Perfect Forward Secrecy (PFS) для защиты сессионных ключей.
+- **Mesh mTLS**: Срок действия mTLS-сертификатов узлов mesh-сети сокращен с 10 лет до 1 года (365 дней).
+- **WSS Anti-Replay**: Окно допустимого рассинхрона временных меток \`X-Auth-Timestamp\` сокращено с 10 минут до 45 секунд для защиты от атак повторного воспроизведения.
+- **CSPRNG-аудит**: Устранены unchecked-вызовы чтения энтропии в ShadowTLS и WireGuard, добавлены строгие проверки \`io.ReadFull(rand.Reader)\` с безопасным фолбэком.
+
+### 📦 Защита от блокировок и обфускация (резервный транспорт)
+- Тонкая настройка параметров обфускации резервного транспорта AmneziaWG 3.1 под противодействие ТСПУ (\`Jc = 5\`, рандомизация мусорных пакетов 40–120 байт).`;
+
             const { data: releases } = await github.rest.repos.listReleases({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -25,88 +55,136 @@ jobs:
             });
 
             console.log(`Found ${releases.length} releases`);
-            const keepIds = new Set();
-            const keepTags = new Set();
 
-            if (releases.length > 0) {
-              const stables = releases.filter(r => !r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-              const prereleases = releases.filter(r => r.prerelease).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-              // Keep latest 3 stable releases
-              for (const stable of stables.slice(0, 3)) {
-                keepIds.add(stable.id);
-                keepTags.add(stable.tag_name);
-                console.log(`Keeping STABLE release: ${stable.tag_name} (ID: ${stable.id})`);
-              }
-
-              // Keep latest 5 prereleases
-              for (const pre of prereleases.slice(0, 5)) {
-                keepIds.add(pre.id);
-                keepTags.add(pre.tag_name);
-                console.log(`Keeping PRERELEASE: ${pre.tag_name} (ID: ${pre.id})`);
-              }
-
-              const now = Date.now();
-              const minAgeMs = 48 * 3600 * 1000; // Do not touch anything created in the last 48 hours
-
-              for (const release of releases) {
-                if (keepIds.has(release.id)) continue;
-
-                const createdAt = new Date(release.created_at).getTime();
-                if (now - createdAt < minAgeMs) {
-                  console.log(`Skipping recently created release: ${release.tag_name} (created ${release.created_at})`);
-                  continue;
-                }
-
-                console.log(`Deleting superseded release: ${release.name || release.tag_name} (${release.tag_name}) ID: ${release.id}`);
+            for (const r of releases) {
+              if (r.tag_name === targetBetaTag) {
+                console.log(`Updating release notes and title for ${r.tag_name}...`);
                 try {
-                  await github.rest.repos.deleteRelease({
+                  await github.rest.repos.updateRelease({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    release_id: release.id,
+                    release_id: r.id,
+                    name: `NatBypass ${targetBetaTag}`,
+                    body: betaChangelog,
+                    prerelease: true,
                   });
-                  console.log(`✓ Deleted release ${release.tag_name}`);
+                  console.log(`✓ Updated release notes for ${r.tag_name}`);
                 } catch (e) {
-                  console.error(`Failed to delete release ${release.tag_name}: ${e.message}`);
+                  console.error(`Failed to update release ${r.tag_name}: ${e.message}`);
                 }
+                continue;
+              }
+
+              if (r.tag_name === targetStableTag) {
+                console.log(`Keeping STABLE release: ${r.tag_name} (ID: ${r.id})`);
+                continue;
+              }
+
+              console.log(`Deleting superseded release: ${r.tag_name} (ID: ${r.id})`);
+              try {
+                await github.rest.repos.deleteRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: r.id,
+                });
+                console.log(`✓ Deleted release ${r.tag_name}`);
+              } catch (e) {
+                console.error(`Failed to delete release ${r.tag_name}: ${e.message}`);
               }
             }
 
-      - name: Delete old completed workflow runs
+      - name: Delete Old Git Tags on GitHub
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            console.log('Cleaning up old completed workflow runs...');
-            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+            const keepTags = new Set(['v1.9.225-beta2', 'v1.9.223']);
+            const { data: tags } = await github.rest.repos.listTags({
               owner: context.repo.owner,
               repo: context.repo.repo,
               per_page: 100,
             });
 
-            console.log(`Total workflow runs found: ${runs.total_count}`);
-            const now = Date.now();
-            const minAgeMs = 24 * 3600 * 1000; // Only clean runs older than 24 hours
-
-            for (const run of runs.workflow_runs) {
-              if (run.id === context.runId || run.status === 'in_progress' || run.status === 'queued') {
+            console.log(`Found ${tags.length} tags on remote`);
+            for (const t of tags) {
+              if (keepTags.has(t.name)) {
+                console.log(`Keeping tag: ${t.name}`);
                 continue;
               }
-              const runAge = now - new Date(run.created_at).getTime();
-              if (runAge < minAgeMs) {
-                continue;
-              }
-              console.log(`Deleting old run: ${run.name} (ID: ${run.id}, Status: ${run.status})`);
+              console.log(`Deleting old tag: ${t.name}`);
               try {
-                await github.rest.actions.deleteWorkflowRun({
+                await github.rest.git.deleteRef({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  run_id: run.id,
+                  ref: `tags/${t.name}`,
                 });
-                console.log(`✓ Deleted run ${run.id}`);
+                console.log(`✓ Deleted tag ${t.name}`);
               } catch (e) {
-                console.warn(`Could not delete run ${run.id}: ${e.message}`);
+                console.error(`Failed to delete tag ${t.name}: ${e.message}`);
               }
             }
+
+      - name: Purge Old Workflow Runs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            console.log('Purging old completed workflow runs...');
+            let deletedCount = 0;
+            for (let page = 1; page <= 5; page++) {
+              let runs;
+              try {
+                const res = await github.rest.actions.listWorkflowRunsForRepo({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  per_page: 100,
+                  page: page,
+                });
+                runs = res.data.workflow_runs;
+              } catch (err) {
+                console.error(`Error listing runs on page ${page}: ${err.message}`);
+                break;
+              }
+
+              if (!runs || runs.length === 0) break;
+
+              for (const run of runs) {
+                if (run.id === context.runId) continue;
+                if (run.status === 'in_progress' || run.status === 'queued') continue;
+                if (run.head_branch === 'v1.9.225-beta2' && run.conclusion === 'success' && run.name === 'Build, Sign and Release') {
+                  console.log(`Keeping release build: ${run.name} (${run.id})`);
+                  continue;
+                }
+
+                try {
+                  await github.rest.actions.deleteWorkflowRun({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    run_id: run.id,
+                  });
+                  deletedCount++;
+                } catch (e) {
+                  // ignore
+                }
+              }
+            }
+            console.log(`Successfully deleted ${deletedCount} old workflow runs.`);
+
+      - name: Setup Python for Manifest Regeneration
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Regenerate Mirror Manifests and Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          python scripts/gen_mirror_manifest.py --tag "v1.9.225-beta2" --out-dir mirror/releases
+          git add mirror/releases/
+          git commit -m "Update mirror manifests with detailed changelog [skip ci]" || echo "No manifest changes to commit"
+          git push origin main || echo "Push failed or nothing to push"
+
 
 

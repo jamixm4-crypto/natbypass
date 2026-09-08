@@ -99,9 +99,9 @@ jobs:
           gh release view $TAG 2>&1 | Out-Null
           if ($LASTEXITCODE -ne 0) {
             if ($isPre) {
-              gh release create $TAG --title "NatBypass $TAG" --notes "NatBypass $TAG — P2P Mesh & AmneziaWG 2.0 Client." --prerelease --draft
+              gh release create $TAG --title "NatBypass $TAG" --generate-notes --prerelease --draft
             } else {
-              gh release create $TAG --title "NatBypass $TAG" --notes "NatBypass $TAG — P2P Mesh & AmneziaWG 2.0 Client." --latest --draft
+              gh release create $TAG --title "NatBypass $TAG" --generate-notes --latest --draft
             }
           }
 
