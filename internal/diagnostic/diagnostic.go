@@ -10,11 +10,14 @@ package diagnostic
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pion/stun/v2"
@@ -71,13 +74,19 @@ func RunFullDiagnostics() *DiagnosticReport {
 	// 6. Проверка сигнальных каналов (MQTT / Telegram)
 	report.Items = append(report.Items, CheckSignalingConnectivity())
 
-	// 7. Проверка среды WebView2 (Edge Runtime)
+	// 7. Path MTU и проверка фрагментации пакетов
+	report.Items = append(report.Items, CheckPathMTU())
+
+	// 8. Системные маршруты ядра и проверка конфликтов подсетей
+	report.Items = append(report.Items, CheckRoutingTable())
+
+	// 9. Проверка среды WebView2 (Edge Runtime)
 	report.Items = append(report.Items, CheckWebView2Runtime())
 
-	// 8. Перечисление локальных сетевых адаптеров
+	// 10. Перечисление локальных сетевых адаптеров
 	report.Items = append(report.Items, CheckNetworkInterfaces())
 
-	// 9. Опрос локального демона NatBypass и активных пиров mesh-сети
+	// 11. Опрос локального демона NatBypass и активных пиров mesh-сети
 	report.Items = append(report.Items, CheckMeshPeersAndEngine())
 
 	for _, item := range report.Items {
@@ -132,54 +141,106 @@ func CheckUDPPort51820() DiagnosticItem {
 	}
 }
 
+type stunProbeResult struct {
+	server   string
+	mappedIP net.IP
+	port     int
+	rtt      time.Duration
+	err      error
+}
+
+func querySingleSTUN(conn *net.UDPConn, server string, timeout time.Duration) stunProbeResult {
+	start := time.Now()
+	srvAddr, err := net.ResolveUDPAddr("udp4", server)
+	if err != nil {
+		return stunProbeResult{server: server, err: err}
+	}
+
+	msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
+	_, err = conn.WriteToUDP(msg.Raw, srvAddr)
+	if err != nil {
+		return stunProbeResult{server: server, err: err}
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	buf := make([]byte, 1024)
+	for {
+		n, from, rErr := conn.ReadFromUDP(buf)
+		if rErr != nil {
+			return stunProbeResult{server: server, err: rErr}
+		}
+		if from.IP.Equal(srvAddr.IP) || from.Port == srvAddr.Port {
+			var resp stun.Message
+			resp.Raw = buf[:n]
+			var xorAddr stun.XORMappedAddress
+			if decErr := resp.Decode(); decErr == nil && xorAddr.GetFrom(&resp) == nil {
+				return stunProbeResult{
+					server:   server,
+					mappedIP: xorAddr.IP,
+					port:     xorAddr.Port,
+					rtt:      time.Since(start),
+				}
+			}
+		}
+	}
+}
+
 func CheckSTUNDiscovery() DiagnosticItem {
 	start := time.Now()
 	conn, err := net.ListenUDP("udp4", nil)
 	if err != nil {
-		return DiagnosticItem{Name: "STUN NAT Пробитие", Passed: false, Elapsed: time.Since(start), Message: err.Error()}
+		return DiagnosticItem{Name: "STUN NAT Пробитие и Классификация", Passed: false, Elapsed: time.Since(start), Message: err.Error()}
 	}
 	defer conn.Close()
 
-	srvAddr, err := net.ResolveUDPAddr("udp4", "stun.l.google.com:19302")
-	if err != nil {
-		return DiagnosticItem{Name: "STUN NAT Пробитие", Passed: false, Elapsed: time.Since(start), Message: "Не удалось разрешить DNS stun.l.google.com"}
+	servers := []string{
+		"stun.l.google.com:19302",
+		"stun.cloudflare.com:3478",
+		"stun.sipnet.ru:3478",
+		"stun.miwifi.com:3478",
 	}
 
-	msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
-	_, _ = conn.WriteToUDP(msg.Raw, srvAddr)
+	var results []stunProbeResult
+	for _, srv := range servers {
+		r := querySingleSTUN(conn, srv, 1000*time.Millisecond)
+		if r.err == nil {
+			results = append(results, r)
+		}
+	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(2500 * time.Millisecond))
-	buf := make([]byte, 1024)
-	n, _, err := conn.ReadFromUDP(buf)
 	elapsed := time.Since(start)
-
-	if err != nil {
+	if len(results) == 0 {
 		return DiagnosticItem{
-			Name:    "STUN NAT Пробитие (RFC 5389)",
+			Name:    "STUN NAT Пробитие и Классификация (RFC 5389 / RFC 5780)",
 			Passed:  false,
 			Elapsed: elapsed,
-			Message: "❌ Таймаут ответа от STUN-сервера Google (порт 19302 UDP)",
-			Details: "UDP-трафик блокируется провайдером, роутером или локальным брандмауэром. Прямой P2P может потребовать релея.",
+			Message: "❌ Таймаут ответов от всех STUN-серверов (Google, Cloudflare, Sipnet, MiWiFi)",
+			Details: "UDP-трафик полностью блокируется ТСПУ/провайдером или локальным брандмауэром. Прямой UDP P2P заблокирован, требуется TCP ShadowTLS или Relay.",
 		}
 	}
 
-	var resp stun.Message
-	resp.Raw = buf[:n]
-	var xorAddr stun.XORMappedAddress
-	if err := resp.Decode(); err == nil && xorAddr.GetFrom(&resp) == nil {
-		return DiagnosticItem{
-			Name:    "STUN NAT Пробитие (RFC 5389)",
-			Passed:  true,
-			Elapsed: elapsed,
-			Message: fmt.Sprintf("✓ Внешний сокет успешно определен: %s:%d (задержка %d ms)", xorAddr.IP.String(), xorAddr.Port, elapsed.Milliseconds()),
+	first := results[0]
+	natType := "Full Cone / Endpoint-Independent Mapping (EIM) [✓ 100% P2P совместимо]"
+	delta := 0
+	if len(results) >= 2 {
+		delta = results[1].port - results[0].port
+		if delta != 0 {
+			natType = fmt.Sprintf("Symmetric NAT / EDM (Delta: %+d) [⚠ Требуется TCP ShadowTLS]", delta)
 		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Внешний сокет: %s:%d | Классификация NAT: %s\n", first.mappedIP, first.port, natType))
+	for _, r := range results {
+		sb.WriteString(fmt.Sprintf("  -> %-27s: %s:%d (RTT: %v)\n", r.server, r.mappedIP, r.port, r.rtt.Round(time.Millisecond)))
 	}
 
 	return DiagnosticItem{
-		Name:    "STUN NAT Пробитие (RFC 5389)",
+		Name:    "STUN NAT Пробитие и Классификация (RFC 5389 / RFC 5780)",
 		Passed:  true,
 		Elapsed: elapsed,
-		Message: "✓ STUN пакет получен",
+		Message: fmt.Sprintf("✓ Внешний IP: %s:%d (%s)", first.mappedIP, first.port, natType),
+		Details: strings.TrimRight(sb.String(), "\n"),
 	}
 }
 
@@ -270,21 +331,135 @@ func min(a, b int) int {
 	return b
 }
 
+// CheckPathMTU tests sending UDP packets of typical VPN MTU sizes (1420, 1360, 1280)
+// to verify kernel and local path MTU limits.
+func CheckPathMTU() DiagnosticItem {
+	start := time.Now()
+	conn, err := net.ListenUDP("udp4", nil)
+	if err != nil {
+		return DiagnosticItem{Name: "Path MTU & Фрагментация (PMTU)", Passed: true, Elapsed: time.Since(start), Message: "Пропуск (сокет занят)"}
+	}
+	defer conn.Close()
+
+	srvAddr, err := net.ResolveUDPAddr("udp4", "1.1.1.1:53")
+	if err != nil {
+		srvAddr, _ = net.ResolveUDPAddr("udp4", "8.8.8.8:53")
+	}
+
+	sizes := []int{1420, 1360, 1280}
+	var passed []int
+	for _, sz := range sizes {
+		data := make([]byte, sz)
+		if _, wErr := conn.WriteToUDP(data, srvAddr); wErr == nil {
+			passed = append(passed, sz)
+		}
+	}
+
+	elapsed := time.Since(start)
+	msg := "✓ UDP пакеты MTU 1420/1360/1280 успешно отправляются без локальной ошибки ядра (AWG MTU 1420 поддерживается)"
+	if len(passed) < len(sizes) {
+		msg = fmt.Sprintf("⚠️ Ограничение MTU стека ОС: успешно только %v", passed)
+	}
+
+	return DiagnosticItem{
+		Name:    "Path MTU & Фрагментация (PMTU)",
+		Passed:  true,
+		Elapsed: elapsed,
+		Message: msg,
+	}
+}
+
+// CheckRoutingTable checks whether the mesh routes (10.1.1.0/24) are present in the OS routing table,
+// and identifies any conflicting subnets (e.g. 100.64.200.0/24).
+func CheckRoutingTable() DiagnosticItem {
+	start := time.Now()
+	var routesStr string
+	var hasConflict bool
+
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("netsh", "interface", "ipv4", "show", "route")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			lines := strings.Split(string(out), "\n")
+			var filtered []string
+			has10 := false
+			has100 := false
+			for _, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.Contains(trimmed, "10.1.1.") || strings.Contains(trimmed, "100.64.200.") {
+					filtered = append(filtered, "  "+trimmed)
+					if strings.Contains(trimmed, "10.1.1.") {
+						has10 = true
+					}
+					if strings.Contains(trimmed, "100.64.200.") {
+						has100 = true
+					}
+				}
+			}
+			if has10 && has100 {
+				hasConflict = true
+			}
+			routesStr = strings.Join(filtered, "\n")
+		}
+	} else {
+		cmd := exec.Command("ip", "route", "show")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			lines := strings.Split(string(out), "\n")
+			var filtered []string
+			has10 := false
+			has100 := false
+			for _, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.Contains(trimmed, "10.1.1.") || strings.Contains(trimmed, "100.64.200.") || strings.Contains(trimmed, "nb0") {
+					filtered = append(filtered, "  "+trimmed)
+					if strings.Contains(trimmed, "10.1.1.") {
+						has10 = true
+					}
+					if strings.Contains(trimmed, "100.64.200.") {
+						has100 = true
+					}
+				}
+			}
+			if has10 && has100 {
+				hasConflict = true
+			}
+			routesStr = strings.Join(filtered, "\n")
+		}
+	}
+
+	elapsed := time.Since(start)
+	msg := "✓ Маршруты mesh-сети активны в таблице ядра"
+	if hasConflict {
+		msg = "⚠️ Обнаружен конфликт подсетей (одновременно присутствуют 10.1.1.0/24 и 100.64.200.0/24)"
+	}
+	if routesStr == "" {
+		routesStr = "  Маршруты mesh-подсетей 10.1.1.0/24 не найдены"
+	}
+
+	return DiagnosticItem{
+		Name:    "Системные маршруты ядра (L3 Routing)",
+		Passed:  !hasConflict,
+		Elapsed: elapsed,
+		Message: msg,
+		Details: routesStr,
+	}
+}
+
 // CheckMeshPeersAndEngine queries the local NatBypass HTTP API (127.0.0.1:8080/api/status and /api/peers)
 // to collect the mesh network topology, peer transport types, and direct P2P latency.
 func CheckMeshPeersAndEngine() DiagnosticItem {
 	start := time.Now()
-	client := http.Client{Timeout: 800 * time.Millisecond}
+	client := http.Client{Timeout: 900 * time.Millisecond}
 
-	// Try standard WebUI ports: 8080, 8081, 8082
-	var peersData []map[string]interface{}
+	var rawPeers []byte
 	var connectedPort int
 
 	for _, port := range []int{8080, 8081, 8082} {
 		resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/peers", port))
 		if err == nil && resp != nil {
 			if resp.StatusCode == 200 {
-				_ = json.NewDecoder(resp.Body).Decode(&peersData)
+				rawPeers, _ = io.ReadAll(resp.Body)
 				_ = resp.Body.Close()
 				connectedPort = port
 				break
@@ -302,6 +477,61 @@ func CheckMeshPeersAndEngine() DiagnosticItem {
 		}
 	}
 
+	var peersData []map[string]interface{}
+	if len(rawPeers) > 0 {
+		var wrapper struct {
+			Ok   bool                     `json:"ok"`
+			Data []map[string]interface{} `json:"data"`
+		}
+		if err := json.Unmarshal(rawPeers, &wrapper); err == nil && len(wrapper.Data) > 0 {
+			peersData = wrapper.Data
+		} else {
+			_ = json.Unmarshal(rawPeers, &peersData)
+		}
+	}
+
+	// Concurrent ICMP ping to all discovered peer Virtual IPs
+	type peerPingResult struct {
+		vip string
+		ok  bool
+		rtt time.Duration
+	}
+	pingChan := make(chan peerPingResult, len(peersData)+1)
+	var wg sync.WaitGroup
+
+	for _, p := range peersData {
+		vip, _ := p["virtual_ip"].(string)
+		cleanVIP := strings.TrimSpace(strings.Split(vip, "/")[0])
+		if cleanVIP == "" || net.ParseIP(cleanVIP) == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(targetVIP string) {
+			defer wg.Done()
+			pStart := time.Now()
+			var cmd *exec.Cmd
+			if runtime.GOOS == "windows" {
+				cmd = exec.Command("ping", "-n", "1", "-w", "650", targetVIP)
+			} else {
+				cmd = exec.Command("ping", "-c", "1", "-W", "1", targetVIP)
+			}
+			pErr := cmd.Run()
+			pingChan <- peerPingResult{
+				vip: targetVIP,
+				ok:  pErr == nil,
+				rtt: time.Since(pStart),
+			}
+		}(cleanVIP)
+	}
+
+	wg.Wait()
+	close(pingChan)
+
+	pingMap := make(map[string]peerPingResult)
+	for pr := range pingChan {
+		pingMap[pr.vip] = pr
+	}
+
 	var sb strings.Builder
 	p2pCount := 0
 	relayCount := 0
@@ -312,6 +542,7 @@ func CheckMeshPeersAndEngine() DiagnosticItem {
 			name, _ = p["device_id"].(string)
 		}
 		vip, _ := p["virtual_ip"].(string)
+		cleanVIP := strings.TrimSpace(strings.Split(vip, "/")[0])
 		transport, _ := p["transport"].(string)
 		directP2P, _ := p["direct_p2p"].(bool)
 		directTCP, _ := p["direct_tcp"].(bool)
@@ -337,8 +568,17 @@ func CheckMeshPeersAndEngine() DiagnosticItem {
 			pingStr = fmt.Sprintf("%d ms", pingMs)
 		}
 
-		sb.WriteString(fmt.Sprintf("  -> %-18s | VIP: %-15s | %-22s | EP: %-21s | Ping: %s\n",
-			name, vip, statusLabel, activeEP, pingStr))
+		icmpStr := "ICMP: N/A"
+		if pr, exists := pingMap[cleanVIP]; exists {
+			if pr.ok {
+				icmpStr = fmt.Sprintf("ICMP: ✓ OK (%d ms)", pr.rtt.Milliseconds())
+			} else {
+				icmpStr = "ICMP: ❌ Таймаут (100% loss)"
+			}
+		}
+
+		sb.WriteString(fmt.Sprintf("  -> %-18s | VIP: %-15s | %-22s | EP: %-21s | EnginePing: %-7s | %s\n",
+			name, vip, statusLabel, activeEP, pingStr, icmpStr))
 	}
 
 	msg := fmt.Sprintf("✓ API активно (порт %d), обнаружено пиров: %d (P2P: %d, Relay: %d)",

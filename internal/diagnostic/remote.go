@@ -60,11 +60,20 @@ func ExecuteLocalDiagScript(ctx context.Context) string {
 
 	// Immediate fallback to built-in Go diagnostic engine (100% offline, self-contained)
 	report := RunFullDiagnostics()
+	var prefix string
+	if err != nil {
+		prefix = fmt.Sprintf("Note: Local script error: %v\n", err)
+	}
+	return prefix + FormatGoDiagnosticsReport(report)
+}
+
+// FormatGoDiagnosticsReport formats a DiagnosticReport into human-readable text.
+func FormatGoDiagnosticsReport(report *DiagnosticReport) string {
+	if report == nil {
+		return ""
+	}
 	var sb strings.Builder
 	sb.WriteString("=== NatBypass Go Diagnostics Report ===\n")
-	if err != nil {
-		sb.WriteString(fmt.Sprintf("Note: Local script error: %v\n", err))
-	}
 	sb.WriteString(fmt.Sprintf("Timestamp: %s\n", report.Timestamp.Format(time.RFC3339)))
 	sb.WriteString(fmt.Sprintf("Host: %s | OS: %s | Arch: %s\n", report.Hostname, report.OS, report.Arch))
 	sb.WriteString(fmt.Sprintf("Admin/Root: %t | All Passed: %t\n\n", report.IsAdmin, report.AllPassed))

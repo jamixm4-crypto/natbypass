@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -48,19 +49,6 @@ const (
 	colorBold   = "\033[1m"
 )
 
-type DiscoveredNodeInfo struct {
-	DeviceID  string
-	Nickname  string
-	OS        string
-	Platform  string
-	Arch      string
-	Version   string
-	VirtualIP string
-	PublicIP  string
-	STUNAddr  string
-	LastSeen  time.Time
-}
-
 type NodeResponse struct {
 	DeviceID    string
 	OS          string
@@ -75,189 +63,158 @@ type NodeResponse struct {
 	LastUpdate  time.Time
 }
 
-func main() {
-	os.Args = reorderArgs(os.Args)
-	flag.Parse()
-	printBanner()
+type DiscoveredNodeInfo struct {
+	DeviceID  string
+	Nickname  string
+	OS        string
+	Platform  string
+	Arch      string
+	Version   string
+	VirtualIP string
+	PublicIP  string
+	STUNAddr  string
+	LastSeen  time.Time
+}
 
-	reader := bufio.NewReader(os.Stdin)
-	isInteractive := false
+type PeerLinkInfo struct {
+	FromNode  string
+	FromGeo   string
+	ToNode    string
+	ToVIP     string
+	Transport string
+	Endpoint  string
+	Ping      string
+	ICMP      string
+	DPIStatus string
+}
 
-	// 1. Resolve configuration defaults
-	cfg := loadOptionalConfig(*flagConfig)
-	topic := *flagTopic
-	broker := *flagBroker
-	networkKey := *flagKey
-
-	// If a link / topic was passed as first positional arg
-	if topic == "" && flag.NArg() > 0 {
-		topic = flag.Arg(0)
-	}
-
-	// Parse input if it's a natbypass:// link, MQTT URL, or JSON
-	if topic != "" {
-		b, t, k, err := parseNetworkInput(topic)
-		if err == nil && t != "" {
-			topic = t
-			if broker == "" {
-				broker = b
+func parseShareLink(raw string) (broker, topic, key string) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "natbypass://profile?") {
+		u, err := url.Parse(raw)
+		if err == nil {
+			q := u.Query()
+			broker = q.Get("broker")
+			topic = q.Get("topic")
+			key = q.Get("network_key")
+			if key == "" {
+				key = q.Get("key")
 			}
-			if networkKey == "" && k != "" {
-				networkKey = k
-			}
+			return
 		}
 	}
-
-	// If topic is still empty, check local config profile or prompt interactively
-	if topic == "" {
-		isInteractive = true
-		if cfg != nil {
-			if prof := cfg.EnsureActiveProfile(); prof != nil && prof.MQTTTopic != "" {
-				fmt.Printf(colorCyan+"[i] Найден локальный профиль NatBypass: '%s'\n"+colorReset, prof.Name)
-				keyPreview := "(открытый)"
-				if prof.NetworkKey != "" {
-					keyPreview = prof.NetworkKey[:min(4, len(prof.NetworkKey))] + "***"
-				}
-				fmt.Printf(colorCyan+"    Топик: %s | Ключ: %s\n"+colorReset, prof.MQTTTopic, keyPreview)
-				fmt.Print(colorYellow + "Использовать его? [Enter = Да, или вставьте ссылку natbypass://profile?...]: " + colorReset)
-				input, _ := reader.ReadString('\n')
-				input = strings.TrimSpace(input)
-				if input == "" || strings.EqualFold(input, "y") || strings.EqualFold(input, "yes") || strings.EqualFold(input, "д") {
-					topic = prof.MQTTTopic
-					if broker == "" {
-						broker = prof.MQTTBroker
-					}
-					if networkKey == "" {
-						networkKey = prof.NetworkKey
-					}
-				} else {
-					b, t, k, err := parseNetworkInput(input)
-					if err == nil && t != "" {
-						topic = t
-						if broker == "" {
-							broker = b
-						}
-						if networkKey == "" {
-							networkKey = k
-						}
-					}
-				}
+	if strings.HasPrefix(raw, "mqtt://") || strings.HasPrefix(raw, "tcp://") ||
+		strings.HasPrefix(raw, "ssl://") || strings.HasPrefix(raw, "tls://") ||
+		strings.HasPrefix(raw, "wss://") || strings.HasPrefix(raw, "ws://") {
+		u, err := url.Parse(raw)
+		if err == nil {
+			broker = fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+			pathTopic := strings.TrimPrefix(u.Path, "/")
+			if pathTopic != "" {
+				topic = pathTopic
 			}
-		}
-
-		// If still empty, ask user to paste network link
-		for topic == "" {
-			fmt.Println(colorYellow + "\nВставьте ссылку сети (natbypass://profile?...), топик или URL брокера:" + colorReset)
-			fmt.Print("> ")
-			input, _ := reader.ReadString('\n')
-			input = strings.TrimSpace(input)
-			if input == "" {
-				continue
+			q := u.Query()
+			if k := q.Get("key"); k != "" {
+				key = k
+			} else if k := q.Get("network_key"); k != "" {
+				key = k
 			}
-			b, t, k, err := parseNetworkInput(input)
-			if err == nil && t != "" {
-				topic = t
-				if broker == "" {
-					broker = b
-				}
-				if networkKey == "" {
-					networkKey = k
-				}
-				break
-			}
-			fmt.Printf(colorRed+"[✗] Ошибка распознавания ссылки: %v\n"+colorReset, err)
+			return
 		}
 	}
+	topic = raw
+	return
+}
 
-	// Default broker if not set
-	if broker == "" {
-		broker = "ssl://broker.emqx.io:8883"
+func printBanner() {
+	fmt.Print(colorCyan + colorBold + `
+╔═════════════════════════════════════════════════════════════════════════╗
+║          NATBYPASS CLUSTER REMOTE DIAGNOSTIC & CONTROL TOOL             ║
+║                  (v1.9.224-beta9 / Local Engineering)                   ║
+╚═════════════════════════════════════════════════════════════════════════╝
+` + colorReset)
+}
+
+func guessGeo(ip, name string) string {
+	lowerName := strings.ToLower(name)
+	if strings.Contains(lowerName, "marnet") || strings.Contains(lowerName, "mord") ||
+		strings.Contains(lowerName, "by") || strings.Contains(lowerName, "mac") ||
+		strings.Contains(lowerName, "9r8") {
+		return "BY (Беларусь)"
 	}
+	if strings.Contains(lowerName, "msk") || strings.Contains(lowerName, "krsda") ||
+		strings.Contains(lowerName, "ustug") || strings.Contains(lowerName, "nextcloud") ||
+		strings.Contains(lowerName, "nc") {
+		return "RU (Россия)"
+	}
+	if strings.HasPrefix(ip, "37.212.") || strings.HasPrefix(ip, "37.214.") ||
+		strings.HasPrefix(ip, "178.120.") || strings.HasPrefix(ip, "178.121.") {
+		return "BY (Беларусь)"
+	}
+	if strings.HasPrefix(ip, "91.214.") || strings.HasPrefix(ip, "77.37.") ||
+		strings.HasPrefix(ip, "212.22.") || strings.HasPrefix(ip, "109.252.") {
+		return "RU (Россия)"
+	}
+	if strings.HasPrefix(ip, "144.172.") || strings.HasPrefix(ip, "194.59.") {
+		return "EU (VPS)"
+	}
+	return "Global"
+}
 
-	// Interactive Mode Menu (if run interactively and -update wasn't explicitly flagged)
-	if isInteractive && !*flagUpdate {
-		fmt.Println(colorCyan + "\nВыберите действие:" + colorReset)
-		fmt.Println("  [1] 📋 Собрать диагностические логи со всех узлов в единый файл (по умолчанию)")
-		fmt.Println("  [2] 🚀 Принудительно обновить все beta-узлы сети (OTA Beta Update)")
-		fmt.Println("  [3] 🎯 Диагностика одного конкретного узла")
-		fmt.Print(colorYellow + "Ваш выбор [1]: " + colorReset)
-		choice, _ := reader.ReadString('\n')
-		choice = strings.TrimSpace(choice)
-		switch choice {
-		case "2":
-			*flagUpdate = true
-		case "3":
-			fmt.Print(colorYellow + "Введите DeviceID целевого узла: " + colorReset)
-			tID, _ := reader.ReadString('\n')
-			*flagTarget = strings.TrimSpace(tID)
-		default:
-			// [1] default
+func isBeta7OrNewer(ver string) bool {
+	vLower := strings.ToLower(ver)
+	if !strings.Contains(vLower, "beta") {
+		return false
+	}
+	for _, old := range []string{"beta1", "beta2", "beta3", "beta4", "beta5", "beta6"} {
+		if strings.Contains(vLower, old) {
+			return false
 		}
 	}
+	return true
+}
 
-	// 2. Generate unique collector session ID and device ID
+func waitForEnter(reader *bufio.Reader) {
+	fmt.Print(colorYellow + "\n[⏎] Нажмите Enter для возврата в главное меню... " + colorReset)
+	_, _ = reader.ReadString('\n')
+}
+
+func truncateStr(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
+}
+
+func runCollection(
+	ch signaling.SignalingChannel,
+	rx <-chan *signaling.Payload,
+	topic, broker, networkKey, collectorID string,
+	targetID string,
+	isUpdate bool,
+	timeout time.Duration,
+	includeLocal bool,
+) (map[string]*DiscoveredNodeInfo, map[string]*NodeResponse, string) {
+
 	randBytes := make([]byte, 4)
 	_, _ = rand.Read(randBytes)
 	sessionID := fmt.Sprintf("diag-sess-%x", randBytes)
-	collectorID := fmt.Sprintf("natbypass-diag-%x", randBytes)
 
-	fmt.Println()
-	fmt.Printf(colorCyan+"[ℹ] Брокер сигнализации: %s\n"+colorReset, broker)
-	fmt.Printf(colorCyan+"[ℹ] Топик комнаты:       %s\n"+colorReset, topic)
-	if networkKey != "" {
-		fmt.Printf(colorGreen+"[✓] Шифрование комнаты:  Включено (NetworkKey: %s***)\n"+colorReset, networkKey[:min(4, len(networkKey))])
-	} else {
-		fmt.Printf(colorYellow+"[!] Шифрование комнаты:  Отключено (открытый канал)\n"+colorReset)
-	}
-	if *flagTarget != "" {
-		fmt.Printf(colorCyan+"[ℹ] Целевой узел:        %s\n"+colorReset, *flagTarget)
-	} else {
-		fmt.Printf(colorCyan+"[ℹ] Целевой узел:        Все beta-узлы сети (Broadcast)\n"+colorReset)
-	}
-	if *flagUpdate {
-		fmt.Printf(colorYellow+colorBold+"[⚠] РЕЖИМ:               ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ КЛИЕНТОВ (OTA Beta Update)\n"+colorReset)
-	} else {
-		fmt.Printf(colorCyan+"[ℹ] РЕЖИМ:               Сбор диагностических логов (Diag Collect)\n"+colorReset)
-	}
-	fmt.Printf(colorCyan+"[ℹ] Таймаут ожидания:    %v\n\n"+colorReset, *flagTimeout)
-
-	// 3. Connect to signaling channel
-	ctx, cancel := context.WithTimeout(context.Background(), *flagTimeout+10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)
 	defer cancel()
 
-	ch := signaling.NewMQTTChannel(broker, topic, collectorID, "", "")
-	defer ch.Close()
-
-	rx, err := ch.Receive(ctx)
-	if err != nil {
-		fmt.Printf(colorRed+"[✗] Ошибка подключения к брокеру: %v\n"+colorReset, err)
-		if isInteractive {
-			fmt.Print(colorCyan + "\nНажмите Enter для завершения..." + colorReset)
-			_, _ = reader.ReadString('\n')
-		}
-		os.Exit(1)
-	}
-
-	// Wait for MQTT connection to establish
-	fmt.Print(colorCyan + "⏳ Подключение к брокеру..." + colorReset)
-	connStart := time.Now()
-	for time.Since(connStart) < 7*time.Second {
-		if ch.IsAvailable(ctx) {
-			break
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	fmt.Println(colorGreen + " Готово!" + colorReset)
-
-	// 4. Prepare request signal
 	action := "request_diag"
-	if *flagUpdate {
+	if isUpdate {
 		action = "request_update"
 	}
 
 	reqSig := &signaling.RemoteDiagSignal{
 		Action:    action,
-		TargetID:  *flagTarget,
+		TargetID:  targetID,
 		SenderID:  collectorID,
 		SessionID: sessionID,
 		Timestamp: time.Now().Unix(),
@@ -284,22 +241,18 @@ func main() {
 		if sendErr == nil {
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(400 * time.Millisecond)
 	}
 	if sendErr != nil {
-		fmt.Printf(colorYellow+"[!] Предупреждение: ошибка отправки запроса в топик: %v\n"+colorReset, sendErr)
+		fmt.Printf(colorYellow+"[!] Предупреждение: ошибка отправки команды в топик: %v\n"+colorReset, sendErr)
 	} else {
-		fmt.Println(colorGreen + "✓ Управляющий сигнал разослан в сеть. Ожидание ответов от узлов..." + colorReset)
+		if isUpdate {
+			fmt.Println(colorYellow + colorBold + "⚡ Команда принудительного OTA-обновления разослана. Ожидание статусов от узлов..." + colorReset)
+		} else {
+			fmt.Println(colorGreen + "✓ Запрос диагностики разослан в сеть. Ожидание ответов от узлов..." + colorReset)
+		}
 	}
 	fmt.Println(colorBold + "─────────────────────────────────────────────────────────────────────────" + colorReset)
-
-	// 5. Collect responses
-	nodes := make(map[string]*NodeResponse)
-	discoveredPeers := make(map[string]*DiscoveredNodeInfo)
-	var mu sync.Mutex
-
-	timeoutTimer := time.NewTimer(*flagTimeout)
-	defer timeoutTimer.Stop()
 
 	// Burst repeat after 2s
 	go func() {
@@ -307,11 +260,18 @@ func main() {
 		_ = ch.Send(ctx, toSend)
 	}()
 
+	nodes := make(map[string]*NodeResponse)
+	discoveredPeers := make(map[string]*DiscoveredNodeInfo)
+	var mu sync.Mutex
+
+	timeoutTimer := time.NewTimer(timeout)
+	defer timeoutTimer.Stop()
+
 collectLoop:
 	for {
 		select {
 		case <-timeoutTimer.C:
-			fmt.Println(colorYellow + "\n[⏰] Время ожидания ответов истекло." + colorReset)
+			fmt.Println(colorYellow + "\n[⏰] Время ожидания ответов завершено." + colorReset)
 			break collectLoop
 
 		case p, ok := <-rx:
@@ -319,7 +279,6 @@ collectLoop:
 				break collectLoop
 			}
 
-			// Decrypt if needed
 			if len(p.Encrypted) > 0 && networkKey != "" {
 				if dec, decErr := signaling.DecryptPayloadWithKey(p, networkKey); decErr == nil && dec != nil {
 					p = dec
@@ -331,7 +290,6 @@ collectLoop:
 			}
 
 			mu.Lock()
-			// Track discovered node
 			if _, seen := discoveredPeers[p.DeviceID]; !seen {
 				ver := p.Version
 				if ver == "" {
@@ -354,12 +312,11 @@ collectLoop:
 					if nick == "" {
 						nick = "-"
 					}
-					fmt.Printf(colorCyan+"  [i] Обнаружен узел: %-22s (%s) [ОС: %s, VIP: %s, Версия: %s]\n"+colorReset,
+					fmt.Printf(colorCyan+"  [i] Обнаружен узел в сети: %-22s (%s) [ОС: %s, VIP: %s, Версия: %s]\n"+colorReset,
 						p.DeviceID, nick, p.OS, p.VirtualIP, ver)
 				}
 			}
 
-			// Check for RemoteDiag response
 			if p.RemoteDiag != nil && p.RemoteDiag.SessionID == sessionID {
 				r := p.RemoteDiag
 				node, exists := nodes[r.SenderID]
@@ -392,7 +349,6 @@ collectLoop:
 						node.FullReport = r.Payload
 					}
 				} else {
-					// response_diag
 					if r.TotalChunks > 1 {
 						fmt.Printf(colorCyan+"  [📦] Узел %s: чанк %d/%d (%d байт)\n"+colorReset,
 							r.SenderID, r.ChunkIndex+1, r.TotalChunks, len(r.Payload))
@@ -404,8 +360,28 @@ collectLoop:
 							sb.WriteString(node.Chunks[i])
 						}
 						node.FullReport = sb.String()
-						fmt.Printf(colorGreen+colorBold+"  [✓] Узел %s (%s/%s v%s): Диагностический отчет ПОЛНОСТЬЮ получен (%d байт)\n"+colorReset,
+						fmt.Printf(colorGreen+colorBold+"  [✓] Узел %-20s (%s/%s v%s): Диагностический отчет ПОЛНОСТЬЮ получен (%d байт)\n"+colorReset,
 							r.SenderID, r.OS, r.Arch, r.Version, len(node.FullReport))
+					}
+				}
+
+				// Fast exit if all discovered nodes have responded
+				if targetID != "" && node.Completed {
+					mu.Unlock()
+					break collectLoop
+				}
+				if targetID == "" && len(discoveredPeers) > 0 && len(nodes) == len(discoveredPeers) {
+					allDone := true
+					for _, n := range nodes {
+						if !n.Completed {
+							allDone = false
+							break
+						}
+					}
+					if allDone {
+						mu.Unlock()
+						fmt.Println(colorGreen + colorBold + "\n[⚡] Все обнаруженные узлы кластера успешно передали отчеты!" + colorReset)
+						break collectLoop
 					}
 				}
 			}
@@ -413,109 +389,23 @@ collectLoop:
 		}
 	}
 
-	// 6. If local flag was set, gather local diagnostic report
 	var localReport string
-	if *flagLocal {
-		fmt.Println(colorCyan + "\n[🖥️] Выполнение локальной диагностики хоста..." + colorReset)
-		localReport = diagnostic.ExecuteLocalDiagScript(ctx)
-		fmt.Println(colorGreen + "✓ Локальная диагностика хоста завершена!" + colorReset)
+	if includeLocal {
+		fmt.Println(colorCyan + "\n[ℹ] Запуск локальной диагностики управляющей машины..." + colorReset)
+		rep := diagnostic.RunFullDiagnostics()
+		localReport = diagnostic.FormatGoDiagnosticsReport(rep)
 	}
 
-	// 7. Format unified cluster report
-	timestampStr := time.Now().Format("20060102_150405")
-	cleanTopic := strings.ReplaceAll(strings.ReplaceAll(topic, "/", "_"), "\\", "_")
-	outFileName := *flagOutput
-	if outFileName == "" {
-		outFileName = fmt.Sprintf("cluster_diag_%s_%s.txt", cleanTopic, timestampStr)
-	}
+	return discoveredPeers, nodes, localReport
+}
 
-	var fileSb strings.Builder
-	fileSb.WriteString("================================================================================\n")
-	fileSb.WriteString("                  NATBYPASS CLUSTER DIAGNOSTIC REPORT                           \n")
-	fileSb.WriteString("================================================================================\n")
-	fileSb.WriteString(fmt.Sprintf("Timestamp:      %s\n", time.Now().UTC().Format(time.RFC3339)))
-	fileSb.WriteString(fmt.Sprintf("MQTT Broker:    %s\n", broker))
-	fileSb.WriteString(fmt.Sprintf("Topic:          %s\n", topic))
-	fileSb.WriteString(fmt.Sprintf("Encrypted:      %t\n", networkKey != ""))
-	fileSb.WriteString(fmt.Sprintf("Discovered:     %d nodes\n", len(discoveredPeers)))
-	fileSb.WriteString(fmt.Sprintf("Responded Beta: %d nodes\n", len(nodes)))
-	fileSb.WriteString("================================================================================\n\n")
-
-	// Summary of all discovered nodes
+func printSummaryTable(discoveredPeers map[string]*DiscoveredNodeInfo, nodes map[string]*NodeResponse) {
 	var allPeerIDs []string
 	for id := range discoveredPeers {
 		allPeerIDs = append(allPeerIDs, id)
 	}
 	sort.Strings(allPeerIDs)
 
-	fileSb.WriteString("================================================================================\n")
-	fileSb.WriteString(fmt.Sprintf(" СПИСОК ОБНАРУЖЕННЫХ УЗЛОВ В СЕТИ (ОНЛАЙН В ТОПИКЕ: %d)\n", len(discoveredPeers)))
-	fileSb.WriteString("================================================================================\n\n")
-	for _, id := range allPeerIDs {
-		dp := discoveredPeers[id]
-		hasDiag := false
-		if n, ok := nodes[id]; ok && n.Completed {
-			hasDiag = true
-		}
-		statusText := fmt.Sprintf("Требуется обновить бинарник до актуальной beta (на узле: %s, RemoteDiag с v1.9.224-beta7+)", dp.Version)
-		if hasDiag {
-			statusText = "OK (Диагностический отчет получен)"
-		} else if isBeta7OrNewer(dp.Version) {
-			statusText = "Таймаут сбора отчета (узел на актуальной beta, но не успел передать отчет за отведенное время)"
-		}
-		fileSb.WriteString(fmt.Sprintf("Узел:        %s (%s)\n", dp.DeviceID, dp.Nickname))
-		fileSb.WriteString(fmt.Sprintf("ОС/Арх:      %s/%s | Версия: %s\n", dp.OS, dp.Arch, dp.Version))
-		fileSb.WriteString(fmt.Sprintf("Virtual IP:  %s | Публичный IP: %s\n", dp.VirtualIP, dp.PublicIP))
-		fileSb.WriteString(fmt.Sprintf("Статус:      %s\n", statusText))
-		fileSb.WriteString("--------------------------------------------------------------------------------\n")
-	}
-	fileSb.WriteString("\n\n")
-
-	if *flagLocal && localReport != "" {
-		fileSb.WriteString("################################################################################\n")
-		fileSb.WriteString(" LOCAL CONTROLLER HOST DIAGNOSTICS\n")
-		fileSb.WriteString("################################################################################\n\n")
-		fileSb.WriteString(localReport)
-		fileSb.WriteString("\n\n")
-	}
-
-	// Full diagnostic logs from responding beta nodes
-	var nodeIDs []string
-	for id := range nodes {
-		nodeIDs = append(nodeIDs, id)
-	}
-	sort.Strings(nodeIDs)
-
-	for _, id := range nodeIDs {
-		n := nodes[id]
-		fileSb.WriteString("################################################################################\n")
-		fileSb.WriteString(fmt.Sprintf(" ПОЛНЫЙ ДИАГНОСТИЧЕСКИЙ ОТЧЕТ УЗЛА: %s\n", n.DeviceID))
-		fileSb.WriteString(fmt.Sprintf(" Platform: %s/%s | Version: %s | Status: %s\n", n.OS, n.Arch, n.Version, n.Status))
-		fileSb.WriteString(fmt.Sprintf(" Completed: %t | Total Chunks: %d\n", n.Completed, n.TotalChunks))
-		fileSb.WriteString("################################################################################\n\n")
-		if n.FullReport != "" {
-			fileSb.WriteString(n.FullReport)
-		} else {
-			fileSb.WriteString("(Внимание: отчет получен не полностью или поврежден)\n")
-			for i := 0; i < n.TotalChunks; i++ {
-				if chunk, ok := n.Chunks[i]; ok {
-					fileSb.WriteString(chunk)
-				} else {
-					fileSb.WriteString(fmt.Sprintf("\n[ПРОПУЩЕН ЧАНК %d]\n", i))
-				}
-			}
-		}
-		fileSb.WriteString("\n\n")
-	}
-
-	if err := os.WriteFile(outFileName, []byte(fileSb.String()), 0644); err != nil {
-		fmt.Printf(colorRed+"[✗] Ошибка сохранения файла отчета: %v\n"+colorReset, err)
-	} else {
-		absPath, _ := filepath.Abs(outFileName)
-		fmt.Printf(colorGreen+colorBold+"\n💾 Объединенный диагностический отчет успешно сохранен:\n   %s\n"+colorReset, absPath)
-	}
-
-	// 8. Print Summary Table
 	fmt.Println("\n" + colorBold + "═══════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
 	fmt.Println(colorBold + " 📊 СВОДНАЯ ТАБЛИЦА УЗЛОВ КЛАСТЕРА" + colorReset)
 	fmt.Println(colorBold + "═══════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
@@ -550,47 +440,434 @@ collectLoop:
 		fmt.Println(" (Узлов в сети не обнаружено. Проверьте активность маяков и топик)")
 	}
 	fmt.Println(colorBold + "═══════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
-
-	if isInteractive {
-		fmt.Print(colorCyan + "\nНажмите Enter для завершения..." + colorReset)
-		_, _ = reader.ReadString('\n')
-	}
 }
 
-// parseNetworkInput extracts broker, topic, and networkKey from any format:
-// - natbypass://profile?... (the standard share link)
-// - mqtt://..., ssl://..., tcp://... URL
-// - plain topic name (e.g. natbypass/mesh/...)
-func parseNetworkInput(raw string) (broker, topic, key string, err error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", "", "", fmt.Errorf("empty input")
-	}
+func printDpiMeshMatrix(discoveredPeers map[string]*DiscoveredNodeInfo, nodes map[string]*NodeResponse) {
+	fmt.Println("\n" + colorBold + "══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
+	fmt.Println(colorBold + " 🌐 МЕЖГЕОГРАФИЧЕСКАЯ P2P / DPI МАТРИЦА СВЯЗНОСТИ КЛАСТЕРА (CROSS-BORDER MESH MATRIX)" + colorReset)
+	fmt.Println(colorBold + "══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
 
-	// 1. Try standard natbypass://profile or JSON via config.ImportProfileURI
-	if prof, pErr := config.ImportProfileURI(raw); pErr == nil && prof != nil {
-		b := prof.MQTTBroker
-		if b == "" {
-			b = "ssl://broker.emqx.io:8883"
+	// Support both beta9 (EnginePing + ICMP) and beta8 (Ping only) peer line formats
+	regexBeta9 := regexp.MustCompile(`->\s*([^|]+)\|\s*VIP:\s*([^|]+)\|\s*([^|]+)\|\s*EP:\s*([^|]+)\|\s*EnginePing:\s*([^|]+)\|\s*(.+)`)
+	regexBeta8 := regexp.MustCompile(`->\s*([^|]+)\|\s*VIP:\s*([^|]+)\|\s*([^|]+)\|\s*EP:\s*([^|]+)\|\s*Ping:\s*(.+)`)
+
+	var allLinks []PeerLinkInfo
+	totalUDP := 0
+	totalTCP := 0
+	totalRelay := 0
+	totalICMPOk := 0
+	totalICMPFail := 0
+
+	for id, node := range nodes {
+		dp := discoveredPeers[id]
+		fromName := id
+		fromGeo := "Global"
+		if dp != nil {
+			if dp.Nickname != "" {
+				fromName = dp.Nickname
+			}
+			fromGeo = guessGeo(dp.PublicIP, dp.Nickname+" "+dp.DeviceID)
 		}
-		return b, prof.MQTTTopic, prof.NetworkKey, nil
-	}
 
-	// 2. Try URL with mqtt://, ssl://, tcp://, wss://
-	if strings.Contains(raw, "://") {
-		if parsedURL, pErr := url.Parse(raw); pErr == nil {
-			q := parsedURL.Query()
-			b := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
-			t := strings.TrimPrefix(parsedURL.Path, "/")
-			k := q.Get("key")
-			if t != "" {
-				return b, t, k, nil
+		lines := strings.Split(node.FullReport, "\n")
+		for _, line := range lines {
+			trimmedLine := strings.TrimSpace(line)
+			var toNode, toVIP, transport, endpoint, ping, icmp string
+
+			if m := regexBeta9.FindStringSubmatch(trimmedLine); len(m) >= 7 {
+				toNode = strings.TrimSpace(m[1])
+				toVIP = strings.TrimSpace(m[2])
+				transport = strings.TrimSpace(m[3])
+				endpoint = strings.TrimSpace(m[4])
+				ping = strings.TrimSpace(m[5])
+				icmp = strings.TrimSpace(m[6])
+			} else if m := regexBeta8.FindStringSubmatch(trimmedLine); len(m) >= 6 {
+				toNode = strings.TrimSpace(m[1])
+				toVIP = strings.TrimSpace(m[2])
+				transport = strings.TrimSpace(m[3])
+				endpoint = strings.TrimSpace(m[4])
+				ping = strings.TrimSpace(m[5])
+				icmp = "N/A (beta8)"
+			}
+
+			if toNode != "" {
+
+				dpiStatus := "✓ Пропуск (P2P OK)"
+				if strings.Contains(transport, "ShadowTLS") || strings.Contains(transport, "TCP") {
+					dpiStatus = "🛡️ Обход ТСПУ через TCP"
+					totalTCP++
+				} else if strings.Contains(transport, "AWG") || strings.Contains(transport, "UDP") {
+					totalUDP++
+				} else {
+					dpiStatus = "❌ Заблокирован ТСПУ / Relay"
+					totalRelay++
+				}
+
+				if strings.Contains(icmp, "✓") {
+					totalICMPOk++
+				} else {
+					totalICMPFail++
+				}
+
+				allLinks = append(allLinks, PeerLinkInfo{
+					FromNode:  fromName,
+					FromGeo:   fromGeo,
+					ToNode:    toNode,
+					ToVIP:     toVIP,
+					Transport: transport,
+					Endpoint:  endpoint,
+					Ping:      ping,
+					ICMP:      icmp,
+					DPIStatus: dpiStatus,
+				})
 			}
 		}
 	}
 
-	// 3. Plain topic name (e.g. natbypass/mesh/12345 or myroom)
-	return "ssl://broker.emqx.io:8883", raw, "", nil
+	if len(allLinks) == 0 {
+		fmt.Println(" (Детальные списки пиров не найдены в отчетах. Убедитесь, что демоны узлов запущены с WebUI-эндпоинтом :8080)")
+		fmt.Println(colorBold + "══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
+		return
+	}
+
+	fmt.Printf("%-22s │ %-18s │ %-24s │ %-21s │ %-10s │ %-16s │ %-24s\n",
+		"ИСТОЧНИК (FROM)", "НАЗНАЧЕНИЕ (TO)", "РЕЖИМ ТРАНСПОРТА", "ENDPOINT", "PING", "ICMP L3", "DPI СТАТУС")
+	fmt.Println("───────────────────────┼────────────────────┼──────────────────────────┼───────────────────────┼────────────┼──────────────────┼─────────────────────────")
+
+	for _, link := range allLinks {
+		fromStr := fmt.Sprintf("%s (%s)", truncateStr(link.FromNode, 14), truncateStr(link.FromGeo, 6))
+		fmt.Printf("%-22s │ %-18s │ %-24s │ %-21s │ %-10s │ %-16s │ %-24s\n",
+			truncateStr(fromStr, 22),
+			truncateStr(link.ToNode, 18),
+			truncateStr(link.Transport, 24),
+			truncateStr(link.Endpoint, 21),
+			truncateStr(link.Ping, 10),
+			truncateStr(link.ICMP, 16),
+			truncateStr(link.DPIStatus, 24),
+		)
+	}
+
+	totalLinks := len(allLinks)
+	fmt.Println(colorBold + "══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
+	fmt.Println(colorBold + " 📊 СВОДНАЯ СТАТИСТИКА P2P / DPI КЛАСТЕРА:" + colorReset)
+	fmt.Printf("  • Всего обнаруженных каналов между узлами:  %d\n", totalLinks)
+	if totalLinks > 0 {
+		fmt.Printf("  • Прямой P2P через UDP AWG:                 %d (%.1f%%) — Высокая скорость, низкий пинг\n",
+			totalUDP, float64(totalUDP)*100.0/float64(totalLinks))
+		fmt.Printf("  • Защищенный P2P через TCP ShadowTLS:       %d (%.1f%%) — Успешный обход DPI/ТСПУ\n",
+			totalTCP, float64(totalTCP)*100.0/float64(totalLinks))
+		fmt.Printf("  • Резервный Relay через MQTT брокер:        %d (%.1f%%) — Требуется диагностика\n",
+			totalRelay, float64(totalRelay)*100.0/float64(totalLinks))
+		fmt.Printf("  • Доставка ICMP L3 пакетов (Ping):          %d успешно / %d потерь\n", totalICMPOk, totalICMPFail)
+	}
+	fmt.Println(colorBold + "══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════" + colorReset)
+}
+
+func saveConsolidatedReport(
+	outFileName, topic string,
+	networkKey, localReport string,
+	discoveredPeers map[string]*DiscoveredNodeInfo,
+	nodes map[string]*NodeResponse,
+) {
+	var allPeerIDs []string
+	for id := range discoveredPeers {
+		allPeerIDs = append(allPeerIDs, id)
+	}
+	sort.Strings(allPeerIDs)
+
+	var fileSb strings.Builder
+	fileSb.WriteString("================================================================================\n")
+	fileSb.WriteString("                  NATBYPASS CLUSTER DIAGNOSTIC REPORT                           \n")
+	fileSb.WriteString("================================================================================\n")
+	fileSb.WriteString(fmt.Sprintf("Timestamp:      %s\n", time.Now().UTC().Format(time.RFC3339)))
+	fileSb.WriteString(fmt.Sprintf("Topic:          %s\n", topic))
+	fileSb.WriteString(fmt.Sprintf("Encrypted:      %t\n", networkKey != ""))
+	fileSb.WriteString(fmt.Sprintf("Discovered:     %d nodes\n", len(discoveredPeers)))
+	fileSb.WriteString(fmt.Sprintf("Responded Beta: %d nodes\n", len(nodes)))
+	fileSb.WriteString("================================================================================\n\n")
+
+	fileSb.WriteString("================================================================================\n")
+	fileSb.WriteString(fmt.Sprintf(" СПИСОК ОБНАРУЖЕННЫХ УЗЛОВ В СЕТИ (ОНЛАЙН В ТОПИКЕ: %d)\n", len(discoveredPeers)))
+	fileSb.WriteString("================================================================================\n\n")
+	for _, id := range allPeerIDs {
+		dp := discoveredPeers[id]
+		hasDiag := false
+		if n, ok := nodes[id]; ok && n.Completed {
+			hasDiag = true
+		}
+		statusText := fmt.Sprintf("Требуется обновить бинарник до актуальной beta (на узле: %s, RemoteDiag с v1.9.224-beta7+)", dp.Version)
+		if hasDiag {
+			statusText = "OK (Диагностический отчет получен)"
+		} else if isBeta7OrNewer(dp.Version) {
+			statusText = "Таймаут сбора отчета (узел на актуальной beta, но не успел передать отчет за отведенное время)"
+		}
+		fileSb.WriteString(fmt.Sprintf("Узел:        %s (%s)\n", dp.DeviceID, dp.Nickname))
+		fileSb.WriteString(fmt.Sprintf("ОС/Арх:      %s/%s | Версия: %s\n", dp.OS, dp.Arch, dp.Version))
+		fileSb.WriteString(fmt.Sprintf("Virtual IP:  %s | Публичный IP: %s\n", dp.VirtualIP, dp.PublicIP))
+		fileSb.WriteString(fmt.Sprintf("Статус:      %s\n", statusText))
+		fileSb.WriteString("--------------------------------------------------------------------------------\n")
+	}
+	fileSb.WriteString("\n\n")
+
+	if localReport != "" {
+		fileSb.WriteString("################################################################################\n")
+		fileSb.WriteString(" LOCAL CONTROLLER HOST DIAGNOSTICS\n")
+		fileSb.WriteString("################################################################################\n\n")
+		fileSb.WriteString(localReport)
+		fileSb.WriteString("\n\n")
+	}
+
+	var respondingIDs []string
+	for id := range nodes {
+		respondingIDs = append(respondingIDs, id)
+	}
+	sort.Strings(respondingIDs)
+
+	for _, id := range respondingIDs {
+		n := nodes[id]
+		fileSb.WriteString("################################################################################\n")
+		fileSb.WriteString(fmt.Sprintf(" ПОЛНЫЙ ДИАГНОСТИЧЕСКИЙ ОТЧЕТ УЗЛА: %s\n", n.DeviceID))
+		fileSb.WriteString(fmt.Sprintf(" Platform: %s/%s | Version: %s | Status: %s\n", n.OS, n.Arch, n.Version, n.Status))
+		fileSb.WriteString(fmt.Sprintf(" Completed: %t | Total Chunks: %d\n", n.Completed, n.TotalChunks))
+		fileSb.WriteString("################################################################################\n\n")
+
+		if n.FullReport != "" {
+			fileSb.WriteString(n.FullReport)
+		} else {
+			for i := 0; i < n.TotalChunks; i++ {
+				if chunk, ok := n.Chunks[i]; ok {
+					fileSb.WriteString(chunk)
+				} else {
+					fileSb.WriteString(fmt.Sprintf("\n[ПРОПУЩЕН ЧАНК %d]\n", i))
+				}
+			}
+		}
+		fileSb.WriteString("\n\n")
+	}
+
+	if err := os.WriteFile(outFileName, []byte(fileSb.String()), 0644); err != nil {
+		fmt.Printf(colorRed+"[✗] Ошибка сохранения файла отчета: %v\n"+colorReset, err)
+	} else {
+		absPath, _ := filepath.Abs(outFileName)
+		fmt.Printf(colorGreen+colorBold+"\n💾 Объединенный диагностический отчет успешно сохранен:\n   %s\n"+colorReset, absPath)
+	}
+}
+
+func main() {
+	os.Args = reorderArgs(os.Args)
+	flag.Parse()
+
+	reader := bufio.NewReader(os.Stdin)
+	isInteractive := len(os.Args) <= 1
+
+	rawInput := *flagTopic
+	if rawInput == "" && flag.NArg() > 0 {
+		rawInput = flag.Arg(0)
+	}
+
+	var parsedBroker, parsedTopic, parsedKey string
+	if rawInput != "" {
+		parsedBroker, parsedTopic, parsedKey = parseShareLink(rawInput)
+	}
+
+	if isInteractive && rawInput == "" {
+		printBanner()
+		if cfg, err := config.Load(*flagConfig); err == nil && cfg != nil {
+			activeProf := cfg.EnsureActiveProfile()
+			if activeProf != nil && activeProf.MQTTTopic != "" {
+				parsedTopic = activeProf.MQTTTopic
+				parsedBroker = activeProf.MQTTBroker
+				parsedKey = activeProf.NetworkKey
+			}
+		}
+
+		prompt := "Вставьте ссылку сети (natbypass://profile?...) или название топика"
+		if parsedTopic != "" {
+			prompt = fmt.Sprintf("%s [по умолчанию: %s]", prompt, parsedTopic)
+		}
+		fmt.Printf(colorYellow+"%s: "+colorReset, prompt)
+		inputStr, _ := reader.ReadString('\n')
+		inputStr = strings.TrimSpace(inputStr)
+
+		if inputStr != "" {
+			b, t, k := parseShareLink(inputStr)
+			if t != "" {
+				parsedTopic = t
+			}
+			if b != "" {
+				parsedBroker = b
+			}
+			if k != "" {
+				parsedKey = k
+			}
+		}
+	}
+
+	broker := *flagBroker
+	if broker == "" {
+		broker = parsedBroker
+	}
+	topic := parsedTopic
+	networkKey := *flagKey
+	if networkKey == "" {
+		networkKey = parsedKey
+	}
+
+	if topic == "" {
+		fmt.Println(colorRed + "[✗] Ошибка: не указан топик сигнальной комнаты (-topic)!" + colorReset)
+		os.Exit(1)
+	}
+
+	if broker == "" {
+		broker = "ssl://broker.emqx.io:8883"
+	}
+
+	randBytes := make([]byte, 4)
+	_, _ = rand.Read(randBytes)
+	collectorID := fmt.Sprintf("natbypass-diag-%x", randBytes)
+
+	// Connect to signaling channel once
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch := signaling.NewMQTTChannel(broker, topic, collectorID, "", "")
+	defer ch.Close()
+
+	rx, err := ch.Receive(ctx)
+	if err != nil {
+		fmt.Printf(colorRed+"[✗] Ошибка подключения к брокеру: %v\n"+colorReset, err)
+		os.Exit(1)
+	}
+
+	fmt.Print(colorCyan + "⏳ Подключение к брокеру..." + colorReset)
+	connStart := time.Now()
+	for time.Since(connStart) < 7*time.Second {
+		if ch.IsAvailable(ctx) {
+			break
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	fmt.Println(colorGreen + " Готово!" + colorReset)
+
+	// Main Menu Loop
+	for {
+		printBanner()
+		fmt.Printf(colorCyan+"[ℹ] Брокер:     %s\n"+colorReset, broker)
+		fmt.Printf(colorCyan+"[ℹ] Топик:      %s\n"+colorReset, topic)
+		if networkKey != "" {
+			fmt.Printf(colorGreen+"[✓] Шифрование: Включено (NetworkKey: %s***)\n"+colorReset, networkKey[:min(4, len(networkKey))])
+		} else {
+			fmt.Printf(colorYellow+"[!] Шифрование: Отключено (открытый канал)\n"+colorReset)
+		}
+		fmt.Println(colorBold + "─────────────────────────────────────────────────────────────────────────" + colorReset)
+
+		var choice string
+		if !isInteractive {
+			if *flagUpdate {
+				choice = "4"
+			} else {
+				choice = "1"
+			}
+		} else {
+			fmt.Println(colorCyan + " ГЛАВНОЕ МЕНЮ ДИАГНОСТИКИ И УПРАВЛЕНИЯ:" + colorReset)
+			fmt.Println("  [1] 📋 Собрать полную диагностику со всех узлов в файл (Diag Collect)")
+			fmt.Println("  [2] 🌐 Межгеографическая P2P/DPI матрица связности (Mesh Matrix)")
+			fmt.Println("  [3] 🎯 Диагностика одного конкретного узла")
+			fmt.Println("  [4] 🚀 Принудительно обновить все beta-узлы сети (OTA Beta Update)")
+			fmt.Println("  [5] ⚙️  Сменить профиль / топик / брокер")
+			fmt.Println("  [0] 🚪 Выход")
+			fmt.Print(colorYellow + "Ваш выбор [1]: " + colorReset)
+			choice, _ = reader.ReadString('\n')
+			choice = strings.TrimSpace(choice)
+			if choice == "" {
+				choice = "1"
+			}
+		}
+
+		switch choice {
+		case "1":
+			discov, nodes, localRep := runCollection(ch, rx, topic, broker, networkKey, collectorID, "", false, *flagTimeout, *flagLocal)
+			outFileName := *flagOutput
+			if outFileName == "" {
+				safeTopic := strings.ReplaceAll(topic, "/", "_")
+				outFileName = fmt.Sprintf("cluster_diag_%s_%s.txt", safeTopic, time.Now().Format("20060102_150405"))
+			}
+			saveConsolidatedReport(outFileName, topic, networkKey, localRep, discov, nodes)
+			printSummaryTable(discov, nodes)
+
+		case "2":
+			discov, nodes, _ := runCollection(ch, rx, topic, broker, networkKey, collectorID, "", false, *flagTimeout, false)
+			printDpiMeshMatrix(discov, nodes)
+
+		case "3":
+			fmt.Print(colorYellow + "Введите DeviceID целевого узла: " + colorReset)
+			tID, _ := reader.ReadString('\n')
+			tID = strings.TrimSpace(tID)
+			if tID == "" {
+				fmt.Println(colorRed + "[!] Узел не указан." + colorReset)
+				break
+			}
+			_, nodes, _ := runCollection(ch, rx, topic, broker, networkKey, collectorID, tID, false, *flagTimeout, false)
+			if n, ok := nodes[tID]; ok && n.Completed {
+				fmt.Println(colorGreen + colorBold + "\n═════════════════════════════════════════════════════════════════════════" + colorReset)
+				fmt.Printf(colorBold+" ДИАГНОСТИЧЕСКИЙ ОТЧЕТ УЗЛА: %s (%s/%s v%s)\n"+colorReset, n.DeviceID, n.OS, n.Arch, n.Version)
+				fmt.Println(colorBold + "═════════════════════════════════════════════════════════════════════════" + colorReset)
+				fmt.Println(n.FullReport)
+			} else {
+				fmt.Printf(colorRed+"\n[✗] Отчет от узла '%s' не получен за отведенное время.\n"+colorReset, tID)
+			}
+
+		case "4":
+			fmt.Println(colorYellow + "[!] Внимание: всем beta-узлам сети будет отправлена команда обновиться до последней версии." + colorReset)
+			fmt.Print("Подтверждаете отправку команды обновления? [y/N]: ")
+			conf, _ := reader.ReadString('\n')
+			conf = strings.TrimSpace(strings.ToLower(conf))
+			if conf == "y" || conf == "yes" || conf == "д" || conf == "да" {
+				_, nodes, _ := runCollection(ch, rx, topic, broker, networkKey, collectorID, "", true, *flagTimeout, false)
+				fmt.Println(colorBold + "\nРезультаты обновления:" + colorReset)
+				for id, n := range nodes {
+					fmt.Printf("  • %-22s: %s (%s)\n", id, n.Status, n.FullReport)
+				}
+			} else {
+				fmt.Println("Отменено.")
+			}
+
+		case "5":
+			fmt.Print(colorYellow + "Вставьте новую ссылку сети (natbypass://profile?...) или название топика: " + colorReset)
+			newLink, _ := reader.ReadString('\n')
+			newLink = strings.TrimSpace(newLink)
+			if newLink != "" {
+				nb, nt, nk := parseShareLink(newLink)
+				if nt != "" {
+					topic = nt
+				}
+				if nb != "" {
+					broker = nb
+				}
+				if nk != "" {
+					networkKey = nk
+				}
+				fmt.Println(colorGreen + "Параметры обновлены. Переподключение..." + colorReset)
+				ch.Close()
+				ch = signaling.NewMQTTChannel(broker, topic, collectorID, "", "")
+				rx, _ = ch.Receive(ctx)
+			}
+
+		case "0":
+			fmt.Println(colorCyan + "Выход из утилиты диагностики. До свидания!" + colorReset)
+			return
+
+		default:
+			fmt.Println(colorRed + "Неизвестный пункт меню." + colorReset)
+		}
+
+		if !isInteractive {
+			// Non-interactive run finishes immediately
+			return
+		}
+
+		waitForEnter(reader)
+	}
 }
 
 func min(a, b int) int {
@@ -598,41 +875,6 @@ func min(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func truncateStr(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-1] + "…"
-}
-
-func loadOptionalConfig(path string) *config.Config {
-	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
-		cfg, err := config.Load(path)
-		if err == nil {
-			return cfg
-		}
-	}
-	if fi, err := os.Stat("dist/config.yaml"); err == nil && !fi.IsDir() {
-		cfg, err := config.Load("dist/config.yaml")
-		if err == nil {
-			return cfg
-		}
-	}
-	return nil
-}
-
-func printBanner() {
-	fmt.Println(colorCyan + colorBold + `
-  ███╗   ██╗ █████╗ ████████╗██████╗ ██╗   ██╗██████╗  █████╗ ███████╗███████╗
-  ████╗  ██║██╔══██╗╚══██╔══╝██╔══██╗╚██╗ ██╔╝██╔══██╗██╔══██╗██╔════╝██╔════╝
-  ██╔██╗ ██║███████║   ██║   ██████╔╝ ╚████╔╝ ██████╔╝███████║███████╗███████╗
-  ██║╚██╗██║██╔══██║   ██║   ██╔══██╗  ╚██╔╝  ██╔═══╝ ██╔══██║╚════██║╚════██║
-  ██║ ╚████║██║  ██║   ██║   ██████╔╝   ██║   ██║     ██║  ██║███████║███████║
-  ╚═╝  ╚═══╝╚═╝  ╚═╝   ╚═╝   ╚═════╝    ╚═╝   ╚═╝     ╚═╝  ╚═╝╚══════╝╚══════╝
-        Cluster Remote Diagnostic & Update Tool (Beta / Engineering Only)
-` + colorReset)
 }
 
 func reorderArgs(args []string) []string {
@@ -660,17 +902,4 @@ func reorderArgs(args []string) []string {
 	res = append(res, flags...)
 	res = append(res, pos...)
 	return res
-}
-
-func isBeta7OrNewer(ver string) bool {
-	vLower := strings.ToLower(ver)
-	if !strings.Contains(vLower, "beta") {
-		return false
-	}
-	for _, old := range []string{"beta1", "beta2", "beta3", "beta4", "beta5", "beta6"} {
-		if strings.Contains(vLower, old) {
-			return false
-		}
-	}
-	return true
 }
