@@ -1601,18 +1601,6 @@ func (p *UDPPuncher) readLoop() {
 					}
 				}
 			}
-		case n >= 31 && (buf[0]&0xC0 == 0x40):
-			// RFC 9000 QUIC 1-RTT Short Header data packet (camouflaged HTTP/3 traffic)
-			p.cipherMu.RLock()
-			cKey := p.cipherKey
-			hasCKey := p.hasCipherKey
-			p.cipherMu.RUnlock()
-			if hasCKey {
-				if dec, _, _, qErr := quic.ParseQUICDataPacket(buf[:n], cKey); qErr == nil && len(dec) > 0 {
-					p.handleTunnelPacket(dec, remoteAddr)
-					continue
-				}
-			}
 		case strings.HasPrefix(string(buf[:n]), constants.PingPrefix):
 			p.handlePing(string(buf[:n]), remoteAddr)
 		case strings.HasPrefix(string(buf[:n]), constants.PongPrefix):
@@ -1669,8 +1657,19 @@ func (p *UDPPuncher) readLoop() {
 			hasCKey := p.hasCipherKey
 			p.cipherMu.RUnlock()
 
-			if hasCKey && n >= 40 {
-				if dec, err := crypto.DecryptSelf(buf[:n], cKey); err == nil && len(dec) > 0 {
+			if hasCKey {
+				// RFC 9000 QUIC 1-RTT Short Header data packet (camouflaged HTTP/3 traffic)
+				if n >= 31 && (buf[0]&0xC0 == 0x40) {
+					if dec, _, _, qErr := quic.ParseQUICDataPacket(buf[:n], cKey); qErr == nil && len(dec) > 0 {
+						p.handleTunnelPacket(dec, remoteAddr)
+						continue
+					}
+					// If QUIC parsing fails, do not drop! The random nonce byte of a standard encrypted packet
+					// has a 25% chance of matching (buf[0]&0xC0 == 0x40). Fall through to DecryptSelf below.
+				}
+
+				if n >= 40 {
+					if dec, err := crypto.DecryptSelf(buf[:n], cKey); err == nil && len(dec) > 0 {
 					decStr := string(dec)
 					if strings.HasPrefix(decStr, constants.PingPrefix) {
 						p.handlePing(decStr, remoteAddr)
@@ -1704,6 +1703,7 @@ func (p *UDPPuncher) readLoop() {
 					}
 				}
 			}
+		}
 
 			p.mu.Lock()
 			handler := p.awgHandler
