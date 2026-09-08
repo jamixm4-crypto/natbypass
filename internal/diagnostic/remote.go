@@ -10,9 +10,6 @@ package diagnostic
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -33,38 +30,12 @@ func (f PayloadSenderFunc) Send(ctx context.Context, payload *signaling.Payload)
 	return f(ctx, payload)
 }
 
-// ExecuteLocalDiagScript runs the local platform diagnostic script (diag.ps1 / diag.sh)
-// if found locally on disk, or falls back immediately to the built-in Go diagnostic engine.
-// Never downloads from external hosts (e.g. raw.githubusercontent.com) to prevent hangs under DPI/TSPU blocks.
+// ExecuteLocalDiagScript runs the built-in Go diagnostic engine.
+// It is 100% offline, self-contained, lightning-fast (~1.5s), and ensures identical
+// structured diagnostic output across Windows, Linux, MIPS/Keenetic, OpenWrt, and Android.
 func ExecuteLocalDiagScript(ctx context.Context) string {
-	var out []byte
-	var err error
-
-	if runtime.GOOS == "windows" {
-		localScript := findLocalScript("scripts/diag.ps1", "diag.ps1")
-		if localScript != "" {
-			cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", localScript)
-			out, err = cmd.CombinedOutput()
-		}
-	} else {
-		localScript := findLocalScript("scripts/diag.sh", "diag.sh")
-		if localScript != "" {
-			cmd := exec.CommandContext(ctx, "sh", localScript)
-			out, err = cmd.CombinedOutput()
-		}
-	}
-
-	if err == nil && len(out) > 50 {
-		return string(out)
-	}
-
-	// Immediate fallback to built-in Go diagnostic engine (100% offline, self-contained)
 	report := RunFullDiagnostics()
-	var prefix string
-	if err != nil {
-		prefix = fmt.Sprintf("Note: Local script error: %v\n", err)
-	}
-	return prefix + FormatGoDiagnosticsReport(report)
+	return FormatGoDiagnosticsReport(report)
 }
 
 // FormatGoDiagnosticsReport formats a DiagnosticReport into human-readable text.
@@ -90,37 +61,6 @@ func FormatGoDiagnosticsReport(report *DiagnosticReport) string {
 	return sb.String()
 }
 
-func findLocalScript(names ...string) string {
-	exePath, err := os.Executable()
-	exeDir := ""
-	if err == nil {
-		exeDir = filepath.Dir(exePath)
-	}
-	cwd, _ := os.Getwd()
-
-	for _, name := range names {
-		if fi, err := os.Stat(name); err == nil && !fi.IsDir() {
-			return name
-		}
-		if exeDir != "" {
-			p := filepath.Join(exeDir, name)
-			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-				return p
-			}
-			pParent := filepath.Join(filepath.Dir(exeDir), name)
-			if fi, err := os.Stat(pParent); err == nil && !fi.IsDir() {
-				return pParent
-			}
-		}
-		if cwd != "" {
-			p := filepath.Join(cwd, name)
-			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-				return p
-			}
-		}
-	}
-	return ""
-}
 
 // ExecuteLocalUpdate triggers an in-place beta update using the updater subsystem.
 func ExecuteLocalUpdate(ctx context.Context, currentVersion string) string {

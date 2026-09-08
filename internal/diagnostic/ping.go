@@ -36,30 +36,48 @@ func PingVirtualIP(ctx context.Context, targetVIP string, timeout time.Duration)
 		timeout = 2500 * time.Millisecond
 	}
 
-	var cmd *exec.Cmd
+	var outBytes []byte
+	var err error
+
 	switch runtime.GOOS {
 	case "windows":
 		ms := int(timeout.Milliseconds())
-		if ms < 200 {
-			ms = 200
+		if ms < 2000 {
+			ms = 2500
 		}
-		cmd = exec.CommandContext(ctx, "ping", "-n", "1", "-w", strconv.Itoa(ms), cleanIP)
+		cmd := exec.CommandContext(ctx, "ping", "-n", "1", "-w", strconv.Itoa(ms), cleanIP)
 		setSysProcAttr(cmd)
+		outBytes, err = cmd.CombinedOutput()
 	case "darwin":
 		sec := int(timeout.Seconds())
-		if sec < 1 {
-			sec = 1
+		if sec < 2 {
+			sec = 2
 		}
-		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-t", strconv.Itoa(sec), cleanIP)
+		cmd := exec.CommandContext(ctx, "ping", "-c", "1", "-t", strconv.Itoa(sec), cleanIP)
+		outBytes, err = cmd.CombinedOutput()
 	default: // linux, android, keenetic, openwrt
 		sec := int(timeout.Seconds())
-		if sec < 1 {
-			sec = 1
+		if sec < 2 {
+			sec = 2
 		}
-		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-W", strconv.Itoa(sec), cleanIP)
-	}
+		// 1. Try standard iputils ping (-W timeout in seconds)
+		cmd := exec.CommandContext(ctx, "ping", "-c", "1", "-W", strconv.Itoa(sec), cleanIP)
+		outBytes, err = cmd.CombinedOutput()
+		outStr := string(outBytes)
 
-	outBytes, err := cmd.CombinedOutput()
+		// 2. If -W is unrecognized (BusyBox without fancy ping), fallback to -w (deadline in seconds)
+		if err != nil && (strings.Contains(outStr, "invalid option") || strings.Contains(outStr, "unrecognized") || strings.Contains(outStr, "Usage:")) {
+			cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-w", strconv.Itoa(sec), cleanIP)
+			outBytes, err = cmd.CombinedOutput()
+			outStr = string(outBytes)
+
+			// 3. If -w is also rejected, run minimal 'ping -c 1 cleanIP' with ctx deadline
+			if err != nil && (strings.Contains(outStr, "invalid option") || strings.Contains(outStr, "unrecognized") || strings.Contains(outStr, "Usage:")) {
+				cmd = exec.CommandContext(ctx, "ping", "-c", "1", cleanIP)
+				outBytes, err = cmd.CombinedOutput()
+			}
+		}
+	}
 	outStr := string(outBytes)
 
 	// If command failed and output is empty, return immediate error

@@ -8,6 +8,7 @@
 package diagnostic
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -219,18 +220,53 @@ func CheckSTUNDiscovery() DiagnosticItem {
 		}
 	}
 
-	first := results[0]
+	// Determine consensus public IP via majority voting across all responding STUN servers
+	ipCounts := make(map[string]int)
+	for _, r := range results {
+		ipCounts[r.mappedIP.String()]++
+	}
+	consensusIPStr := results[0].mappedIP.String()
+	maxCount := 0
+	for ipStr, count := range ipCounts {
+		if count > maxCount {
+			maxCount = count
+			consensusIPStr = ipStr
+		}
+	}
+
+	var consensusResults []stunProbeResult
+	for _, r := range results {
+		if r.mappedIP.String() == consensusIPStr {
+			consensusResults = append(consensusResults, r)
+		}
+	}
+
+	primarySocket := results[0]
+	if len(consensusResults) > 0 {
+		primarySocket = consensusResults[0]
+	}
+
 	natType := "Full Cone / Endpoint-Independent Mapping (EIM) [✓ 100% P2P совместимо]"
 	delta := 0
-	if len(results) >= 2 {
-		delta = results[1].port - results[0].port
+	if len(consensusResults) >= 2 {
+		delta = consensusResults[1].port - consensusResults[0].port
 		if delta != 0 {
 			natType = fmt.Sprintf("Symmetric NAT / EDM (Delta: %+d) [⚠ Требуется TCP ShadowTLS]", delta)
 		}
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Внешний сокет: %s:%d | Классификация NAT: %s\n", first.mappedIP, first.port, natType))
+	hasMultiWAN := len(ipCounts) > 1
+	var multiWANNote string
+	if hasMultiWAN {
+		var allIPs []string
+		for ip, c := range ipCounts {
+			allIPs = append(allIPs, fmt.Sprintf("%s (%d)", ip, c))
+		}
+		multiWANNote = fmt.Sprintf(" [⚠️ Multi-WAN/Split-Tunnel: %s]", strings.Join(allIPs, ", "))
+	}
+
+	sb.WriteString(fmt.Sprintf("Внешний сокет: %s:%d | Классификация NAT: %s%s\n", primarySocket.mappedIP, primarySocket.port, natType, multiWANNote))
 	for _, r := range results {
 		sb.WriteString(fmt.Sprintf("  -> %-27s: %s:%d (RTT: %v)\n", r.server, r.mappedIP, r.port, r.rtt.Round(time.Millisecond)))
 	}
@@ -239,7 +275,7 @@ func CheckSTUNDiscovery() DiagnosticItem {
 		Name:    "STUN NAT Пробитие и Классификация (RFC 5389 / RFC 5780)",
 		Passed:  true,
 		Elapsed: elapsed,
-		Message: fmt.Sprintf("✓ Внешний IP: %s:%d (%s)", first.mappedIP, first.port, natType),
+		Message: fmt.Sprintf("✓ Внешний IP: %s:%d (%s)%s", primarySocket.mappedIP, primarySocket.port, natType, multiWANNote),
 		Details: strings.TrimRight(sb.String(), "\n"),
 	}
 }
@@ -508,18 +544,13 @@ func CheckMeshPeersAndEngine() DiagnosticItem {
 		wg.Add(1)
 		go func(targetVIP string) {
 			defer wg.Done()
-			pStart := time.Now()
-			var cmd *exec.Cmd
-			if runtime.GOOS == "windows" {
-				cmd = exec.Command("ping", "-n", "1", "-w", "650", targetVIP)
-			} else {
-				cmd = exec.Command("ping", "-c", "1", "-W", "1", targetVIP)
-			}
-			pErr := cmd.Run()
+			pCtx, pCancel := context.WithTimeout(context.Background(), 2600*time.Millisecond)
+			defer pCancel()
+			rtt, pErr := PingVirtualIP(pCtx, targetVIP, 2500*time.Millisecond)
 			pingChan <- peerPingResult{
 				vip: targetVIP,
 				ok:  pErr == nil,
-				rtt: time.Since(pStart),
+				rtt: rtt,
 			}
 		}(cleanVIP)
 	}

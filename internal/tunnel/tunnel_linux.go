@@ -292,8 +292,11 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	}
 	_ = exec.CommandContext(ctx, ipBin, "route", "replace", prefix+".0/24", "dev", d.AdapterName, "src", cleanVIP).Run()
 	_ = exec.CommandContext(ctx, ipBin, "route", "replace", prefix+".0/24", "dev", d.AdapterName, "src", cleanVIP, "table", "main").Run()
-	_ = exec.CommandContext(ctx, ipBin, "route", "replace", "100.64.200.0/24", "dev", d.AdapterName, "src", cleanVIP).Run()
-	_ = exec.CommandContext(ctx, ipBin, "route", "replace", "100.64.200.0/24", "dev", d.AdapterName, "src", cleanVIP, "table", "main").Run()
+	// S3: Clean up legacy 100.64.200.0/24 route if active subnet prefix is different
+	if prefix != "100.64.200" {
+		_ = exec.CommandContext(ctx, ipBin, "route", "del", "100.64.200.0/24", "dev", d.AdapterName).Run()
+		_ = exec.CommandContext(ctx, ipBin, "route", "del", "100.64.200.0/24", "dev", d.AdapterName, "table", "main").Run()
+	}
 
 	// Приоритетные правила маршрутизации для KeeneticOS (обход blackhole таблиц 4096-4101)
 	_ = exec.CommandContext(ctx, ipBin, "rule", "del", "pref", "50", "to", prefix+".0/24", "lookup", "main").Run()
