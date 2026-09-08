@@ -1054,6 +1054,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 			// R3: Per-peer backoff tracker: DeviceID -> when we're allowed to probe next
 			probeBackoff := make(map[string]time.Time)
+			lastRendezvousInit := make(map[string]time.Time)
 			// activeSymSessions guards in-progress Symmetric NAT sessions.
 			// Access MUST be protected by symSessionMu because the cleanup defer runs
 			// in a child goroutine that races with the keepalive ticker goroutine.
@@ -1079,6 +1080,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 							// Clear backoff on successful connection
 							delete(probeBackoff, p.DeviceID)
+							delete(lastRendezvousInit, p.DeviceID)
 							delete(activeSymSessions, p.DeviceID)
 						} else {
 							// R3: Backoff logic for unconnected peers (UDP hole punch probes only)
@@ -1139,6 +1141,44 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 								if p.PublicIP != "" && p.WGPort > 0 {
 									_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+								}
+
+								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT for unconnected / relay-only peers
+								if !p.DirectP2P && sigMgr != nil && puncher != nil && now.Sub(lastRendezvousInit[p.DeviceID]) > 30*time.Second {
+									lastRendezvousInit[p.DeviceID] = now
+									go func(targetPeerID string) {
+										sCtx, sCancel := context.WithTimeout(engineCtx, 2500*time.Millisecond)
+										defer sCancel()
+										_, _, _ = puncher.DiscoverMappedAddress(sCtx)
+										mySTUN := puncher.GetCachedSTUNAddr()
+										if mySTUN == "" {
+											return
+										}
+										myCands := puncher.DiscoverCandidates(sCtx, mySTUN)
+										sessionID := fmt.Sprintf("rndv-%d-%s", time.Now().UnixNano(), deviceID)
+										rndvPl := &signaling.Payload{
+											DeviceID: deviceID,
+											Rendezvous: &signaling.RendezvousSignal{
+												Phase:            "init",
+												SessionID:        sessionID,
+												TargetDeviceID:   targetPeerID,
+												SenderDeviceID:   deviceID,
+												SenderSTUN:       mySTUN,
+												SenderCandidates: myCands,
+												Timestamp:        time.Now().Unix(),
+											},
+											Timestamp: time.Now(),
+										}
+										log.Info().Str("target", targetPeerID).Str("my_stun", mySTUN).
+											Msg("🤝 [SRHP] Initiating Synchronized Rendezvous Hole-Punching via MQTT")
+										_ = sigMgr.Send(engineCtx, rndvPl)
+
+										// Prime local NAT mappings: send immediate burst probes towards peer's known addresses
+										if targetPeer, ok := registry.Get(targetPeerID); ok && targetPeer != nil {
+											primeTargets := append([]string{targetPeer.STUNAddr, targetPeer.ActiveEndpoint, targetPeer.LocalAddr}, targetPeer.Candidates...)
+											puncher.SendHolePunchBurst(primeTargets, 3)
+										}
+									}(p.DeviceID)
 								}
 
 								// Trigger Symmetric NAT wide-sweep multi-hop session when peer or local is behind Symmetric NAT
@@ -2152,6 +2192,69 @@ func receiveLoop(
 					}(p.DeviceID, sp.MySTUNAddr, sp.HopHint)
 				}
 				// SymPunch-only payload: don't update registry / wg config
+				if p.VirtualIP == "" || p.PublicKey == "" {
+					continue
+				}
+			}
+
+			// SRHP: Handle Synchronized Rendezvous Hole-Punching
+			if p.Rendezvous != nil && puncher != nil && sigMgr != nil {
+				rndv := p.Rendezvous
+				if (rndv.TargetDeviceID == "" || rndv.TargetDeviceID == deviceID) && rndv.SenderDeviceID != "" && rndv.SenderDeviceID != deviceID {
+					if regPeer, ok := registry.Get(rndv.SenderDeviceID); ok && regPeer != nil {
+						if rndv.SenderSTUN != "" {
+							regPeer.STUNAddr = rndv.SenderSTUN
+						}
+						if len(rndv.SenderCandidates) > 0 {
+							regPeer.Candidates = rndv.SenderCandidates
+						}
+						registry.Upsert(regPeer)
+					}
+					if magicSock != nil && rndv.SenderSTUN != "" {
+						magicSock.RegisterPeerEndpoints(rndv.SenderDeviceID, rndv.SenderSTUN, "", "", rndv.SenderCandidates...)
+					}
+
+					if rndv.Phase == "init" {
+						log.Info().Str("from", rndv.SenderDeviceID).Str("remote_stun", rndv.SenderSTUN).
+							Msg("🤝 [SRHP] Received Rendezvous INIT — refreshing STUN and responding with ACK")
+						go func(fromDevID, sessionID, remoteSTUN string, remoteCands []string) {
+							// 1. Fast STUN refresh
+							sCtx, sCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+							defer sCancel()
+							_, _, _ = puncher.DiscoverMappedAddress(sCtx)
+							mySTUN := puncher.GetCachedSTUNAddr()
+							myCands := puncher.DiscoverCandidates(sCtx, mySTUN)
+
+							// 2. Send ACK over MQTT with our fresh STUN & candidates
+							ackPl := &signaling.Payload{
+								DeviceID: deviceID,
+								Rendezvous: &signaling.RendezvousSignal{
+									Phase:            "ack",
+									SessionID:        sessionID,
+									TargetDeviceID:   fromDevID,
+									SenderDeviceID:   deviceID,
+									SenderSTUN:       mySTUN,
+									SenderCandidates: myCands,
+									Timestamp:        time.Now().Unix(),
+								},
+								Timestamp: time.Now(),
+							}
+							_ = sigMgr.Send(ctx, ackPl)
+
+							// 3. Fire synchronized burst probes towards initiator's candidates
+							burstTargets := append([]string{remoteSTUN}, remoteCands...)
+							puncher.SendHolePunchBurst(burstTargets, 4)
+						}(rndv.SenderDeviceID, rndv.SessionID, rndv.SenderSTUN, rndv.SenderCandidates)
+					} else if rndv.Phase == "ack" {
+						log.Info().Str("from", rndv.SenderDeviceID).Str("remote_stun", rndv.SenderSTUN).
+							Msg("🤝 [SRHP] Received Rendezvous ACK — firing synchronized bilateral punch burst")
+						go func(fromDevID, remoteSTUN string, remoteCands []string) {
+							burstTargets := append([]string{remoteSTUN}, remoteCands...)
+							puncher.SendHolePunchBurst(burstTargets, 4)
+						}(rndv.SenderDeviceID, rndv.SenderSTUN, rndv.SenderCandidates)
+					}
+				}
+				// Rendezvous-only payload: don't update registry / wg config
 				if p.VirtualIP == "" || p.PublicKey == "" {
 					continue
 				}

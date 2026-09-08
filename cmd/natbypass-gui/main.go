@@ -4982,6 +4982,7 @@ func startEngineFromConfig(c *config.Config) {
 	go func() {
 		probeTicker := time.NewTicker(2 * time.Second)
 		defer probeTicker.Stop()
+		lastRendezvousInit := make(map[string]time.Time)
 		for {
 			select {
 			case <-ctx.Done():
@@ -4996,6 +4997,7 @@ func startEngineFromConfig(c *config.Config) {
 							if !isForceTCP && udpPuncher != nil && p.Transport != "tcp_tls" {
 								_ = udpPuncher.SendKeepAlive(p.ActiveEndpoint)
 							}
+							delete(lastRendezvousInit, p.DeviceID)
 						} else {
 							if !isForceTCP && udpPuncher != nil {
 								if p.ActiveEndpoint != "" {
@@ -5014,6 +5016,46 @@ func startEngineFromConfig(c *config.Config) {
 									if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
 										_ = udpPuncher.SendHolePunchProbe(cand)
 									}
+								}
+
+								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT for unconnected peers
+								now := time.Now()
+								if !p.DirectP2P && len(sigChannels) > 0 && udpPuncher != nil && now.Sub(lastRendezvousInit[p.DeviceID]) > 30*time.Second {
+									lastRendezvousInit[p.DeviceID] = now
+									go func(targetPeerID string) {
+										sCtx, sCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+										defer sCancel()
+										_, _, _ = udpPuncher.DiscoverMappedAddress(sCtx)
+										mySTUN := udpPuncher.GetCachedSTUNAddr()
+										if mySTUN == "" {
+											return
+										}
+										myCands := udpPuncher.DiscoverCandidates(sCtx, mySTUN)
+										sessionID := fmt.Sprintf("rndv-%d-%s", time.Now().UnixNano(), myDevID)
+										rndvPl := &signaling.Payload{
+											DeviceID: myDevID,
+											Rendezvous: &signaling.RendezvousSignal{
+												Phase:            "init",
+												SessionID:        sessionID,
+												TargetDeviceID:   targetPeerID,
+												SenderDeviceID:   myDevID,
+												SenderSTUN:       mySTUN,
+												SenderCandidates: myCands,
+												Timestamp:        time.Now().Unix(),
+											},
+											Timestamp: time.Now(),
+										}
+										writeDebug(fmt.Sprintf("🤝 [SRHP] Initiating Synchronized Rendezvous Hole-Punching with %s", targetPeerID))
+										for _, sc := range sigChannels {
+											_ = sc.Send(ctx, rndvPl)
+										}
+
+										// Prime local NAT mappings: send immediate burst probes towards peer's known addresses
+										if targetPeer, ok := registry.Get(targetPeerID); ok && targetPeer != nil {
+											primeTargets := append([]string{targetPeer.STUNAddr, targetPeer.ActiveEndpoint, targetPeer.LocalAddr}, targetPeer.Candidates...)
+											udpPuncher.SendHolePunchBurst(primeTargets, 3)
+										}
+									}(p.DeviceID)
 								}
 							}
 							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS for ALL peers:
@@ -5599,6 +5641,65 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 
 				if p.DeviceID == "" || p.DeviceID == myDevID {
 					continue
+				}
+
+				// SRHP: Handle Synchronized Rendezvous Hole-Punching
+				if p.Rendezvous != nil && udpPuncher != nil && len(sigChannels) > 0 {
+					rndv := p.Rendezvous
+					if (rndv.TargetDeviceID == "" || rndv.TargetDeviceID == myDevID) && rndv.SenderDeviceID != "" && rndv.SenderDeviceID != myDevID {
+						if regPeer, ok := registry.Get(rndv.SenderDeviceID); ok && regPeer != nil {
+							if rndv.SenderSTUN != "" {
+								regPeer.STUNAddr = rndv.SenderSTUN
+							}
+							if len(rndv.SenderCandidates) > 0 {
+								regPeer.Candidates = rndv.SenderCandidates
+							}
+							registry.Upsert(regPeer)
+						}
+						if guiMagicSock != nil && rndv.SenderSTUN != "" {
+							guiMagicSock.RegisterPeerEndpoints(rndv.SenderDeviceID, rndv.SenderSTUN, "", "", rndv.SenderCandidates...)
+						}
+
+						if rndv.Phase == "init" {
+							writeDebug(fmt.Sprintf("🤝 [SRHP] Received Rendezvous INIT from %s (%s) — responding ACK", rndv.SenderDeviceID, rndv.SenderSTUN))
+							go func(fromDevID, sessionID, remoteSTUN string, remoteCands []string) {
+								sCtx, sCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+								defer sCancel()
+								_, _, _ = udpPuncher.DiscoverMappedAddress(sCtx)
+								mySTUN := udpPuncher.GetCachedSTUNAddr()
+								myCands := udpPuncher.DiscoverCandidates(sCtx, mySTUN)
+
+								ackPl := &signaling.Payload{
+									DeviceID: myDevID,
+									Rendezvous: &signaling.RendezvousSignal{
+										Phase:            "ack",
+										SessionID:        sessionID,
+										TargetDeviceID:   fromDevID,
+										SenderDeviceID:   myDevID,
+										SenderSTUN:       mySTUN,
+										SenderCandidates: myCands,
+										Timestamp:        time.Now().Unix(),
+									},
+									Timestamp: time.Now(),
+								}
+								for _, sc := range sigChannels {
+									_ = sc.Send(ctx, ackPl)
+								}
+
+								burstTargets := append([]string{remoteSTUN}, remoteCands...)
+								udpPuncher.SendHolePunchBurst(burstTargets, 4)
+							}(rndv.SenderDeviceID, rndv.SessionID, rndv.SenderSTUN, rndv.SenderCandidates)
+						} else if rndv.Phase == "ack" {
+							writeDebug(fmt.Sprintf("🤝 [SRHP] Received Rendezvous ACK from %s (%s) — firing burst", rndv.SenderDeviceID, rndv.SenderSTUN))
+							go func(fromDevID, remoteSTUN string, remoteCands []string) {
+								burstTargets := append([]string{remoteSTUN}, remoteCands...)
+								udpPuncher.SendHolePunchBurst(burstTargets, 4)
+							}(rndv.SenderDeviceID, rndv.SenderSTUN, rndv.SenderCandidates)
+						}
+					}
+					if p.VirtualIP == "" || p.PublicKey == "" {
+						continue
+					}
 				}
 
 				// RemoteDiag: beta cluster diagnostics and update orchestration

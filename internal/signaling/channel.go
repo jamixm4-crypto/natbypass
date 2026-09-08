@@ -129,6 +129,17 @@ type SymPunchSignal struct {
 }
 
 // RemoteDiagSignal is used for remote cluster diagnostics collection and update orchestration in beta builds.
+// RendezvousSignal coordinates on-demand synchronized bilateral hole-punching between peers.
+type RendezvousSignal struct {
+	Phase            string   `json:"phase"`                       // "init" | "ack"
+	SessionID        string   `json:"session_id"`                  // unique session identifier
+	TargetDeviceID   string   `json:"target_device_id"`            // recipient DeviceID
+	SenderDeviceID   string   `json:"sender_device_id"`            // initiator / responder DeviceID
+	SenderSTUN       string   `json:"sender_stun"`                 // sender's fresh external STUN address (IP:Port)
+	SenderCandidates []string `json:"sender_candidates,omitempty"` // sender's current socket candidates
+	Timestamp        int64    `json:"timestamp"`
+}
+
 type RemoteDiagSignal struct {
 	Action      string `json:"action"`                // "request_diag", "response_diag", "request_update", "response_update"
 	TargetID    string `json:"target_id,omitempty"`   // empty = all beta nodes in topic, or specific DeviceID
@@ -196,6 +207,9 @@ type Payload struct {
 
 	// RemoteDiag: beta-only remote cluster diagnostics collection and update coordination
 	RemoteDiag *RemoteDiagSignal `json:"remote_diag,omitempty"`
+
+	// Rendezvous: on-demand synchronized bilateral hole-punch coordination
+	Rendezvous *RendezvousSignal `json:"rendezvous,omitempty"`
 }
 
 
@@ -237,6 +251,8 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		CamelNATDelta         *int              `json:"natDelta"`
 		UpperRemoteDiag       *RemoteDiagSignal `json:"RemoteDiag"`
 		CamelRemoteDiag       *RemoteDiagSignal `json:"remoteDiag"`
+		UpperRendezvous       *RendezvousSignal `json:"Rendezvous"`
+		CamelRendezvous       *RendezvousSignal `json:"rendezvous"`
 		*Alias
 	}{
 		Alias: (*Alias)(p),
@@ -246,6 +262,13 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 	}
 	if p.DeviceID == "" && aux.UpperDeviceID != "" {
 		p.DeviceID = aux.UpperDeviceID
+	}
+	if p.Rendezvous == nil {
+		if aux.UpperRendezvous != nil {
+			p.Rendezvous = aux.UpperRendezvous
+		} else if aux.CamelRendezvous != nil {
+			p.Rendezvous = aux.CamelRendezvous
+		}
 	}
 	// DirectP2P, ActiveEndpoint, and PingMs are local network observations of THIS node.
 	// They must NEVER be adopted from a remote peer's signaling beacon.

@@ -1126,6 +1126,30 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	return p.SendHolePunchProbeWithDelta(targetAddr, 0)
 }
 
+// SendHolePunchBurst sends coordinated burst hole-punch probes to multiple candidate targets
+// with micro-sleeps (15-25ms) between rounds to pierce NAT firewalls on both sides.
+func (p *UDPPuncher) SendHolePunchBurst(targets []string, bursts int) {
+	if p == nil || len(targets) == 0 {
+		return
+	}
+	if bursts <= 0 {
+		bursts = 3
+	}
+	if bursts > 8 {
+		bursts = 8
+	}
+	for b := 0; b < bursts; b++ {
+		for _, tgt := range targets {
+			if tgt != "" {
+				_ = p.SendHolePunchProbe(tgt)
+			}
+		}
+		if b < bursts-1 {
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+}
+
 
 // StartKeepAliveLoop запускает автоматическую отправку keepalive для активных пиров
 func (p *UDPPuncher) StartKeepAliveLoop() {
