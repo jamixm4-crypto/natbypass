@@ -365,8 +365,14 @@ collectLoop:
 
 				if r.Action == "response_update" {
 					if r.Status == "updating" {
-						fmt.Printf(colorYellow+"  [⚡] Узел %s (%s/%s v%s): %s\n"+colorReset,
-							r.SenderID, r.OS, r.Arch, r.Version, r.Payload)
+						if !exists {
+							vStr := r.Version
+							if !strings.HasPrefix(vStr, "v") {
+								vStr = "v" + vStr
+							}
+							fmt.Printf(colorYellow+"  [⚡] Узел %s (%s/%s %s): %s\n"+colorReset,
+								r.SenderID, r.OS, r.Arch, vStr, r.Payload)
+						}
 					} else {
 						fmt.Printf(colorGreen+"  [✓] Узел %s: Обновление завершено (%s)! Результат: %s\n"+colorReset,
 							r.SenderID, r.Status, r.Payload)
