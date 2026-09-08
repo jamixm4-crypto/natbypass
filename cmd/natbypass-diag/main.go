@@ -167,12 +167,20 @@ func isBeta7OrNewer(ver string) bool {
 	if !strings.Contains(vLower, "beta") {
 		return false
 	}
-	for _, old := range []string{"beta1", "beta2", "beta3", "beta4", "beta5", "beta6"} {
-		if strings.Contains(vLower, old) {
-			return false
-		}
+	// Any 1.9.225+ or newer version supports RemoteDiag
+	if strings.Contains(vLower, "1.9.225") || strings.Contains(vLower, "1.9.226") || strings.Contains(vLower, "1.10.") || strings.Contains(vLower, "2.0.") {
+		return true
 	}
-	return true
+	// In 1.9.224 series, RemoteDiag was introduced in beta7
+	if strings.Contains(vLower, "1.9.224") {
+		for _, old := range []string{"beta1", "beta2", "beta3", "beta4", "beta5", "beta6"} {
+			if strings.Contains(vLower, old) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func waitForEnter(reader *bufio.Reader) {
