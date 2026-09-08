@@ -47,6 +47,7 @@ import (
 var (
 	magicSock        *network.MagicSock
 	tcpDirectMgr     *network.TCPDirectManager
+	decoyMgr         *network.DecoyManager
 	wssClient        *relay.WSSRelayClient
 	udpRelay         *relay.UDPRelayClient
 	triggerPublishCh = make(chan struct{}, 10)
@@ -591,6 +592,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		onInboundPacket := func(payload []byte, directAddr *net.UDPAddr, isTCP bool, isRelay bool) {
 			if len(payload) < 20 {
 				return
+			}
+			// Unwrap 2-byte length prefix if packet was sent with Amnezia 3.x trailer padding format
+			if len(payload) >= 22 && payload[0]>>4 != 4 {
+				pLen := int(binary.BigEndian.Uint16(payload[:2]))
+				if pLen >= 20 && pLen+2 <= len(payload) && payload[2]>>4 == 4 {
+					payload = payload[2 : 2+pLen]
+				}
 			}
 			if payload[0]>>4 != 4 {
 				return // Must be IPv4
@@ -1655,6 +1663,8 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		if tcpPort, err := tcpDirectMgr.StartListener(desiredTCPPort); err == nil {
 			log.Info().Int("port", tcpPort).Str("mode", tcpDirectMgr.TransportMode()).Msg("Direct P2P TCP (ShadowTLS) listener active")
 		}
+		decoyMgr = network.NewDecoyManager(network.DefaultDecoyConfig(), tcpDirectMgr)
+		decoyMgr.Start(ctx)
 	}
 
 	return puncher, ipDisc

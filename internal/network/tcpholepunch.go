@@ -551,6 +551,17 @@ func (m *TCPDirectManager) HasConn(deviceID string) bool {
 	return ok
 }
 
+// ListConns returns a list of peer device IDs with active TCP connections.
+func (m *TCPDirectManager) ListConns() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	res := make([]string, 0, len(m.conns))
+	for id := range m.conns {
+		res = append(res, id)
+	}
+	return res
+}
+
 // RegisterConn registers a newly established TCP connection and starts reading packets.
 func (m *TCPDirectManager) RegisterConn(deviceID string, conn net.Conn, onPacket func(remoteAddr *net.UDPAddr, payload []byte)) {
 	if onPacket == nil {

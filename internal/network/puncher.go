@@ -24,6 +24,7 @@ import (
 
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
+	"github.com/natbypass/natbypass/internal/transport/quic"
 	"github.com/pion/stun/v2"
 )
 
@@ -102,6 +103,7 @@ type UDPPuncher struct {
 	awgVersion     string
 	awgHandler     AWGPacketHandler
 	trafficShaper   *TrafficShaper
+	pacer          *AdaptivePacer
 	conn         *net.UDPConn
 	localPort    int
 	mappedIP     net.IP
@@ -276,6 +278,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		lastProbeMap:    make(map[string]time.Time),
 		lastCleanupTime: time.Now(),
 		pingRateLimiter:  NewIPRateLimiter(60.0, 15.0),
+		pacer:            NewAdaptivePacer(),
 	}
 
 	// Start packet processing loop
@@ -1282,9 +1285,31 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 				_, _ = rand.Read(padded[2+len(payload):])
 				payloadToEncrypt = padded
 			}
+		} else {
+			// Dynamic Packet Size Obfuscation (Anti-Flow Analysis for TSPU/DPI)
+			p.mu.Lock()
+			shaper := p.trafficShaper
+			p.mu.Unlock()
+			if shaper != nil && shaper.IsEnabled() {
+				payloadToEncrypt = shaper.ApplyAdaptivePadding(payload)
+			} else if len(payload) < 512 {
+				// Default light jitter padding for small packets (<512B) to mask keystrokes / interactive traffic
+				var b [1]byte
+				_, _ = rand.Read(b[:])
+				padLen := 16 + int(b[0]%48) // 16-63 bytes
+				padded := make([]byte, len(payload)+padLen)
+				copy(padded, payload)
+				_, _ = rand.Read(padded[len(payload):])
+				payloadToEncrypt = padded
+			}
 		}
 
 		if enc, encErr := crypto.EncryptSelf(payloadToEncrypt, cKey); encErr == nil && len(enc) > 0 {
+			if p.pacer != nil {
+				p.pacer.Pace()
+				p.pacer.RecordSent(len(enc))
+			}
+
 			p.mu.Lock()
 			shaper := p.trafficShaper
 			p.mu.Unlock()
@@ -1312,6 +1337,51 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 	}
 
 	_, err = p.conn.WriteToUDP(fullPkt, rAddr)
+	return err
+}
+
+// SendDataPacketWithQUIC wraps and transmits an IP packet inside an RFC 9000 1-RTT Short Header QUIC datagram.
+// Camouflages packet flow as legitimate HTTP/3 / QUIC traffic.
+func (p *UDPPuncher) SendDataPacketWithQUIC(targetAddr string, payload []byte) error {
+	if targetAddr == "" || p.conn == nil || len(payload) == 0 {
+		return nil
+	}
+	rAddr, err := p.resolveAddr(targetAddr)
+	if err != nil {
+		return err
+	}
+
+	p.cipherMu.RLock()
+	cKey := p.cipherKey
+	hasCKey := p.hasCipherKey
+	p.cipherMu.RUnlock()
+
+	if !hasCKey {
+		return p.SendDataPacket(targetAddr, payload)
+	}
+
+	if p.pacer != nil {
+		p.pacer.Pace()
+	}
+
+	pkt, err := quic.BuildQUICDataPacket(nil, 1, payload, cKey)
+	if err != nil {
+		return err
+	}
+
+	if p.pacer != nil {
+		p.pacer.RecordSent(len(pkt))
+	}
+
+	p.mu.Lock()
+	shaper := p.trafficShaper
+	p.mu.Unlock()
+
+	if shaper != nil && shaper.IsEnabled() {
+		return shaper.SendPacket(p.conn, rAddr, pkt)
+	}
+
+	_, err = p.conn.WriteToUDP(pkt, rAddr)
 	return err
 }
 
@@ -1417,6 +1487,10 @@ func (p *UDPPuncher) handlePong(data string, remoteAddr *net.UDPAddr) {
 	rtt := time.Since(time.Unix(0, sentNano))
 	if rtt <= 0 {
 		rtt = 1 * time.Millisecond
+	}
+
+	if p.pacer != nil {
+		p.pacer.RecordAck(rtt)
 	}
 
 	// Track port delta for Symmetric NAT port prediction
@@ -1525,6 +1599,18 @@ func (p *UDPPuncher) readLoop() {
 						p.handlePong(decStr, remoteAddr)
 						continue
 					}
+				}
+			}
+		case n >= 31 && (buf[0]&0xC0 == 0x40):
+			// RFC 9000 QUIC 1-RTT Short Header data packet (camouflaged HTTP/3 traffic)
+			p.cipherMu.RLock()
+			cKey := p.cipherKey
+			hasCKey := p.hasCipherKey
+			p.cipherMu.RUnlock()
+			if hasCKey {
+				if dec, _, _, qErr := quic.ParseQUICDataPacket(buf[:n], cKey); qErr == nil && len(dec) > 0 {
+					p.handleTunnelPacket(dec, remoteAddr)
+					continue
 				}
 			}
 		case strings.HasPrefix(string(buf[:n]), constants.PingPrefix):
@@ -1652,6 +1738,14 @@ func (p *UDPPuncher) SetTrafficShaper(shaper *TrafficShaper) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.trafficShaper = shaper
+}
+
+// GetPacer returns the AdaptivePacer instance used for congestion control and pacing.
+func (p *UDPPuncher) GetPacer() *AdaptivePacer {
+	if p == nil {
+		return nil
+	}
+	return p.pacer
 }
 
 func (p *UDPPuncher) HopPort() (int, error) {

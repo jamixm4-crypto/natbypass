@@ -116,3 +116,74 @@ func (s *TrafficShaper) SendPacket(conn *net.UDPConn, addr *net.UDPAddr, payload
 
 	return sendErr
 }
+
+// AdaptivePadding computes the dynamic trailer padding length for a packet.
+// It quantizes packet sizes into discrete bins [128, 256, 512, 1024, 1360]
+// and adds random jitter (0-31 bytes) to defeat statistical flow analysis (histogram fingerprinting) by DPI/TSPU.
+// If payload is already near or above maxFrameSize, it adds minimal padding to prevent MTU fragmentation.
+func (s *TrafficShaper) AdaptivePadding(payloadLen int) int {
+	if payloadLen <= 0 {
+		return 0
+	}
+	s.mu.RLock()
+	maxSize := s.maxFrameSize
+	s.mu.RUnlock()
+
+	if maxSize <= 0 {
+		maxSize = 1350
+	}
+
+	// If packet already exceeds target max size, don't pad
+	if payloadLen >= maxSize {
+		return 0
+	}
+
+	// Discrete bins for packet size quantization
+	bins := [...]int{128, 256, 512, 1024, maxSize}
+	targetBin := maxSize
+	for _, b := range bins {
+		if payloadLen <= b {
+			targetBin = b
+			break
+		}
+	}
+
+	diff := targetBin - payloadLen
+	if diff <= 0 {
+		return 0
+	}
+
+	// Add random variation within the bin so packets form a continuous distribution rather than exact multiples
+	var jitterByte [1]byte
+	_, _ = rand.Read(jitterByte[:])
+	jitter := int(jitterByte[0] % 32) // 0-31 bytes
+
+	padLen := diff
+	if padLen > jitter {
+		padLen = padLen - jitter
+	}
+	if payloadLen+padLen > maxSize {
+		padLen = maxSize - payloadLen
+	}
+	if padLen < 0 {
+		padLen = 0
+	}
+	return padLen
+}
+
+// ApplyAdaptivePadding appends random cryptographic padding to an IPv4 payload
+// without altering the IPv4 Total Length field, allowing the receiver to cleanly strip it.
+func (s *TrafficShaper) ApplyAdaptivePadding(payload []byte) []byte {
+	if len(payload) == 0 {
+		return payload
+	}
+	padLen := s.AdaptivePadding(len(payload))
+	if padLen <= 0 {
+		return payload
+	}
+
+	padded := make([]byte, len(payload)+padLen)
+	copy(padded, payload)
+	_, _ = rand.Read(padded[len(payload):])
+	return padded
+}

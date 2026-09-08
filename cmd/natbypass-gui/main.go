@@ -522,6 +522,7 @@ var (
 	ipDisc           *network.Discoverer
 	udpPuncher       *network.UDPPuncher
 	guiTCPDirectMgr  *network.TCPDirectManager
+	guiDecoyMgr      *network.DecoyManager
 	activeMQTT       *signaling.MQTTChannel
 	uiServer         *webui.Server
 	tunDev           *tunnel.Device
@@ -4473,6 +4474,8 @@ func startEngineFromConfig(c *config.Config) {
 		if tcpPort, err := guiTCPDirectMgr.StartListener(desiredTCPPort); err == nil {
 			writeDebug(fmt.Sprintf("Direct P2P TCP (ShadowTLS) listener active on :%d [mode=%s]", tcpPort, guiTCPDirectMgr.TransportMode()))
 		}
+		guiDecoyMgr = network.NewDecoyManager(network.DefaultDecoyConfig(), guiTCPDirectMgr)
+		guiDecoyMgr.Start(ctx)
 		writeDebug(fmt.Sprintf("UDPPuncher слушает локальный UDP порт :%d", puncher.LocalPort()))
 		pPort := puncher.LocalPort()
 		go func() {
@@ -4514,6 +4517,12 @@ func startEngineFromConfig(c *config.Config) {
 
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
 		onInboundPacket := func(srcAddr *net.UDPAddr, payload []byte, isTCP bool, isRelay bool) {
+			if len(payload) >= 22 && payload[0]>>4 != 4 {
+				pLen := int(binary.BigEndian.Uint16(payload[:2]))
+				if pLen >= 20 && pLen+2 <= len(payload) && payload[2]>>4 == 4 {
+					payload = payload[2 : 2+pLen]
+				}
+			}
 			if len(payload) < 20 || payload[0]>>4 != 4 {
 				return
 			}
