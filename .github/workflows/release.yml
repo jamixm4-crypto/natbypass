@@ -139,5 +139,24 @@ jobs:
           $diff = git status --porcelain
           if ($diff) {
             git commit -m "chore(mirror): update release manifests for ${{ github.ref_name }} [skip ci]"
-            git push origin main
+            $pushed = $false
+            for ($i = 0; $i -lt 5; $i++) {
+              git fetch origin main
+              git rebase origin/main
+              git push origin main
+              if ($LASTEXITCODE -eq 0) {
+                $pushed = $true
+                break
+              }
+              Start-Sleep -Seconds 3
+            }
+            if (-not $pushed) {
+              Write-Host "Warning: Could not push mirror manifest (possibly updated by concurrent run). Checking remote..."
+              git fetch origin main
+              if (Test-Path "mirror/releases/${{ github.ref_name }}.json") {
+                Write-Host "Manifest for ${{ github.ref_name }} is already present on remote origin/main. Success."
+              } else {
+                exit 1
+              }
+            }
           }
