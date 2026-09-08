@@ -264,7 +264,12 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	if existing.NATBlocked && !newer.DirectP2P {
 		newer.NATBlocked = true
 	}
-	if existing.ProbeCount > 0 && newer.ProbeCount == 0 {
+	// Reset backoff if peer changed its STUN address or returned from offline/restart
+	endpointChanged := newer.STUNAddr != "" && existing.STUNAddr != "" && newer.STUNAddr != existing.STUNAddr
+	peerRecovered := now.Sub(existing.LastSeen) > 15*time.Second
+	if endpointChanged || peerRecovered {
+		newer.ProbeCount = 0
+	} else if existing.ProbeCount > 0 && newer.ProbeCount == 0 {
 		newer.ProbeCount = existing.ProbeCount
 	}
 

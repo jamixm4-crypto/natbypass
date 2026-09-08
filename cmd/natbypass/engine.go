@@ -957,6 +957,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							delete(activeSymSessions, p.DeviceID)
 						} else {
 							// R3: Backoff logic for unconnected peers (UDP hole punch probes only)
+							if p.ProbeCount == 0 {
+								delete(probeBackoff, p.DeviceID)
+							}
 							if !isForceTCP && puncher != nil {
 								udpInBackoff := false
 								if until, ok := probeBackoff[p.DeviceID]; ok && now.Before(until) {

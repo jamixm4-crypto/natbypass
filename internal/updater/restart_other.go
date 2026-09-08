@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -47,11 +48,20 @@ func hasBinaryInPath(name string) bool {
 
 // RestartService перезапускает сервис на Linux/router платформах безопасно.
 //
-// Особенности реализации для BusyBox (Keenetic MIPS, OpenWrt):
-//   - sleep использует только целые числа (BusyBox не принимает дробные, напр. 1.5)
-//   - nohup опционален — используется setsid или просто двойной fork как fallback
-//   - двойной fork через "sh -c '... &'" гарантирует отсоединение от текущего PID
+// Особенности реализации:
+//   - systemd: использует 'systemctl --no-block restart natbypass'. Запрос ставится
+//     в очередь PID 1, что исключает потерю службы при выходе текущего cgroup.
+//   - BusyBox (Keenetic MIPS, OpenWrt): экранирует SIGHUP через 'trap "" HUP INT TERM',
+//     предотвращая сброс дочернего процесса при завершении родительского процесса.
 func RestartService(execPath string) {
+	// 1. Linux systemd: асинхронный перезапуск напрямую через PID 1
+	if isSystemdService() {
+		_ = exec.Command("systemctl", "--no-block", "restart", "natbypass").Run()
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	}
+
+	// 2. Роутеры (Keenetic Entware / OpenWrt / SysVinit / прямое выполнение)
 	var restartCmd string
 	if _, err := os.Stat("/opt/etc/init.d/S99natbypass"); err == nil {
 		// Keenetic Entware
@@ -59,9 +69,6 @@ func RestartService(execPath string) {
 	} else if _, err := os.Stat("/etc/init.d/natbypass"); err == nil {
 		// OpenWrt Procd / SysVinit
 		restartCmd = "/etc/init.d/natbypass restart"
-	} else if isSystemdService() {
-		// Linux systemd (только если служба реально управляется systemd)
-		restartCmd = "systemctl restart natbypass"
 	} else {
 		// Прямой перезапуск бинарника с сохранением оригинальных аргументов (включая --config)
 		var escapedArgs []string
@@ -75,33 +82,26 @@ func RestartService(execPath string) {
 		restartCmd = strings.Join(escapedArgs, " ")
 	}
 
-	// Строим BusyBox-совместимый detached-скрипт.
-	// ВАЖНО: sleep должен использовать только целое число секунд —
-	// BusyBox sleep не принимает дробные значения (sleep 1.5 завершается ошибкой,
-	// прерывая весь пайп и служба не запускается).
+	// Строим BusyBox-совместимый detached-скрипт с защитой от SIGHUP
 	var detachedScript string
 	switch {
 	case hasBinaryInPath("nohup"):
-		detachedScript = fmt.Sprintf("(sleep 2; nohup %s >/dev/null 2>&1 &) &", restartCmd)
+		detachedScript = fmt.Sprintf("trap '' HUP INT TERM; (sleep 2; nohup %s >/dev/null 2>&1 &) &", restartCmd)
 	case hasBinaryInPath("setsid"):
-		// BusyBox без nohup, но с setsid (некоторые OpenWrt/Entware сборки)
-		detachedScript = fmt.Sprintf("(sleep 2; setsid %s >/dev/null 2>&1 &) &", restartCmd)
+		detachedScript = fmt.Sprintf("trap '' HUP INT TERM; (sleep 2; setsid %s >/dev/null 2>&1 &) &", restartCmd)
 	default:
-		// Минимальный вариант: двойной fork через вложенный &
-		// Работает на любом POSIX sh, включая BusyBox ash
-		detachedScript = fmt.Sprintf("(sleep 2; %s >/dev/null 2>&1 &) &", restartCmd)
+		detachedScript = fmt.Sprintf("trap '' HUP INT TERM; (sleep 2; %s >/dev/null 2>&1 &) &", restartCmd)
 	}
 
 	cmd := exec.Command("sh", "-c", detachedScript)
-	// Явно отсоединяем все стандартные дескрипторы, чтобы sh не унаследовал
-	// открытые сокеты / pipe'ы текущего процесса natbypass
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
+	cmd.Dir = filepath.Dir(execPath)
 	_ = cmd.Start()
 
-	// Даём subshell зарегистрироваться в планировщике ядра, затем завершаем текущий процесс
-	time.Sleep(300 * time.Millisecond)
+	// Даём subshell зарегистрироваться в ядре, затем завершаем текущий процесс
+	time.Sleep(500 * time.Millisecond)
 	os.Exit(0)
 }
 

@@ -45,3 +45,36 @@ func TestDoubleRatchet_PFS(t *testing.T) {
 		t.Fatalf("expected %s, got %s", string(msg1), string(dec1))
 	}
 }
+
+func TestSymmetricKDFChain_MultiMessagePFS(t *testing.T) {
+	secret := make([]byte, 32)
+	for i := range secret {
+		secret[i] = byte(i + 1)
+	}
+
+	alice, err := NewSessionState(secret)
+	if err != nil {
+		t.Fatalf("failed to create alice session: %v", err)
+	}
+	bob, err := NewSessionState(secret)
+	if err != nil {
+		t.Fatalf("failed to create bob session: %v", err)
+	}
+	bob.ReceivingChain.ChainKey = make([]byte, len(alice.SendingChain.ChainKey))
+	copy(bob.ReceivingChain.ChainKey, alice.SendingChain.ChainKey)
+
+	for i := 1; i <= 5; i++ {
+		msg := []byte(bytes.Repeat([]byte{byte(i)}, 100))
+		ct, err := alice.Encrypt(msg)
+		if err != nil {
+			t.Fatalf("encrypt step %d failed: %v", i, err)
+		}
+		pt, err := bob.Decrypt(ct)
+		if err != nil {
+			t.Fatalf("decrypt step %d failed: %v", i, err)
+		}
+		if !bytes.Equal(msg, pt) {
+			t.Fatalf("step %d payload mismatch", i)
+		}
+	}
+}

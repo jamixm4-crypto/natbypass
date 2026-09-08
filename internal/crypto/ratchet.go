@@ -8,7 +8,6 @@
 package crypto
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
@@ -19,7 +18,10 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// SessionState реализует Double Ratchet Algorithm для Perfect Forward Secrecy.
+// SessionState (также доступен как SymmetricKDFChain) реализует симметричную KDF-цепочку
+// (Symmetric KDF Chain) для обеспечения свойства Perfect Forward Secrecy (PFS).
+// На каждом сообщении сессионный ключ деривируется через стандартный HKDF-Expand (RFC 5869),
+// после чего предыдущий ключ цепочки немедленно перезаписывается новым значением.
 type SessionState struct {
 	RootKey        []byte
 	SendingChain   Chain
@@ -28,13 +30,30 @@ type SessionState struct {
 	mu             sync.Mutex
 }
 
+// SymmetricKDFChain — точный криптографический псевдоним для SessionState.
+type SymmetricKDFChain = SessionState
+
 // Chain представляет KDF-цепочку симметричных сессионных ключей.
 type Chain struct {
 	ChainKey []byte
 	Counter  uint32
 }
 
-// NewSessionState инициализирует Double Ratchet сессию с общим мастер-ключом.
+// deriveStepKeys выполняет шаг KDF-цепочки по стандарту RFC 5869 (HKDF-Expand).
+// Генерирует следующий ключ цепочки (nextChainKey) и одноразовый ключ сообщения (msgKey).
+func deriveStepKeys(chainKey []byte) (nextChainKey, msgKey []byte, err error) {
+	nextChainKey = make([]byte, 32)
+	msgKey = make([]byte, 32)
+	if _, err := io.ReadFull(hkdf.Expand(sha256.New, chainKey, []byte("NatBypass-Chain-Next-v1")), nextChainKey); err != nil {
+		return nil, nil, fmt.Errorf("hkdf next chain key derivation failed: %w", err)
+	}
+	if _, err := io.ReadFull(hkdf.Expand(sha256.New, chainKey, []byte("NatBypass-Msg-Key-v1")), msgKey); err != nil {
+		return nil, nil, fmt.Errorf("hkdf msg key derivation failed: %w", err)
+	}
+	return nextChainKey, msgKey, nil
+}
+
+// NewSessionState инициализирует симметричную KDF-цепочку (PFS Session) с общим мастер-ключом.
 func NewSessionState(sharedSecret []byte) (*SessionState, error) {
 	if len(sharedSecret) < 32 {
 		return nil, fmt.Errorf("shared secret must be at least 32 bytes")
@@ -68,18 +87,16 @@ func NewSessionState(sharedSecret []byte) (*SessionState, error) {
 	}, nil
 }
 
-// Encrypt шифрует открытый текст с ротацией ключей в цепочке отправки.
+// Encrypt шифрует открытый текст с одноразовой ротацией ключей через HKDF-Expand.
 func (s *SessionState) Encrypt(plaintext []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	mac := hmac.New(sha256.New, s.SendingChain.ChainKey)
-	mac.Write([]byte{0x01})
-	msgKey := mac.Sum(nil)
-
-	macNext := hmac.New(sha256.New, s.SendingChain.ChainKey)
-	macNext.Write([]byte{0x02})
-	s.SendingChain.ChainKey = macNext.Sum(nil)
+	nextChainKey, msgKey, err := deriveStepKeys(s.SendingChain.ChainKey)
+	if err != nil {
+		return nil, err
+	}
+	s.SendingChain.ChainKey = nextChainKey
 	s.SendingChain.Counter++
 	s.MessageNumber++
 
@@ -97,20 +114,16 @@ func (s *SessionState) Encrypt(plaintext []byte) ([]byte, error) {
 	return append(nonce, ciphertext...), nil
 }
 
-// Decrypt расшифровывает сообщение с ротацией ключей в цепочке приема.
+// Decrypt расшифровывает сообщение с одноразовой ротацией ключей через HKDF-Expand.
 func (s *SessionState) Decrypt(data []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Ключ сообщения через HMAC-SHA256
-	mac := hmac.New(sha256.New, s.ReceivingChain.ChainKey)
-	mac.Write([]byte{0x01})
-	msgKey := mac.Sum(nil)
-
-	// Ротация цепочки ключей
-	macNext := hmac.New(sha256.New, s.ReceivingChain.ChainKey)
-	macNext.Write([]byte{0x02})
-	s.ReceivingChain.ChainKey = macNext.Sum(nil)
+	nextChainKey, msgKey, err := deriveStepKeys(s.ReceivingChain.ChainKey)
+	if err != nil {
+		return nil, err
+	}
+	s.ReceivingChain.ChainKey = nextChainKey
 	s.ReceivingChain.Counter++
 
 	// Создаём AEAD из message key

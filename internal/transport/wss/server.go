@@ -20,11 +20,20 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	// maxWSSAuthClockSkew is the maximum allowed skew between client and server clocks (in seconds).
+	// 45 seconds provides ample tolerance for NTP time drift while preventing replay attacks.
+	maxWSSAuthClockSkew = 45
+)
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  32768,
 	WriteBufferSize: 32768,
+	// CheckOrigin returns true because NatBypass WSS relay is strictly an internal daemon-to-daemon
+	// transport (not accessed by browser WebApps/cross-origin pages). Authentication is enforced
+	// cryptographically via HMAC-SHA256 signature in X-Auth-Token and timestamp validation.
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for mesh network tunnel
+		return true
 	},
 }
 
@@ -60,9 +69,10 @@ func (s *WSSRelayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate timestamp within 10 minutes to prevent replay attacks
+	// Validate timestamp within 45 seconds to strictly prevent replay attacks
 	ts, err := strconv.ParseInt(tsStr, 10, 64)
-	if err != nil || time.Now().Unix()-ts > 600 || ts-time.Now().Unix() > 600 {
+	now := time.Now().Unix()
+	if err != nil || now-ts > maxWSSAuthClockSkew || ts-now > maxWSSAuthClockSkew {
 		http.Error(w, "Unauthorized: invalid or expired timestamp", http.StatusUnauthorized)
 		return
 	}

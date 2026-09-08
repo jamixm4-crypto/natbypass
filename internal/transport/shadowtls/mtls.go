@@ -49,7 +49,7 @@ func GenerateMeshTLSCertificate(deviceID, vip string, networkKey [32]byte) (tls.
 			Organization: []string{meshTag},
 		},
 		NotBefore:             time.Now().Add(-1 * time.Hour),
-		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour), // 10 years
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // 1 year (safer rotation window against compromise)
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,

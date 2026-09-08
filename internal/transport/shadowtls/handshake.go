@@ -102,7 +102,9 @@ func BuildClientHello(sni string, networkKey [32]byte) ([]byte, error) {
 	// 4. Key Share Extension (X25519 mock public key)
 	extBuf.Write([]byte{0x00, 0x33}) // ExtKeyShare
 	var keyShareData [32]byte
-	_, _ = io.ReadFull(rand.Reader, keyShareData[:])
+	if _, err := io.ReadFull(rand.Reader, keyShareData[:]); err != nil {
+		return nil, fmt.Errorf("shadowtls csprng key share failure: %w", err)
+	}
 	binary.Write(extBuf, binary.BigEndian, uint16(36)) // ext len
 	binary.Write(extBuf, binary.BigEndian, uint16(34)) // client_shares len
 	extBuf.Write([]byte{0x00, 0x1d})                   // X25519
@@ -162,7 +164,9 @@ func BuildServerHello(clientRandom [32]byte, clientSessionID [32]byte, networkKe
 
 	extBuf.Write([]byte{0x00, 0x33}) // KeyShare
 	var sKeyShare [32]byte
-	_, _ = io.ReadFull(rand.Reader, sKeyShare[:])
+	if _, err := io.ReadFull(rand.Reader, sKeyShare[:]); err != nil {
+		return nil, fmt.Errorf("shadowtls server csprng key share failure: %w", err)
+	}
 	binary.Write(extBuf, binary.BigEndian, uint16(36))
 	extBuf.Write([]byte{0x00, 0x1d})                   // X25519
 	binary.Write(extBuf, binary.BigEndian, uint16(32)) // Key len

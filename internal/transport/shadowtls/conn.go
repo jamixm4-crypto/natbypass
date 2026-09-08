@@ -55,14 +55,18 @@ func (c *ShadowTLSConn) WritePacket(payload []byte) error {
 
 	// 1. Calculate dynamic random padding (16..48 bytes)
 	var padRand [1]byte
-	_, _ = rand.Read(padRand[:])
+	if _, err := io.ReadFull(rand.Reader, padRand[:]); err != nil {
+		return fmt.Errorf("shadowtls csprng failure: %w", err)
+	}
 	padLen := 16 + int(padRand[0]%33)
 
 	realLen := uint16(len(payload))
 	plainPkt := make([]byte, 2+len(payload)+padLen)
 	binary.BigEndian.PutUint16(plainPkt[:2], realLen)
 	copy(plainPkt[2:], payload)
-	_, _ = rand.Read(plainPkt[2+len(payload):])
+	if _, err := io.ReadFull(rand.Reader, plainPkt[2+len(payload):]); err != nil {
+		return fmt.Errorf("shadowtls padding csprng failure: %w", err)
+	}
 
 	// 2. Encrypt payload using ChaCha20-Poly1305 (NaCl SecretBox / EncryptSelf)
 	encPayload, err := crypto.EncryptSelf(plainPkt, c.key)

@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"time"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -117,7 +118,10 @@ func DefaultAWGParams() AWGParams {
 // GenerateAWG31BalancedParams генерирует сбалансированные параметры AWG 3.1
 func GenerateAWG31BalancedParams() AWGParams {
 	var key [32]byte
-	_, _ = rand.Read(key[:])
+	if _, err := io.ReadFull(rand.Reader, key[:]); err != nil {
+		h := sha256.Sum256([]byte(fmt.Sprintf("awg-key-fallback-%d", time.Now().UnixNano())))
+		copy(key[:], h[:])
+	}
 
 	return AWGParams{
 		Version: AWGVersion31,
@@ -179,6 +183,11 @@ func GenerateAWG31StrictParams() AWGParams {
 
 	// Strict: отключаем cookies (защита от active probing)
 	params.DisableCookies = true
+
+	// Strict: усиленный junk-train против ТСПУ (Jc = 4..5, Jmax = 120 для разрушения сигнатур WireGuard)
+	params.Jc = 5
+	params.Jmin = 40
+	params.Jmax = 120
 
 	// Strict: больший content padding
 	params.ContentPaddingAdditionMax = 100
@@ -253,7 +262,13 @@ func DeriveAWGParamsFromKey(networkKey string) AWGParams {
 
 func randomUint32() uint32 {
 	var b [4]byte
-	_, _ = rand.Read(b[:])
+	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+		v := uint32(time.Now().UnixNano() ^ 0x5A5A5A5A)
+		if v < 1000 {
+			v += 1000
+		}
+		return v
+	}
 	val := binary.BigEndian.Uint32(b[:])
 	if val < 1000 {
 		val += 1000
@@ -276,17 +291,28 @@ func GenerateRandomWGPort() int {
 
 // GenerateRandomAWGParams генерирует случайные валидные параметры AWG
 func GenerateRandomAWGParams() AWGParams {
-	jcBig, _ := rand.Int(rand.Reader, big.NewInt(6))
-	jminBig, _ := rand.Int(rand.Reader, big.NewInt(50))
-	jmaxExtra, _ := rand.Int(rand.Reader, big.NewInt(100))
-	s1Big, _ := rand.Int(rand.Reader, big.NewInt(100))
-	s2Big, _ := rand.Int(rand.Reader, big.NewInt(100))
+	jc := 4
+	if jcBig, err := rand.Int(rand.Reader, big.NewInt(5)); err == nil {
+		jc = int(jcBig.Int64()) + 3 // 3..7
+	}
+	jmin := 40
+	if jminBig, err := rand.Int(rand.Reader, big.NewInt(30)); err == nil {
+		jmin = int(jminBig.Int64()) + 30 // 30..60
+	}
+	jmaxExtra := 60
+	if jmaxExtraBig, err := rand.Int(rand.Reader, big.NewInt(60)); err == nil {
+		jmaxExtra = int(jmaxExtraBig.Int64()) + 30 // 30..90
+	}
+	jmax := jmin + jmaxExtra // 60..150
 
-	jc := int(jcBig.Int64()) + 2
-	jmin := int(jminBig.Int64()) + 20
-	jmax := jmin + int(jmaxExtra.Int64()) + 30
-	s1 := int(s1Big.Int64()) + 20
-	s2 := int(s2Big.Int64()) + 20
+	s1 := 40
+	if s1Big, err := rand.Int(rand.Reader, big.NewInt(80)); err == nil {
+		s1 = int(s1Big.Int64()) + 20
+	}
+	s2 := 40
+	if s2Big, err := rand.Int(rand.Reader, big.NewInt(80)); err == nil {
+		s2 = int(s2Big.Int64()) + 20
+	}
 
 	return AWGParams{
 		Version: AWGVersion31,
