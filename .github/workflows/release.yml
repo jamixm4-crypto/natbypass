@@ -99,9 +99,9 @@ jobs:
           gh release view $TAG 2>&1 | Out-Null
           if ($LASTEXITCODE -ne 0) {
             if ($isPre) {
-              gh release create $TAG --title "NatBypass $TAG" --generate-notes --prerelease
+              gh release create $TAG --target "${{ github.sha }}" --title "NatBypass $TAG" --generate-notes --prerelease
             } else {
-              gh release create $TAG --title "NatBypass $TAG" --generate-notes --latest
+              gh release create $TAG --target "${{ github.sha }}" --title "NatBypass $TAG" --generate-notes --latest
             }
           }
 
