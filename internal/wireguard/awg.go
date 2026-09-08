@@ -21,7 +21,6 @@ import (
 	"io"
 	"math/big"
 	"os"
-	"time"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -119,8 +118,7 @@ func DefaultAWGParams() AWGParams {
 func GenerateAWG31BalancedParams() AWGParams {
 	var key [32]byte
 	if _, err := io.ReadFull(rand.Reader, key[:]); err != nil {
-		h := sha256.Sum256([]byte(fmt.Sprintf("awg-key-fallback-%d", time.Now().UnixNano())))
-		copy(key[:], h[:])
+		panic(fmt.Sprintf("wireguard: csprng failure in GenerateAWG31BalancedParams: %v", err))
 	}
 
 	return AWGParams{
@@ -263,11 +261,7 @@ func DeriveAWGParamsFromKey(networkKey string) AWGParams {
 func randomUint32() uint32 {
 	var b [4]byte
 	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
-		v := uint32(time.Now().UnixNano() ^ 0x5A5A5A5A)
-		if v < 1000 {
-			v += 1000
-		}
-		return v
+		panic(fmt.Sprintf("wireguard: csprng failure in randomUint32: %v", err))
 	}
 	val := binary.BigEndian.Uint32(b[:])
 	if val < 1000 {
@@ -284,35 +278,43 @@ func GenerateRandomWGPort() int {
 	delta := big.NewInt(int64(maxPort - minPort + 1))
 	n, err := rand.Int(rand.Reader, delta)
 	if err != nil {
-		return 47820
+		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomWGPort: %v", err))
 	}
 	return minPort + int(n.Int64())
 }
 
 // GenerateRandomAWGParams генерирует случайные валидные параметры AWG
 func GenerateRandomAWGParams() AWGParams {
-	jc := 4
-	if jcBig, err := rand.Int(rand.Reader, big.NewInt(5)); err == nil {
-		jc = int(jcBig.Int64()) + 3 // 3..7
+	jcBig, err := rand.Int(rand.Reader, big.NewInt(5))
+	if err != nil {
+		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
 	}
-	jmin := 40
-	if jminBig, err := rand.Int(rand.Reader, big.NewInt(30)); err == nil {
-		jmin = int(jminBig.Int64()) + 30 // 30..60
-	}
-	jmaxExtra := 60
-	if jmaxExtraBig, err := rand.Int(rand.Reader, big.NewInt(60)); err == nil {
-		jmaxExtra = int(jmaxExtraBig.Int64()) + 30 // 30..90
-	}
-	jmax := jmin + jmaxExtra // 60..150
+	jc := int(jcBig.Int64()) + 3 // 3..7
 
-	s1 := 40
-	if s1Big, err := rand.Int(rand.Reader, big.NewInt(80)); err == nil {
-		s1 = int(s1Big.Int64()) + 20
+	jminBig, err := rand.Int(rand.Reader, big.NewInt(30))
+	if err != nil {
+		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
 	}
-	s2 := 40
-	if s2Big, err := rand.Int(rand.Reader, big.NewInt(80)); err == nil {
-		s2 = int(s2Big.Int64()) + 20
+	jmin := int(jminBig.Int64()) + 30 // 30..60
+
+	jmaxExtraBig, err := rand.Int(rand.Reader, big.NewInt(60))
+	if err != nil {
+		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
 	}
+	jmaxExtra := int(jmaxExtraBig.Int64()) + 30 // 30..90
+	jmax := jmin + jmaxExtra                   // 60..150
+
+	s1Big, err := rand.Int(rand.Reader, big.NewInt(80))
+	if err != nil {
+		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
+	}
+	s1 := int(s1Big.Int64()) + 20
+
+	s2Big, err := rand.Int(rand.Reader, big.NewInt(80))
+	if err != nil {
+		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
+	}
+	s2 := int(s2Big.Int64()) + 20
 
 	return AWGParams{
 		Version: AWGVersion31,
@@ -331,6 +333,16 @@ func GenerateRandomAWGParams() AWGParams {
 	}
 }
 
+// GetRecommendedMTU returns the recommended MTU for a given AWG preset.
+// For "anti_tspu", it returns 1280 to eliminate the standard WireGuard MTU (1420) signature,
+// matching the standard minimum IPv6/tunnel MTU. For other presets, it returns 1420.
+func GetRecommendedMTU(preset string) int {
+	if preset == "anti_tspu" {
+		return 1280
+	}
+	return 1420
+}
+
 // GetAWGParamsByPreset возвращает параметры по имени пресета
 func GetAWGParamsByPreset(preset string) AWGParams {
 	switch preset {
@@ -341,9 +353,12 @@ func GetAWGParamsByPreset(preset string) AWGParams {
 	case "awg20_legacy":
 		return GenerateAWG20LegacyParams()
 	case "anti_tspu":
-		// Anti-TSPU: AWG 2.0 с нетипичными параметрами
+		// Anti-TSPU: AWG 2.0 с нетипичными параметрами против сигнатур ТСПУ
 		params := GenerateAWG20LegacyParams()
 		params.Jc = 5
+		params.Jmin = 40
+		params.Jmax = 120
+		params.S1 = 56
 		params.S2 = 100
 		params.H1 = randomUint32()
 		params.H2 = randomUint32()

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -50,6 +51,7 @@ var (
 	ErrInvalidTLSHandshake = errors.New("shadowtls: invalid TLS 1.3 record")
 	ErrAuthFailed          = errors.New("shadowtls: peer authentication failed (HMAC mismatch)")
 	ErrTimeout             = errors.New("shadowtls: handshake timed out")
+	ErrActiveProbeHandled  = errors.New("shadowtls: unauthenticated active probe safely proxied to fallback host")
 )
 
 // computeHMAC generates a 16-byte HMAC tag over data with key
@@ -339,7 +341,110 @@ func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout tim
 	return false, ErrInvalidTLSHandshake
 }
 
+// ExtractSNI parses the Server Name Indication extension from a TLS ClientHello body (RFC 6066).
+func ExtractSNI(body []byte) string {
+	if len(body) < 42 || body[0] != HandshakeClientHello {
+		return ""
+	}
+	if len(body) < 39 {
+		return ""
+	}
+	sessLen := int(body[38])
+	offset := 39 + sessLen
+	if offset+2 > len(body) {
+		return ""
+	}
+	csLen := int(binary.BigEndian.Uint16(body[offset : offset+2]))
+	offset += 2 + csLen
+	if offset+1 > len(body) {
+		return ""
+	}
+	compLen := int(body[offset])
+	offset += 1 + compLen
+	if offset+2 > len(body) {
+		return ""
+	}
+	extTotalLen := int(binary.BigEndian.Uint16(body[offset : offset+2]))
+	offset += 2
+	extEnd := offset + extTotalLen
+	if extEnd > len(body) {
+		extEnd = len(body)
+	}
+
+	for offset+4 <= extEnd {
+		extType := binary.BigEndian.Uint16(body[offset : offset+2])
+		extLen := int(binary.BigEndian.Uint16(body[offset+2 : offset+4]))
+		offset += 4
+		if offset+extLen > extEnd {
+			break
+		}
+		if extType == ExtServerName && extLen >= 5 {
+			snListLen := int(binary.BigEndian.Uint16(body[offset : offset+2]))
+			if snListLen >= 3 && body[offset+2] == 0x00 { // HostName type
+				nameLen := int(binary.BigEndian.Uint16(body[offset+3 : offset+5]))
+				if offset+5+nameLen <= offset+extLen {
+					return string(body[offset+5 : offset+5+nameLen])
+				}
+			}
+		}
+		offset += extLen
+	}
+	return ""
+}
+
+// ProxyActiveProbe handles unauthenticated active probes by transparently proxying
+// the connection to the authentic SNI host on port 443. This prevents active probing systems
+// (such as TSPU / censors) from detecting a proxy via TCP RST or unexpected connection closure.
+func ProxyActiveProbe(conn net.Conn, initialBytes []byte, sni string) {
+	if sni == "" {
+		sni = DefaultSNI
+	}
+	target := net.JoinHostPort(sni, "443")
+	remoteConn, err := net.DialTimeout("tcp", target, 5*time.Second)
+	if err != nil {
+		// If dial fails, send standard TLS 1.3 Handshake Failure alert (Record Type 0x15)
+		alert := []byte{0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28}
+		_ = conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+		_, _ = conn.Write(alert)
+		time.Sleep(200 * time.Millisecond)
+		_ = conn.Close()
+		return
+	}
+
+	go func() {
+		defer conn.Close()
+		defer remoteConn.Close()
+
+		_ = remoteConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if _, err := remoteConn.Write(initialBytes); err != nil {
+			return
+		}
+		_ = remoteConn.SetDeadline(time.Time{})
+		_ = conn.SetDeadline(time.Time{})
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = io.Copy(remoteConn, conn)
+			if tc, ok := remoteConn.(*net.TCPConn); ok {
+				_ = tc.CloseWrite()
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = io.Copy(conn, remoteConn)
+			if tc, ok := conn.(*net.TCPConn); ok {
+				_ = tc.CloseWrite()
+			}
+		}()
+		wg.Wait()
+	}()
+}
+
 // ServerHandshake handles incoming connection on server side, validates HMAC, and responds.
+// If an unauthenticated probe is detected, it transparently proxies the connection to the
+// authentic SNI target server and returns ErrActiveProbeHandled.
 func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) error {
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	defer conn.SetDeadline(time.Time{})
@@ -349,7 +454,12 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 		return fmt.Errorf("failed to read ClientHello header: %w", err)
 	}
 	if hdr[0] != RecordHandshake {
-		return ErrInvalidTLSHandshake
+		// Non-TLS probe (e.g. HTTP scanner): respond with HTTP 400 Bad Request
+		_ = conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+		_, _ = conn.Write([]byte("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n400 Bad Request\r\n"))
+		time.Sleep(200 * time.Millisecond)
+		_ = conn.Close()
+		return ErrActiveProbeHandled
 	}
 	recLen := binary.BigEndian.Uint16(hdr[3:5])
 	if recLen < 40 || recLen > 8192 {
@@ -371,7 +481,13 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 	// sessionID length at offset 38, sessionID at offset 39
 	sessIDLen := int(body[38])
 	if sessIDLen != 32 || len(body) < 39+32 {
-		return ErrInvalidTLSHandshake
+		sni := ExtractSNI(body)
+		if sni == "" {
+			sni = DefaultSNI
+		}
+		fullPkt := append(hdr, body...)
+		ProxyActiveProbe(conn, fullPkt, sni)
+		return ErrActiveProbeHandled
 	}
 	var sessionID [32]byte
 	copy(sessionID[:], body[39:39+32])
@@ -379,7 +495,14 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 	// Validate HMAC authentication token
 	expectedTag := computeHMAC(networkKey, clientRandom[:])
 	if !hmac.Equal(sessionID[:16], expectedTag) {
-		return ErrAuthFailed
+		// Active probe detected: deflect to genuine TLS server
+		sni := ExtractSNI(body)
+		if sni == "" {
+			sni = DefaultSNI
+		}
+		fullPkt := append(hdr, body...)
+		ProxyActiveProbe(conn, fullPkt, sni)
+		return ErrActiveProbeHandled
 	}
 
 	// Respond with valid ServerHello + ChangeCipherSpec

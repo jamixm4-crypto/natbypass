@@ -15,37 +15,82 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/natbypass/natbypass/internal/crypto"
 )
 
 var (
-	ErrRecordTooShort  = errors.New("shadowtls: TLS record too short")
-	ErrInvalidRecord   = errors.New("shadowtls: record is not TLS Application Data")
-	ErrPayloadTooLarge = errors.New("shadowtls: payload exceeds maximum TLS record size")
+	ErrRecordTooShort         = errors.New("shadowtls: TLS record too short")
+	ErrInvalidRecord          = errors.New("shadowtls: record is not TLS Application Data")
+	ErrPayloadTooLarge        = errors.New("shadowtls: payload exceeds maximum TLS record size")
+	ErrHandshakeNotComplete   = errors.New("shadowtls: TLS 1.3 handshake must complete before sending application data")
 )
 
 // ShadowTLSConn wraps an underlying net.Conn in TLS 1.3 Application Data record framing.
 type ShadowTLSConn struct {
 	net.Conn
-	key     [32]byte
-	readBuf []byte
-	readMu  sync.Mutex
-	writeMu sync.Mutex
+	key           [32]byte
+	readBuf       []byte
+	handshakeDone bool
+	readMu        sync.Mutex
+	writeMu       sync.Mutex
 }
 
 // NewShadowTLSConn creates a new framed TLS 1.3 connection.
+// Presumes the TLS 1.3 handshake has already completed over rawConn.
 func NewShadowTLSConn(rawConn net.Conn, key [32]byte) *ShadowTLSConn {
 	return &ShadowTLSConn{
-		Conn:    rawConn,
-		key:     key,
-		readBuf: nil,
+		Conn:          rawConn,
+		key:           key,
+		readBuf:       nil,
+		handshakeDone: true,
 	}
+}
+
+// NewUnverifiedShadowTLSConn creates a connection requiring explicit handshake completion.
+func NewUnverifiedShadowTLSConn(rawConn net.Conn, key [32]byte) *ShadowTLSConn {
+	return &ShadowTLSConn{
+		Conn:          rawConn,
+		key:           key,
+		readBuf:       nil,
+		handshakeDone: false,
+	}
+}
+
+// MarkHandshakeComplete marks the connection as having verified and completed the TLS 1.3 handshake.
+func (c *ShadowTLSConn) MarkHandshakeComplete() {
+	c.handshakeDone = true
+}
+
+// IsHandshakeComplete returns whether the TLS 1.3 handshake is complete.
+func (c *ShadowTLSConn) IsHandshakeComplete() bool {
+	return c.handshakeDone
+}
+
+// NewClientConn performs client-side handshake and returns an authenticated ShadowTLSConn.
+func NewClientConn(rawConn net.Conn, sni string, key [32]byte, timeout time.Duration) (*ShadowTLSConn, bool, error) {
+	isServer, err := ClientHandshake(rawConn, sni, key, timeout)
+	if err != nil {
+		return nil, false, err
+	}
+	return NewShadowTLSConn(rawConn, key), isServer, nil
+}
+
+// NewServerConn performs server-side handshake and returns an authenticated ShadowTLSConn.
+func NewServerConn(rawConn net.Conn, key [32]byte, timeout time.Duration) (*ShadowTLSConn, error) {
+	if err := ServerHandshake(rawConn, key, timeout); err != nil {
+		return nil, err
+	}
+	return NewShadowTLSConn(rawConn, key), nil
 }
 
 // WritePacket encapsulates an IP/tunnel packet into an encrypted TLS 1.3 Application Data record
 // with dynamic padding (16-48 bytes) to camouflage packet size distributions against DPI.
 func (c *ShadowTLSConn) WritePacket(payload []byte) error {
+	if !c.handshakeDone {
+		return ErrHandshakeNotComplete
+	}
 	if len(payload) == 0 {
 		return nil
 	}
@@ -93,6 +138,9 @@ func (c *ShadowTLSConn) WritePacket(payload []byte) error {
 // ReadPacket reads one complete TLS 1.3 Application Data record, decrypts it,
 // strips padding, and returns the original inner packet.
 func (c *ShadowTLSConn) ReadPacket() ([]byte, error) {
+	if !c.handshakeDone {
+		return nil, ErrHandshakeNotComplete
+	}
 	hdr := make([]byte, 5)
 	if _, err := io.ReadFull(c.Conn, hdr); err != nil {
 		return nil, err

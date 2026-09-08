@@ -89,7 +89,7 @@ func applyBuiltinDefaults(cfg *config.Config) {
 		cfg.WireGuard.ListenPort = constants.DefaultWGListenPort
 	}
 	if cfg.WireGuard.MTU <= 0 {
-		cfg.WireGuard.MTU = constants.DefaultWGMTU
+		cfg.WireGuard.MTU = cfg.GetEffectiveMTU()
 	}
 	if len(cfg.Network.StunServers) == 0 {
 		cfg.Network.StunServers = []string{

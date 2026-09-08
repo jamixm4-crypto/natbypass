@@ -193,3 +193,23 @@ func TestDeriveAWGParamsFromKey(t *testing.T) {
 		t.Errorf("expected different H1..H2 for different keys")
 	}
 }
+
+func TestAntiTSPUMTUAndParams(t *testing.T) {
+	params := GetAWGParamsByPreset("anti_tspu")
+	if params.Jc != 5 {
+		t.Errorf("expected Jc=5, got %d", params.Jc)
+	}
+	if params.Jmax != 120 {
+		t.Errorf("expected Jmax=120, got %d", params.Jmax)
+	}
+	if params.S2 != 100 {
+		t.Errorf("expected S2=100, got %d", params.S2)
+	}
+	if mtu := GetRecommendedMTU("anti_tspu"); mtu != 1280 {
+		t.Errorf("expected MTU=1280 for anti_tspu, got %d", mtu)
+	}
+	if mtu := GetRecommendedMTU("awg31_strict"); mtu != 1420 {
+		t.Errorf("expected MTU=1420 for awg31_strict, got %d", mtu)
+	}
+}
+

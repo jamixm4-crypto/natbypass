@@ -11,6 +11,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strconv"
 	"sync"
@@ -48,6 +49,30 @@ type clientSession struct {
 	conn    *websocket.Conn
 	devID   string
 	writeMu sync.Mutex
+	closed  bool
+}
+
+func (cs *clientSession) Close() error {
+	cs.writeMu.Lock()
+	defer cs.writeMu.Unlock()
+	if cs.closed {
+		return nil
+	}
+	cs.closed = true
+	if cs.conn != nil {
+		return cs.conn.Close()
+	}
+	return nil
+}
+
+func (cs *clientSession) Send(msgType int, data []byte, timeout time.Duration) error {
+	cs.writeMu.Lock()
+	defer cs.writeMu.Unlock()
+	if cs.closed || cs.conn == nil {
+		return errors.New("client session closed")
+	}
+	_ = cs.conn.SetWriteDeadline(time.Now().Add(timeout))
+	return cs.conn.WriteMessage(msgType, data)
 }
 
 // NewWSSRelayServer creates a new WebSocket relay handler.
@@ -100,7 +125,7 @@ func (s *WSSRelayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	if old, exists := s.clients[devID]; exists && old != nil {
-		_ = old.conn.Close()
+		_ = old.Close()
 	}
 	s.clients[devID] = sess
 	s.mu.Unlock()
@@ -113,7 +138,7 @@ func (s *WSSRelayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			delete(s.clients, devID)
 		}
 		s.mu.Unlock()
-		_ = conn.Close()
+		_ = sess.Close()
 		log.Info().Str("devID", devID).Msg("🔒 WSS Server: client disconnected")
 	}()
 
@@ -136,10 +161,10 @@ func (s *WSSRelayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Forwarding to target client
 		s.mu.RLock()
-		targetSess, exists := s.clients[dstDevID]
+		targetSess := s.clients[dstDevID]
 		s.mu.RUnlock()
 
-		if !exists || targetSess == nil {
+		if targetSess == nil {
 			continue
 		}
 
@@ -150,10 +175,7 @@ func (s *WSSRelayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		copy(fwdFrame[1:1+srcLen], []byte(devID))
 		copy(fwdFrame[1+srcLen:], payload)
 
-		targetSess.writeMu.Lock()
-		_ = targetSess.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-		_ = targetSess.conn.WriteMessage(websocket.BinaryMessage, fwdFrame)
-		targetSess.writeMu.Unlock()
+		_ = targetSess.Send(websocket.BinaryMessage, fwdFrame, 2*time.Second)
 	}
 }
 

@@ -254,6 +254,27 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 	return params
 }
 
+// GetEffectiveMTU returns the effective MTU for WireGuard/AmneziaWG.
+// When "anti_tspu" preset is selected and MTU is not explicitly customized (0 or standard 1420),
+// it defaults to 1280 to eliminate the WireGuard 1420 MTU DPI signature.
+func (c *Config) GetEffectiveMTU() int {
+	activeProf := c.EnsureActiveProfile()
+	preset := c.WireGuard.AWGPreset
+	if preset == "" && activeProf != nil {
+		preset = activeProf.AWGPreset
+	}
+	if preset == "" {
+		preset = c.WireGuard.AWG.Preset
+	}
+	if preset == "anti_tspu" && (c.WireGuard.MTU <= 0 || c.WireGuard.MTU == 1420) {
+		return 1280
+	}
+	if c.WireGuard.MTU > 0 {
+		return c.WireGuard.MTU
+	}
+	return 1420
+}
+
 
 // CryptoConfig — настройки шифрования NaCl и WireGuard
 type CryptoConfig struct {

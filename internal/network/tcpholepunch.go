@@ -10,6 +10,7 @@ package network
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -306,6 +307,10 @@ func (m *TCPDirectManager) acceptLoop(ln net.Listener) {
 			if hasKey {
 				// 1. Stealth TLS 1.3 Server Handshake (DPI bypass)
 				if err := shadowtls.ServerHandshake(c, netKey, 5*time.Second); err != nil {
+					if errors.Is(err, shadowtls.ErrActiveProbeHandled) {
+						// Probe was safely proxied to real SNI host or gracefully deflected
+						return
+					}
 					_ = c.Close()
 					return
 				}

@@ -9,6 +9,7 @@ package shadowtls
 
 import (
 	"bytes"
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -267,3 +268,55 @@ func TestHandshake_SimultaneousOpen_CollisionResolution(t *testing.T) {
 		}
 	}
 }
+
+func TestShadowTLS_HandshakeStateEnforcement(t *testing.T) {
+	key := crypto.DeriveKey("test-handshake-state-key")
+	clientConn, serverConn, err := tcpLoopbackPair()
+	if err != nil {
+		t.Fatalf("tcpLoopbackPair failed: %v", err)
+	}
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	// Create unverified connection without handshake
+	unverified := NewUnverifiedShadowTLSConn(clientConn, key)
+	if unverified.IsHandshakeComplete() {
+		t.Fatalf("expected unverified connection to have handshakeDone=false")
+	}
+
+	// Attempting to write application data (0x17) must fail immediately
+	err = unverified.WritePacket([]byte("premature packet"))
+	if !errors.Is(err, ErrHandshakeNotComplete) {
+		t.Fatalf("expected ErrHandshakeNotComplete, got: %v", err)
+	}
+
+	// Attempting to read application data must also fail
+	_, err = unverified.ReadPacket()
+	if !errors.Is(err, ErrHandshakeNotComplete) {
+		t.Fatalf("expected ErrHandshakeNotComplete, got: %v", err)
+	}
+
+	// After marking complete, state machine allows operations
+	unverified.MarkHandshakeComplete()
+	if !unverified.IsHandshakeComplete() {
+		t.Fatalf("expected handshakeDone=true after MarkHandshakeComplete")
+	}
+}
+
+func TestExtractSNI(t *testing.T) {
+	key := crypto.DeriveKey("test-sni-extraction-key")
+	targetSNI := "secure.apple.com"
+
+	chPkt, err := BuildClientHello(targetSNI, key)
+	if err != nil {
+		t.Fatalf("BuildClientHello failed: %v", err)
+	}
+
+	// Skip 5 bytes record header to get ClientHello body
+	body := chPkt[5:]
+	extracted := ExtractSNI(body)
+	if extracted != targetSNI {
+		t.Fatalf("expected extracted SNI %q, got %q", targetSNI, extracted)
+	}
+}
+
