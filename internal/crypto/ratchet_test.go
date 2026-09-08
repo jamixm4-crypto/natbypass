@@ -175,3 +175,55 @@ func TestSymmetricKDFChain_MaxSkipExceeded(t *testing.T) {
 		t.Fatalf("expected gap > 64 to fail, but it succeeded")
 	}
 }
+
+func TestStatelessHKDF_UDPLossAndReorderRecovery(t *testing.T) {
+	secret := make([]byte, 32)
+	for i := range secret {
+		secret[i] = byte(i + 77)
+	}
+	alice, _ := NewSessionState(secret)
+	bob, _ := NewSessionState(secret)
+	bob.ReceivingChain.ChainKey = make([]byte, len(alice.SendingChain.ChainKey))
+	copy(bob.ReceivingChain.ChainKey, alice.SendingChain.ChainKey)
+
+	// Alice produces 40 messages (indices 0..39)
+	packets := make([][]byte, 40)
+	for i := 0; i < 40; i++ {
+		ct, err := alice.Encrypt([]byte(fmt.Sprintf("udp-packet-%d", i)))
+		if err != nil {
+			t.Fatalf("encrypt %d failed: %v", i, err)
+		}
+		packets[i] = ct
+	}
+
+	// 1. Packet 0 received
+	dec0, err := bob.Decrypt(packets[0])
+	if err != nil || string(dec0) != "udp-packet-0" {
+		t.Fatalf("packet 0 failed: %v", err)
+	}
+
+	// 2. Heavy loss: packets 1..25 lost! Packet 26 arrives directly
+	dec26, err := bob.Decrypt(packets[26])
+	if err != nil || string(dec26) != "udp-packet-26" {
+		t.Fatalf("packet 26 failed after loss: %v", err)
+	}
+
+	// 3. Out-of-order: packet 10 (which was previously delayed in transit) arrives now
+	dec10, err := bob.Decrypt(packets[10])
+	if err != nil || string(dec10) != "udp-packet-10" {
+		t.Fatalf("out-of-order packet 10 failed: %v", err)
+	}
+
+	// 4. Replay attack: packet 10 replayed again -> must be rejected
+	_, err = bob.Decrypt(packets[10])
+	if err == nil {
+		t.Fatalf("expected replay of packet 10 to fail, but succeeded")
+	}
+
+	// 5. Subsequent in-order packet 27 arrives
+	dec27, err := bob.Decrypt(packets[27])
+	if err != nil || string(dec27) != "udp-packet-27" {
+		t.Fatalf("packet 27 failed: %v", err)
+	}
+}
+

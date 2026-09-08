@@ -215,9 +215,7 @@ func DeriveAWGParamsFromKey(networkKey string) AWGParams {
 	hkdfReader := hkdf.New(sha256.New, []byte(networkKey), []byte("natbypass-awg-salt-v1"), []byte("natbypass-awg-31-mesh"))
 	var derived [64]byte
 	if _, err := io.ReadFull(hkdfReader, derived[:]); err != nil {
-		h := sha256.Sum256([]byte(networkKey))
-		copy(params.HeaderProtectionKey[:], h[:])
-		return params
+		panic(fmt.Sprintf("wireguard: critical hkdf failure in DeriveAWGParamsFromKey: %v", err))
 	}
 
 	// 1. Header Protection Key (32 bytes)

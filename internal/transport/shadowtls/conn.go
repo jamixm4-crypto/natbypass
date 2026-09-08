@@ -16,18 +16,19 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	"github.com/natbypass/natbypass/internal/crypto"
 )
 
 var (
-	ErrRecordTooShort         = errors.New("shadowtls: TLS record too short")
-	ErrInvalidRecord          = errors.New("shadowtls: record is not TLS Application Data")
-	ErrPayloadTooLarge        = errors.New("shadowtls: payload exceeds maximum TLS record size")
-	ErrHandshakeNotComplete   = errors.New("shadowtls: TLS 1.3 handshake must complete before sending application data")
+	ErrRecordTooShort       = errors.New("shadowtls: TLS record too short")
+	ErrInvalidRecord        = errors.New("shadowtls: record framing invalid")
+	ErrPayloadTooLarge      = errors.New("shadowtls: payload exceeds maximum TLS record size")
+	ErrHandshakeNotComplete = errors.New("shadowtls: TLS 1.3 handshake must complete before sending application data")
 )
 
-// ShadowTLSConn wraps an underlying net.Conn in TLS 1.3 Application Data record framing.
+// ShadowTLSConn wraps an underlying authenticated TLS 1.3 connection (*tls.Conn).
+// It provides packet framing with dynamic random padding (16..48 bytes) over the TLS stream,
+// camouflaging packet size distributions against DPI/TSPU while delegating all encryption,
+// authentication, and TLS record framing to Go's standard library crypto/tls (RFC 8446).
 type ShadowTLSConn struct {
 	net.Conn
 	key           [32]byte
@@ -38,10 +39,10 @@ type ShadowTLSConn struct {
 }
 
 // NewShadowTLSConn creates a new framed TLS 1.3 connection.
-// Presumes the TLS 1.3 handshake has already completed over rawConn.
-func NewShadowTLSConn(rawConn net.Conn, key [32]byte) *ShadowTLSConn {
+// Presumes the TLS 1.3 handshake has already completed over conn.
+func NewShadowTLSConn(conn net.Conn, key [32]byte) *ShadowTLSConn {
 	return &ShadowTLSConn{
-		Conn:          rawConn,
+		Conn:          conn,
 		key:           key,
 		readBuf:       nil,
 		handshakeDone: true,
@@ -68,25 +69,19 @@ func (c *ShadowTLSConn) IsHandshakeComplete() bool {
 	return c.handshakeDone
 }
 
-// NewClientConn performs client-side handshake and returns an authenticated ShadowTLSConn.
+// NewClientConn performs client-side TLS 1.3 mutual authentication handshake and returns an authenticated ShadowTLSConn.
 func NewClientConn(rawConn net.Conn, sni string, key [32]byte, timeout time.Duration) (*ShadowTLSConn, bool, error) {
-	isServer, err := ClientHandshake(rawConn, sni, key, timeout)
-	if err != nil {
-		return nil, false, err
-	}
-	return NewShadowTLSConn(rawConn, key), isServer, nil
+	return ClientHandshake(rawConn, sni, key, timeout)
 }
 
-// NewServerConn performs server-side handshake and returns an authenticated ShadowTLSConn.
+// NewServerConn performs server-side TLS 1.3 mutual authentication handshake and returns an authenticated ShadowTLSConn.
 func NewServerConn(rawConn net.Conn, key [32]byte, timeout time.Duration) (*ShadowTLSConn, error) {
-	if err := ServerHandshake(rawConn, key, timeout); err != nil {
-		return nil, err
-	}
-	return NewShadowTLSConn(rawConn, key), nil
+	return ServerHandshake(rawConn, key, timeout)
 }
 
-// WritePacket encapsulates an IP/tunnel packet into an encrypted TLS 1.3 Application Data record
+// WritePacket encapsulates an IP/tunnel packet into an encrypted TLS 1.3 Application Data stream
 // with dynamic padding (16-48 bytes) to camouflage packet size distributions against DPI.
+// All encryption is performed by Go's standard crypto/tls layer in RFC 8446 AEAD records.
 func (c *ShadowTLSConn) WritePacket(payload []byte) error {
 	if !c.handshakeDone {
 		return ErrHandshakeNotComplete
@@ -106,77 +101,59 @@ func (c *ShadowTLSConn) WritePacket(payload []byte) error {
 	padLen := 16 + int(padRand[0]%33)
 
 	realLen := uint16(len(payload))
-	plainPkt := make([]byte, 2+len(payload)+padLen)
-	binary.BigEndian.PutUint16(plainPkt[:2], realLen)
-	copy(plainPkt[2:], payload)
-	if _, err := io.ReadFull(rand.Reader, plainPkt[2+len(payload):]); err != nil {
+	totalLen := 2 + len(payload) + padLen
+	if totalLen > 32768 {
+		return ErrPayloadTooLarge
+	}
+
+	// 2. Build framed payload: [uint16 totalLen][uint16 realLen][payload][random padding]
+	frame := make([]byte, 2+totalLen)
+	binary.BigEndian.PutUint16(frame[0:2], uint16(totalLen))
+	binary.BigEndian.PutUint16(frame[2:4], realLen)
+	copy(frame[4:4+len(payload)], payload)
+	if _, err := io.ReadFull(rand.Reader, frame[4+len(payload):]); err != nil {
 		return fmt.Errorf("shadowtls padding csprng failure: %w", err)
 	}
 
-	// 2. Encrypt payload using ChaCha20-Poly1305 (NaCl SecretBox / EncryptSelf)
-	encPayload, err := crypto.EncryptSelf(plainPkt, c.key)
-	if err != nil {
-		return fmt.Errorf("shadowtls encrypt failed: %w", err)
-	}
-
-	// 3. Frame as TLS 1.3 Application Data Record (RFC 8446 Section 5.1)
-	// Header: 0x17 (Application Data) + 0x03 0x03 (TLS 1.2/1.3) + 2 bytes length
-	recLen := len(encPayload)
-	rec := make([]byte, 5+recLen)
-	rec[0] = RecordApplicationData
-	rec[1] = 0x03
-	rec[2] = 0x03
-	binary.BigEndian.PutUint16(rec[3:5], uint16(recLen))
-	copy(rec[5:], encPayload)
-
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	_, err = c.Conn.Write(rec)
+	// Write directly to c.Conn (*tls.Conn). Go's standard library crypto/tls encrypts
+	// the frame into genuine TLS 1.3 Application Data records with AEAD and sequence numbers.
+	_, err := c.Conn.Write(frame)
 	return err
 }
 
-// ReadPacket reads one complete TLS 1.3 Application Data record, decrypts it,
+// ReadPacket reads one framed packet from the TLS 1.3 stream, decrypts it via crypto/tls,
 // strips padding, and returns the original inner packet.
 func (c *ShadowTLSConn) ReadPacket() ([]byte, error) {
 	if !c.handshakeDone {
 		return nil, ErrHandshakeNotComplete
 	}
-	hdr := make([]byte, 5)
-	if _, err := io.ReadFull(c.Conn, hdr); err != nil {
+
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+
+	var lenHdr [2]byte
+	if _, err := io.ReadFull(c.Conn, lenHdr[:]); err != nil {
 		return nil, err
 	}
-
-	// Verify TLS Application Data record header
-	if hdr[0] != RecordApplicationData {
-		return nil, ErrInvalidRecord
-	}
-
-	recLen := int(binary.BigEndian.Uint16(hdr[3:5]))
-	if recLen < 40 || recLen > 18000 {
+	totalLen := int(binary.BigEndian.Uint16(lenHdr[:]))
+	if totalLen < 18 || totalLen > 32768 {
 		return nil, ErrRecordTooShort
 	}
 
-	encBuf := make([]byte, recLen)
-	if _, err := io.ReadFull(c.Conn, encBuf); err != nil {
+	frame := make([]byte, totalLen)
+	if _, err := io.ReadFull(c.Conn, frame); err != nil {
 		return nil, err
 	}
 
-	dec, err := crypto.DecryptSelf(encBuf, c.key)
-	if err != nil {
-		return nil, fmt.Errorf("shadowtls decrypt failed: %w", err)
-	}
-
-	if len(dec) < 2 {
-		return nil, ErrRecordTooShort
-	}
-
-	realLen := int(binary.BigEndian.Uint16(dec[:2]))
-	if realLen <= 0 || 2+realLen > len(dec) {
+	realLen := int(binary.BigEndian.Uint16(frame[:2]))
+	if realLen <= 0 || 2+realLen > totalLen {
 		return nil, ErrInvalidRecord
 	}
 
 	pkt := make([]byte, realLen)
-	copy(pkt, dec[2:2+realLen])
+	copy(pkt, frame[2:2+realLen])
 	return pkt, nil
 }
 

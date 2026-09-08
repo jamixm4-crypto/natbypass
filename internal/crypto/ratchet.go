@@ -26,31 +26,32 @@ const (
 	maxSkippedKeysLimit = 256
 )
 
-// SessionState (также доступен как SymmetricKDFChain) реализует симметричную KDF-цепочку
-// (Symmetric KDF Chain) для обеспечения свойства Perfect Forward Secrecy (PFS).
-// На каждом сообщении сессионный ключ деривируется через стандартный HKDF-Expand (RFC 5869),
-// после чего предыдущий ключ цепочки немедленно перезаписывается новым значением.
-// Поддерживает кэширование пропущенных ключей (skip-list) для устойчивости к потерям пакетов в UDP.
+// SessionState (также доступен как SymmetricKDFChain) реализует устойчивую к потерям UDP-пакетов
+// симметричную схему шифрования (Stateless HKDF per-packet key derivation) со скользящим окном
+// защиты от повторов (anti-replay sliding window по стандарту RFC 2401).
+// Ключ для каждого сообщения деривируется напрямую из RootKey/ChainKey и Counter через HKDF-Expand.
 type SessionState struct {
 	RootKey        []byte
 	SendingChain   Chain
 	ReceivingChain Chain
 	MessageNumber  uint32
-	skippedKeys    map[uint32][]byte
+	skippedKeys    map[uint32][]byte // для обратной совместимости
+	replayWindow   uint64            // 64-битная битовая маска скользящего окна
+	replayBase     uint32            // максимальный полученный номер пакета
+	hasReceived    bool              // флаг первого полученного пакета
 	mu             sync.Mutex
 }
 
 // SymmetricKDFChain — точный криптографический псевдоним для SessionState.
 type SymmetricKDFChain = SessionState
 
-// Chain представляет KDF-цепочку симметричных сессионных ключей.
+// Chain представляет состояние направления передачи сессионных ключей.
 type Chain struct {
 	ChainKey []byte
 	Counter  uint32
 }
 
-// deriveStepKeys выполняет шаг KDF-цепочки по стандарту RFC 5869 (HKDF-Expand).
-// Генерирует следующий ключ цепочки (nextChainKey) и одноразовый ключ сообщения (msgKey).
+// deriveStepKeys сохранен для обратной совместимости.
 func deriveStepKeys(chainKey []byte) (nextChainKey, msgKey []byte, err error) {
 	nextChainKey = make([]byte, 32)
 	msgKey = make([]byte, 32)
@@ -61,6 +62,21 @@ func deriveStepKeys(chainKey []byte) (nextChainKey, msgKey []byte, err error) {
 		return nil, nil, fmt.Errorf("hkdf msg key derivation failed: %w", err)
 	}
 	return nextChainKey, msgKey, nil
+}
+
+// deriveMsgKeyStateless деривирует ключ для конкретного пакета напрямую из rootKey и counter.
+// Это делает протокол устойчивым к потере и перестановке UDP-пакетов.
+func deriveMsgKeyStateless(rootKey []byte, counter uint32) ([]byte, error) {
+	counterBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(counterBytes, counter)
+
+	msgKey := make([]byte, 32)
+	// Используем HKDF-Expand с контекстом, включающим номер пакета
+	info := append([]byte("NatBypass-Msg-Key-v2-Counter:"), counterBytes...)
+	if _, err := io.ReadFull(hkdf.Expand(sha256.New, rootKey, info), msgKey); err != nil {
+		return nil, err
+	}
+	return msgKey, nil
 }
 
 // NewSessionState инициализирует симметричную KDF-цепочку (PFS Session) с общим мастер-ключом.
@@ -98,20 +114,20 @@ func NewSessionState(sharedSecret []byte) (*SessionState, error) {
 	}, nil
 }
 
-// Encrypt шифрует открытый текст с одноразовой ротацией ключей через HKDF-Expand.
+// Encrypt шифрует открытый текст с деривацией ключа для конкретного номера пакета.
 // Формат возвращаемого фрейма: [MessageNumber uint32 (4 байта)][Nonce 12 байт][Ciphertext + Poly1305 Tag].
 func (s *SessionState) Encrypt(plaintext []byte) ([]byte, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	msgNum := s.SendingChain.Counter
-	nextChainKey, msgKey, err := deriveStepKeys(s.SendingChain.ChainKey)
+	s.SendingChain.Counter++
+	s.MessageNumber++
+	sendKey := s.SendingChain.ChainKey
+	s.mu.Unlock()
+
+	msgKey, err := deriveMsgKeyStateless(sendKey, msgNum)
 	if err != nil {
 		return nil, err
 	}
-	s.SendingChain.ChainKey = nextChainKey
-	s.SendingChain.Counter++
-	s.MessageNumber++
 
 	aead, err := chacha20poly1305.New(msgKey)
 	if err != nil {
@@ -120,7 +136,7 @@ func (s *SessionState) Encrypt(plaintext []byte) ([]byte, error) {
 
 	nonce := make([]byte, aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
+		panic(fmt.Sprintf("ratchet: csprng failure: %v", err))
 	}
 
 	ciphertext := aead.Seal(nil, nonce, plaintext, nil)
@@ -131,17 +147,10 @@ func (s *SessionState) Encrypt(plaintext []byte) ([]byte, error) {
 	return out, nil
 }
 
-// Decrypt расшифровывает сообщение с одноразовой ротацией ключей через HKDF-Expand.
-// Поддерживает восстановление при потере и нарушении порядка доставки UDP-пакетов через кэш пропущенных ключей (skip-list).
+// Decrypt расшифровывает сообщение по его номеру пакета.
+// Поддерживает восстановление при потере и нарушении порядка доставки UDP-пакетов
+// с защитой от Replay-атак по скользящему окну.
 func (s *SessionState) Decrypt(data []byte) ([]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.skippedKeys == nil {
-		s.skippedKeys = make(map[uint32][]byte)
-	}
-
-	// Минимальный размер: 4 байта msgNum + 12 байт nonce + 16 байт Poly1305 auth tag
 	if len(data) < 4+12+16 {
 		return nil, fmt.Errorf("ciphertext too short: %d bytes (minimum 32 bytes required)", len(data))
 	}
@@ -150,59 +159,74 @@ func (s *SessionState) Decrypt(data []byte) ([]byte, error) {
 	nonce := data[4 : 4+12]
 	ciphertext := data[4+12:]
 
-	var msgKey []byte
+	s.mu.Lock()
+	recvKey := s.ReceivingChain.ChainKey
 
-	// 1. Проверяем, был ли ключ для этого сообщения уже вычислен и сохранён в skip-кэше
-	if cachedKey, ok := s.skippedKeys[msgNum]; ok {
-		msgKey = cachedKey
-		delete(s.skippedKeys, msgNum)
-	} else if msgNum < s.ReceivingChain.Counter {
-		// Сообщение уже было обработано ранее либо ключ был удалён по лимиту кэша
-		return nil, fmt.Errorf("duplicate or expired message: msg_num=%d, chain_counter=%d", msgNum, s.ReceivingChain.Counter)
+	// Проверка скользящего окна защиты от Replay-атак
+	if !s.hasReceived {
+		if msgNum > maxSkipMessages {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("message sequence gap too large: skipped %d > %d allowed", msgNum, maxSkipMessages)
+		}
 	} else {
-		// 2. msgNum >= s.ReceivingChain.Counter: сообщение из текущего шага или из будущего
-		skipCount := msgNum - s.ReceivingChain.Counter
-		if skipCount > maxSkipMessages {
-			return nil, fmt.Errorf("message sequence gap too large: skipped %d > %d allowed", skipCount, maxSkipMessages)
-		}
-
-		// Вычисляем и кэшируем ключи для всех пропущенных промежуточных пакетов
-		for s.ReceivingChain.Counter < msgNum {
-			nextChainKey, skippedKey, err := deriveStepKeys(s.ReceivingChain.ChainKey)
-			if err != nil {
-				return nil, err
+		if msgNum > s.replayBase {
+			gap := msgNum - s.replayBase
+			if gap > maxSkipMessages {
+				s.mu.Unlock()
+				return nil, fmt.Errorf("message sequence gap too large: skipped %d > %d allowed", gap, maxSkipMessages)
 			}
-			s.skippedKeys[s.ReceivingChain.Counter] = skippedKey
-			s.ReceivingChain.ChainKey = nextChainKey
-			s.ReceivingChain.Counter++
-		}
-
-		// Вычисляем ключ для текущего сообщения
-		nextChainKey, currentKey, err := deriveStepKeys(s.ReceivingChain.ChainKey)
-		if err != nil {
-			return nil, err
-		}
-		s.ReceivingChain.ChainKey = nextChainKey
-		s.ReceivingChain.Counter++
-		msgKey = currentKey
-	}
-
-	// 3. Ограничиваем размер кэша пропущенных ключей во избежание утечки памяти
-	if len(s.skippedKeys) > maxSkippedKeysLimit {
-		var oldestKeys []uint32
-		for k := range s.skippedKeys {
-			oldestKeys = append(oldestKeys, k)
-		}
-		for _, k := range oldestKeys[:len(oldestKeys)/2] {
-			delete(s.skippedKeys, k)
+		} else {
+			diff := s.replayBase - msgNum
+			if diff >= 64 {
+				s.mu.Unlock()
+				return nil, fmt.Errorf("message sequence too old (seq=%d, base=%d)", msgNum, s.replayBase)
+			}
+			if (s.replayWindow & (uint64(1) << diff)) != 0 {
+				s.mu.Unlock()
+				return nil, fmt.Errorf("duplicate or replay message: seq=%d", msgNum)
+			}
 		}
 	}
+	s.mu.Unlock()
 
-	// 4. Расшифровываем полезную нагрузку
+	// Деривируем ключ для msgNum напрямую из recvKey
+	msgKey, err := deriveMsgKeyStateless(recvKey, msgNum)
+	if err != nil {
+		return nil, err
+	}
+
 	aead, err := chacha20poly1305.New(msgKey)
 	if err != nil {
 		return nil, err
 	}
 
-	return aead.Open(nil, nonce, ciphertext, nil)
+	plaintext, err := aead.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ratchet decrypt failed: %w", err)
+	}
+
+	// Сообщение успешно верифицировано и расшифровано — продвигаем скользящее окно
+	s.mu.Lock()
+	if !s.hasReceived {
+		s.hasReceived = true
+		s.replayBase = msgNum
+		s.replayWindow = 1
+	} else if msgNum > s.replayBase {
+		diff := msgNum - s.replayBase
+		if diff < 64 {
+			s.replayWindow = (s.replayWindow << diff) | 1
+		} else {
+			s.replayWindow = 1
+		}
+		s.replayBase = msgNum
+	} else {
+		diff := s.replayBase - msgNum
+		if diff < 64 {
+			s.replayWindow |= (uint64(1) << diff)
+		}
+	}
+	s.ReceivingChain.Counter = s.replayBase + 1
+	s.mu.Unlock()
+
+	return plaintext, nil
 }

@@ -19,8 +19,41 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"sync"
 	"time"
 )
+
+var (
+	meshCertMu    sync.RWMutex
+	cachedCertMap = make(map[[32]byte]tls.Certificate)
+)
+
+// GetOrCreateMeshCertificate returns a cached mesh TLS certificate for the given networkKey,
+// or generates a new one if not yet cached. This avoids re-generating ECDSA keys on MIPS/ARM.
+func GetOrCreateMeshCertificate(deviceID, vip string, networkKey [32]byte) (tls.Certificate, error) {
+	meshCertMu.RLock()
+	if cert, ok := cachedCertMap[networkKey]; ok {
+		meshCertMu.RUnlock()
+		return cert, nil
+	}
+	meshCertMu.RUnlock()
+
+	meshCertMu.Lock()
+	defer meshCertMu.Unlock()
+	if cert, ok := cachedCertMap[networkKey]; ok {
+		return cert, nil
+	}
+
+	if deviceID == "" {
+		deviceID = "natbypass-mesh-peer"
+	}
+	cert, err := GenerateMeshTLSCertificate(deviceID, vip, networkKey)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	cachedCertMap[networkKey] = cert
+	return cert, nil
+}
 
 // GenerateMeshTLSCertificate creates an in-memory self-signed ECDSA certificate
 // for native TLS 1.3 mode. The certificate contains the DeviceID in CommonName,

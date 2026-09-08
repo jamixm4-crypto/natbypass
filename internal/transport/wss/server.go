@@ -175,7 +175,15 @@ func (s *WSSRelayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		copy(fwdFrame[1:1+srcLen], []byte(devID))
 		copy(fwdFrame[1+srcLen:], payload)
 
-		_ = targetSess.Send(websocket.BinaryMessage, fwdFrame, 2*time.Second)
+		if err := targetSess.Send(websocket.BinaryMessage, fwdFrame, 2*time.Second); err != nil {
+			// Session is dead: clean it up to prevent resource leaks and TOCTOU writes
+			s.mu.Lock()
+			if current, exists := s.clients[dstDevID]; exists && current == targetSess {
+				delete(s.clients, dstDevID)
+			}
+			s.mu.Unlock()
+			_ = targetSess.Close()
+		}
 	}
 }
 

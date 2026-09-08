@@ -9,9 +9,11 @@ package shadowtls
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -212,15 +214,15 @@ func BuildServerHello(clientRandom [32]byte, clientSessionID [32]byte, networkKe
 }
 
 // ClientHandshake performs client-side ShadowTLS handshake over existing TCP connection.
-// It returns (isServerRole, err). When a TCP Simultaneous Open collision is detected (both sides sent
+// It returns (shadowConn, isServerRole, err). When a TCP Simultaneous Open collision is detected (both sides sent
 // ClientHello simultaneously), a deterministic tie-break determines which side acts as Server.
-func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout time.Duration) (bool, error) {
+func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout time.Duration) (*ShadowTLSConn, bool, error) {
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	defer conn.SetDeadline(time.Time{})
 
 	chPkt, err := BuildClientHello(sni, networkKey)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 
 	// Extract clientRandom and authTag for later server verification
@@ -228,36 +230,36 @@ func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout tim
 	copy(clientRandom[:], chPkt[11:43])
 
 	if _, err := conn.Write(chPkt); err != nil {
-		return false, fmt.Errorf("failed to send ClientHello: %w", err)
+		return nil, false, fmt.Errorf("failed to send ClientHello: %w", err)
 	}
 
 	// Read response Record Header (5 bytes)
 	hdr := make([]byte, 5)
 	if _, err := io.ReadFull(conn, hdr); err != nil {
-		return false, fmt.Errorf("failed to read ServerHello header: %w", err)
+		return nil, false, fmt.Errorf("failed to read ServerHello header: %w", err)
 	}
 	if hdr[0] != RecordHandshake {
-		return false, ErrInvalidTLSHandshake
+		return nil, false, ErrInvalidTLSHandshake
 	}
 	recLen := binary.BigEndian.Uint16(hdr[3:5])
 	if recLen < 38 || recLen > 8192 {
-		return false, ErrInvalidTLSHandshake
+		return nil, false, ErrInvalidTLSHandshake
 	}
 
 	body := make([]byte, recLen)
 	if _, err := io.ReadFull(conn, body); err != nil {
-		return false, fmt.Errorf("failed to read handshake response body: %w", err)
+		return nil, false, fmt.Errorf("failed to read handshake response body: %w", err)
 	}
 
 	// 1. Standard Client path: Server responded with ServerHello (HandshakeServerHello = 0x02)
 	if body[0] == HandshakeServerHello {
 		if len(body) < 38 {
-			return false, ErrInvalidTLSHandshake
+			return nil, false, ErrInvalidTLSHandshake
 		}
 		serverRandom := body[6:38]
 		expectedAuth := computeHMAC(networkKey, append(clientRandom[:], []byte("server")...))
 		if !hmac.Equal(serverRandom[:16], expectedAuth) {
-			return false, ErrAuthFailed
+			return nil, false, ErrAuthFailed
 		}
 
 		// Read optional ChangeCipherSpec (6 bytes: 0x14 0x03 0x03 0x00 0x01 0x01)
@@ -266,21 +268,34 @@ func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout tim
 		if n, err := io.ReadFull(conn, ccsHdr); err == nil && n == 6 && ccsHdr[0] == RecordChangeCipherSpec {
 			// ChangeCipherSpec successfully consumed
 		}
-		_ = conn.SetDeadline(time.Time{})
-		return false, nil // We are Client
+		_ = conn.SetDeadline(time.Now().Add(timeout))
+
+		cert, err := GetOrCreateMeshCertificate("mesh-client", "", networkKey)
+		if err != nil {
+			return nil, false, fmt.Errorf("shadowtls: failed to get client mesh cert: %w", err)
+		}
+		clientConfig := NewMeshClientTLSConfig(cert, networkKey, sni)
+		tlsConn := tls.Client(conn, clientConfig)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, false, fmt.Errorf("shadowtls client TLS 1.3 handshake failed: %w", err)
+		}
+		return NewShadowTLSConn(tlsConn, networkKey), false, nil
 	}
 
 	// 2. TCP Simultaneous Open collision resolution: Both sides sent ClientHello (HandshakeClientHello = 0x01)!
 	if body[0] == HandshakeClientHello {
 		if len(body) < 70 {
-			return false, ErrInvalidTLSHandshake
+			return nil, false, ErrInvalidTLSHandshake
 		}
 		var remoteClientRandom [32]byte
 		copy(remoteClientRandom[:], body[6:38])
 
 		sessIDLen := int(body[38])
 		if sessIDLen != 32 || len(body) < 39+32 {
-			return false, ErrInvalidTLSHandshake
+			return nil, false, ErrInvalidTLSHandshake
 		}
 		var remoteSessionID [32]byte
 		copy(remoteSessionID[:], body[39:39+32])
@@ -288,7 +303,7 @@ func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout tim
 		// Validate remote peer's HMAC token
 		expectedTag := computeHMAC(networkKey, remoteClientRandom[:])
 		if !hmac.Equal(remoteSessionID[:16], expectedTag) {
-			return false, ErrAuthFailed
+			return nil, false, ErrAuthFailed
 		}
 
 		// Tie-break: compare our clientRandom vs remoteClientRandom
@@ -297,48 +312,73 @@ func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout tim
 			// WE WIN: We transition to SERVER role!
 			shResp, err := BuildServerHello(remoteClientRandom, remoteSessionID, networkKey)
 			if err != nil {
-				return false, err
+				return nil, false, err
 			}
 			if _, err := conn.Write(shResp); err != nil {
-				return false, fmt.Errorf("failed to write ServerHello in simultaneous open: %w", err)
+				return nil, false, fmt.Errorf("failed to write ServerHello in simultaneous open: %w", err)
 			}
-			return true, nil // We act as Server
+			cert, err := GetOrCreateMeshCertificate("mesh-server", "", networkKey)
+			if err != nil {
+				return nil, false, fmt.Errorf("shadowtls: failed to get server mesh cert: %w", err)
+			}
+			serverConfig := NewMeshServerTLSConfig(cert, networkKey)
+			tlsConn := tls.Server(conn, serverConfig)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				_ = conn.Close()
+				return nil, false, fmt.Errorf("shadowtls simultaneous server TLS 1.3 handshake failed: %w", err)
+			}
+			return NewShadowTLSConn(tlsConn, networkKey), true, nil
 		} else {
 			// WE LOSE: We remain CLIENT role and wait for ServerHello from the winner
 			_ = conn.SetDeadline(time.Now().Add(timeout))
 			sHdr := make([]byte, 5)
 			if _, err := io.ReadFull(conn, sHdr); err != nil {
-				return false, fmt.Errorf("failed to read ServerHello from simultaneous open peer: %w", err)
+				return nil, false, fmt.Errorf("failed to read ServerHello from simultaneous open peer: %w", err)
 			}
 			if sHdr[0] != RecordHandshake {
-				return false, ErrInvalidTLSHandshake
+				return nil, false, ErrInvalidTLSHandshake
 			}
 			sRecLen := binary.BigEndian.Uint16(sHdr[3:5])
 			if sRecLen < 38 || sRecLen > 4096 {
-				return false, ErrInvalidTLSHandshake
+				return nil, false, ErrInvalidTLSHandshake
 			}
 			sBody := make([]byte, sRecLen)
 			if _, err := io.ReadFull(conn, sBody); err != nil {
-				return false, fmt.Errorf("failed to read ServerHello body from simultaneous open peer: %w", err)
+				return nil, false, fmt.Errorf("failed to read ServerHello body from simultaneous open peer: %w", err)
 			}
 			if sBody[0] != HandshakeServerHello || len(sBody) < 38 {
-				return false, ErrInvalidTLSHandshake
+				return nil, false, ErrInvalidTLSHandshake
 			}
 			serverRandom := sBody[6:38]
 			expectedAuth := computeHMAC(networkKey, append(clientRandom[:], []byte("server")...))
 			if !hmac.Equal(serverRandom[:16], expectedAuth) {
-				return false, ErrAuthFailed
+				return nil, false, ErrAuthFailed
 			}
 			// Read optional ChangeCipherSpec
 			ccsHdr := make([]byte, 6)
 			_ = conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
 			_, _ = io.ReadFull(conn, ccsHdr)
-			_ = conn.SetDeadline(time.Time{})
-			return false, nil // We remain Client
+			_ = conn.SetDeadline(time.Now().Add(timeout))
+
+			cert, err := GetOrCreateMeshCertificate("mesh-client", "", networkKey)
+			if err != nil {
+				return nil, false, fmt.Errorf("shadowtls: failed to get client mesh cert: %w", err)
+			}
+			clientConfig := NewMeshClientTLSConfig(cert, networkKey, sni)
+			tlsConn := tls.Client(conn, clientConfig)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				_ = conn.Close()
+				return nil, false, fmt.Errorf("shadowtls simultaneous client TLS 1.3 handshake failed: %w", err)
+			}
+			return NewShadowTLSConn(tlsConn, networkKey), false, nil
 		}
 	}
 
-	return false, ErrInvalidTLSHandshake
+	return nil, false, ErrInvalidTLSHandshake
 }
 
 // ExtractSNI parses the Server Name Indication extension from a TLS ClientHello body (RFC 6066).
@@ -445,13 +485,14 @@ func ProxyActiveProbe(conn net.Conn, initialBytes []byte, sni string) {
 // ServerHandshake handles incoming connection on server side, validates HMAC, and responds.
 // If an unauthenticated probe is detected, it transparently proxies the connection to the
 // authentic SNI target server and returns ErrActiveProbeHandled.
-func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) error {
+// On success, it upgrades the connection to genuine TLS 1.3 with mutual authentication (mTLS) via crypto/tls.
+func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) (*ShadowTLSConn, error) {
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	defer conn.SetDeadline(time.Time{})
 
 	hdr := make([]byte, 5)
 	if _, err := io.ReadFull(conn, hdr); err != nil {
-		return fmt.Errorf("failed to read ClientHello header: %w", err)
+		return nil, fmt.Errorf("failed to read ClientHello header: %w", err)
 	}
 	if hdr[0] != RecordHandshake {
 		// Non-TLS probe (e.g. HTTP scanner): respond with HTTP 400 Bad Request
@@ -459,19 +500,19 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 		_, _ = conn.Write([]byte("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n400 Bad Request\r\n"))
 		time.Sleep(200 * time.Millisecond)
 		_ = conn.Close()
-		return ErrActiveProbeHandled
+		return nil, ErrActiveProbeHandled
 	}
 	recLen := binary.BigEndian.Uint16(hdr[3:5])
 	if recLen < 40 || recLen > 8192 {
-		return ErrInvalidTLSHandshake
+		return nil, ErrInvalidTLSHandshake
 	}
 
 	body := make([]byte, recLen)
 	if _, err := io.ReadFull(conn, body); err != nil {
-		return fmt.Errorf("failed to read ClientHello body: %w", err)
+		return nil, fmt.Errorf("failed to read ClientHello body: %w", err)
 	}
 	if body[0] != HandshakeClientHello || len(body) < 70 {
-		return ErrInvalidTLSHandshake
+		return nil, ErrInvalidTLSHandshake
 	}
 
 	// clientRandom starts at offset 6 in body
@@ -487,7 +528,7 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 		}
 		fullPkt := append(hdr, body...)
 		ProxyActiveProbe(conn, fullPkt, sni)
-		return ErrActiveProbeHandled
+		return nil, ErrActiveProbeHandled
 	}
 	var sessionID [32]byte
 	copy(sessionID[:], body[39:39+32])
@@ -502,17 +543,31 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 		}
 		fullPkt := append(hdr, body...)
 		ProxyActiveProbe(conn, fullPkt, sni)
-		return ErrActiveProbeHandled
+		return nil, ErrActiveProbeHandled
 	}
 
 	// Respond with valid ServerHello + ChangeCipherSpec
 	shResp, err := BuildServerHello(clientRandom, sessionID, networkKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := conn.Write(shResp); err != nil {
-		return fmt.Errorf("failed to write ServerHello response: %w", err)
+		return nil, fmt.Errorf("failed to write ServerHello response: %w", err)
 	}
 
-	return nil
+	// Upgrade to TLS 1.3 server using standard crypto/tls
+	cert, err := GetOrCreateMeshCertificate("mesh-server", "", networkKey)
+	if err != nil {
+		return nil, fmt.Errorf("shadowtls: failed to get server mesh cert: %w", err)
+	}
+	serverConfig := NewMeshServerTLSConfig(cert, networkKey)
+	tlsConn := tls.Server(conn, serverConfig)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("shadowtls server TLS 1.3 handshake failed: %w", err)
+	}
+
+	return NewShadowTLSConn(tlsConn, networkKey), nil
 }

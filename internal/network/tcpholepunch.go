@@ -306,7 +306,8 @@ func (m *TCPDirectManager) acceptLoop(ln net.Listener) {
 
 			if hasKey {
 				// 1. Stealth TLS 1.3 Server Handshake (DPI bypass)
-				if err := shadowtls.ServerHandshake(c, netKey, 5*time.Second); err != nil {
+				tlsConn, err := shadowtls.ServerHandshake(c, netKey, 5*time.Second)
+				if err != nil {
 					if errors.Is(err, shadowtls.ErrActiveProbeHandled) {
 						// Probe was safely proxied to real SNI host or gracefully deflected
 						return
@@ -314,7 +315,6 @@ func (m *TCPDirectManager) acceptLoop(ln net.Listener) {
 					_ = c.Close()
 					return
 				}
-				tlsConn := shadowtls.NewShadowTLSConn(c, netKey)
 				_ = tlsConn.SetDeadline(time.Now().Add(5 * time.Second))
 
 				// 2. Read remote peer ID inside encrypted TLS 1.3 Application Data frame
@@ -463,12 +463,11 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 
 	if hasKey {
 		// 1. Stealth TLS 1.3 Client Handshake (DPI bypass) with Simultaneous Open collision resolution
-		isServer, err := shadowtls.ClientHandshake(conn, sni, netKey, 5*time.Second)
+		tlsConn, isServer, err := shadowtls.ClientHandshake(conn, sni, netKey, 5*time.Second)
 		if err != nil {
 			_ = conn.Close()
 			return fmt.Errorf("shadowtls handshake failed: %w", err)
 		}
-		tlsConn := shadowtls.NewShadowTLSConn(conn, netKey)
 		_ = tlsConn.SetDeadline(time.Now().Add(5 * time.Second))
 
 		var remotePeerID string

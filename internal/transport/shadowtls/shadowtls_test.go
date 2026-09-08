@@ -98,22 +98,12 @@ func TestHandshake_SuccessAndTransmission(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		err := ServerHandshake(serverConn, key, 3*time.Second)
-		if err != nil {
-			serverErr = err
-			return
-		}
-		serverTLS = NewShadowTLSConn(serverConn, key)
+		serverTLS, serverErr = ServerHandshake(serverConn, key, 3*time.Second)
 	}()
 
 	go func() {
 		defer wg.Done()
-		_, err := ClientHandshake(clientConn, sni, key, 3*time.Second)
-		if err != nil {
-			clientErr = err
-			return
-		}
-		clientTLS = NewShadowTLSConn(clientConn, key)
+		clientTLS, _, clientErr = ClientHandshake(clientConn, sni, key, 3*time.Second)
 	}()
 
 	wg.Wait()
@@ -174,17 +164,17 @@ func TestHandshake_WrongKeyRejection_ActiveProbing(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		serverErr = ServerHandshake(serverConn, keyAlice, 2*time.Second)
+		_, serverErr = ServerHandshake(serverConn, keyAlice, 2*time.Second)
 	}()
 
 	go func() {
 		defer wg.Done()
-		_, clientErr = ClientHandshake(clientConn, "gateway.icloud.com", keyAttacker, 2*time.Second)
+		_, _, clientErr = ClientHandshake(clientConn, "gateway.icloud.com", keyAttacker, 2*time.Second)
 	}()
 
 	wg.Wait()
 
-	// Server MUST reject with ErrAuthFailed, successfully protecting against active probing
+	// Server MUST reject with error, successfully protecting against active probing
 	if serverErr == nil {
 		t.Fatalf("expected ServerHandshake to fail due to wrong HMAC key, but succeeded!")
 	}
@@ -214,18 +204,12 @@ func TestHandshake_SimultaneousOpen_CollisionResolution(t *testing.T) {
 	// Both sides run ClientHandshake simultaneously (simulating TCP Simultaneous Open)
 	go func() {
 		defer wg.Done()
-		roleA, errA = ClientHandshake(connA, sni, key, 3*time.Second)
-		if errA == nil {
-			tlsA = NewShadowTLSConn(connA, key)
-		}
+		tlsA, roleA, errA = ClientHandshake(connA, sni, key, 3*time.Second)
 	}()
 
 	go func() {
 		defer wg.Done()
-		roleB, errB = ClientHandshake(connB, sni, key, 3*time.Second)
-		if errB == nil {
-			tlsB = NewShadowTLSConn(connB, key)
-		}
+		tlsB, roleB, errB = ClientHandshake(connB, sni, key, 3*time.Second)
 	}()
 
 	wg.Wait()
