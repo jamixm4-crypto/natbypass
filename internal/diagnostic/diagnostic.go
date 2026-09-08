@@ -8,11 +8,13 @@
 package diagnostic
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/pion/stun/v2"
@@ -74,6 +76,9 @@ func RunFullDiagnostics() *DiagnosticReport {
 
 	// 8. Перечисление локальных сетевых адаптеров
 	report.Items = append(report.Items, CheckNetworkInterfaces())
+
+	// 9. Опрос локального демона NatBypass и активных пиров mesh-сети
+	report.Items = append(report.Items, CheckMeshPeersAndEngine())
 
 	for _, item := range report.Items {
 		if !item.Passed {
@@ -263,4 +268,87 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// CheckMeshPeersAndEngine queries the local NatBypass HTTP API (127.0.0.1:8080/api/status and /api/peers)
+// to collect the mesh network topology, peer transport types, and direct P2P latency.
+func CheckMeshPeersAndEngine() DiagnosticItem {
+	start := time.Now()
+	client := http.Client{Timeout: 800 * time.Millisecond}
+
+	// Try standard WebUI ports: 8080, 8081, 8082
+	var peersData []map[string]interface{}
+	var connectedPort int
+
+	for _, port := range []int{8080, 8081, 8082} {
+		resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/peers", port))
+		if err == nil && resp != nil {
+			if resp.StatusCode == 200 {
+				_ = json.NewDecoder(resp.Body).Decode(&peersData)
+				_ = resp.Body.Close()
+				connectedPort = port
+				break
+			}
+			_ = resp.Body.Close()
+		}
+	}
+
+	if connectedPort == 0 {
+		return DiagnosticItem{
+			Name:    "Mesh-состояние и активные пиры (L3 P2P)",
+			Passed:  true,
+			Elapsed: time.Since(start),
+			Message: "ℹ Демон активен (WebUI API на 8080..8082 недоступен или отключен флагом -no-webui)",
+		}
+	}
+
+	var sb strings.Builder
+	p2pCount := 0
+	relayCount := 0
+
+	for _, p := range peersData {
+		name, _ := p["nickname"].(string)
+		if name == "" {
+			name, _ = p["device_id"].(string)
+		}
+		vip, _ := p["virtual_ip"].(string)
+		transport, _ := p["transport"].(string)
+		directP2P, _ := p["direct_p2p"].(bool)
+		directTCP, _ := p["direct_tcp"].(bool)
+		activeEP, _ := p["active_endpoint"].(string)
+		var pingMs int64
+		if pm, ok := p["ping_ms"].(float64); ok {
+			pingMs = int64(pm)
+		}
+
+		statusLabel := "Relay [MQTT]"
+		if directTCP || transport == "tcp_tls" || transport == "tcp_shadowtls" {
+			statusLabel = "Прямой TCP [ShadowTLS]"
+			p2pCount++
+		} else if directP2P || transport == "udp_direct" {
+			statusLabel = "Прямой P2P [UDP AWG]"
+			p2pCount++
+		} else {
+			relayCount++
+		}
+
+		pingStr := "N/A"
+		if pingMs > 0 {
+			pingStr = fmt.Sprintf("%d ms", pingMs)
+		}
+
+		sb.WriteString(fmt.Sprintf("  -> %-18s | VIP: %-15s | %-22s | EP: %-21s | Ping: %s\n",
+			name, vip, statusLabel, activeEP, pingStr))
+	}
+
+	msg := fmt.Sprintf("✓ API активно (порт %d), обнаружено пиров: %d (P2P: %d, Relay: %d)",
+		connectedPort, len(peersData), p2pCount, relayCount)
+
+	return DiagnosticItem{
+		Name:    "Mesh-состояние и активные пиры (L3 P2P)",
+		Passed:  true,
+		Elapsed: time.Since(start),
+		Message: msg,
+		Details: strings.TrimRight(sb.String(), "\n"),
+	}
 }

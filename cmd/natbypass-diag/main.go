@@ -32,7 +32,7 @@ var (
 	flagKey     = flag.String("key", "", "NetworkKey for room encryption/decryption")
 	flagTarget  = flag.String("target", "", "Target DeviceID to diagnose or update (empty = all beta nodes)")
 	flagUpdate  = flag.Bool("update", false, "Trigger remote beta update across target/all nodes")
-	flagTimeout = flag.Duration("timeout", 25*time.Second, "Response collection timeout")
+	flagTimeout = flag.Duration("timeout", 45*time.Second, "Response collection timeout")
 	flagOutput  = flag.String("output", "", "Output filename for consolidated cluster report")
 	flagLocal   = flag.Bool("local", false, "Include local host diagnostic report in the consolidated output")
 	flagConfig  = flag.String("config", "config.yaml", "Path to config.yaml (used for defaults)")
@@ -457,9 +457,11 @@ collectLoop:
 		if n, ok := nodes[id]; ok && n.Completed {
 			hasDiag = true
 		}
-		statusText := "Требуется обновить бинарник до актуальной beta (RemoteDiag отсутствует)"
+		statusText := fmt.Sprintf("Требуется обновить бинарник до актуальной beta (на узле: %s, RemoteDiag с v1.9.224-beta7+)", dp.Version)
 		if hasDiag {
 			statusText = "OK (Диагностический отчет получен)"
+		} else if isBeta7OrNewer(dp.Version) {
+			statusText = "Таймаут сбора отчета (узел на актуальной beta, но не успел передать отчет за отведенное время)"
 		}
 		fileSb.WriteString(fmt.Sprintf("Узел:        %s (%s)\n", dp.DeviceID, dp.Nickname))
 		fileSb.WriteString(fmt.Sprintf("ОС/Арх:      %s/%s | Версия: %s\n", dp.OS, dp.Arch, dp.Version))
@@ -525,7 +527,10 @@ collectLoop:
 		if dp.Arch == "" {
 			plat = dp.OS
 		}
-		st := "Старая версия (нет RemoteDiag)"
+		st := "Старая beta (нет RemoteDiag)"
+		if isBeta7OrNewer(dp.Version) {
+			st = "⌛ Таймаут / Занят"
+		}
 		szStr := "-"
 		if n, ok := nodes[id]; ok {
 			st = n.Status
@@ -655,4 +660,17 @@ func reorderArgs(args []string) []string {
 	res = append(res, flags...)
 	res = append(res, pos...)
 	return res
+}
+
+func isBeta7OrNewer(ver string) bool {
+	vLower := strings.ToLower(ver)
+	if !strings.Contains(vLower, "beta") {
+		return false
+	}
+	for _, old := range []string{"beta1", "beta2", "beta3", "beta4", "beta5", "beta6"} {
+		if strings.Contains(vLower, old) {
+			return false
+		}
+	}
+	return true
 }

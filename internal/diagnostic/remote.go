@@ -34,7 +34,8 @@ func (f PayloadSenderFunc) Send(ctx context.Context, payload *signaling.Payload)
 }
 
 // ExecuteLocalDiagScript runs the local platform diagnostic script (diag.ps1 / diag.sh)
-// or falls back to online retrieval and built-in Go diagnostic engine.
+// if found locally on disk, or falls back immediately to the built-in Go diagnostic engine.
+// Never downloads from external hosts (e.g. raw.githubusercontent.com) to prevent hangs under DPI/TSPU blocks.
 func ExecuteLocalDiagScript(ctx context.Context) string {
 	var out []byte
 	var err error
@@ -44,23 +45,12 @@ func ExecuteLocalDiagScript(ctx context.Context) string {
 		if localScript != "" {
 			cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", localScript)
 			out, err = cmd.CombinedOutput()
-		} else {
-			psCmd := "$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.ps1 | iex"
-			cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psCmd)
-			out, err = cmd.CombinedOutput()
 		}
 	} else {
 		localScript := findLocalScript("scripts/diag.sh", "diag.sh")
 		if localScript != "" {
 			cmd := exec.CommandContext(ctx, "sh", localScript)
 			out, err = cmd.CombinedOutput()
-		} else {
-			cmd := exec.CommandContext(ctx, "sh", "-c", "wget -qO- https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.sh | sh")
-			out, err = cmd.CombinedOutput()
-			if err != nil || len(out) == 0 {
-				cmd2 := exec.CommandContext(ctx, "sh", "-c", "curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.sh | sh")
-				out, err = cmd2.CombinedOutput()
-			}
 		}
 	}
 
@@ -68,12 +58,12 @@ func ExecuteLocalDiagScript(ctx context.Context) string {
 		return string(out)
 	}
 
-	// Fallback to built-in Go diagnostic engine if external script is unavailable or failed
+	// Immediate fallback to built-in Go diagnostic engine (100% offline, self-contained)
 	report := RunFullDiagnostics()
 	var sb strings.Builder
-	sb.WriteString("=== NatBypass Go Diagnostics Fallback Report ===\n")
+	sb.WriteString("=== NatBypass Go Diagnostics Report ===\n")
 	if err != nil {
-		sb.WriteString(fmt.Sprintf("Note: External script failed: %v\n", err))
+		sb.WriteString(fmt.Sprintf("Note: Local script error: %v\n", err))
 	}
 	sb.WriteString(fmt.Sprintf("Timestamp: %s\n", report.Timestamp.Format(time.RFC3339)))
 	sb.WriteString(fmt.Sprintf("Host: %s | OS: %s | Arch: %s\n", report.Hostname, report.OS, report.Arch))
@@ -83,9 +73,9 @@ func ExecuteLocalDiagScript(ctx context.Context) string {
 		if !item.Passed {
 			status = "[FAIL]"
 		}
-		sb.WriteString(fmt.Sprintf("%s %-35s (%v): %s\n", status, item.Name, item.Elapsed.Round(time.Millisecond), item.Message))
+		sb.WriteString(fmt.Sprintf("%s %-38s (%v): %s\n", status, item.Name, item.Elapsed.Round(time.Millisecond), item.Message))
 		if item.Details != "" {
-			sb.WriteString(fmt.Sprintf("     %s\n", item.Details))
+			sb.WriteString(fmt.Sprintf("%s\n", item.Details))
 		}
 	}
 	return sb.String()
@@ -178,10 +168,13 @@ func HandleRemoteDiagSignal(
 	switch sig.Action {
 	case "request_diag":
 		go func() {
-			diagCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
+			execCtx, execCancel := context.WithTimeout(context.Background(), 25*time.Second)
+			report := ExecuteLocalDiagScript(execCtx)
+			execCancel()
 
-			report := ExecuteLocalDiagScript(diagCtx)
+			sendCtx, sendCancel := context.WithTimeout(context.Background(), 25*time.Second)
+			defer sendCancel()
+
 			chunks := SplitIntoChunks(report, 9000)
 			totalChunks := len(chunks)
 
@@ -214,7 +207,7 @@ func HandleRemoteDiagSignal(
 					}
 				}
 
-				_ = sender.Send(diagCtx, toSend)
+				_ = sender.Send(sendCtx, toSend)
 				if totalChunks > 1 {
 					time.Sleep(60 * time.Millisecond)
 				}
@@ -223,8 +216,8 @@ func HandleRemoteDiagSignal(
 
 	case "request_update":
 		go func() {
-			updateCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-			defer cancel()
+			updateCtx, updateCancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer updateCancel()
 
 			// Send intermediate progress signal
 			initSig := &signaling.RemoteDiagSignal{
@@ -286,7 +279,10 @@ func HandleRemoteDiagSignal(
 					toSendFinal = enc
 				}
 			}
-			_ = sender.Send(updateCtx, toSendFinal)
+
+			sendCtx, sendCancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer sendCancel()
+			_ = sender.Send(sendCtx, toSendFinal)
 		}()
 	}
 }
