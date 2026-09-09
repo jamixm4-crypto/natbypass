@@ -17,13 +17,17 @@ import (
 // When DPI active filtering / throttling or network congestion causes packet loss,
 // the pacer smooths packet transmission bursts and increases keepalive intervals,
 // preventing sudden connection drops.
+//
+// NOTE: On 32-bit architectures (mips, mipsle, arm, 386), 64-bit atomic fields MUST be 64-bit
+// aligned. Using atomic.Uint64 placed at the very beginning of the struct guarantees 8-byte alignment
+// on all platforms and prevents "panic: unaligned 64-bit atomic operation".
 type AdaptivePacer struct {
+	sentCount    atomic.Uint64 // 64-bit aligned at offset 0
+	lossCount    atomic.Uint64 // 64-bit aligned at offset 8
 	mu           sync.RWMutex
 	srtt         time.Duration // Smoothed RTT (EWMA)
 	rttMin       time.Duration // Minimum RTT observed (RTprop)
 	rttMinSeenAt time.Time
-	sentCount    uint64
-	lossCount    uint64
 	lastWindow   time.Time
 	currentLoss  float64       // 0.0 to 1.0 (loss rate in current window)
 	maxBurst     int           // Maximum packets sent before pacing yield
@@ -67,12 +71,12 @@ func (p *AdaptivePacer) RecordAck(rtt time.Duration) {
 
 // RecordSent increments transmitted packet count.
 func (p *AdaptivePacer) RecordSent(pktLen int) {
-	atomic.AddUint64(&p.sentCount, 1)
+	p.sentCount.Add(1)
 }
 
 // RecordLoss notes an unacknowledged or dropped packet.
 func (p *AdaptivePacer) RecordLoss() {
-	atomic.AddUint64(&p.lossCount, 1)
+	p.lossCount.Add(1)
 	p.evaluateWindow()
 }
 
@@ -93,8 +97,8 @@ func (p *AdaptivePacer) ForceEvaluateWindow() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	sent := atomic.SwapUint64(&p.sentCount, 0)
-	lost := atomic.SwapUint64(&p.lossCount, 0)
+	sent := p.sentCount.Swap(0)
+	lost := p.lossCount.Swap(0)
 	p.lastWindow = time.Now()
 
 	if sent > 0 {

@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.225-beta8"
+const Version = "1.9.225-beta9"
 
 
 
@@ -139,8 +139,8 @@ var (
 	globalTCPDirectMgr     *network.TCPDirectManager
 	globalTunFile   *os.File
 	globalTunCancel context.CancelFunc // controls TUN read goroutine lifecycle
-	globalTxBytes   uint64
-	globalRxBytes   uint64
+	globalTxBytes   atomic.Uint64
+	globalRxBytes   atomic.Uint64
 	logger          zerolog.Logger
 )
 
@@ -316,7 +316,7 @@ func StartEngine(configYAML string, tunFd int) string {
 	}
 	globalSigMgr = signaling.NewFallbackManager(channels)
 	globalSigMgr.SubscribeTunnelData(devID, func(pkt []byte) {
-		atomic.AddUint64(&globalRxBytes, uint64(len(pkt)))
+		globalRxBytes.Add(uint64(len(pkt)))
 		dataToProcess := pkt
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 			cKey := crypto.DeriveKey(activeProf.NetworkKey)
@@ -422,7 +422,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}
 	globalTCPDirectMgr.SetOnPacket(func(srcAddr *net.UDPAddr, payload []byte) {
-		atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
+		globalRxBytes.Add(uint64(len(payload)))
 		respondICMPEcho(payload, srcAddr)
 		engineMu.Lock()
 		tf := globalTunFile
@@ -966,7 +966,7 @@ func attachTUNLocked(tunFd int) {
 
 	if globalPuncher != nil && globalTunFile != nil {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
-			atomic.AddUint64(&globalRxBytes, uint64(len(payload)))
+			globalRxBytes.Add(uint64(len(payload)))
 
 			// Юзерспейс-ответ на входящие ICMP Echo запросы (чтобы другие узлы могли пинговать Android)
 			respondICMPEcho(payload, srcAddr)
@@ -1017,7 +1017,7 @@ func attachTUNLocked(tunFd int) {
 						continue
 					}
 					pkt := buf[:n]
-					atomic.AddUint64(&globalTxBytes, uint64(n))
+					globalTxBytes.Add(uint64(n))
 
 					if len(pkt) >= 20 && (pkt[0]>>4) == 4 {
 						destIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
@@ -1909,8 +1909,8 @@ func getAWGParamsFromPreset(preset string) *signaling.AWGParams {
 // GetTrafficStats возвращает текущую статистику переданных и принятых байт
 func GetTrafficStats() string {
 	res := map[string]interface{}{
-		"tx_bytes": atomic.LoadUint64(&globalTxBytes),
-		"rx_bytes": atomic.LoadUint64(&globalRxBytes),
+		"tx_bytes": globalTxBytes.Load(),
+		"rx_bytes": globalRxBytes.Load(),
 	}
 	data, _ := json.Marshal(res)
 	return string(data)
@@ -2018,8 +2018,8 @@ func GetFullTelemetryJSON() string {
 		"awg_active":      awgActive,
 		"awg_version":     "3.1",
 		"awg":             awgData,
-		"tx_bytes":        atomic.LoadUint64(&globalTxBytes),
-		"rx_bytes":        atomic.LoadUint64(&globalRxBytes),
+		"tx_bytes":        globalTxBytes.Load(),
+		"rx_bytes":        globalRxBytes.Load(),
 		"uptime":          time.Since(globalStarted).Round(time.Second).String(),
 	}
 	data, _ := json.Marshal(res)
