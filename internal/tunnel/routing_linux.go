@@ -411,17 +411,17 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 // setLinuxExitNodeDNS настраивает DNS серверы при активации exit node на Linux.
 // R2: Без этого DNS запросы могут идти мимо VPN-тоннеля (DNS leak).
 func setLinuxExitNodeDNS() {
-	// Метод 1: systemd-resolved через resolvectl
-	if err := exec.Command("resolvectl", "dns", "nb0", "1.1.1.1", "8.8.8.8").Run(); err == nil {
+	// Метод 1: systemd-resolved через resolvectl (127.0.0.1 DoH, 1.1.1.1 fallback)
+	if err := exec.Command("resolvectl", "dns", "nb0", "127.0.0.1", "1.1.1.1").Run(); err == nil {
 		_ = exec.Command("resolvectl", "domain", "nb0", "~.").Run()
 		return
 	}
 	// Метод 2: через nmcli (NetworkManager)
-	if err := exec.Command("nmcli", "dev", "mod", "nb0", "ipv4.dns", "1.1.1.1 8.8.8.8").Run(); err == nil {
+	if err := exec.Command("nmcli", "dev", "mod", "nb0", "ipv4.dns", "127.0.0.1 1.1.1.1").Run(); err == nil {
 		return
 	}
 	// Метод 3: Прямая правка /etc/resolv.conf (fallback для OpenWrt/Keenetic)
-	const dnsContent = "# NatBypass exit node DNS\nnameserver 1.1.1.1\nnameserver 8.8.8.8\n"
+	const dnsContent = "# NatBypass exit node DoH DNS\nnameserver 127.0.0.1\nnameserver 1.1.1.1\n"
 	if err := os.WriteFile("/etc/resolv.conf", []byte(dnsContent), 0644); err != nil {
 		// /etc/resolv.conf может быть симлинком — игнорируем
 		_ = err

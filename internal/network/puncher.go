@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/natbypass/natbypass/internal/constants"
@@ -148,6 +149,7 @@ type UDPPuncher struct {
 	cipherKey    [32]byte
 	hasCipherKey bool
 	cipherMu     sync.RWMutex
+	outboundSeq  uint64
 }
 
 // SetCipherKey конфигурирует ключ симметричного шифрования (ChaCha20-Poly1305) для L3 Data-plane пакетов.
@@ -1407,7 +1409,25 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			}
 		}
 
-		if enc, encErr := crypto.EncryptSelf(payloadToEncrypt, cKey); encErr == nil && len(enc) > 0 {
+		epoch := crypto.GetCurrentEpoch()
+		seq := atomic.AddUint64(&p.outboundSeq, 1)
+		if enc, encErr := crypto.EncryptWithEpochSeq(payloadToEncrypt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+			if p.pacer != nil {
+				p.pacer.Pace()
+				p.pacer.RecordSent(len(enc))
+			}
+
+			p.mu.Lock()
+			shaper := p.trafficShaper
+			p.mu.Unlock()
+
+			if shaper != nil && shaper.IsEnabled() {
+				return shaper.SendPacket(p.conn, rAddr, enc)
+			}
+
+			_, err = p.conn.WriteToUDP(enc, rAddr)
+			return err
+		} else if enc, encErr := crypto.EncryptSelf(payloadToEncrypt, cKey); encErr == nil && len(enc) > 0 {
 			if p.pacer != nil {
 				p.pacer.Pace()
 				p.pacer.RecordSent(len(enc))
@@ -1777,8 +1797,53 @@ func (p *UDPPuncher) readLoop() {
 					// has a 25% chance of matching (buf[0]&0xC0 == 0x40). Fall through to DecryptSelf below.
 				}
 
+				// 1. Try modern Epoch + Seq encrypted packets (RFC 6479 + PFS)
+				if n >= 16+24+16 {
+					curEpoch := crypto.GetCurrentEpoch()
+					if dec, _, _, err := crypto.DecryptWithEpochSeq(buf[:n], cKey[:], curEpoch); err == nil && len(dec) > 0 {
+						if IsMultiHopPacket(dec) {
+							p.handleTunnelPacket(dec, remoteAddr)
+							continue
+						}
+						decStr := string(dec)
+						if strings.HasPrefix(decStr, constants.PingPrefix) {
+							p.handlePing(decStr, remoteAddr)
+							continue
+						} else if strings.HasPrefix(decStr, constants.PongPrefix) {
+							p.handlePong(decStr, remoteAddr)
+							continue
+						} else if len(dec) >= 3 && (dec[2]>>4 == 4 || dec[2]>>4 == 6) {
+							realLen := int(binary.BigEndian.Uint16(dec[:2]))
+							if realLen > 0 && 2+realLen <= len(dec) {
+								p.handleTunnelPacket(dec[2:2+realLen], remoteAddr)
+								continue
+							}
+						} else if (dec[0]>>4) == 4 || (dec[0]>>4) == 6 {
+							payloadToSend := dec
+							if (dec[0]>>4) == 4 && len(dec) >= 20 {
+								totLen := int(binary.BigEndian.Uint16(dec[2:4]))
+								if totLen >= 20 && totLen <= len(dec) {
+									payloadToSend = dec[:totLen]
+								}
+							} else if (dec[0]>>4) == 6 && len(dec) >= 40 {
+								totLen := 40 + int(binary.BigEndian.Uint16(dec[4:6]))
+								if totLen >= 40 && totLen <= len(dec) {
+									payloadToSend = dec[:totLen]
+								}
+							}
+							p.handleTunnelPacket(payloadToSend, remoteAddr)
+							continue
+						}
+					}
+				}
+
+				// 2. Fallback to legacy static DecryptSelf
 				if n >= 40 {
 					if dec, err := crypto.DecryptSelf(buf[:n], cKey); err == nil && len(dec) > 0 {
+						if IsMultiHopPacket(dec) {
+							p.handleTunnelPacket(dec, remoteAddr)
+							continue
+						}
 					decStr := string(dec)
 					if strings.HasPrefix(decStr, constants.PingPrefix) {
 						p.handlePing(decStr, remoteAddr)

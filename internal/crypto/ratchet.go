@@ -299,3 +299,53 @@ func DecryptWithEpoch(data []byte, baseKey []byte, currentEpoch uint64) ([]byte,
 
 	return dec, msgEpoch, nil
 }
+
+// EncryptWithEpochSeq wraps plaintext with an 8-byte epoch and 8-byte sequence counter,
+// then encrypts under the epoch-derived key.
+// Wire format: [Epoch uint64 (8B)][Seq uint64 (8B)][Nonce 24B][Ciphertext + Poly1305 Tag 16B]
+func EncryptWithEpochSeq(plaintext []byte, baseKey []byte, epoch uint64, seq uint64) ([]byte, error) {
+	epochKey, err := DeriveEpochKey(baseKey, epoch)
+	if err != nil {
+		return nil, err
+	}
+
+	enc, err := EncryptSelf(plaintext, epochKey)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]byte, 16+len(enc))
+	binary.BigEndian.PutUint64(out[:8], epoch)
+	binary.BigEndian.PutUint64(out[8:16], seq)
+	copy(out[16:], enc)
+	return out, nil
+}
+
+// DecryptWithEpochSeq validates epoch tolerance (±1) and decrypts the payload.
+// Returns (plaintext, epoch, seq, err).
+func DecryptWithEpochSeq(data []byte, baseKey []byte, currentEpoch uint64) ([]byte, uint64, uint64, error) {
+	if len(data) < 16+24+16 {
+		return nil, 0, 0, ErrDecryptionFailed
+	}
+
+	msgEpoch := binary.BigEndian.Uint64(data[:8])
+	seq := binary.BigEndian.Uint64(data[8:16])
+
+	// Tolerance window of ±1 epoch
+	if msgEpoch > currentEpoch+1 || (currentEpoch > 0 && msgEpoch < currentEpoch-1) {
+		return nil, 0, 0, fmt.Errorf("epoch expired or out of window (msg=%d, current=%d)", msgEpoch, currentEpoch)
+	}
+
+	epochKey, err := DeriveEpochKey(baseKey, msgEpoch)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	dec, err := DecryptSelf(data[16:], epochKey)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	return dec, msgEpoch, seq, nil
+}
+

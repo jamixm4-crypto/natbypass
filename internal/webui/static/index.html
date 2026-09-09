@@ -1575,7 +1575,63 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         </div>
       </div>
 
-      <!-- 3. General System Connectivity Report -->
+      <!-- 3. RFC 5780 NAT & TSPU DPI Netcheck -->
+      <div class="glass-card" style="margin-bottom:20px; border-color: rgba(56, 189, 248, 0.3); background: linear-gradient(135deg, rgba(56, 189, 248, 0.04), rgba(14, 20, 32, 0.7));">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+          <div>
+            <h2 style="font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
+              <span style="color:#38bdf8;">🔬</span> Глубокий аудит сети (RFC 5780 STUN Netcheck & ТСПУ DPI)
+            </h2>
+            <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Анализ поведения NAT (Mapping & Filtering), детекция трансграничных блокировок ТСПУ и Path MTU</p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button id="btnRunNetcheck" onclick="runNetcheck()" class="btn btn-neon" style="background: linear-gradient(135deg, #0284c7, #38bdf8); font-size:0.85rem; padding:8px 18px;">
+              ⚡ Запустить Netcheck
+            </button>
+          </div>
+        </div>
+
+        <div id="netcheckResults" style="display:none; flex-direction:column; gap:14px;">
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
+            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">📡 NAT MAPPING (RFC 5780)</div>
+              <div id="ncMapping" style="font-size:1rem; font-weight:700; color:#38bdf8;">—</div>
+              <div id="ncDelta" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">—</div>
+            </div>
+            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">🛡️ NAT FILTERING (RFC 5780)</div>
+              <div id="ncFiltering" style="font-size:1rem; font-weight:700; color:#a78bfa;">—</div>
+              <div id="ncNATType" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">—</div>
+            </div>
+            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">🚫 ДЕТЕКЦИЯ ТСПУ / DPI</div>
+              <div id="ncTSPU" style="font-size:1rem; font-weight:700; color:#4ade80;">Чисто</div>
+              <div id="ncTSPUDetails" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">Блокировок не обнаружено</div>
+            </div>
+            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">📏 PATH MTU & ПРОТОКОЛЫ</div>
+              <div id="ncMTU" style="font-size:1rem; font-weight:700; color:#fbbf24;">—</div>
+              <div id="ncProtoSupport" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">—</div>
+            </div>
+          </div>
+
+          <div id="ncRecommendationCard" style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div>
+              <div style="font-size:0.85rem; font-weight:700; color:#38bdf8;">✨ Оптимальный режим передачи трафика:</div>
+              <div id="ncRecommendationText" style="font-size:0.8rem; color:var(--text-muted); margin-top:3px;">Рекомендуется режим прямого UDP (AWG) для максимальной скорости и минимальных задержек.</div>
+            </div>
+            <button id="btnApplyTransport" onclick="applyRecommendedTransport()" class="btn btn-neon" style="padding:7px 16px; font-size:0.82rem;">
+              Применить рекомендацию
+            </button>
+          </div>
+        </div>
+
+        <div id="netcheckPlaceholder" style="color:var(--text-dim); font-size:0.82rem; font-style:italic;">
+          Нажмите кнопку «⚡ Запустить Netcheck» для классификации NAT по RFC 5780 и проверки блокировок DPI.
+        </div>
+      </div>
+
+      <!-- 4. General System Connectivity Report -->
       <div class="glass-card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
           <div>
@@ -4705,6 +4761,102 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
       copyToClipboard(lastDiagReport, "✓ Отчет диагностики скопирован в буфер обмена!"); return;
       showToast('✓ Отчет диагностики скопирован в буфер обмена!');
+    }
+
+    let lastNetcheckReport = null;
+
+    async function runNetcheck() {
+      const btn = document.getElementById('btnRunNetcheck');
+      const ph = document.getElementById('netcheckPlaceholder');
+      const resContainer = document.getElementById('netcheckResults');
+      
+      btn.disabled = true;
+      btn.innerText = '⏳ Выполняется Netcheck...';
+      ph.style.display = 'block';
+      ph.innerText = '⏳ Проверка классификации RFC 5780 и детекция ТСПУ DPI (может занять до 3-5 секунд)...';
+
+      try {
+        const res = await fetch('/api/diagnostics/netcheck', { method: 'POST' });
+        const json = await res.json();
+        if (json.ok && json.data) {
+          const d = json.data;
+          lastNetcheckReport = d;
+          ph.style.display = 'none';
+          resContainer.style.display = 'flex';
+
+          document.getElementById('ncMapping').innerText = d.mapping_type || '—';
+          document.getElementById('ncDelta').innerText = (d.port_delta !== undefined && d.port_delta !== 0) ? `Дельта портов: ${d.port_delta > 0 ? '+' : ''}${d.port_delta}` : (d.pba_block_size > 0 ? `PBA блок: ${d.pba_block_size}` : 'Прямое связывание');
+
+          document.getElementById('ncFiltering').innerText = d.filtering_type || '—';
+          document.getElementById('ncNATType').innerText = `Тип NAT: ${d.nat_type || 'Unknown'}`;
+
+          const tspuEl = document.getElementById('ncTSPU');
+          const tspuDetEl = document.getElementById('ncTSPUDetails');
+          if (d.tspu_detected) {
+            tspuEl.innerText = '⚠️ ОБНАРУЖЕН';
+            tspuEl.style.color = '#ef4444';
+            tspuDetEl.innerText = d.tspu_details || 'UDP трафик подвергается фильтрации ТСПУ';
+          } else {
+            tspuEl.innerText = '✅ Чисто';
+            tspuEl.style.color = '#4ade80';
+            tspuDetEl.innerText = 'Блокировок UDP/WireGuard не обнаружено';
+          }
+
+          document.getElementById('ncMTU').innerText = d.path_mtu ? `${d.path_mtu} байт` : '1420 байт';
+          document.getElementById('ncProtoSupport').innerText = `UDP: ${d.udp_enabled ? '✅' : '❌'} | IPv6: ${d.ipv6_enabled ? '✅' : '❌'}`;
+
+          const recText = document.getElementById('ncRecommendationText');
+          const pref = d.preferred_transport || 'udp';
+          if (pref === 'tcp_shadowtls' || pref === 'force_tcp') {
+            recText.innerText = 'Рекомендован режим TCP ShadowTLS v3: обнаружена цензура/блокировка UDP со стороны ТСПУ или Symmetric NAT.';
+          } else if (pref === 'quic') {
+            recText.innerText = 'Рекомендован режим QUIC Multipath: провайдер использует динамический пул портов (Symmetric CGNAT).';
+          } else {
+            recText.innerText = 'Рекомендован стандартный режим Direct UDP (AmneziaWG): свободное прохождение пакетов без цензуры.';
+          }
+          showToast('✓ Глубокий Netcheck успешно завершен!');
+        } else {
+          ph.innerText = 'Ошибка получения отчета Netcheck: ' + (json.error || 'неизвестная ошибка');
+        }
+      } catch (e) {
+        ph.innerText = 'Ошибка выполнения Netcheck: ' + e.message;
+      } finally {
+        btn.disabled = false;
+        btn.innerText = '⚡ Запустить Netcheck';
+      }
+    }
+
+    async function applyRecommendedTransport() {
+      if (!lastNetcheckReport || !lastNetcheckReport.preferred_transport) {
+        showToast('Сначала выполните диагностику Netcheck!');
+        return;
+      }
+      let targetMode = 'auto';
+      const pref = lastNetcheckReport.preferred_transport;
+      if (pref === 'tcp_shadowtls' || pref === 'force_tcp') {
+        targetMode = 'force_tcp';
+      } else if (pref === 'quic') {
+        targetMode = 'quic';
+      } else if (pref === 'udp' || pref === 'awg') {
+        targetMode = 'force_udp';
+      }
+
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transport_mode: targetMode })
+        });
+        const json = await res.json();
+        if (json.ok) {
+          showToast(`✓ Режим транспорта изменен на "${targetMode}"!`);
+          if (typeof loadSettings === 'function') loadSettings();
+        } else {
+          showToast('Ошибка применения: ' + (json.error || 'не удалось сохранить'));
+        }
+      } catch (e) {
+        showToast('Ошибка: ' + e.message);
+      }
     }
 
     function copyLogs() {

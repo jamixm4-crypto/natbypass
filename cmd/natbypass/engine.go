@@ -30,6 +30,8 @@ import (
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/daemon"
 	"github.com/natbypass/natbypass/internal/diagnostic"
+	"github.com/natbypass/natbypass/internal/dns"
+	"github.com/natbypass/natbypass/internal/transport"
 	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/peer"
@@ -53,6 +55,9 @@ var (
 	wssClient        *relay.WSSRelayClient
 	udpRelay         *relay.UDPRelayClient
 	triggerPublishCh = make(chan struct{}, 10)
+	multiHopRouter   *network.MultiHopRouter
+	transSelector    *transport.TransportSelector
+	dohProxyServer   *dns.DoHProxyServer
 
 	// S6: Debounce для triggerPublish — предотвращаем signaling storm при одновременном появлении пиров
 	lastPublishTrigger   time.Time
@@ -383,6 +388,45 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		log.Info().Int("initial_mtu", initialMTU).Msg("🛡️ [Random MTU] Initialized dynamic MTU to defeat DPI/TSPU fingerprinting")
 	}
 
+	// Initialize Dynamic Transport Auto-Selector with 15s hysteresis
+	transSelector = transport.NewTransportSelector(15 * time.Second)
+
+	// Initialize Mesh Multi-Hop P2P Router
+	multiHopRouter = network.NewMultiHopRouter(
+		deviceID,
+		func(dstID string, packet []byte) error {
+			if tcpDirectMgr != nil && tcpDirectMgr.HasConn(dstID) {
+				return tcpDirectMgr.SendPacket(dstID, packet)
+			}
+			if destPeer, ok := registry.Get(dstID); ok && destPeer != nil {
+				if puncher != nil && destPeer.DirectP2P && destPeer.ActiveEndpoint != "" {
+					return puncher.SendDataPacketWithPadding(destPeer.ActiveEndpoint, packet, 0, 0)
+				}
+			}
+			if wssClient != nil && wssClient.IsConnected() {
+				return wssClient.SendPacket(dstID, packet)
+			}
+			return fmt.Errorf("no route to peer %s for multi-hop transit", dstID)
+		},
+		func(srcID string, payload []byte) error {
+			if len(payload) >= 20 && tunDev != nil {
+				return tunDev.WritePacket(payload)
+			}
+			return nil
+		},
+	)
+
+	// Start Built-in Encrypted DoH DNS Proxy on 127.0.0.1:53 to eliminate DNS leaks & ISP hijacking
+	dohResolver := dns.NewDoHResolver(nil)
+	var dohErr error
+	dohProxyServer, dohErr = dns.NewDoHProxyServer("127.0.0.1:53", dohResolver)
+	if dohErr != nil {
+		log.Debug().Err(dohErr).Msg("DoH Proxy could not bind 127.0.0.1:53 (skipping local port 53 listener)")
+	} else {
+		log.Info().Str("addr", dohProxyServer.Addr()).Msg("🛡️ Built-in DoH DNS Proxy active (RFC 8484)")
+		defer dohProxyServer.Close()
+	}
+
 	if uiServer != nil {
 		onCfgReload := func() {
 			if configFile != "" {
@@ -670,6 +714,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 		// L3 Data-plane: Inbound packets from UDP Puncher & MQTT Relay -> Write directly to kernel TUN
 		onInboundPacket := func(payload []byte, directAddr *net.UDPAddr, isTCP bool, isRelay bool) {
+			if len(payload) < 6 {
+				return
+			}
+			// Intercept Multi-Hop packet BEFORE IPv4 checks (0x4E >> 4 == 4 protocol collision prevention)
+			if network.IsMultiHopPacket(payload) {
+				if multiHopRouter != nil {
+					if err := multiHopRouter.Route(payload); err != nil {
+						log.Debug().Err(err).Msg("Multi-hop packet route dropped")
+					}
+				}
+				return
+			}
 			if len(payload) < 20 {
 				return
 			}
@@ -923,7 +979,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				dataToProcess := payload
 				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 					cKey := crypto.DeriveKey(activeProf.NetworkKey)
-					if dec, decErr := crypto.DecryptSelf(payload, cKey); decErr == nil && len(dec) >= 20 {
+					curEpoch := crypto.GetCurrentEpoch()
+					if dec, _, seq, err := crypto.DecryptWithEpochSeq(payload, cKey[:], curEpoch); err == nil && len(dec) >= 20 {
+						srcIP := net.IPv4(dec[12], dec[13], dec[14], dec[15]).String()
+						if senderPeer, ok := registry.GetByVirtualIP(srcIP); ok && senderPeer != nil {
+							if !senderPeer.GetReplayFilter().ValidateAndAccept(seq) {
+								log.Warn().Str("src", srcIP).Uint64("seq", seq).Msg("🛡️ [Relay Anti-Replay] Duplicate packet dropped")
+								return
+							}
+						}
+						dataToProcess = dec
+					} else if dec, decErr := crypto.DecryptSelf(payload, cKey); decErr == nil && len(dec) >= 20 {
 						dataToProcess = dec
 					}
 				}
@@ -1149,13 +1215,23 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}(p.DeviceID, tcpTarget, lPort)
 							}
 						}
-						// 1e. Mesh Userspace TCP Relay Fallback:
-						// If neither direct TCP nor confirmed direct UDP succeeded, forward through an active relay peer
-						if !sentTCP && !sentDirect && !isForceUDP && tcpDirectMgr != nil {
+						// 1e. Mesh Userspace Multi-Hop Relay Fallback:
+						// If neither direct TCP nor confirmed direct UDP succeeded, forward encapsulated in MultiHopPacket
+						if !sentTCP && !sentDirect && !isForceUDP {
 							if relayPeer := findMeshRelayPeer(registry, tcpDirectMgr, p.DeviceID); relayPeer != nil {
-								if err := tcpDirectMgr.SendPacket(relayPeer.DeviceID, pkt); err == nil {
-									sentDirect = true
-									log.Debug().Str("dst", dstIP).Str("via", relayPeer.DeviceID).Msg("🔀 Routed packet via Mesh TCP Relay peer")
+								mhPkt, mhErr := network.EncodeMultiHopPacket(deviceID, p.DeviceID, network.DefaultMaxTTL, 0x00, pkt)
+								if mhErr == nil {
+									if tcpDirectMgr != nil && tcpDirectMgr.HasConn(relayPeer.DeviceID) {
+										if err := tcpDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
+											sentDirect = true
+											log.Debug().Str("dst", dstIP).Str("via", relayPeer.DeviceID).Msg("🔀 MultiHop: Routed packet via Mesh TCP Relay peer")
+										}
+									} else if puncher != nil && relayPeer.DirectP2P && relayPeer.ActiveEndpoint != "" {
+										if err := puncher.SendDataPacketWithPadding(relayPeer.ActiveEndpoint, mhPkt, 0, 0); err == nil {
+											sentDirect = true
+											log.Debug().Str("dst", dstIP).Str("via", relayPeer.ActiveEndpoint).Msg("🔀 MultiHop: Routed packet via Mesh UDP Relay peer")
+										}
+									}
 								}
 							}
 						}
@@ -1179,7 +1255,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								dataToSend := pkt
 								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 									cKey := crypto.DeriveKey(activeProf.NetworkKey)
-									if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+									epoch := crypto.GetCurrentEpoch()
+									seq := p.NextOutboundSeq()
+									if enc, encErr := crypto.EncryptWithEpochSeq(pkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+										dataToSend = enc
+									} else if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
 										dataToSend = enc
 									}
 								}
@@ -1486,6 +1566,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									p.DirectP2P = true
 								}
 								p.LastDirectSeen = time.Now()
+								if transSelector != nil {
+									metrics := transport.LinkMetrics{
+										RTT:         p.Latency,
+										LossPercent: p.LossPercent,
+										ConsecDrops: p.ConsecutiveDrops,
+										DirectUDP:   p.DirectP2P && p.ActiveEndpoint != "",
+										DirectTCP:   tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID),
+									}
+									bestTrans := transSelector.SelectTransport(p.DeviceID, metrics)
+									if bestTrans != "" && p.Transport != bestTrans {
+										p.Transport = bestTrans
+									}
+								}
 								registry.Upsert(p)
 							} else {
 								// ICMP failure: UDP is blackholed by TSPU or dropped

@@ -87,3 +87,64 @@ func TestEpoch_ToleranceWindow(t *testing.T) {
 		t.Errorf("Expected failure for epoch out of window, but succeeded")
 	}
 }
+
+func TestEpochSeq_EncryptDecrypt_Success(t *testing.T) {
+	baseKey := []byte("0123456789abcdef0123456789abcdef")
+	epoch := uint64(2000)
+	seq := uint64(42)
+	message := []byte("Testing combined Epoch PFS and Sequence Number")
+
+	encrypted, err := EncryptWithEpochSeq(message, baseKey, epoch, seq)
+	if err != nil {
+		t.Fatalf("EncryptWithEpochSeq error: %v", err)
+	}
+
+	decrypted, msgEpoch, msgSeq, err := DecryptWithEpochSeq(encrypted, baseKey, epoch)
+	if err != nil {
+		t.Fatalf("DecryptWithEpochSeq error: %v", err)
+	}
+
+	if msgEpoch != epoch {
+		t.Errorf("Expected epoch %d, got %d", epoch, msgEpoch)
+	}
+	if msgSeq != seq {
+		t.Errorf("Expected seq %d, got %d", seq, msgSeq)
+	}
+	if !bytes.Equal(decrypted, message) {
+		t.Errorf("Decrypted message mismatch")
+	}
+}
+
+func TestEpochSeq_AntiReplayIntegration(t *testing.T) {
+	baseKey := []byte("0123456789abcdef0123456789abcdef")
+	epoch := uint64(3000)
+	message := []byte("Anti-Replay Integration Test")
+
+	rf := NewReplayFilter()
+
+	for s := uint64(1); s <= 100; s++ {
+		enc, err := EncryptWithEpochSeq(message, baseKey, epoch, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		dec, _, msgSeq, err := DecryptWithEpochSeq(enc, baseKey, epoch)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !rf.ValidateAndAccept(msgSeq) {
+			t.Fatalf("ReplayFilter rejected fresh packet seq %d", msgSeq)
+		}
+
+		// Immediate replay must be rejected by ReplayFilter
+		if rf.ValidateAndAccept(msgSeq) {
+			t.Fatalf("ReplayFilter accepted replayed packet seq %d", msgSeq)
+		}
+
+		if !bytes.Equal(dec, message) {
+			t.Fatal("Data mismatch")
+		}
+	}
+}
+

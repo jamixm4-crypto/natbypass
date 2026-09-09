@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/natbypass/natbypass/internal/constants"
+	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/signaling"
 )
 
@@ -73,6 +74,25 @@ type Peer struct {
 	ConsecutiveDirectSuccess int                     `json:"consec_direct_success,omitempty"`// Consecutive successful direct probes (hysteresis)
 	StandbyRelayReady        bool                    `json:"standby_relay_ready,omitempty"`  // True if Hot-Standby Relay path is verified
 	LastRelayPing            time.Time               `json:"last_relay_ping,omitempty"`      // Timestamp of last Hot-Standby heartbeat
+	ReplayFilter             *crypto.ReplayFilter    `json:"-"`                              // Anti-Replay sliding window (RFC 6479)
+	OutboundSeq              uint64                  `json:"-"`                              // Monotonic outbound sequence counter
+	OutboundSeqMu            sync.Mutex              `json:"-"`                              // Protects OutboundSeq
+}
+
+// NextOutboundSeq returns the next monotonically increasing sequence number for this peer.
+func (p *Peer) NextOutboundSeq() uint64 {
+	p.OutboundSeqMu.Lock()
+	defer p.OutboundSeqMu.Unlock()
+	p.OutboundSeq++
+	return p.OutboundSeq
+}
+
+// GetReplayFilter returns the initialized Anti-Replay filter for this peer.
+func (p *Peer) GetReplayFilter() *crypto.ReplayFilter {
+	if p.ReplayFilter == nil {
+		p.ReplayFilter = crypto.NewReplayFilter()
+	}
+	return p.ReplayFilter
 }
 
 // RecordProbeResult updates the 32-bit delivery bitmap and recalculates LossPercent using pure integer arithmetic (MIPS safe).
@@ -272,6 +292,12 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	}
 	if newer.LastRelayPing.IsZero() && !existing.LastRelayPing.IsZero() {
 		newer.LastRelayPing = existing.LastRelayPing
+	}
+	if newer.ReplayFilter == nil && existing.ReplayFilter != nil {
+		newer.ReplayFilter = existing.ReplayFilter
+	}
+	if newer.OutboundSeq == 0 && existing.OutboundSeq != 0 {
+		newer.OutboundSeq = existing.OutboundSeq
 	}
 
 

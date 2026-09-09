@@ -6768,6 +6768,9 @@ func updateData() {
 					if p.Online && p.AWG != nil && !awgParamsMatch(cachedAWGParams, p.AWG) {
 						extraTags = append(extraTags, "[AWG: ⚠️]")
 					}
+					if p.Online && p.LossPercent > 0 {
+						extraTags = append(extraTags, fmt.Sprintf("[Потери: %d%%]", p.LossPercent))
+					}
 					extraInfo := ""
 					if len(extraTags) > 0 {
 						extraInfo = " " + strings.Join(extraTags, " ")
@@ -6804,7 +6807,11 @@ func updateData() {
 					}
 
 					if hListSummaryPeers != 0 {
-						sumLine := fmt.Sprintf("  %s %s • VIP: %s • %s • %s", icon, nameDisplay, vip, statusDisplay, platBadge)
+						lossStr := ""
+						if p.Online && p.LossPercent > 0 {
+							lossStr = fmt.Sprintf(" • Потери: %d%%", p.LossPercent)
+						}
+						sumLine := fmt.Sprintf("  %s %s • VIP: %s • %s • %s%s", icon, nameDisplay, vip, statusDisplay, platBadge, lossStr)
 						addListBoxItem(hListSummaryPeers, sumLine)
 					}
 				}
@@ -7442,6 +7449,27 @@ func runDiag() {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 		res += fmt.Sprintf("🧠 10. Потоки и память: %d Горутин | %.2f MB RAM | GC Циклов: %d\r\n\r\n", runtime.NumGoroutine(), float64(m.Alloc)/(1024*1024), m.NumGC)
+
+		// 11. Глубокий аудит RFC 5780 Netcheck & ТСПУ DPI
+		res += "🔬 11. Глубокий аудит RFC 5780 Netcheck & ТСПУ DPI...\r\n"
+		setControlText(hEditDiagLog, res)
+		ncCtx, ncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ncRep, ncErr := diagnostic.RunNetcheck(ncCtx)
+		ncCancel()
+		if ncErr == nil && ncRep != nil {
+			res += fmt.Sprintf("   ├── RFC 5780 NAT Mapping: %s (Дельта: %d)\r\n", ncRep.MappingType, ncRep.PortDelta)
+			res += fmt.Sprintf("   ├── RFC 5780 NAT Filtering: %s (Тип: %s)\r\n", ncRep.FilteringType, ncRep.NATType)
+			if ncRep.TSPUDetected {
+				res += fmt.Sprintf("   ├── ⚠️ ТСПУ / DPI Цензура: ОБНАРУЖЕНА (%s)\r\n", ncRep.TSPUDetails)
+			} else {
+				res += "   ├── ✅ ТСПУ / DPI Цензура: НЕ ОБНАРУЖЕНА (UDP свободен)\r\n"
+			}
+			res += fmt.Sprintf("   ├── Path MTU: %d байт\r\n", ncRep.PathMTU)
+			res += fmt.Sprintf("   └── ✨ Рекомендованный транспорт: %s\r\n\r\n", ncRep.PreferredTransport)
+		} else {
+			res += "   └── ⚠️ Аудит RFC 5780: таймаут ответа STUN-серверов\r\n\r\n"
+		}
+
 		res += "✓ Комплексная проверка успешно завершена."
 
 		setControlText(hEditDiagLog, res)

@@ -137,6 +137,7 @@ var (
 	globalAWGPreset        string = "dpi"
 	globalPuncher          *network.UDPPuncher
 	globalTCPDirectMgr     *network.TCPDirectManager
+	globalMultiHopRouter   *network.MultiHopRouter
 	globalTunFile   *os.File
 	globalTunCancel context.CancelFunc // controls TUN read goroutine lifecycle
 	globalTxBytes   atomic.Uint64
@@ -318,12 +319,40 @@ func StartEngine(configYAML string, tunFd int) string {
 	globalSigMgr.SubscribeTunnelData(devID, func(pkt []byte) {
 		globalRxBytes.Add(uint64(len(pkt)))
 		dataToProcess := pkt
+		var senderPeer *peer.Peer
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 			cKey := crypto.DeriveKey(activeProf.NetworkKey)
-			if dec, decErr := crypto.DecryptSelf(pkt, cKey); decErr == nil && len(dec) >= 20 {
+			curEpoch := crypto.GetCurrentEpoch()
+			if dec, _, seq, decErr := crypto.DecryptWithEpochSeq(pkt, cKey[:], curEpoch); decErr == nil && len(dec) >= 20 {
+				dataToProcess = dec
+				if len(dec) >= 20 && dec[0]>>4 == 4 {
+					srcIPStr := net.IP(dec[12:16]).String()
+					if globalRegistry != nil {
+						if sp, found := globalRegistry.GetByVirtualIP(srcIPStr); found && sp != nil {
+							senderPeer = sp
+							if !sp.GetReplayFilter().ValidateAndAccept(seq) {
+								logger.Debug().Str("peer", sp.DeviceID).Uint64("seq", seq).Msg("🛡️ Dropping replayed relay packet")
+								return
+							}
+						}
+					}
+				}
+			} else if dec, decErr := crypto.DecryptSelf(pkt, cKey); decErr == nil && len(dec) >= 20 {
 				dataToProcess = dec
 			}
 		}
+		_ = senderPeer
+
+		// Intercept Multi-Hop packet BEFORE IPv4 checks (0x4E >> 4 == 4 protocol collision prevention)
+		if network.IsMultiHopPacket(dataToProcess) {
+			if globalMultiHopRouter != nil {
+				if err := globalMultiHopRouter.Route(dataToProcess); err != nil {
+					logger.Debug().Err(err).Msg("Multi-hop packet route dropped")
+				}
+			}
+			return
+		}
+
 		// Юзерспейс-ответ на входящие ICMP Echo запросы через Relay
 		respondICMPEcho(dataToProcess, nil)
 
@@ -390,6 +419,9 @@ func StartEngine(configYAML string, tunFd int) string {
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 			puncher.SetCipherKey(activeProf.NetworkKey)
 		}
+		shaper := network.NewTrafficShaper(true)
+		shaper.SetProfile(network.ProfileWebRTC)
+		puncher.SetTrafficShaper(shaper)
 	}
 
 	globalTCPDirectMgr = network.NewTCPDirectManager(ctx)
@@ -423,6 +455,14 @@ func StartEngine(configYAML string, tunFd int) string {
 	}
 	globalTCPDirectMgr.SetOnPacket(func(srcAddr *net.UDPAddr, payload []byte) {
 		globalRxBytes.Add(uint64(len(payload)))
+		if network.IsMultiHopPacket(payload) {
+			if globalMultiHopRouter != nil {
+				if err := globalMultiHopRouter.Route(payload); err != nil {
+					logger.Debug().Err(err).Msg("Multi-hop TCP packet route dropped")
+				}
+			}
+			return
+		}
 		respondICMPEcho(payload, srcAddr)
 		engineMu.Lock()
 		tf := globalTunFile
@@ -445,6 +485,34 @@ func StartEngine(configYAML string, tunFd int) string {
 	if tcpPort, err := globalTCPDirectMgr.StartListener(desiredTCPPort); err == nil {
 		logger.Info().Int("port", tcpPort).Str("mode", globalTCPDirectMgr.TransportMode()).Msg("Android Direct P2P TCP listener active")
 	}
+
+	// Initialize Mesh Multi-Hop P2P Router for Android
+	globalMultiHopRouter = network.NewMultiHopRouter(
+		devID,
+		func(dstID string, packet []byte) error {
+			if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(dstID) {
+				return globalTCPDirectMgr.SendPacket(dstID, packet)
+			}
+			if destPeer, ok := globalRegistry.Get(dstID); ok && destPeer != nil {
+				if globalPuncher != nil && destPeer.DirectP2P && destPeer.ActiveEndpoint != "" {
+					return globalPuncher.SendDataPacketWithPadding(destPeer.ActiveEndpoint, packet, 0, 0)
+				}
+			}
+			return fmt.Errorf("no route to peer %s for multi-hop transit", dstID)
+		},
+		func(srcID string, payload []byte) error {
+			if len(payload) >= 20 {
+				engineMu.Lock()
+				tf := globalTunFile
+				engineMu.Unlock()
+				if tf != nil {
+					_, err := tf.Write(payload)
+					return err
+				}
+			}
+			return nil
+		},
+	)
 
 	// Определение IP и STUN на постоянном UDP Puncher сокете:
 	// 1. Быстрый параллельный STUN-опрос (суб-100мс) без ожидания медленных HTTP API
@@ -817,10 +885,11 @@ func StartEngine(configYAML string, tunFd int) string {
 	// BUG-04 FIX: Previously one probeTicker.C channel was read by TWO goroutines simultaneously,
 	// causing ~50% tick loss. Split into two independent goroutines with separate tickers.
 
-	// Goroutine A: Active hole punch probes (every 4 seconds)
+	// Goroutine A: Active hole punch probes (every 4 seconds) with battery-saving backoff
 	go func() {
 		probeTicker := time.NewTicker(4 * time.Second)
 		defer probeTicker.Stop()
+		probeBackoff := make(map[string]time.Time)
 
 		for {
 			select {
@@ -828,10 +897,32 @@ func StartEngine(configYAML string, tunFd int) string {
 				return
 			case <-probeTicker.C:
 				if globalRegistry != nil {
+					now := time.Now()
 					isForceTCP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_tcp"
 					isForceUDP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_udp"
 					for _, peerItem := range globalRegistry.List() {
 						if peerItem.Online {
+							if peerItem.DirectP2P {
+								delete(probeBackoff, peerItem.DeviceID)
+							} else {
+								if nextProbe, ok := probeBackoff[peerItem.DeviceID]; ok && now.Before(nextProbe) {
+									continue
+								}
+								var nextBackoff time.Duration
+								switch {
+								case peerItem.ProbeCount > 300:
+									nextBackoff = 300 * time.Second
+								case peerItem.ProbeCount > 150:
+									nextBackoff = 120 * time.Second
+								case peerItem.ProbeCount > 50:
+									nextBackoff = 60 * time.Second
+								case peerItem.ProbeCount > 15:
+									nextBackoff = 16 * time.Second
+								}
+								if nextBackoff > 0 {
+									probeBackoff[peerItem.DeviceID] = now.Add(nextBackoff)
+								}
+							}
 							if !isForceTCP && puncher != nil {
 								if peerItem.STUNAddr != "" {
 									_ = puncher.SendHolePunchProbe(peerItem.STUNAddr)
@@ -927,6 +1018,63 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
+	// Goroutine C: Exit Node Health Watchdog & Blackhole Recovery loop (every 5 seconds)
+	go func() {
+		time.Sleep(3 * time.Second)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		var consecutiveFailures int
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				engineMu.Lock()
+				exitNodeID := globalExitNode
+				reg := globalRegistry
+				engineMu.Unlock()
+
+				if exitNodeID == "" || reg == nil {
+					consecutiveFailures = 0
+					continue
+				}
+
+				var exitPeer *peer.Peer
+				if p, ok := reg.Get(exitNodeID); ok && p != nil {
+					exitPeer = p
+				} else {
+					for _, item := range reg.List() {
+						itemVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
+						if item.DeviceID == exitNodeID || itemVIP == exitNodeID || item.Nickname == exitNodeID {
+							exitPeer = item
+							break
+						}
+					}
+				}
+
+				peerHealthy := exitPeer != nil && exitPeer.Online && time.Since(exitPeer.LastSeen) < 25*time.Second
+				if peerHealthy {
+					consecutiveFailures = 0
+				} else {
+					consecutiveFailures++
+					if consecutiveFailures >= 3 {
+						logger.Warn().
+							Str("exit_node", exitNodeID).
+							Int("failures", consecutiveFailures).
+							Msg("🚨 Exit Node unresponsive (15s) — blackhole recovery: disabling exit node route")
+						engineMu.Lock()
+						if globalExitNode == exitNodeID {
+							globalExitNode = ""
+						}
+						engineMu.Unlock()
+						consecutiveFailures = 0
+					}
+				}
+			}
+		}
+	}()
+
 
 
 	if tunFd > 0 {
@@ -967,6 +1115,16 @@ func attachTUNLocked(tunFd int) {
 	if globalPuncher != nil && globalTunFile != nil {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
 			globalRxBytes.Add(uint64(len(payload)))
+
+			// Intercept Multi-Hop packet BEFORE IPv4 checks (0x4E >> 4 == 4 protocol collision prevention)
+			if network.IsMultiHopPacket(payload) {
+				if globalMultiHopRouter != nil {
+					if err := globalMultiHopRouter.Route(payload); err != nil {
+						logger.Debug().Err(err).Msg("Multi-hop UDP packet route dropped")
+					}
+				}
+				return
+			}
 
 			// Юзерспейс-ответ на входящие ICMP Echo запросы (чтобы другие узлы могли пинговать Android)
 			respondICMPEcho(payload, srcAddr)
@@ -1160,8 +1318,10 @@ func attachTUNLocked(tunFd int) {
 									}(targetPeer.DeviceID, tcpTarget, lPort)
 								}
 							}
-							// 1e. Mesh Userspace TCP Relay Fallback:
+							// 1e. Mesh Userspace Relay Fallback (encapsulated in Multi-Hop header)
 							if !sentTCP && !sentDirect && !isForceUDP && globalTCPDirectMgr != nil && globalRegistry != nil {
+								relayPkt, mhErr := network.EncodeMultiHopPacket(globalDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, pkt)
+								if mhErr == nil {
 								for _, rp := range globalRegistry.List() {
 									if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
 										continue
@@ -1169,7 +1329,7 @@ func attachTUNLocked(tunFd int) {
 									vip := strings.TrimSpace(strings.Split(rp.VirtualIP, "/")[0])
 									isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(rp.DeviceName), "serv") || strings.Contains(strings.ToLower(rp.Nickname), "serv")
 									if isServ && globalTCPDirectMgr.HasConn(rp.DeviceID) {
-										if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, pkt); err == nil {
+										if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
 											sentDirect = true
 											break
 										}
@@ -1181,16 +1341,31 @@ func attachTUNLocked(tunFd int) {
 											continue
 										}
 										if globalTCPDirectMgr.HasConn(rp.DeviceID) {
-											if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, pkt); err == nil {
+											if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
 												sentDirect = true
 												break
 											}
 										}
 									}
 								}
+								}
 							}
 
-							// Data transmission over MQTT relay disabled: signaling is strictly for connection establishment. Data only travels via Direct AWG (UDP) or Direct ShadowTLS (TCP).
+							// 1f. Fallback: relay via MQTT/Signaling when direct transmission is unconfirmed or failed
+							if (!sentDirect || !targetPeer.DirectP2P) && globalSigMgr != nil {
+								dataToSend := pkt
+								if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+									cKey := crypto.DeriveKey(activeProf.NetworkKey)
+									seq := targetPeer.NextOutboundSeq()
+									epoch := crypto.GetCurrentEpoch()
+									if enc, encErr := crypto.EncryptWithEpochSeq(pkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+										dataToSend = enc
+									} else if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+										dataToSend = enc
+									}
+								}
+								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, dataToSend)
+							}
 
 							logger.Debug().
 								Str("dst", destIP.String()).
@@ -1388,6 +1563,7 @@ func StopEngine() {
 		globalTunCancel = nil
 	}
 	// F6: Закрываем UDP сокет и MQTT-подключения
+	globalMultiHopRouter = nil
 	if globalPuncher != nil {
 		globalPuncher.Close()
 		globalPuncher = nil

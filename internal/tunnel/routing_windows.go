@@ -240,9 +240,9 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		return fmt.Errorf("failed to add default route 128.0.0.0/1 via %s: %w", cleanVIP, err)
 	}
 
-	// 3. Configure public DNS on NatBypass adapter to prevent DNS failure / leaks
-	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", "name=NatBypass", "static", "1.1.1.1", "register=primary", "validate=no")
-	_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", "name=NatBypass", "address=8.8.8.8", "index=2", "validate=no")
+	// 3. Configure DoH DNS on NatBypass adapter to prevent DNS leaks and ISP hijacking (127.0.0.1 primary, 1.1.1.1 fallback)
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", "name=NatBypass", "static", "127.0.0.1", "register=primary", "validate=no")
+	_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", "name=NatBypass", "address=1.1.1.1", "index=2", "validate=no")
 
 	return nil
 }
