@@ -12,6 +12,13 @@ import (
 	"sync"
 )
 
+const (
+	TransportAWG       = "awg"
+	TransportQUIC      = "quic"
+	TransportShadowTLS = "shadowtls"
+	TransportWSS       = "wss"
+)
+
 // TransportFeatures describes capabilities and security parameters of a transport channel.
 type TransportFeatures struct {
 	Name         string `json:"name"`

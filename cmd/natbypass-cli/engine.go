@@ -513,65 +513,123 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 		}
 
-		// F3: Если задан SelectedExitNode — активируем маршрутизацию через exit node при запуске.
-		// Поиск нужного пира произойдёт в TUN dispatch loop; здесь инжектируем маршруты.
-		// Поскольку пиры ещё не подключены, вызов с пустыми EP — только def1 маршруты.
-		var activeExitVIP string
-		if cfg.Network.SelectedExitNode != "" {
-			go func() {
-				// Ждём 5 секунд, чтобы пиры успели подключиться и зарегистрироваться
-				time.Sleep(5 * time.Second)
-				selStr := strings.TrimSpace(strings.Split(cfg.Network.SelectedExitNode, "/")[0])
-				var exitPeer *peer.Peer
-				if p, ok := registry.Get(selStr); ok && p != nil {
-					exitPeer = p
-				} else {
-					for _, item := range registry.List() {
-						itemVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
-						if item.DeviceID == selStr || itemVIP == selStr {
-							exitPeer = item
-							break
+		// Task 5.3: Exit Node Health Watchdog & Blackhole Recovery loop.
+		// Periodically monitors selected exit node reachability.
+		// If exit node fails 3 consecutive checks (15s): immediately disables exit node
+		// default routes to restore physical internet gateway and avoid traffic blackhole.
+		// When exit node recovers: automatically re-enables exit node routing.
+		var (
+			activeExitVIP      string
+			exitRoutingMu      sync.Mutex
+			exitRoutingActive  bool
+			consecutiveFailures int
+		)
+
+		go func() {
+			// Initial delay to let peers connect and register
+			time.Sleep(3 * time.Second)
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-engineCtx.Done():
+					exitRoutingMu.Lock()
+					if exitRoutingActive && activeExitVIP != "" {
+						_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+						exitRoutingActive = false
+					}
+					exitRoutingMu.Unlock()
+					return
+				case <-ticker.C:
+					sel := cfg.Network.SelectedExitNode
+					if sel == "" {
+						exitRoutingMu.Lock()
+						if exitRoutingActive && activeExitVIP != "" {
+							_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+							exitRoutingActive = false
+							activeExitVIP = ""
+							consecutiveFailures = 0
+							log.Info().Msg("ℹ️ Exit node deselected: restored physical internet gateway")
+						}
+						exitRoutingMu.Unlock()
+						continue
+					}
+
+					selStr := strings.TrimSpace(strings.Split(sel, "/")[0])
+					var exitPeer *peer.Peer
+					if p, ok := registry.Get(selStr); ok && p != nil {
+						exitPeer = p
+					} else {
+						for _, item := range registry.List() {
+							itemVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
+							if item.DeviceID == selStr || itemVIP == selStr {
+								exitPeer = item
+								break
+							}
 						}
 					}
-				}
-				if exitPeer != nil {
-					exitVIP := strings.TrimSpace(strings.Split(exitPeer.VirtualIP, "/")[0])
-					if exitVIP == "" {
-						exitVIP = selStr
-					}
-					// S3: Собираем все IP которые должны идти через физический шлюз (не через VPN)
-					// чтобы не разорвать соединение с сигналинговыми серверами при активации exit node
-					bypassIPs := []string{exitPeer.ActiveEndpoint, exitPeer.STUNAddr, exitPeer.PublicIP}
-					for _, cand := range exitPeer.Candidates {
-						bypassIPs = append(bypassIPs, cand)
-					}
-					// Добавляем STUN-серверы из конфига
-					for _, stunURL := range cfg.Network.StunServers {
-						bypassIPs = append(bypassIPs, stunURL)
-					}
-					// Добавляем MQTT-брокер из активного профиля
-					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.MQTTBroker != "" {
-						bypassIPs = append(bypassIPs, activeProf.MQTTBroker)
-					}
-					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TGToken != "" {
-						bypassIPs = append(bypassIPs, "api.telegram.org")
-					}
-					if err := tunnel.EnableExitNodeRouting(exitVIP, bypassIPs...); err != nil {
-						log.Warn().Err(err).Str("exit_vip", exitVIP).Msg("Failed to enable exit node routing")
+
+					// Health criteria: peer exists, is online, and seen within last 25 seconds
+					peerHealthy := exitPeer != nil && exitPeer.Online && time.Since(exitPeer.LastSeen) < 25*time.Second
+
+					exitRoutingMu.Lock()
+					if peerHealthy {
+						consecutiveFailures = 0
+						exitVIP := strings.TrimSpace(strings.Split(exitPeer.VirtualIP, "/")[0])
+						if exitVIP == "" {
+							exitVIP = selStr
+						}
+
+						if !exitRoutingActive || activeExitVIP != exitVIP {
+							bypassIPs := []string{exitPeer.ActiveEndpoint, exitPeer.STUNAddr, exitPeer.PublicIP}
+							for _, cand := range exitPeer.Candidates {
+								bypassIPs = append(bypassIPs, cand)
+							}
+							for _, stunURL := range cfg.Network.StunServers {
+								bypassIPs = append(bypassIPs, stunURL)
+							}
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.MQTTBroker != "" {
+								bypassIPs = append(bypassIPs, activeProf.MQTTBroker)
+							}
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TGToken != "" {
+								bypassIPs = append(bypassIPs, "api.telegram.org")
+							}
+
+							if err := tunnel.EnableExitNodeRouting(exitVIP, bypassIPs...); err != nil {
+								log.Warn().Err(err).Str("exit_vip", exitVIP).Msg("Failed to enable exit node routing")
+							} else {
+								activeExitVIP = exitVIP
+								exitRoutingActive = true
+								log.Info().Str("exit_vip", exitVIP).Str("peer", exitPeer.DeviceID).Msg("✅ Exit Node routing activated / recovered")
+							}
+						}
 					} else {
-						activeExitVIP = exitVIP
-						log.Info().Str("exit_vip", exitVIP).Str("peer", exitPeer.DeviceID).Msg("✅ Exit Node routing activated")
+						// Peer is down or unreachable
+						if exitRoutingActive {
+							consecutiveFailures++
+							if consecutiveFailures >= 3 {
+								// Trigger blackhole recovery!
+								log.Warn().
+									Str("exit_vip", activeExitVIP).
+									Int("failures", consecutiveFailures).
+									Msg("🚨 Exit Node unresponsive (15s) — blackhole recovery: disabling exit routes, restored local internet gateway")
+								_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+								exitRoutingActive = false
+							}
+						}
 					}
-				} else {
-					log.Warn().Str("selected_exit", cfg.Network.SelectedExitNode).Msg("Exit node peer not yet online, routing not activated")
+					exitRoutingMu.Unlock()
 				}
-			}()
-			defer func() {
-				if activeExitVIP != "" {
-					_ = tunnel.DisableExitNodeRouting(activeExitVIP)
-				}
-			}()
-		}
+			}
+		}()
+		defer func() {
+			exitRoutingMu.Lock()
+			if exitRoutingActive && activeExitVIP != "" {
+				_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+			}
+			exitRoutingMu.Unlock()
+		}()
 
 		// Self-check and self-ping of Virtual IP
 		go func() {

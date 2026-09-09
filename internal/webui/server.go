@@ -372,6 +372,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/diagnostics/traceroute", s.handleDiagnosticsTraceroute)
 	mux.HandleFunc("/api/diagnostics/peer-routes", s.handleDiagnosticsPeerRoutes)
 	mux.HandleFunc("/api/diagnostics/check-internet", s.handleDiagnosticsCheckInternet)
+	mux.HandleFunc("/api/diagnostics/netcheck", s.handleDiagnosticsNetcheck)
 	mux.HandleFunc("/api/awg/sync-with-peer", s.handleAWGSyncWithPeer)
 	mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
 	mux.HandleFunc("/api/setup/complete", s.handleSetupComplete)
@@ -619,7 +620,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 0. Разрешить локальный read-only опрос статуса, пиров, дашборда и топологии (localhost 127.0.0.1 / ::1) для diag/CLI/WebUI
-		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry") && r.Method == http.MethodGet {
+		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck") && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
 			host, _, _ := net.SplitHostPort(r.RemoteAddr)
 			if host == "" {
 				host = r.RemoteAddr
@@ -3841,6 +3842,21 @@ func (s *Server) handleDiagnosticsCheckInternet(w http.ResponseWriter, r *http.R
 }
 
 // handleAWGSyncWithPeer — POST /api/awg/sync-with-peer — автоматическая синхронизация параметров AWG с удаленным пиром
+// handleDiagnosticsNetcheck — GET/POST /api/diagnostics/netcheck — выполняет глубокую диагностику RFC 5780 и ТСПУ DPI
+func (s *Server) handleDiagnosticsNetcheck(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+
+	rep, err := diagnostic.RunNetcheck(ctx)
+	if err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, err.Error())
+		return
+	}
+
+	s.AddEvent("info", "Диагностика сети Netcheck", fmt.Sprintf("NAT: %s, TSPU: %v, Preferred: %s", rep.NATType, rep.TSPUDetected, rep.PreferredTransport))
+	s.jsonResponse(w, http.StatusOK, rep, "")
+}
+
 func (s *Server) handleAWGSyncWithPeer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
