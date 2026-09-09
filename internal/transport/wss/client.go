@@ -10,10 +10,12 @@ package wss
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -185,6 +187,16 @@ func (c *WSSClient) SendPacket(targetDevID string, payload []byte) error {
 	idLen := len(targetDevID)
 	if idLen > 255 {
 		return fmt.Errorf("target device ID too long")
+	}
+
+	// Traffic shaping: inject micro-jitter (1..15ms) for interactive packets (<512 bytes)
+	// to disrupt uniform Inter-Arrival Time (IAT) analysis by TSPU/DPI classifiers.
+	if len(payload) < 512 {
+		var jitterByte [1]byte
+		if _, err := io.ReadFull(rand.Reader, jitterByte[:]); err == nil {
+			jitterMs := 1 + int(jitterByte[0]%15) // 1..15 ms
+			time.Sleep(time.Duration(jitterMs) * time.Millisecond)
+		}
 	}
 
 	frame := make([]byte, 1+idLen+len(payload))

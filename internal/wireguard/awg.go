@@ -518,3 +518,13 @@ func SaveAWGConfig(cfg *AWGConfig, path string) error {
 	}
 	return os.WriteFile(path, []byte(content), 0600)
 }
+
+// GenerateRandomMTU генерирует случайный MTU в диапазоне 1280–1379 для предотвращения
+// фингерпринтинга длины пакетов системами ТСПУ/DPI.
+func GenerateRandomMTU() int {
+	var b [1]byte
+	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomMTU: %v", err))
+	}
+	return 1280 + int(b[0]%100) // 1280-1379
+}

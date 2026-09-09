@@ -159,9 +159,9 @@ func TestSymmetricKDFChain_MaxSkipExceeded(t *testing.T) {
 	bob.ReceivingChain.ChainKey = make([]byte, len(alice.SendingChain.ChainKey))
 	copy(bob.ReceivingChain.ChainKey, alice.SendingChain.ChainKey)
 
-	// Alice encrypts 70 messages (exceeding maxSkipMessages = 64)
+	// Alice encrypts messages exceeding maxSkipMessages
 	var lastCT []byte
-	for i := 0; i < 70; i++ {
+	for i := 0; i < maxSkipMessages+10; i++ {
 		ct, err := alice.Encrypt([]byte(fmt.Sprintf("msg %d", i)))
 		if err != nil {
 			t.Fatalf("encrypt failed: %v", err)
@@ -169,10 +169,10 @@ func TestSymmetricKDFChain_MaxSkipExceeded(t *testing.T) {
 		lastCT = ct
 	}
 
-	// Bob is at counter 0 and receives message 69 (gap of 69 > 64)
+	// Bob is at counter 0 and receives message (gap > maxSkipMessages)
 	_, err := bob.Decrypt(lastCT)
 	if err == nil {
-		t.Fatalf("expected gap > 64 to fail, but it succeeded")
+		t.Fatalf("expected gap > %d to fail, but it succeeded", maxSkipMessages)
 	}
 }
 
@@ -226,4 +226,83 @@ func TestStatelessHKDF_UDPLossAndReorderRecovery(t *testing.T) {
 		t.Fatalf("packet 27 failed: %v", err)
 	}
 }
+
+func TestStatelessHKDF_1000Packets_ShuffleAndAntiReplay(t *testing.T) {
+	secret := make([]byte, 32)
+	for i := range secret {
+		secret[i] = byte(i*3 + 17)
+	}
+
+	alice, err := NewSessionState(secret)
+	if err != nil {
+		t.Fatalf("NewSessionState alice failed: %v", err)
+	}
+	bob, err := NewSessionState(secret)
+	if err != nil {
+		t.Fatalf("NewSessionState bob failed: %v", err)
+	}
+	bob.ReceivingChain.ChainKey = make([]byte, len(alice.SendingChain.ChainKey))
+	copy(bob.ReceivingChain.ChainKey, alice.SendingChain.ChainKey)
+
+	const totalPackets = 1000
+	plaintexts := make([][]byte, totalPackets)
+	ciphertexts := make([][]byte, totalPackets)
+
+	// 1. Encrypt 1000 packets with sequential 64-bit Counters
+	for i := 0; i < totalPackets; i++ {
+		plaintexts[i] = []byte(fmt.Sprintf("mesh-udp-payload-seq-%04d", i))
+		ct, err := alice.Encrypt(plaintexts[i])
+		if err != nil {
+			t.Fatalf("encrypt %d failed: %v", i, err)
+		}
+		ciphertexts[i] = ct
+	}
+
+	// 2. Shuffle packets within sliding blocks of 32 (simulating real UDP reordering / jitter within 64-packet window)
+	shuffled := make([][]byte, totalPackets)
+	copy(shuffled, ciphertexts)
+	blockSize := 32
+	for b := 0; b < totalPackets; b += blockSize {
+		end := b + blockSize
+		if end > totalPackets {
+			end = totalPackets
+		}
+		// Deterministic reverse-interleave shuffle inside each block
+		block := shuffled[b:end]
+		n := len(block)
+		for i := 0; i < n/2; i++ {
+			block[i], block[n-1-i] = block[n-1-i], block[i]
+		}
+	}
+
+	// 3. Decrypt all 1000 shuffled packets
+	recovered := make(map[string]bool)
+	for i, ct := range shuffled {
+		pt, err := bob.Decrypt(ct)
+		if err != nil {
+			t.Fatalf("decrypt failed for shuffled packet index %d: %v", i, err)
+		}
+		recovered[string(pt)] = true
+	}
+
+	if len(recovered) != totalPackets {
+		t.Fatalf("expected %d recovered packets, got %d", totalPackets, len(recovered))
+	}
+
+	for i := 0; i < totalPackets; i++ {
+		key := fmt.Sprintf("mesh-udp-payload-seq-%04d", i)
+		if !recovered[key] {
+			t.Fatalf("missing recovered payload: %s", key)
+		}
+	}
+
+	// 4. Anti-Replay: replaying any previously seen packet MUST be rejected
+	for _, idx := range []int{0, 50, 250, 500, 750, 999} {
+		_, err := bob.Decrypt(ciphertexts[idx])
+		if err == nil {
+			t.Fatalf("expected replay of packet %d to be rejected, but succeeded", idx)
+		}
+	}
+}
+
 

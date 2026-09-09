@@ -21,20 +21,20 @@ import (
 
 const (
 	// maxSkipMessages limits how far ahead the packet sequence can advance for missing UDP packets.
-	maxSkipMessages = 64
+	maxSkipMessages = 2048
 )
 
 // SessionState (также доступен как SymmetricKDFChain) реализует устойчивую к потерям UDP-пакетов
 // симметричную схему шифрования (Stateless HKDF per-packet key derivation) со скользящим окном
 // защиты от повторов (anti-replay sliding window по стандарту RFC 2401).
-// Ключ для каждого сообщения деривируется напрямую из RootKey/ChainKey и Counter через HKDF-Expand.
+// Ключ для каждого сообщения деривируется напрямую из RootKey/ChainKey и 64-битного Counter через HKDF-Expand.
 type SessionState struct {
 	RootKey        []byte
 	SendingChain   Chain
 	ReceivingChain Chain
-	MessageNumber  uint32
+	MessageNumber  uint64
 	replayWindow   uint64 // 64-битная битовая маска скользящего окна
-	replayBase     uint32 // максимальный полученный номер пакета
+	replayBase     uint64 // максимальный полученный номер пакета
 	hasReceived    bool   // флаг первого полученного пакета
 	mu             sync.Mutex
 }
@@ -45,18 +45,18 @@ type SymmetricKDFChain = SessionState
 // Chain представляет состояние направления передачи сессионных ключей.
 type Chain struct {
 	ChainKey []byte
-	Counter  uint32
+	Counter  uint64
 }
 
-// deriveMsgKeyStateless деривирует ключ для конкретного пакета напрямую из rootKey и counter.
+// deriveMsgKeyStateless деривирует ключ для конкретного пакета напрямую из rootKey и 64-битного counter.
 // Это делает протокол устойчивым к потере и перестановке UDP-пакетов.
-func deriveMsgKeyStateless(rootKey []byte, counter uint32) ([]byte, error) {
-	counterBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(counterBytes, counter)
+func deriveMsgKeyStateless(rootKey []byte, counter uint64) ([]byte, error) {
+	counterBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(counterBytes, counter)
 
 	msgKey := make([]byte, 32)
-	// Используем HKDF-Expand с контекстом, включающим номер пакета
-	info := append([]byte("NatBypass-Msg-Key-v2-Counter:"), counterBytes...)
+	// Используем HKDF-Expand с контекстом, включающим 64-битный номер пакета (Big Endian)
+	info := append([]byte("NatBypass-Msg-Key-v3-Counter:"), counterBytes...)
 	if _, err := io.ReadFull(hkdf.Expand(sha256.New, rootKey, info), msgKey); err != nil {
 		return nil, err
 	}
@@ -98,9 +98,13 @@ func NewSessionState(sharedSecret []byte) (*SessionState, error) {
 }
 
 // Encrypt шифрует открытый текст с деривацией ключа для конкретного номера пакета.
-// Формат возвращаемого фрейма: [MessageNumber uint32 (4 байта)][Nonce 12 байт][Ciphertext + Poly1305 Tag].
+// Формат возвращаемого фрейма: [MessageNumber uint64 (8 байт Big Endian)][Nonce 12 байт][Ciphertext + Poly1305 Tag].
 func (s *SessionState) Encrypt(plaintext []byte) ([]byte, error) {
 	s.mu.Lock()
+	if s.SendingChain.Counter >= (uint64(1) << 63) {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("ratchet: sending counter overflow, rekey required")
+	}
 	msgNum := s.SendingChain.Counter
 	s.SendingChain.Counter++
 	s.MessageNumber++
@@ -123,24 +127,27 @@ func (s *SessionState) Encrypt(plaintext []byte) ([]byte, error) {
 	}
 
 	ciphertext := aead.Seal(nil, nonce, plaintext, nil)
-	out := make([]byte, 4+len(nonce)+len(ciphertext))
-	binary.BigEndian.PutUint32(out[:4], msgNum)
-	copy(out[4:4+len(nonce)], nonce)
-	copy(out[4+len(nonce):], ciphertext)
+	out := make([]byte, 8+len(nonce)+len(ciphertext))
+	binary.BigEndian.PutUint64(out[:8], msgNum)
+	copy(out[8:8+len(nonce)], nonce)
+	copy(out[8+len(nonce):], ciphertext)
 	return out, nil
 }
 
 // Decrypt расшифровывает сообщение по его номеру пакета.
 // Поддерживает восстановление при потере и нарушении порядка доставки UDP-пакетов
-// с защитой от Replay-атак по скользящему окну.
+// с защитой от Replay-атак по 64-битному скользящему окну (RFC 2401).
 func (s *SessionState) Decrypt(data []byte) ([]byte, error) {
-	if len(data) < 4+12+16 {
-		return nil, fmt.Errorf("ciphertext too short: %d bytes (minimum 32 bytes required)", len(data))
+	if len(data) < 8+12+16 {
+		return nil, fmt.Errorf("ciphertext too short: %d bytes (minimum 36 bytes required)", len(data))
 	}
 
-	msgNum := binary.BigEndian.Uint32(data[:4])
-	nonce := data[4 : 4+12]
-	ciphertext := data[4+12:]
+	msgNum := binary.BigEndian.Uint64(data[:8])
+	if msgNum >= (uint64(1) << 63) {
+		return nil, fmt.Errorf("message sequence number counter overflow (> 2^63)")
+	}
+	nonce := data[8 : 8+12]
+	ciphertext := data[8+12:]
 
 	s.mu.Lock()
 	recvKey := s.ReceivingChain.ChainKey

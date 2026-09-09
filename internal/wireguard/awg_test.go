@@ -213,3 +213,17 @@ func TestAntiTSPUMTUAndParams(t *testing.T) {
 	}
 }
 
+func TestGenerateRandomMTU(t *testing.T) {
+	seen := make(map[int]bool)
+	for i := 0; i < 200; i++ {
+		mtu := GenerateRandomMTU()
+		if mtu < 1280 || mtu > 1379 {
+			t.Fatalf("generated MTU %d out of bounds [1280, 1379]", mtu)
+		}
+		seen[mtu] = true
+	}
+	if len(seen) < 10 {
+		t.Fatalf("expected high variance in generated MTU, got only %d distinct values", len(seen))
+	}
+}
+
