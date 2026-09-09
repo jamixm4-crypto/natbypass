@@ -23,8 +23,18 @@ func RestartService(execPath string) {
 	escapedPath := strings.ReplaceAll(execPath, "'", "''")
 
 	var argList []string
+	hasNoWindow := false
 	for i := 1; i < len(os.Args); i++ {
-		argList = append(argList, fmt.Sprintf("'%s'", strings.ReplaceAll(os.Args[i], "'", "''")))
+		arg := os.Args[i]
+		if arg == "--no-window" || arg == "-no-window" || arg == "--silent" || arg == "-silent" || arg == "--updated" || arg == "-updated" || strings.HasPrefix(arg, "--ui=none") || strings.HasPrefix(arg, "--ui=off") {
+			hasNoWindow = true
+		}
+		argList = append(argList, fmt.Sprintf("'%s'", strings.ReplaceAll(arg, "'", "''")))
+	}
+	// При перезапуске после обновления НЕ распахиваем браузер заново:
+	// страница WebUI уже открыта у пользователя в браузере или процесс работает тихо в трее.
+	if !hasNoWindow {
+		argList = append(argList, "'--no-window'")
 	}
 	var psScript string
 	if len(argList) > 0 {

@@ -1542,20 +1542,29 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 
 	// Windows: open native WebView2 window after readiness gate confirms listening (TCP + HTTP healthz)
 	if runtime.GOOS == "windows" {
-		go func() {
-			actualPort := uiServer.GetPort()
-			if err := tray.EnsureFirewallRule(actualPort); err != nil {
-				log.Debug().Err(err).Msg("Windows Firewall rule notice")
-			}
-			if uiServer.WaitForReady(10 * time.Second) {
-				actualPort = uiServer.GetPort()
-				url := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
-				log.Info().Int("port", actualPort).Str("url", url).Msg("WebUI readiness confirmed (TCP + HTTP healthz OK), opening window")
-				openAppWindow(actualPort)
-			} else {
-				log.Warn().Int("port", actualPort).Msg("WebUI readiness gate timed out; window launch skipped")
-			}
-		}()
+		autoOpen := true
+		if cfg != nil && cfg.WebUI.AutoOpenBrowser != nil {
+			autoOpen = *cfg.WebUI.AutoOpenBrowser
+		}
+		if noWindow || strings.EqualFold(uiMode, "none") || strings.EqualFold(uiMode, "off") || strings.EqualFold(uiMode, "silent") || strings.EqualFold(uiMode, "hidden") {
+			autoOpen = false
+		}
+		if autoOpen {
+			go func() {
+				actualPort := uiServer.GetPort()
+				if err := tray.EnsureFirewallRule(actualPort); err != nil {
+					log.Debug().Err(err).Msg("Windows Firewall rule notice")
+				}
+				if uiServer.WaitForReady(10 * time.Second) {
+					actualPort = uiServer.GetPort()
+					url := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
+					log.Info().Int("port", actualPort).Str("url", url).Msg("WebUI readiness confirmed (TCP + HTTP healthz OK), opening window")
+					openAppWindow(actualPort)
+				} else {
+					log.Warn().Int("port", actualPort).Msg("WebUI readiness gate timed out; window launch skipped")
+				}
+			}()
+		}
 	}
 
 	return uiServer

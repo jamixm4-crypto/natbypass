@@ -34,6 +34,7 @@ var (
 	webUIPort  int
 	useTray    bool
 	uiMode     string
+	noWindow   bool
 )
 
 
@@ -46,6 +47,12 @@ func main() {
 			os.Args[i] = "--port"
 		} else if arg == "-log-level" {
 			os.Args[i] = "--log-level"
+		} else if arg == "-no-window" {
+			os.Args[i] = "--no-window"
+		} else if arg == "-silent" {
+			os.Args[i] = "--silent"
+		} else if arg == "-updated" {
+			os.Args[i] = "--updated"
 		}
 	}
 
@@ -142,7 +149,10 @@ Supported platforms: Windows, Linux (amd64/arm64/mips/mipsle), Android, iOS.`, V
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level: debug/info/warn/error")
 	rootCmd.PersistentFlags().BoolVar(&noWebUI, "no-webui", false, "Disable embedded Web UI")
 	rootCmd.PersistentFlags().IntVar(&webUIPort, "port", 0, "Override Web UI HTTP port")
-	rootCmd.PersistentFlags().StringVar(&uiMode, "ui", "auto", "UI launch mode: auto | native | browser")
+	rootCmd.PersistentFlags().StringVar(&uiMode, "ui", "auto", "UI launch mode: auto | native | browser | none")
+	rootCmd.PersistentFlags().BoolVar(&noWindow, "no-window", false, "Do not automatically open browser or UI window on start")
+	rootCmd.PersistentFlags().BoolVar(&noWindow, "silent", false, "Run silently in background/tray without opening browser window")
+	rootCmd.PersistentFlags().BoolVar(&noWindow, "updated", false, "Internal flag: process was restarted after update (silent)")
 
 	rootCmd.AddCommand(
 		newStartCmd(),

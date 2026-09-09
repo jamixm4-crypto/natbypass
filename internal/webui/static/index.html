@@ -1632,6 +1632,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <input type="checkbox" id="chkAutoStart" style="accent-color:#a855f7; width:16px; height:16px;">
             <span>Запускать вместе с Windows (Автозагрузка)</span>
           </label>
+          <label id="lblAutoOpenBrowser" style="display:none; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
+            <input type="checkbox" id="chkAutoOpenBrowser" style="accent-color:#a855f7; width:16px; height:16px;" checked>
+            <span>Открывать браузер при запуске программы</span>
+          </label>
           <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
             <input type="checkbox" id="chkSaveLogs" style="accent-color:#a855f7; width:16px; height:16px;">
             <span>Сохранять логи на диск (natbypass.log)</span>
@@ -3129,8 +3133,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
           const isWin = (d.is_windows === true || d.os === 'windows');
           const autoStartEl = document.getElementById('lblAutoStart');
+          const autoOpenBrowserEl = document.getElementById('lblAutoOpenBrowser');
           if (isWin) {
             if (autoStartEl) autoStartEl.style.display = 'flex';
+            if (autoOpenBrowserEl) autoOpenBrowserEl.style.display = 'flex';
             document.body.classList.add('is-windows');
             ['nav-logout', 'btnTopLogout', 'btnSettingsLogout'].forEach(id => {
               const el = document.getElementById(id);
@@ -3141,6 +3147,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             });
           } else {
             if (autoStartEl) autoStartEl.style.display = 'none';
+            if (autoOpenBrowserEl) autoOpenBrowserEl.style.display = 'none';
             // Linux, Keenetic, Routers, etc: Show logout button
             const navLog = document.getElementById('nav-logout');
             if (navLog) navLog.style.display = 'flex';
@@ -4585,6 +4592,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               ((app.show_diagnostics !== undefined) ? app.show_diagnostics : (app.ShowDiagnostics ?? false));
             document.getElementById('chkShowDiag').checked = !!showDiag;
             toggleDiagVisibility(showDiag);
+            const autoOpen = (webui.auto_open_browser !== undefined) ? webui.auto_open_browser : true;
+            if (document.getElementById('chkAutoOpenBrowser')) {
+              document.getElementById('chkAutoOpenBrowser').checked = !!autoOpen;
+            }
           }
           if (c.network) {
             document.getElementById('cfgVirtualIP').value = c.network.address || '';
@@ -4707,6 +4718,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           save_logs_to_disk,
           show_diagnostics,
           autostart,
+          auto_open_browser: document.getElementById('chkAutoOpenBrowser') ? document.getElementById('chkAutoOpenBrowser').checked : true,
           allow_exit_node: document.getElementById('cfgAllowExitNode') ? document.getElementById('cfgAllowExitNode').checked : false,
           advertised_subnets: (document.getElementById('cfgAdvertisedSubnets') ? document.getElementById('cfgAdvertisedSubnets').value : '').split(',').map(s => s.trim()).filter(s => s.length > 0)
         })

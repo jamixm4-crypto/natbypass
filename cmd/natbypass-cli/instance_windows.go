@@ -346,6 +346,9 @@ func launchNativeWebView(url string, port int) bool {
 // 2. Otherwise (auto / native) -> ALWAYS tries native WebView2 first.
 // 3. If native fails (e.g. Server without runtime) -> checks auto-install or falls back to dedicated App window.
 func openAppWindow(port int) {
+	if noWindow || strings.EqualFold(uiMode, "none") || strings.EqualFold(uiMode, "off") || strings.EqualFold(uiMode, "silent") || strings.EqualFold(uiMode, "hidden") {
+		return
+	}
 	if port <= 0 {
 		port = 8080
 	}

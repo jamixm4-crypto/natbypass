@@ -2125,6 +2125,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		ShowDiagnostics   bool     `json:"show_diagnostics"`
 		BetaChannel       bool     `json:"beta_channel"`
 		AutoStart         bool     `json:"autostart"`
+		AutoOpenBrowser   *bool    `json:"auto_open_browser"`
 		AllowExitNode     bool     `json:"allow_exit_node"`
 		AdvertisedSubnets []string `json:"advertised_subnets"`
 	}
@@ -2144,6 +2145,9 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	cfg.App.SaveLogsToDisk = req.SaveLogsToDisk
 	cfg.App.ShowDiagnostics = req.ShowDiagnostics
 	cfg.App.BetaChannel = req.BetaChannel
+	if req.AutoOpenBrowser != nil {
+		cfg.WebUI.AutoOpenBrowser = req.AutoOpenBrowser
+	}
 	s.deviceName = req.DeviceName
 	if req.VirtualIP != "" {
 		cleanVIP := strings.TrimSpace(strings.Split(req.VirtualIP, "/")[0])
