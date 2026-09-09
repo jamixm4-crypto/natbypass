@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,7 @@ type WGKeyPair struct {
 // GenerateKeyPair генерирует новую пару ключей WireGuard (Curve25519)
 func GenerateKeyPair() (*WGKeyPair, error) {
 	var privKey [32]byte
-	if _, err := rand.Read(privKey[:]); err != nil {
+	if _, err := io.ReadFull(rand.Reader, privKey[:]); err != nil {
 		return nil, fmt.Errorf("rand: %w", err)
 	}
 	// Clamp private key per Curve25519 spec

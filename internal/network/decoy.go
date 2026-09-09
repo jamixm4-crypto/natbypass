@@ -1,4 +1,4 @@
-﻿// Copyright (C) 2026 jamixm4-crypto
+// Copyright (C) 2026 jamixm4-crypto
 //
 // NatBypass is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -10,6 +10,8 @@ package network
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"sync"
@@ -88,7 +90,9 @@ func BuildDecoyFrame() []byte {
 	// 4 bytes Stream ID = 0 (Connection control)
 
 	// 8 bytes random opaque data
-	_, _ = rand.Read(frame[9:])
+	if _, err := io.ReadFull(rand.Reader, frame[9:]); err != nil {
+		panic(fmt.Sprintf("decoy: csprng failure in BuildDecoyFrame: %v", err))
+	}
 	return frame
 }
 

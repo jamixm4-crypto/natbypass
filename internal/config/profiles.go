@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"strings"
@@ -61,7 +62,9 @@ type Profile struct {
 // GenerateRandomHex возвращает криптостойкую случайную hex-строку
 func GenerateRandomHex(n int) string {
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		panic(fmt.Sprintf("profiles: csprng failure in GenerateRandomHex: %v", err))
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -70,7 +73,9 @@ func GenerateRandomHex(n int) string {
 // GenerateRandomAWGProfileParams генерирует полностью уникальный набор параметров AWG 3.1 для новой сети
 func GenerateRandomAWGProfileParams() (jc, jmin, jmax, s1, s2 int, h1, h2, h3, h4 uint32, hpKey string) {
 	var b [16]byte
-	_, _ = rand.Read(b[:])
+	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+		panic(fmt.Sprintf("profiles: csprng failure in GenerateRandomAWGProfileParams: %v", err))
+	}
 	h1 = uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
 	h2 = uint32(b[4])<<24 | uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7])
 	h3 = uint32(b[8])<<24 | uint32(b[9])<<16 | uint32(b[10])<<8 | uint32(b[11])
@@ -81,7 +86,9 @@ func GenerateRandomAWGProfileParams() (jc, jmin, jmax, s1, s2 int, h1, h2, h3, h
 	if h4 < 1000000 { h4 += 1000000 }
 
 	var r [4]byte
-	_, _ = rand.Read(r[:])
+	if _, err := io.ReadFull(rand.Reader, r[:]); err != nil {
+		panic(fmt.Sprintf("profiles: csprng failure in GenerateRandomAWGProfileParams: %v", err))
+	}
 	jc = 3 + int(r[0]%4)
 	jmin = 25 + int(r[1]%25)
 	jmax = jmin + 30 + int(r[2]%35)
@@ -94,7 +101,9 @@ func GenerateRandomAWGProfileParams() (jc, jmin, jmax, s1, s2 int, h1, h2, h3, h
 // GenerateRandomWGPort генерирует случайный порт WireGuard в диапазоне 25700..49000
 func GenerateRandomWGPort() int {
 	var r [2]byte
-	_, _ = rand.Read(r[:])
+	if _, err := io.ReadFull(rand.Reader, r[:]); err != nil {
+		panic(fmt.Sprintf("profiles: csprng failure in GenerateRandomWGPort: %v", err))
+	}
 	portVal := int(r[0])<<8 | int(r[1])
 	return 25700 + (portVal % (49000 - 25700 + 1))
 }

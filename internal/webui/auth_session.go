@@ -12,6 +12,8 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"runtime"
@@ -76,7 +78,9 @@ func saveSessionsToDisk() {
 
 func generateSessionToken() string {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		panic(fmt.Sprintf("webui: csprng failure in generateSessionToken: %v", err))
+	}
 	return hex.EncodeToString(b)
 }
 

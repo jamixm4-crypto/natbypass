@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,7 +57,9 @@ func BuildQUICDataPacket(dcid []byte, pktNum uint16, payload []byte, cKey [32]by
 	if len(dcid) >= DCIDLen {
 		copy(buf[1:1+DCIDLen], dcid[:DCIDLen])
 	} else {
-		_, _ = rand.Read(buf[1 : 1+DCIDLen])
+		if _, err := io.ReadFull(rand.Reader, buf[1:1+DCIDLen]); err != nil {
+			panic(fmt.Sprintf("quic: csprng failure in BuildQUICDataPacket (dcid): %v", err))
+		}
 	}
 
 	// 3. Packet Number (2 bytes)
@@ -107,7 +110,9 @@ type Session struct {
 // NewSession creates a new QUIC transport session for a remote peer.
 func NewSession(peerID string, remoteAddr string, cKey [32]byte) *Session {
 	var dcid [DCIDLen]byte
-	_, _ = rand.Read(dcid[:])
+	if _, err := io.ReadFull(rand.Reader, dcid[:]); err != nil {
+		panic(fmt.Sprintf("quic: csprng failure in NewSession (dcid): %v", err))
+	}
 
 	return &Session{
 		peerID:     peerID,

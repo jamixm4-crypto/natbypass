@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 
 	"golang.org/x/crypto/curve25519"
@@ -26,7 +27,7 @@ type KeyPair struct {
 // GenerateKeyPair generates a new WireGuard-compatible X25519 key pair.
 func GenerateKeyPair() (*KeyPair, error) {
 	var privateKey [32]byte
-	if _, err := rand.Read(privateKey[:]); err != nil {
+	if _, err := io.ReadFull(rand.Reader, privateKey[:]); err != nil {
 		return nil, fmt.Errorf("ошибка генерации случайных байт: %w", err)
 	}
 

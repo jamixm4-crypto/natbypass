@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -147,7 +148,7 @@ func printBanner() {
 	fmt.Print(colorBrightCyan + colorBold + `
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║               NATBYPASS CLUSTER DIAGNOSTIC & CONTROL CENTER                  ║
-║                  (v1.9.225 | Local Engineering)                        ║
+║                  (v1.9.226-beta1 | Local Engineering)                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ` + colorReset)
 }
@@ -226,7 +227,9 @@ func runCollection(
 ) (map[string]*DiscoveredNodeInfo, map[string]*NodeResponse, string) {
 
 	randBytes := make([]byte, 4)
-	_, _ = rand.Read(randBytes)
+	if _, err := io.ReadFull(rand.Reader, randBytes); err != nil {
+		panic(fmt.Sprintf("diag: csprng failure: %v", err))
+	}
 	sessionID := fmt.Sprintf("diag-sess-%x", randBytes)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)
@@ -806,7 +809,9 @@ func main() {
 	}
 
 	randBytes := make([]byte, 4)
-	_, _ = rand.Read(randBytes)
+	if _, err := io.ReadFull(rand.Reader, randBytes); err != nil {
+		panic(fmt.Sprintf("diag: csprng failure: %v", err))
+	}
 	collectorID := fmt.Sprintf("natbypass-diag-%x", randBytes)
 
 	// Connect to signaling channel once

@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -826,13 +827,17 @@ func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 
 	// DCID: 8 random bytes
 	dcid := make([]byte, 8)
-	_, _ = rand.Read(dcid)
+	if _, err := io.ReadFull(rand.Reader, dcid); err != nil {
+		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICChameleonProbe (dcid): %v", err))
+	}
 	buf = append(buf, byte(len(dcid)))
 	buf = append(buf, dcid...)
 
 	// SCID: 8 random bytes
 	scid := make([]byte, 8)
-	_, _ = rand.Read(scid)
+	if _, err := io.ReadFull(rand.Reader, scid); err != nil {
+		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICChameleonProbe (scid): %v", err))
+	}
 	buf = append(buf, byte(len(scid)))
 	buf = append(buf, scid...)
 
@@ -844,7 +849,9 @@ func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 	buf = append(buf, putQUICVarint(16)...)
 	buf = append(buf, 0x00, 0x01)
 	pad := make([]byte, 14)
-	_, _ = rand.Read(pad)
+	if _, err := io.ReadFull(rand.Reader, pad); err != nil {
+		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICChameleonProbe (pad): %v", err))
+	}
 	buf = append(buf, pad...)
 
 	return buf, nil
@@ -866,12 +873,16 @@ func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte,
 	buf = append(buf, verBuf[:]...)
 
 	dcid := make([]byte, 8)
-	_, _ = rand.Read(dcid)
+	if _, err := io.ReadFull(rand.Reader, dcid); err != nil {
+		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICPongChameleonProbe (dcid): %v", err))
+	}
 	buf = append(buf, byte(len(dcid)))
 	buf = append(buf, dcid...)
 
 	scid := make([]byte, 8)
-	_, _ = rand.Read(scid)
+	if _, err := io.ReadFull(rand.Reader, scid); err != nil {
+		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICPongChameleonProbe (scid): %v", err))
+	}
 	buf = append(buf, byte(len(scid)))
 	buf = append(buf, scid...)
 
@@ -881,7 +892,9 @@ func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte,
 	buf = append(buf, putQUICVarint(16)...)
 	buf = append(buf, 0x00, 0x01)
 	pad := make([]byte, 14)
-	_, _ = rand.Read(pad)
+	if _, err := io.ReadFull(rand.Reader, pad); err != nil {
+		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICPongChameleonProbe (pad): %v", err))
+	}
 	buf = append(buf, pad...)
 
 	return buf, nil
@@ -1274,7 +1287,9 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			padLen := pmin
 			if diff := pmax - pmin; diff > 0 {
 				var b [1]byte
-				_, _ = rand.Read(b[:])
+				if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+					panic(fmt.Sprintf("puncher: csprng failure in SendDataPacketWithPadding: %v", err))
+				}
 				padLen += int(b[0]) % (diff + 1)
 			}
 			if padLen > 0 {
@@ -1282,7 +1297,9 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 				padded := make([]byte, 2+len(payload)+padLen)
 				binary.BigEndian.PutUint16(padded[:2], pLen)
 				copy(padded[2:], payload)
-				_, _ = rand.Read(padded[2+len(payload):])
+				if _, err := io.ReadFull(rand.Reader, padded[2+len(payload):]); err != nil {
+					panic(fmt.Sprintf("puncher: csprng failure in SendDataPacketWithPadding (padding bytes): %v", err))
+				}
 				payloadToEncrypt = padded
 			}
 		} else {
@@ -1295,11 +1312,15 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			} else if len(payload) < 512 {
 				// Default light jitter padding for small packets (<512B) to mask keystrokes / interactive traffic
 				var b [1]byte
-				_, _ = rand.Read(b[:])
+				if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+					panic(fmt.Sprintf("puncher: csprng failure in SendDataPacketWithPadding (jitter): %v", err))
+				}
 				padLen := 16 + int(b[0]%48) // 16-63 bytes
 				padded := make([]byte, len(payload)+padLen)
 				copy(padded, payload)
-				_, _ = rand.Read(padded[len(payload):])
+				if _, err := io.ReadFull(rand.Reader, padded[len(payload):]); err != nil {
+					panic(fmt.Sprintf("puncher: csprng failure in SendDataPacketWithPadding (jitter pad): %v", err))
+				}
 				payloadToEncrypt = padded
 			}
 		}

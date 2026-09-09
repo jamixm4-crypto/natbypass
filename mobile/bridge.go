@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.225"
+const Version = "1.9.226-beta1"
 
 
 
@@ -1831,7 +1831,9 @@ func SetAWGPreset(preset string) {
 // GetRandomAWGParamsJSON генерирует случайные параметры обхода блокировок
 func GetRandomAWGParamsJSON() string {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		panic(fmt.Sprintf("mobile: csprng failure in GetRandomAWGParamsJSON: %v", err))
+	}
 	p := signaling.AWGParams{
 		Jc:   3 + int(b[0]%4),
 		Jmin: 30 + int(b[1]%30),
@@ -1879,7 +1881,9 @@ func getAWGParamsFromPreset(preset string) *signaling.AWGParams {
 		}
 	case "stealth":
 		var b [16]byte
-		_, _ = rand.Read(b[:])
+		if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+			panic(fmt.Sprintf("mobile: csprng failure in getAWGParamsFromPreset(stealth): %v", err))
+		}
 		return &signaling.AWGParams{
 			Jc:   4,
 			Jmin: 40,

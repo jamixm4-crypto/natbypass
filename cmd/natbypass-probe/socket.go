@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -252,7 +253,9 @@ func (ps *ProbeSocket) sendPunchStep(state *PeerPunchState) {
 			for j := 0; j < ps.cfg.AWG.Jc; j++ {
 				jLen := jMin + (j*7)%(jMax-jMin+1)
 				junk := make([]byte, jLen)
-				_, _ = rand.Read(junk)
+				if _, err := io.ReadFull(rand.Reader, junk); err != nil {
+					panic(fmt.Sprintf("probe: csprng failure: %v", err))
+				}
 				_, _ = ps.conn.WriteToUDP(junk, state.TargetAddr)
 			}
 		}
@@ -264,7 +267,9 @@ func (ps *ProbeSocket) sendPunchStep(state *PeerPunchState) {
 		marker := fmt.Sprintf("AWGPROBE:%s>%s", ps.myNodeID, state.Peer.NodeID)
 		copy(initPacket[4:], []byte(marker))
 		if len(initPacket) > 4+len(marker) {
-			_, _ = rand.Read(initPacket[4+len(marker):])
+			if _, err := io.ReadFull(rand.Reader, initPacket[4+len(marker):]); err != nil {
+				panic(fmt.Sprintf("probe: csprng failure: %v", err))
+			}
 		}
 
 		_, _ = ps.conn.WriteToUDP(initPacket, state.TargetAddr)
@@ -470,7 +475,9 @@ func (ps *ProbeSocket) readLoop() {
 			binary.LittleEndian.PutUint32(reply[:4], h2)
 			copy(reply[4:], []byte("AWGREPLY:"+ps.myNodeID))
 			if len(reply) > 20 {
-				_, _ = rand.Read(reply[20:])
+				if _, err := io.ReadFull(rand.Reader, reply[20:]); err != nil {
+					panic(fmt.Sprintf("probe: csprng failure: %v", err))
+				}
 			}
 			_, _ = ps.conn.WriteToUDP(reply, remoteAddr)
 			logf("[AWG-SRV] Received AWG Handshake Initiation from %s (%s) -> sent H2 response", remoteAddr, fromID)

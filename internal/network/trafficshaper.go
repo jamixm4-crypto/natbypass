@@ -10,12 +10,13 @@ package network
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"runtime"
 	"sync"
 	"time"
-
 )
 
 // TrafficShaper маскирует VPN-трафик под видеоконференции (WebRTC/Zoom).
@@ -107,7 +108,9 @@ func (s *TrafficShaper) SendPacket(conn *net.UDPConn, addr *net.UDPAddr, payload
 	nRand, err := rand.Int(rand.Reader, big.NewInt(100))
 	if err == nil && float32(nRand.Int64())/100.0 < ackProb {
 		var fakeAck [16]byte
-		_, _ = rand.Read(fakeAck[:])
+		if _, err := io.ReadFull(rand.Reader, fakeAck[:]); err != nil {
+			panic(fmt.Sprintf("trafficshaper: csprng failure: %v", err))
+		}
 		fakeAck[0] = 0x80 // RTP version 2
 		fakeAck[1] = 0xc8 // RTCP Sender Report marker
 		binary.BigEndian.PutUint16(fakeAck[14:], uint16(len(payload)))
@@ -155,7 +158,9 @@ func (s *TrafficShaper) AdaptivePadding(payloadLen int) int {
 
 	// Add random variation within the bin so packets form a continuous distribution rather than exact multiples
 	var jitterByte [1]byte
-	_, _ = rand.Read(jitterByte[:])
+	if _, err := io.ReadFull(rand.Reader, jitterByte[:]); err != nil {
+		panic(fmt.Sprintf("trafficshaper: csprng failure: %v", err))
+	}
 	jitter := int(jitterByte[0] % 32) // 0-31 bytes
 
 	padLen := diff
@@ -184,6 +189,8 @@ func (s *TrafficShaper) ApplyAdaptivePadding(payload []byte) []byte {
 
 	padded := make([]byte, len(payload)+padLen)
 	copy(padded, payload)
-	_, _ = rand.Read(padded[len(payload):])
+	if _, err := io.ReadFull(rand.Reader, padded[len(payload):]); err != nil {
+		panic(fmt.Sprintf("trafficshaper: csprng failure: %v", err))
+	}
 	return padded
 }
