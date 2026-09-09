@@ -18,9 +18,20 @@ import (
 	"time"
 )
 
-// TrafficShaper маскирует VPN-трафик под видеоконференции (WebRTC/Zoom).
+// TrafficProfile defines camouflage shaping patterns against DPI.
+type TrafficProfile string
+
+const (
+	ProfileDefault TrafficProfile = "webrtc"
+	ProfileWebRTC  TrafficProfile = "webrtc"
+	ProfileYouTube TrafficProfile = "youtube"
+	ProfileZoom    TrafficProfile = "zoom"
+)
+
+// TrafficShaper маскирует VPN-трафик под видеоконференции (WebRTC/Zoom) или потоковое видео (YouTube).
 type TrafficShaper struct {
 	enabled      bool
+	profile      TrafficProfile
 	jitterMin    time.Duration // 5ms
 	jitterMax    time.Duration // 50ms
 	maxFrameSize int           // 1350 bytes (video frame slice)
@@ -32,11 +43,47 @@ type TrafficShaper struct {
 func NewTrafficShaper(enabled bool) *TrafficShaper {
 	return &TrafficShaper{
 		enabled:      enabled,
+		profile:      ProfileWebRTC,
 		jitterMin:    5 * time.Millisecond,
 		jitterMax:    50 * time.Millisecond,
 		maxFrameSize: 1350,
 		fakeAckProb:  0.30,
 	}
+}
+
+// SetProfile configures shaping parameters for specific camouflage profile (YouTube, Zoom, WebRTC).
+func (s *TrafficShaper) SetProfile(profile TrafficProfile) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profile = profile
+	switch profile {
+	case ProfileYouTube:
+		s.jitterMin = 2 * time.Millisecond
+		s.jitterMax = 30 * time.Millisecond
+		s.maxFrameSize = 1380
+		s.fakeAckProb = 0.10
+	case ProfileZoom:
+		s.jitterMin = 15 * time.Millisecond
+		s.jitterMax = 25 * time.Millisecond
+		s.maxFrameSize = 1200
+		s.fakeAckProb = 0.40
+	default:
+		s.profile = ProfileWebRTC
+		s.jitterMin = 5 * time.Millisecond
+		s.jitterMax = 50 * time.Millisecond
+		s.maxFrameSize = 1350
+		s.fakeAckProb = 0.30
+	}
+}
+
+// GetProfile returns the current traffic shaping camouflage profile.
+func (s *TrafficShaper) GetProfile() TrafficProfile {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.profile == "" {
+		return ProfileWebRTC
+	}
+	return s.profile
 }
 
 // SetEnabled включает или отключает маскировку трафика.
@@ -132,6 +179,7 @@ func (s *TrafficShaper) AdaptivePadding(payloadLen int) int {
 	}
 	s.mu.RLock()
 	maxSize := s.maxFrameSize
+	prof := s.profile
 	s.mu.RUnlock()
 
 	if maxSize <= 0 {
@@ -143,8 +191,17 @@ func (s *TrafficShaper) AdaptivePadding(payloadLen int) int {
 		return 0
 	}
 
-	// Discrete bins for packet size quantization
-	bins := [...]int{128, 256, 512, 1024, maxSize}
+	// Discrete bins for packet size quantization (profile-tuned, zero heap allocation)
+	var bins [5]int
+	switch prof {
+	case ProfileYouTube:
+		bins = [5]int{256, 512, 1024, 1280, maxSize}
+	case ProfileZoom:
+		bins = [5]int{160, 320, 640, 1024, maxSize}
+	default:
+		bins = [5]int{128, 256, 512, 1024, maxSize}
+	}
+
 	targetBin := maxSize
 	for _, b := range bins {
 		if payloadLen <= b {

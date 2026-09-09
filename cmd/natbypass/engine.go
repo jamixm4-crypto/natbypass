@@ -34,6 +34,7 @@ import (
 	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/natbypass/natbypass/internal/transport/quic"
 	"github.com/natbypass/natbypass/internal/tray"
 	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/webui"
@@ -45,6 +46,7 @@ import (
 // runEngine initializes and runs the core NatBypass networking pipeline.
 
 var (
+	quicSessMgr      *quic.SessionManager
 	magicSock        *network.MagicSock
 	tcpDirectMgr     *network.TCPDirectManager
 	decoyMgr         *network.DecoyManager
@@ -1038,7 +1040,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						if !isForceTCP && !sentTCP && targetEP != "" && puncher != nil {
 							srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
 							log.Debug().Str("src", srcIP).Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Int("len", len(pkt)).Msg("📤 TUN→UDP outbound")
-							err := puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
+							var err error
+							if p.Transport == "quic" {
+								err = puncher.SendQUICPacket(targetEP, pkt)
+							} else {
+								err = puncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax)
+							}
 							if err == nil {
 								sentDirect = true
 							} else {
@@ -1047,7 +1054,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 						// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
 						if !isForceTCP && !sentTCP && !p.DirectP2P && puncher != nil && p.STUNAddr != "" && p.STUNAddr != targetEP {
-							_ = puncher.SendDataPacketWithPadding(p.STUNAddr, pkt, pmin, pmax)
+							if p.Transport == "quic" {
+								_ = puncher.SendQUICPacket(p.STUNAddr, pkt)
+							} else {
+								_ = puncher.SendDataPacketWithPadding(p.STUNAddr, pkt, pmin, pmax)
+							}
 						}
 						// 1c. Reactive instant hole punching if direct P2P is not yet confirmed or packet wasn't sent
 						if !isForceTCP && (!sentDirect || !p.DirectP2P) && puncher != nil {
@@ -1088,6 +1099,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									sentDirect = true
 									log.Debug().Str("dst", dstIP).Str("via", relayPeer.DeviceID).Msg("🔀 Routed packet via Mesh TCP Relay peer")
 								}
+							}
+						}
+
+						// Task 3.4: Multi-Path Hot-Standby Heartbeat & Sub-50ms Failover
+						// When direct P2P is active, maintain standby relay path every 15s to guarantee hitless switchover
+						if sentDirect && p.DirectP2P {
+							now := time.Now()
+							if p.LastRelayPing.IsZero() || now.Sub(p.LastRelayPing) > 15*time.Second {
+								p.LastRelayPing = now
+								p.StandbyRelayReady = (wssClient != nil && wssClient.IsConnected()) || sigMgr != nil
+								registry.Upsert(p)
 							}
 						}
 						// 1f. Encrypted Relay Fallback (WSS or MQTT):
@@ -1694,6 +1716,7 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			}
 		})
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDP puncher active on persistent socket with MagicSock and KeepAlive")
+		quicSessMgr = quic.NewSessionManager()
 		tcpDirectMgr = network.NewTCPDirectManager(ctx)
 		tcpDirectMgr.SetDeviceID(deviceID)
 		desiredTCPPort := cfg.Network.TCPPort

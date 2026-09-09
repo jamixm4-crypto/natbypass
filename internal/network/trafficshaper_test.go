@@ -51,3 +51,32 @@ func TestTrafficShaper_AdaptivePadding(t *testing.T) {
 		t.Fatalf("expected 0 padding for 1350B packet, got %d", padLarge)
 	}
 }
+
+func TestTrafficShaper_Profiles(t *testing.T) {
+	shaper := NewTrafficShaper(true)
+	if shaper.GetProfile() != ProfileWebRTC {
+		t.Errorf("expected default profile WebRTC, got %s", shaper.GetProfile())
+	}
+
+	shaper.SetProfile(ProfileYouTube)
+	if shaper.GetProfile() != ProfileYouTube {
+		t.Errorf("expected YouTube profile, got %s", shaper.GetProfile())
+	}
+	if shaper.maxFrameSize != 1380 {
+		t.Errorf("expected YouTube maxFrameSize=1380, got %d", shaper.maxFrameSize)
+	}
+
+	shaper.SetProfile(ProfileZoom)
+	if shaper.GetProfile() != ProfileZoom {
+		t.Errorf("expected Zoom profile, got %s", shaper.GetProfile())
+	}
+	if shaper.maxFrameSize != 1200 {
+		t.Errorf("expected Zoom maxFrameSize=1200, got %d", shaper.maxFrameSize)
+	}
+
+	// Verify adaptive padding with Zoom profile
+	padZoom := shaper.AdaptivePadding(150)
+	if padZoom < 0 || 150+padZoom > 1200 {
+		t.Errorf("unexpected padZoom: %d", padZoom)
+	}
+}

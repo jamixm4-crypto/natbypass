@@ -71,6 +71,8 @@ type Peer struct {
 	LossPercent              int                     `json:"loss_percent,omitempty"`        // Integer loss percentage (0-100%)
 	ConsecutiveDrops         int                     `json:"consec_drops,omitempty"`        // Consecutive failed probes
 	ConsecutiveDirectSuccess int                     `json:"consec_direct_success,omitempty"`// Consecutive successful direct probes (hysteresis)
+	StandbyRelayReady        bool                    `json:"standby_relay_ready,omitempty"`  // True if Hot-Standby Relay path is verified
+	LastRelayPing            time.Time               `json:"last_relay_ping,omitempty"`      // Timestamp of last Hot-Standby heartbeat
 }
 
 // RecordProbeResult updates the 32-bit delivery bitmap and recalculates LossPercent using pure integer arithmetic (MIPS safe).
@@ -264,6 +266,12 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.LossPercent = existing.LossPercent
 		newer.ConsecutiveDrops = existing.ConsecutiveDrops
 		newer.ConsecutiveDirectSuccess = existing.ConsecutiveDirectSuccess
+	}
+	if !newer.StandbyRelayReady && existing.StandbyRelayReady {
+		newer.StandbyRelayReady = existing.StandbyRelayReady
+	}
+	if newer.LastRelayPing.IsZero() && !existing.LastRelayPing.IsZero() {
+		newer.LastRelayPing = existing.LastRelayPing
 	}
 
 

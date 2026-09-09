@@ -1488,6 +1488,12 @@ func (p *UDPPuncher) SendDataPacketWithQUIC(targetAddr string, payload []byte) e
 	return err
 }
 
+// SendQUICPacket wraps and transmits an IP packet inside an RFC 9000 1-RTT Short Header QUIC datagram.
+// Alias for SendDataPacketWithQUIC.
+func (p *UDPPuncher) SendQUICPacket(targetAddr string, payload []byte) error {
+	return p.SendDataPacketWithQUIC(targetAddr, payload)
+}
+
 // handleSTUNMessage decodes incoming STUN responses and extracts mapped public IP/port.
 func (p *UDPPuncher) handleSTUNMessage(data []byte) {
 	var stunResp stun.Message
