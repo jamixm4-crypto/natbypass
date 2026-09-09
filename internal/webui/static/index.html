@@ -1273,6 +1273,26 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           </table>
         </div>
       </div>
+
+      <!-- Interactive Mesh Topology Graph -->
+      <div class="glass-card" style="margin-top: 14px; padding: 16px 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; flex-wrap:wrap; gap:8px;">
+          <div>
+            <h3 style="font-size: 1.05rem; font-weight: 800;">🕸️ ИНТЕРАКТИВНАЯ ТОПОЛОГИЯ MESH-СЕТИ</h3>
+            <p style="font-size: 0.78rem; color: var(--text-muted);">P2P связи, задержки (RTT) и резервные Hot-Standby пути в реальном времени</p>
+          </div>
+          <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <span style="font-size:0.75rem; color:#4ade80; display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#4ade80;"></span> P2P Direct</span>
+            <span style="font-size:0.75rem; color:#c084fc; display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#c084fc;"></span> Hot-Standby</span>
+            <span style="font-size:0.75rem; color:#f59e0b; display:flex; align-items:center; gap:4px;"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#f59e0b;"></span> Relay</span>
+            <button onclick="renderTopologyGraph()" class="btn btn-glass" style="font-size:0.75rem; padding:4px 10px;">🔄 Обновить</button>
+          </div>
+        </div>
+        <div id="topologyContainer" style="width:100%; height:260px; background:rgba(15,23,42,0.6); border:1px solid rgba(51,65,85,0.5); border-radius:10px; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+          <svg id="topologySvg" style="width:100%; height:100%;"></svg>
+          <div id="topologyEmpty" style="color:var(--text-muted); font-size:0.85rem; position:absolute; display:none;">Ожидание обнаружения пиров в сети...</div>
+        </div>
+      </div>
     </div>
 
     <!-- TAB 2: DEVICES (FULL ADDRESS BOOK) -->
@@ -3417,6 +3437,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           cachedPeers = pJson.data;
           renderPeers(cachedPeers);
         }
+        renderTopologyGraph();
         const bOff = document.getElementById('offlineBanner');
         if (bOff) bOff.style.display = 'none';
         failedRefreshAttempts = 0;
@@ -3426,6 +3447,147 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const bOff = document.getElementById('offlineBanner');
           if (bOff) bOff.style.display = 'block';
         }
+      }
+    }
+
+    async function renderTopologyGraph() {
+      try {
+        const res = await fetch('/api/mesh/topology');
+        const json = await res.json();
+        if (!json.ok || !json.data) return;
+
+        const topo = json.data;
+        const svg = document.getElementById('topologySvg');
+        const emptyEl = document.getElementById('topologyEmpty');
+        if (!svg) return;
+
+        svg.innerHTML = '';
+        if (!topo.nodes || topo.nodes.length <= 1) {
+          if (emptyEl) emptyEl.style.display = 'block';
+          return;
+        }
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        const width = svg.clientWidth || 800;
+        const height = svg.clientHeight || 260;
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const radius = Math.min(centerX, centerY) - 50;
+
+        const selfNode = topo.nodes.find(n => n.is_self) || { id: topo.self_id, name: 'Этот узел', vip: '' };
+        const peerNodes = topo.nodes.filter(n => !n.is_self);
+
+        // Draw edges first
+        peerNodes.forEach((peer, idx) => {
+          const angle = (idx / peerNodes.length) * 2 * Math.PI - Math.PI / 2;
+          const px = centerX + radius * Math.cos(angle);
+          const py = centerY + radius * Math.sin(angle);
+
+          const edge = (topo.edges || []).find(e => e.to === peer.id) || {};
+          let strokeColor = '#f59e0b'; // Relay
+          let strokeDash = 'none';
+          if (edge.path_type === 'direct') {
+            strokeColor = (edge.ping_ms > 0 && edge.ping_ms < 100) ? '#4ade80' : '#facc15';
+          }
+          if (edge.standby_ready && edge.path_type === 'relay') {
+            strokeColor = '#c084fc';
+            strokeDash = '4,4';
+          }
+
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', centerX);
+          line.setAttribute('y1', centerY);
+          line.setAttribute('x2', px);
+          line.setAttribute('y2', py);
+          line.setAttribute('stroke', strokeColor);
+          line.setAttribute('stroke-width', '2');
+          line.setAttribute('stroke-dasharray', strokeDash);
+          line.setAttribute('opacity', '0.75');
+          svg.appendChild(line);
+
+          // Metric label
+          const midX = (centerX + px) / 2;
+          const midY = (centerY + py) / 2;
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', midX);
+          text.setAttribute('y', midY - 4);
+          text.setAttribute('fill', strokeColor);
+          text.setAttribute('font-size', '10px');
+          text.setAttribute('font-family', 'monospace');
+          text.setAttribute('text-anchor', 'middle');
+          const trans = edge.transport || 'udp';
+          const rtt = edge.ping_ms > 0 ? `${edge.ping_ms}ms` : '';
+          text.textContent = `${trans} ${rtt}`.trim();
+          svg.appendChild(text);
+
+          // Peer Node
+          const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          circle.setAttribute('cx', px);
+          circle.setAttribute('cy', py);
+          circle.setAttribute('r', '18');
+          circle.setAttribute('fill', peer.online ? '#1e293b' : '#334155');
+          circle.setAttribute('stroke', peer.direct_p2p ? '#4ade80' : '#f59e0b');
+          circle.setAttribute('stroke-width', '2');
+          g.appendChild(circle);
+
+          const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          label.setAttribute('x', px);
+          label.setAttribute('y', py + 30);
+          label.setAttribute('fill', '#f1f5f9');
+          label.setAttribute('font-size', '11px');
+          label.setAttribute('font-weight', '700');
+          label.setAttribute('text-anchor', 'middle');
+          label.textContent = (peer.name || peer.id).substring(0, 14);
+          g.appendChild(label);
+
+          const vipLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          vipLabel.setAttribute('x', px);
+          vipLabel.setAttribute('y', py + 42);
+          vipLabel.setAttribute('fill', 'var(--text-muted)');
+          vipLabel.setAttribute('font-size', '9px');
+          vipLabel.setAttribute('font-family', 'monospace');
+          vipLabel.setAttribute('text-anchor', 'middle');
+          vipLabel.textContent = (peer.vip || '').split('/')[0];
+          g.appendChild(vipLabel);
+
+          svg.appendChild(g);
+        });
+
+        // Center Self Node
+        const selfG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const selfCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        selfCircle.setAttribute('cx', centerX);
+        selfCircle.setAttribute('cy', centerY);
+        selfCircle.setAttribute('r', '22');
+        selfCircle.setAttribute('fill', '#0284c7');
+        selfCircle.setAttribute('stroke', '#38bdf8');
+        selfCircle.setAttribute('stroke-width', '3');
+        selfG.appendChild(selfCircle);
+
+        const selfIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        selfIcon.setAttribute('x', centerX);
+        selfIcon.setAttribute('y', centerY + 4);
+        selfIcon.setAttribute('fill', '#ffffff');
+        selfIcon.setAttribute('font-size', '11px');
+        selfIcon.setAttribute('font-weight', '800');
+        selfIcon.setAttribute('text-anchor', 'middle');
+        selfIcon.textContent = 'YOU';
+        selfG.appendChild(selfIcon);
+
+        const selfLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        selfLabel.setAttribute('x', centerX);
+        selfLabel.setAttribute('y', centerY + 36);
+        selfLabel.setAttribute('fill', '#38bdf8');
+        selfLabel.setAttribute('font-size', '11px');
+        selfLabel.setAttribute('font-weight', '700');
+        selfLabel.setAttribute('text-anchor', 'middle');
+        selfLabel.textContent = selfNode.vip ? selfNode.vip.split('/')[0] : 'Локальный узел';
+        selfG.appendChild(selfLabel);
+
+        svg.appendChild(selfG);
+      } catch (err) {
+        console.error('Failed to render topology graph:', err);
       }
     }
 

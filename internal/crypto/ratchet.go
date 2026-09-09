@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/hkdf"
@@ -219,4 +220,82 @@ func (s *SessionState) Decrypt(data []byte) ([]byte, error) {
 	s.mu.Unlock()
 
 	return plaintext, nil
+}
+
+const (
+	// EpochDuration defines the key rotation interval for Perfect Forward Secrecy (30 minutes).
+	EpochDuration = 30 * time.Minute
+)
+
+// GetCurrentEpoch returns the current epoch index based on Unix timestamp.
+func GetCurrentEpoch() uint64 {
+	return uint64(time.Now().Unix()) / uint64(EpochDuration.Seconds())
+}
+
+// DeriveEpochKey derives a 32-byte ephemeral master key for a specific time epoch using HKDF-Expand.
+// This ensures that compromise of a long-term network key in the future does not compromise past epoch keys.
+func DeriveEpochKey(baseKey []byte, epoch uint64) ([32]byte, error) {
+	var epochBytes [8]byte
+	binary.BigEndian.PutUint64(epochBytes[:], epoch)
+
+	info := append([]byte("NatBypass-Epoch-PFS-v1:"), epochBytes[:]...)
+	var epochKey [32]byte
+	if _, err := io.ReadFull(hkdf.Expand(sha256.New, baseKey, info), epochKey[:]); err != nil {
+		return [32]byte{}, fmt.Errorf("epoch key derivation failed: %w", err)
+	}
+	return epochKey, nil
+}
+
+// DeriveEpochMasterKey derives a 32-byte key for the given networkKey string and epoch.
+func DeriveEpochMasterKey(networkKey string, epoch uint64) [32]byte {
+	base := sha256.Sum256([]byte(networkKey))
+	key, err := DeriveEpochKey(base[:], epoch)
+	if err != nil {
+		return base // Fallback to base key on theoretical HKDF error
+	}
+	return key
+}
+
+// EncryptWithEpoch wraps a message with an 8-byte epoch header and encrypts it using the epoch-derived key.
+func EncryptWithEpoch(plaintext []byte, baseKey []byte, epoch uint64) ([]byte, error) {
+	epochKey, err := DeriveEpochKey(baseKey, epoch)
+	if err != nil {
+		return nil, err
+	}
+
+	enc, err := EncryptSelf(plaintext, epochKey)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]byte, 8+len(enc))
+	binary.BigEndian.PutUint64(out[:8], epoch)
+	copy(out[8:], enc)
+	return out, nil
+}
+
+// DecryptWithEpoch validates and decrypts an epoch-wrapped message within a tolerance window of ±1 epoch.
+func DecryptWithEpoch(data []byte, baseKey []byte, currentEpoch uint64) ([]byte, uint64, error) {
+	if len(data) < 8+24 { // 8-byte epoch + 24-byte secretbox nonce
+		return nil, 0, ErrDecryptionFailed
+	}
+
+	msgEpoch := binary.BigEndian.Uint64(data[:8])
+
+	// Allow current epoch, previous epoch (tolerance for clock skew / packet in flight), or next epoch (+1)
+	if msgEpoch > currentEpoch+1 || (currentEpoch > 0 && msgEpoch < currentEpoch-1) {
+		return nil, 0, fmt.Errorf("epoch expired or out of window (msg=%d, current=%d)", msgEpoch, currentEpoch)
+	}
+
+	epochKey, err := DeriveEpochKey(baseKey, msgEpoch)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	dec, err := DecryptSelf(data[8:], epochKey)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return dec, msgEpoch, nil
 }

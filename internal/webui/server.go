@@ -364,6 +364,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/test/mqtt", s.handleTestMQTT)
 	// Новые UX-эндпоинты
 	mux.HandleFunc("/api/dashboard", s.handleDashboard)
+	mux.HandleFunc("/api/mesh/topology", s.handleMeshTopology)
+	mux.HandleFunc("/api/telemetry", s.handleTelemetry)
 	mux.HandleFunc("/api/analytics", s.handleAnalytics)
 	mux.HandleFunc("/api/diagnose", s.handleDiagnose)
 	mux.HandleFunc("/api/diagnostics/ping", s.handleDiagnosticsPing)
@@ -616,8 +618,8 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 0. Разрешить локальный read-only опрос статуса, пиров и дашборда (localhost 127.0.0.1 / ::1) для diag/CLI/WebUI
-		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard") && r.Method == http.MethodGet {
+		// 0. Разрешить локальный read-only опрос статуса, пиров, дашборда и топологии (localhost 127.0.0.1 / ::1) для diag/CLI/WebUI
+		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry") && r.Method == http.MethodGet {
 			host, _, _ := net.SplitHostPort(r.RemoteAddr)
 			if host == "" {
 				host = r.RemoteAddr
@@ -1795,6 +1797,220 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			activeProf := cfg.EnsureActiveProfile()
 			return activeProf != nil && activeProf.NetworkKey != ""
 		}(),
+	}
+
+	s.jsonResponse(w, http.StatusOK, data, "")
+}
+
+// TopologyNode represents a node in the mesh network.
+type TopologyNode struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	VirtualIP  string `json:"vip"`
+	IsSelf     bool   `json:"is_self"`
+	IsExitNode bool   `json:"is_exit_node"`
+	Online     bool   `json:"online"`
+	DirectP2P  bool   `json:"direct_p2p"`
+	Platform   string `json:"platform,omitempty"`
+}
+
+// TopologyEdge represents a logical communication channel between two mesh nodes.
+type TopologyEdge struct {
+	From              string `json:"from"`
+	To                string `json:"to"`
+	Transport         string `json:"transport"`
+	PathType          string `json:"path_type"` // "direct", "relay", "standby"
+	PingMs            int64  `json:"ping_ms"`
+	LossPercent       int    `json:"loss_percent"`
+	ConsecutiveDrops  int    `json:"consecutive_drops"`
+	StandbyRelayReady bool   `json:"standby_ready"`
+}
+
+// MeshTopology represents the full mesh topology graph.
+type MeshTopology struct {
+	SelfID string         `json:"self_id"`
+	Nodes  []TopologyNode `json:"nodes"`
+	Edges  []TopologyEdge `json:"edges"`
+}
+
+// handleMeshTopology — GET /api/mesh/topology — returns full mesh topology and link metrics
+func (s *Server) handleMeshTopology(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	myID := ""
+	myName := s.deviceName
+	myVIP := ""
+	if s.state != nil {
+		myID = s.state.DeviceID
+		myVIP = s.state.VirtualIP
+	}
+	if myName == "" {
+		myName = "Этот узел (" + runtime.GOOS + ")"
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	if cfg != nil && myID != "" {
+		if v := config.ResolveVirtualIP(cfg, myID); v != "" {
+			myVIP = v
+		}
+	}
+
+	topo := MeshTopology{
+		SelfID: myID,
+		Nodes:  make([]TopologyNode, 0),
+		Edges:  make([]TopologyEdge, 0),
+	}
+
+	// Add self node
+	selfNode := TopologyNode{
+		ID:         myID,
+		Name:       myName,
+		VirtualIP:  myVIP,
+		IsSelf:     true,
+		IsExitNode: cfg != nil && cfg.Network.AllowExitNode,
+		Online:     true,
+		DirectP2P:  true,
+		Platform:   runtime.GOOS,
+	}
+	topo.Nodes = append(topo.Nodes, selfNode)
+
+	if s.registry != nil {
+		for _, p := range s.registry.List() {
+			if p == nil || p.DeviceID == "" || (myID != "" && p.DeviceID == myID) {
+				continue
+			}
+
+			// Omit stale ghost peers
+			if time.Since(p.LastSeen) > constants.PeerCleanupInterval {
+				continue
+			}
+
+			pName := p.DeviceName
+			if pName == "" {
+				pName = p.DeviceID
+			}
+
+			pNode := TopologyNode{
+				ID:         p.DeviceID,
+				Name:       pName,
+				VirtualIP:  p.VirtualIP,
+				IsSelf:     false,
+				IsExitNode: p.IsExitNode,
+				Online:     p.Online && time.Since(p.LastSeen) < constants.PeerOfflineThreshold,
+				DirectP2P:  p.DirectP2P,
+				Platform:   p.Platform,
+			}
+			topo.Nodes = append(topo.Nodes, pNode)
+
+			// Primary Edge
+			pathType := "relay"
+			if p.DirectP2P {
+				pathType = "direct"
+			}
+			transport := p.Transport
+			if transport == "" {
+				if p.DirectP2P {
+					transport = "awg"
+				} else {
+					transport = "relay_mqtt"
+				}
+			}
+
+			edge := TopologyEdge{
+				From:              myID,
+				To:                p.DeviceID,
+				Transport:         transport,
+				PathType:          pathType,
+				PingMs:            p.PingMs,
+				LossPercent:       p.LossPercent,
+				ConsecutiveDrops:  p.ConsecutiveDrops,
+				StandbyRelayReady: p.StandbyRelayReady,
+			}
+			topo.Edges = append(topo.Edges, edge)
+		}
+	}
+
+	s.jsonResponse(w, http.StatusOK, topo, "")
+}
+
+// TelemetryData represents real-time anti-DPI and transport health metrics.
+type TelemetryData struct {
+	DeviceID          string `json:"device_id"`
+	Version           string `json:"version"`
+	ActiveProfile     string `json:"active_profile"` // "webrtc", "youtube", "zoom"
+	TransportMode     string `json:"transport_mode"` // "auto", "force_tcp", "force_udp", "quic"
+	MTU               int    `json:"mtu"`
+	TotalPeers        int    `json:"total_peers"`
+	DirectP2PCount    int    `json:"direct_p2p_count"`
+	RelayCount        int    `json:"relay_count"`
+	StandbyReadyCount int    `json:"standby_ready_count"`
+}
+
+// handleTelemetry — GET /api/telemetry — returns real-time telemetry metrics
+func (s *Server) handleTelemetry(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	devID := ""
+	if s.state != nil {
+		devID = s.state.DeviceID
+	}
+
+	cfg, _ := config.Load(s.configPath)
+	profile := "webrtc"
+	transportMode := "auto"
+	mtu := 1380
+	if cfg != nil {
+		if cfg.WireGuard.MTU > 0 {
+			mtu = cfg.WireGuard.MTU
+		}
+		if prof := cfg.EnsureActiveProfile(); prof != nil {
+			if prof.TransportMode != "" {
+				transportMode = prof.TransportMode
+			} else if cfg.Network.TransportMode != "" {
+				transportMode = cfg.Network.TransportMode
+			}
+		}
+	}
+
+	total := 0
+	direct := 0
+	relay := 0
+	standby := 0
+	if s.registry != nil {
+		for _, p := range s.registry.List() {
+			if p == nil || (devID != "" && p.DeviceID == devID) {
+				continue
+			}
+			if p.Online && time.Since(p.LastSeen) < constants.PeerOfflineThreshold {
+				total++
+				if p.DirectP2P {
+					direct++
+				} else {
+					relay++
+				}
+				if p.StandbyRelayReady {
+					standby++
+				}
+			}
+		}
+	}
+
+	data := TelemetryData{
+		DeviceID:          devID,
+		Version:           s.version,
+		ActiveProfile:     profile,
+		TransportMode:     transportMode,
+		MTU:               mtu,
+		TotalPeers:        total,
+		DirectP2PCount:    direct,
+		RelayCount:        relay,
+		StandbyReadyCount: standby,
 	}
 
 	s.jsonResponse(w, http.StatusOK, data, "")
