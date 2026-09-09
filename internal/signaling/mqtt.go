@@ -17,6 +17,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/rs/zerolog/log"
 )
 
@@ -78,6 +79,22 @@ type MQTTChannel struct {
 	tunnelTopic   string
 	tunnelHandler func(pkt []byte)
 	dedup         *PacketDedup
+	keyMu         sync.RWMutex
+	hasSignKey    bool
+	signKey       [32]byte
+}
+
+// SetNetworkKey configures the HMAC-SHA256 signaling authentication key derived from the network key.
+func (m *MQTTChannel) SetNetworkKey(networkKey string) {
+	m.keyMu.Lock()
+	defer m.keyMu.Unlock()
+	if networkKey == "" {
+		m.hasSignKey = false
+		m.signKey = [32]byte{}
+		return
+	}
+	m.signKey = crypto.DeriveSignKey(networkKey)
+	m.hasSignKey = true
 }
 
 func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTTChannel {
@@ -130,8 +147,20 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 		if tTopic != "" && tHandler != nil {
 			log.Info().Str("tunnel_topic", tTopic).Msg("MQTT подписка на туннельный поток...")
 			c.Subscribe(tTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-				if len(msg.Payload()) >= 20 {
-					tHandler(msg.Payload())
+				raw := msg.Payload()
+				ch.keyMu.RLock()
+				hasKey := ch.hasSignKey
+				signKey := ch.signKey
+				ch.keyMu.RUnlock()
+
+				if hasKey && len(raw) >= 40 && raw[0] != '{' {
+					if inner, _, err := crypto.VerifyFrame(raw, signKey, 30*time.Second); err == nil && len(inner) >= 20 {
+						tHandler(inner)
+						return
+					}
+				}
+				if len(raw) >= 20 {
+					tHandler(raw)
 				}
 			})
 		}
@@ -159,8 +188,30 @@ func (m *MQTTChannel) GetTopic() string {
 }
 
 func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
+	data := msg.Payload()
+	if len(data) == 0 {
+		return
+	}
+
+	m.keyMu.RLock()
+	hasKey := m.hasSignKey
+	signKey := m.signKey
+	m.keyMu.RUnlock()
+
+	var payloadBytes []byte
+	if hasKey && len(data) >= 40 && data[0] != '{' {
+		inner, _, err := crypto.VerifyFrame(data, signKey, 30*time.Second)
+		if err != nil {
+			log.Warn().Err(err).Msg("🛡️ MQTT signaling frame dropped: invalid HMAC signature or replay detected")
+			return
+		}
+		payloadBytes = inner
+	} else {
+		payloadBytes = data
+	}
+
 	var p Payload
-	if err := json.Unmarshal(msg.Payload(), &p); err != nil || p.DeviceID == "" {
+	if err := json.Unmarshal(payloadBytes, &p); err != nil || p.DeviceID == "" {
 		return
 	}
 	// Скоростная дедупликация: отсекаем повторные маяки за 1000 мс
@@ -248,6 +299,16 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 		return err
 	}
 
+	m.keyMu.RLock()
+	hasKey := m.hasSignKey
+	signKey := m.signKey
+	m.keyMu.RUnlock()
+
+	dataToSend := data
+	if hasKey {
+		dataToSend = crypto.SignFrame(data, signKey)
+	}
+
 	if !m.client.IsConnected() {
 		tok := m.client.Connect()
 		if !tok.WaitTimeout(4 * time.Second) {
@@ -259,7 +320,7 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 	}
 
 	targetTopic := m.GetTopic()
-	token := m.client.Publish(targetTopic, 0, false, data)
+	token := m.client.Publish(targetTopic, 0, false, dataToSend)
 	if !token.WaitTimeout(4 * time.Second) {
 		return fmt.Errorf("MQTT publish timeout")
 	}
@@ -304,8 +365,19 @@ func (m *MQTTChannel) PublishTunnelData(targetDevID string, pkt []byte) error {
 	if !m.client.IsConnected() {
 		return fmt.Errorf("MQTT client not connected")
 	}
+
+	m.keyMu.RLock()
+	hasKey := m.hasSignKey
+	signKey := m.signKey
+	m.keyMu.RUnlock()
+
+	dataToSend := pkt
+	if hasKey {
+		dataToSend = crypto.SignFrame(pkt, signKey)
+	}
+
 	topic := fmt.Sprintf("%s/tunnel/%s", m.GetTopic(), targetDevID)
-	tok := m.client.Publish(topic, 0, false, pkt)
+	tok := m.client.Publish(topic, 0, false, dataToSend)
 	return tok.Error()
 }
 
@@ -320,8 +392,20 @@ func (m *MQTTChannel) SubscribeTunnelData(myDevID string, onPkt func(pkt []byte)
 
 	if m.client != nil && m.client.IsConnected() {
 		m.client.Subscribe(topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-			if len(msg.Payload()) >= 20 && onPkt != nil {
-				onPkt(msg.Payload())
+			raw := msg.Payload()
+			m.keyMu.RLock()
+			hasKey := m.hasSignKey
+			signKey := m.signKey
+			m.keyMu.RUnlock()
+
+			if hasKey && len(raw) >= 40 && raw[0] != '{' {
+				if inner, _, err := crypto.VerifyFrame(raw, signKey, 30*time.Second); err == nil && len(inner) >= 20 {
+					onPkt(inner)
+					return
+				}
+			}
+			if len(raw) >= 20 && onPkt != nil {
+				onPkt(raw)
 			}
 		})
 	}

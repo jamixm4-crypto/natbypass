@@ -9,6 +9,7 @@ package peer
 
 import (
 	"context"
+	"math/bits"
 	"net"
 	"sort"
 	"strings"
@@ -60,13 +61,33 @@ type Peer struct {
 	AWG              *signaling.AWGParams `json:"awg,omitempty"`
 	AWGMismatch      bool                 `json:"awg_mismatch,omitempty"`
 	IPConflict       bool                 `json:"ip_conflict,omitempty"`
-	CountryFlag      string               `json:"country_flag,omitempty"`
-	Candidates       []string             `json:"candidates,omitempty"`
-	NATBlocked       bool                 `json:"nat_blocked,omitempty"`
-	FirstSeen        time.Time            `json:"first_seen,omitempty"`
-	ProbeCount       int                  `json:"probe_count,omitempty"`
+	CountryFlag              string                  `json:"country_flag,omitempty"`
+	Candidates               []string                `json:"candidates,omitempty"`
+	Endpoints                []signaling.EndpointDesc `json:"endpoints,omitempty"`
+	NATBlocked               bool                    `json:"nat_blocked,omitempty"`
+	FirstSeen                time.Time               `json:"first_seen,omitempty"`
+	ProbeCount               int                     `json:"probe_count,omitempty"`
+	DeliveryMask             uint32                  `json:"delivery_mask,omitempty"`       // 32-bit sliding bitmap of recent packet deliveries
+	LossPercent              int                     `json:"loss_percent,omitempty"`        // Integer loss percentage (0-100%)
+	ConsecutiveDrops         int                     `json:"consec_drops,omitempty"`        // Consecutive failed probes
+	ConsecutiveDirectSuccess int                     `json:"consec_direct_success,omitempty"`// Consecutive successful direct probes (hysteresis)
 }
 
+// RecordProbeResult updates the 32-bit delivery bitmap and recalculates LossPercent using pure integer arithmetic (MIPS safe).
+func (p *Peer) RecordProbeResult(success bool) {
+	if success {
+		p.DeliveryMask = (p.DeliveryMask << 1) | 1
+		p.ConsecutiveDrops = 0
+		p.ConsecutiveDirectSuccess++
+	} else {
+		p.DeliveryMask = (p.DeliveryMask << 1)
+		p.ConsecutiveDrops++
+		p.ConsecutiveDirectSuccess = 0
+	}
+
+	popcount := bits.OnesCount32(p.DeliveryMask)
+	p.LossPercent = 100 - (popcount * 100 / 32)
+}
 
 // MergeFrom merges discovery details into an existing peer while preserving established connections.
 func (existing *Peer) MergeFrom(newer *Peer) {
@@ -232,6 +253,17 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	}
 	if newer.AWG == nil && existing.AWG != nil {
 		newer.AWG = existing.AWG
+	}
+	if len(newer.Endpoints) > 0 {
+		existing.Endpoints = newer.Endpoints
+	} else if len(existing.Endpoints) > 0 {
+		newer.Endpoints = existing.Endpoints
+	}
+	if newer.DeliveryMask == 0 && existing.DeliveryMask != 0 {
+		newer.DeliveryMask = existing.DeliveryMask
+		newer.LossPercent = existing.LossPercent
+		newer.ConsecutiveDrops = existing.ConsecutiveDrops
+		newer.ConsecutiveDirectSuccess = existing.ConsecutiveDirectSuccess
 	}
 
 

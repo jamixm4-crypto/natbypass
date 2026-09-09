@@ -128,7 +128,28 @@ type SymPunchSignal struct {
 	HopHint int `json:"hop_hint,omitempty"`
 }
 
-// RemoteDiagSignal is used for remote cluster diagnostics collection and update orchestration in beta builds.
+// EndpointDesc describes an observed direct connectivity endpoint for ICE-like consensus.
+type EndpointDesc struct {
+	Proto    string `json:"proto"`              // "udp" | "tcp" | "wss"
+	IP       string `json:"ip"`                 // External IPv4 or IPv6
+	Port     int    `json:"port"`               // External port
+	NATType  string `json:"nat_type,omitempty"` // "full_cone" | "port_restricted" | "symmetric" | "unknown"
+	TTL      int    `json:"ttl,omitempty"`      // NAT mapping TTL in seconds (e.g. 20-60)
+	Priority int    `json:"priority,omitempty"` // Candidate priority (ICE-like)
+}
+
+// PunchCoordinationSignal coordinates bilateral synchronized hole punching across NATs.
+type PunchCoordinationSignal struct {
+	Action      string `json:"action"`                 // "punch" | "ack"
+	SessionID   string `json:"session_id"`             // unique session ID
+	Target      string `json:"target"`                 // target DeviceID
+	Sender      string `json:"sender"`                 // sender DeviceID
+	StartAt     int64  `json:"start_at"`               // Unix Epoch seconds
+	TargetPorts []int  `json:"target_ports,omitempty"`// Predicted ports for Symmetric NAT
+	BurstCount  int    `json:"burst_count,omitempty"` // Number of packets in burst (default 8-16)
+	IntervalMs  int    `json:"interval_ms,omitempty"` // Milliseconds between packets (default 15ms)
+}
+
 // RendezvousSignal coordinates on-demand synchronized bilateral hole-punching between peers.
 type RendezvousSignal struct {
 	Phase            string   `json:"phase"`                       // "init" | "ack"
@@ -208,6 +229,12 @@ type Payload struct {
 	// RemoteDiag: beta-only remote cluster diagnostics collection and update coordination
 	RemoteDiag *RemoteDiagSignal `json:"remote_diag,omitempty"`
 
+	// Endpoints: multi-STUN consensus endpoint announcements
+	Endpoints []EndpointDesc `json:"endpoints,omitempty"`
+
+	// Coordination: synchronized bilateral hole punching coordination signal
+	Coordination *PunchCoordinationSignal `json:"coordination,omitempty"`
+
 	// Rendezvous: on-demand synchronized bilateral hole-punch coordination
 	Rendezvous *RendezvousSignal `json:"rendezvous,omitempty"`
 }
@@ -217,48 +244,66 @@ type Payload struct {
 func (p *Payload) UnmarshalJSON(data []byte) error {
 	type Alias Payload
 	aux := &struct {
-		UpperDeviceID         string     `json:"DeviceID"`
-		UpperNickname         string     `json:"Nickname"`
-		UpperDeviceName       string     `json:"DeviceName"`
-		UpperVirtualIP        string     `json:"VirtualIP"`
-		UpperPublicIP         string     `json:"PublicIP"`
-		UpperLocalAddr        string     `json:"LocalAddr"`
-		UpperSTUNAddr         string     `json:"STUNAddr"`
-		UpperIPv6Addr         string     `json:"IPv6Addr"`
-		UpperWGPubKey         string     `json:"WGPubKey"`
-		UpperWGPort           int        `json:"WGPort"`
-		UpperIsExitNode       bool       `json:"IsExitNode"`
-		UpperAdvertisedRoutes []string   `json:"AdvertisedRoutes"`
-		UpperExitRevoked      bool       `json:"ExitRevoked"`
-		UpperOffline          bool       `json:"Offline"`
-		UpperLeave            bool       `json:"Leave"`
-		UpperAWG              *AWGParams `json:"AWG"`
-		CamelAWG              *AWGParams `json:"awg"`
-		UpperOS               string     `json:"OS"`
-		UpperPlatform         string     `json:"Platform"`
-		UpperArch             string     `json:"Arch"`
-		UpperVersion          string     `json:"Version"`
-		UpperIsKeenetic       bool       `json:"IsKeenetic"`
-		UpperCountryFlag      string     `json:"CountryFlag"`
-		UpperNetworkKey       string     `json:"NetworkKey"`
-		UpperNetworkID        string     `json:"NetworkID"`
-		UpperTopic            string     `json:"Topic"`
-		UpperDirectP2P        bool       `json:"DirectP2P"`
-		UpperActiveEndpoint   string     `json:"ActiveEndpoint"`
-		UpperPingMs           int64      `json:"PingMs"`
-		UpperNATType          string            `json:"NATType"`
-		UpperNATDelta         *int              `json:"NATDelta"`
-		CamelNATDelta         *int              `json:"natDelta"`
-		UpperRemoteDiag       *RemoteDiagSignal `json:"RemoteDiag"`
-		CamelRemoteDiag       *RemoteDiagSignal `json:"remoteDiag"`
-		UpperRendezvous       *RendezvousSignal `json:"Rendezvous"`
-		CamelRendezvous       *RendezvousSignal `json:"rendezvous"`
+		UpperDeviceID         string                   `json:"DeviceID"`
+		UpperNickname         string                   `json:"Nickname"`
+		UpperDeviceName       string                   `json:"DeviceName"`
+		UpperVirtualIP        string                   `json:"VirtualIP"`
+		UpperPublicIP         string                   `json:"PublicIP"`
+		UpperLocalAddr        string                   `json:"LocalAddr"`
+		UpperSTUNAddr         string                   `json:"STUNAddr"`
+		UpperIPv6Addr         string                   `json:"IPv6Addr"`
+		UpperWGPubKey         string                   `json:"WGPubKey"`
+		UpperWGPort           int                      `json:"WGPort"`
+		UpperIsExitNode       bool                     `json:"IsExitNode"`
+		UpperAdvertisedRoutes []string                 `json:"AdvertisedRoutes"`
+		UpperExitRevoked      bool                     `json:"ExitRevoked"`
+		UpperOffline          bool                     `json:"Offline"`
+		UpperLeave            bool                     `json:"Leave"`
+		UpperAWG              *AWGParams               `json:"AWG"`
+		CamelAWG              *AWGParams               `json:"awg"`
+		UpperOS               string                   `json:"OS"`
+		UpperPlatform         string                   `json:"Platform"`
+		UpperArch             string                   `json:"Arch"`
+		UpperVersion          string                   `json:"Version"`
+		UpperIsKeenetic       bool                     `json:"IsKeenetic"`
+		UpperCountryFlag      string                   `json:"CountryFlag"`
+		UpperNetworkKey       string                   `json:"NetworkKey"`
+		UpperNetworkID        string                   `json:"NetworkID"`
+		UpperTopic            string                   `json:"Topic"`
+		UpperDirectP2P        bool                     `json:"DirectP2P"`
+		UpperActiveEndpoint   string                   `json:"ActiveEndpoint"`
+		UpperPingMs           int64                    `json:"PingMs"`
+		UpperNATType          string                   `json:"NATType"`
+		UpperNATDelta         *int                     `json:"NATDelta"`
+		CamelNATDelta         *int                     `json:"natDelta"`
+		UpperEndpoints        []EndpointDesc           `json:"Endpoints"`
+		CamelEndpoints        []EndpointDesc           `json:"endpoints"`
+		UpperCoordination     *PunchCoordinationSignal `json:"Coordination"`
+		CamelCoordination     *PunchCoordinationSignal `json:"coordination"`
+		UpperRemoteDiag       *RemoteDiagSignal        `json:"RemoteDiag"`
+		CamelRemoteDiag       *RemoteDiagSignal        `json:"remoteDiag"`
+		UpperRendezvous       *RendezvousSignal        `json:"Rendezvous"`
+		CamelRendezvous       *RendezvousSignal        `json:"rendezvous"`
 		*Alias
 	}{
 		Alias: (*Alias)(p),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
+	}
+	if len(p.Endpoints) == 0 {
+		if len(aux.UpperEndpoints) > 0 {
+			p.Endpoints = aux.UpperEndpoints
+		} else if len(aux.CamelEndpoints) > 0 {
+			p.Endpoints = aux.CamelEndpoints
+		}
+	}
+	if p.Coordination == nil {
+		if aux.UpperCoordination != nil {
+			p.Coordination = aux.UpperCoordination
+		} else if aux.CamelCoordination != nil {
+			p.Coordination = aux.CamelCoordination
+		}
 	}
 	if p.DeviceID == "" && aux.UpperDeviceID != "" {
 		p.DeviceID = aux.UpperDeviceID

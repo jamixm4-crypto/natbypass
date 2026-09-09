@@ -207,3 +207,63 @@ func TestPayloadEncryptDecrypt_AWG(t *testing.T) {
 	}
 }
 
+func TestPayload_EndpointsAndCoordination(t *testing.T) {
+	orig := &Payload{
+		DeviceID:  "node-endpoints",
+		VirtualIP: "100.64.0.5",
+		Endpoints: []EndpointDesc{
+			{
+				Proto:    "udp",
+				IP:       "198.51.100.1",
+				Port:     47832,
+				NATType:  "full_cone",
+				TTL:      20,
+				Priority: 100,
+			},
+			{
+				Proto:    "udp",
+				IP:       "198.51.100.1",
+				Port:     47833,
+				NATType:  "symmetric",
+				TTL:      20,
+				Priority: 80,
+			},
+		},
+		Coordination: &PunchCoordinationSignal{
+			Action:      "punch",
+			SessionID:   "session-xyz",
+			Target:      "node-target",
+			Sender:      "node-endpoints",
+			StartAt:     1773000000,
+			TargetPorts: []int{47832, 47833, 47834},
+			BurstCount:  8,
+			IntervalMs:  15,
+		},
+	}
+
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	var parsed Payload
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if len(parsed.Endpoints) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(parsed.Endpoints))
+	}
+	if parsed.Endpoints[0].Port != 47832 || parsed.Endpoints[0].NATType != "full_cone" {
+		t.Fatalf("unexpected endpoint 0: %+v", parsed.Endpoints[0])
+	}
+
+	if parsed.Coordination == nil {
+		t.Fatalf("expected coordination to be non-nil")
+	}
+	if parsed.Coordination.Action != "punch" || parsed.Coordination.BurstCount != 8 {
+		t.Fatalf("unexpected coordination signal: %+v", parsed.Coordination)
+	}
+}
+
+

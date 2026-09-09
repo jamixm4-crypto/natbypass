@@ -1077,7 +1077,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}
-						// Data transmission over MQTT/Telegram relay disabled: signaling channels are strictly for connection establishment. Data only travels via Direct AWG (UDP) or Direct ShadowTLS (TCP).
+						// 1f. Encrypted Relay Fallback (WSS or MQTT):
+						// If neither direct TCP nor confirmed direct UDP succeeded, or UDP packet loss > 30%:
+						if !sentTCP && (!sentDirect || !p.DirectP2P || p.LossPercent > 30) {
+							if wssClient != nil && wssClient.IsConnected() {
+								_ = wssClient.SendPacket(p.DeviceID, pkt)
+							} else if sigMgr != nil {
+								dataToSend := pkt
+								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+									cKey := crypto.DeriveKey(activeProf.NetworkKey)
+									if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+										dataToSend = enc
+									}
+								}
+								_ = sigMgr.PublishTunnelData(p.DeviceID, dataToSend)
+							}
+						}
 					}
 				}
 			}
@@ -1366,24 +1381,32 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							pingCancel()
 							if err == nil && rtt > 0 {
 								p.ProbeCount = 0
-								// Keep latency and ping_ms in sync — EWMA smoothing
+								p.RecordProbeResult(true)
+								// Keep latency and ping_ms in sync — EWMA smoothing (integer-safe for MIPS softfloat)
 								if p.Latency > 0 {
-									p.Latency = time.Duration(float64(p.Latency)*0.6 + float64(rtt)*0.4)
+									p.Latency = (p.Latency*3 + rtt*2) / 5
 								} else {
 									p.Latency = rtt
 								}
 								p.PingMs = p.Latency.Milliseconds()
-								p.DirectP2P = true
+								if p.ConsecutiveDirectSuccess >= 2 || p.DirectP2P {
+									p.DirectP2P = true
+								}
 								p.LastDirectSeen = time.Now()
 								registry.Upsert(p)
 							} else {
 								// ICMP failure: UDP is blackholed by TSPU or dropped
 								p.ProbeCount++
+								p.RecordProbeResult(false)
 								p.Latency = 0
 								p.PingMs = 0
-								if p.ProbeCount >= 2 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) {
+								if p.ProbeCount >= 2 || p.LossPercent > 30 || p.ConsecutiveDrops >= 3 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) {
 									if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (tcpDirectMgr == nil || !tcpDirectMgr.HasConn(p.DeviceID)) {
+										if p.DirectP2P {
+											log.Warn().Str("peer", p.DeviceID).Int("loss", p.LossPercent).Int("drops", p.ConsecutiveDrops).Msg("🔀 UDP packet loss > 30% or drops >= 3: automatic fallback to Relay")
+										}
 										p.DirectP2P = false
+										p.Transport = "relay_mqtt"
 									}
 								}
 								registry.Upsert(p)
@@ -2082,6 +2105,12 @@ func publishLoop(
 				return ""
 			}(),
 			Candidates:      candidates,
+			Endpoints: func() []signaling.EndpointDesc {
+				if puncher != nil {
+					return puncher.GetEndpoints()
+				}
+				return nil
+			}(),
 			NATType:         natLabel,
 			NATDelta:        natDelta,
 			WGPubKey:        wgPubKey,
@@ -2125,6 +2154,9 @@ func publishLoop(
 
 		toSend := payload
 		if activeKey != "" {
+			if sigMgr != nil {
+				sigMgr.SetNetworkKey(activeKey)
+			}
 			if enc, err := signaling.EncryptPayloadWithKey(payload, activeKey); err == nil && enc != nil {
 				toSend = enc
 			}
@@ -2243,6 +2275,27 @@ func receiveLoop(
 					}(p.DeviceID, sp.MySTUNAddr, sp.HopHint)
 				}
 				// SymPunch-only payload: don't update registry / wg config
+				if p.VirtualIP == "" || p.PublicKey == "" {
+					continue
+				}
+			}
+
+			// Task 1.2: Handle Synchronized Simultaneous Open Coordination signal
+			if p.Coordination != nil && puncher != nil {
+				coord := p.Coordination
+				if coord.Target == "" || coord.Target == deviceID {
+					targetHost := p.PublicIP
+					if (targetHost == "" || targetHost == "0.0.0.0" || targetHost == "<nil>") && p.STUNAddr != "" {
+						targetHost = strings.Split(p.STUNAddr, ":")[0]
+					}
+					if targetHost != "" && len(coord.TargetPorts) > 0 {
+						log.Info().Str("sender", coord.Sender).Str("target_ip", targetHost).Int64("start_at", coord.StartAt).
+							Msg("⚡ [Simultaneous Open] Executing coordinated punch schedule")
+						go func(c *signaling.PunchCoordinationSignal, host string) {
+							_ = puncher.ScheduleSimultaneousOpen(ctx, c.StartAt, host, c.TargetPorts, c.BurstCount, c.IntervalMs)
+						}(coord, targetHost)
+					}
+				}
 				if p.VirtualIP == "" || p.PublicKey == "" {
 					continue
 				}
@@ -2373,6 +2426,14 @@ func receiveLoop(
 						_ = puncher.SendHolePunchProbe(cand)
 					}
 				}
+				for _, ep := range p.Endpoints {
+					if ep.IP != "" && ep.Port > 0 {
+						epStr := fmt.Sprintf("%s:%d", ep.IP, ep.Port)
+						if epStr != p.ActiveEndpoint && epStr != p.STUNAddr && epStr != p.LocalAddr {
+							_ = puncher.SendHolePunchProbe(epStr)
+						}
+					}
+				}
 				if p.PublicIP != "" && p.WGPort > 0 {
 					_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
 				}
@@ -2384,7 +2445,13 @@ func receiveLoop(
 						myPub = myIP.String()
 					}
 				}
-				magicSock.RegisterPeerWithTopology(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr, myPub, "", p.PublicIP, "", p.Candidates...)
+				allCandidates := append([]string{}, p.Candidates...)
+				for _, ep := range p.Endpoints {
+					if ep.IP != "" && ep.Port > 0 {
+						allCandidates = append(allCandidates, fmt.Sprintf("%s:%d", ep.IP, ep.Port))
+					}
+				}
+				magicSock.RegisterPeerWithTopology(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr, myPub, "", p.PublicIP, "", allCandidates...)
 				if p.TCPAddr != "" {
 					magicSock.RegisterPeerTCPAddr(p.DeviceID, p.TCPAddr)
 				}
@@ -2426,6 +2493,7 @@ func receiveLoop(
 				STUNAddr:         p.STUNAddr,
 				TCPAddr:          p.TCPAddr,
 				Candidates:       p.Candidates,
+				Endpoints:        p.Endpoints,
 				NATType:          p.NATType,
 				NATDelta:         p.NATDelta,
 				WGPubKey:         p.WGPubKey,

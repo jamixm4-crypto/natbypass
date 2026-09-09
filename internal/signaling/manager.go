@@ -230,4 +230,15 @@ func (m *FallbackManager) SubscribeTunnelData(myDevID string, onPkt func(pkt []b
 	}
 }
 
+// SetNetworkKey updates the network authentication key for all underlying signaling channels.
+func (m *FallbackManager) SetNetworkKey(networkKey string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, ch := range m.channels {
+		if mqttCh, ok := ch.(*MQTTChannel); ok {
+			mqttCh.SetNetworkKey(networkKey)
+		}
+	}
+}
+
 

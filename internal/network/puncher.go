@@ -25,6 +25,7 @@ import (
 
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
+	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/transport/quic"
 	"github.com/pion/stun/v2"
 )
@@ -124,6 +125,7 @@ type UDPPuncher struct {
 	// NATType is detected asynchronously after construction.
 	NATType   NATType
 	natTypeMu sync.RWMutex
+	endpoints []signaling.EndpointDesc
 
 	// portDelta tracks the observed consecutive port increment for Symmetric NAT prediction.
 	lastMappedPort int
@@ -285,16 +287,18 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	// Start packet processing loop
 	go p.readLoop()
 
-	// Detect NAT type in background with retry up to 3 times
+	// Detect NAT type and harvest consensus endpoints in background with retry up to 3 times
 	go func() {
 		for attempt := 1; attempt <= 3; attempt++ {
 			dCtx, dCancel := context.WithTimeout(ctx, 6*time.Second)
-			natType, err := DetectNATType(dCtx, conn, stunServers)
+			res, err := DetectNATConsensus(dCtx, nil, stunServers)
 			dCancel()
 
 			p.natTypeMu.Lock()
-			if err == nil && natType != NATTypeUnknown {
-				p.NATType = natType
+			if err == nil && res != nil && res.NATType != NATTypeUnknown {
+				p.NATType = res.NATType
+				p.portDelta = res.NATDelta
+				p.endpoints = res.Endpoints
 				p.natTypeMu.Unlock()
 				return
 			}
@@ -329,6 +333,25 @@ func (p *UDPPuncher) GetNATType() NATType {
 	p.natTypeMu.RLock()
 	defer p.natTypeMu.RUnlock()
 	return p.NATType
+}
+
+// GetEndpoints returns the discovered multi-STUN consensus endpoint descriptions.
+func (p *UDPPuncher) GetEndpoints() []signaling.EndpointDesc {
+	p.natTypeMu.RLock()
+	defer p.natTypeMu.RUnlock()
+	if len(p.endpoints) == 0 {
+		return nil
+	}
+	res := make([]signaling.EndpointDesc, len(p.endpoints))
+	copy(res, p.endpoints)
+	return res
+}
+
+// SetEndpoints sets or updates the discovered consensus endpoints.
+func (p *UDPPuncher) SetEndpoints(eps []signaling.EndpointDesc) {
+	p.natTypeMu.Lock()
+	defer p.natTypeMu.Unlock()
+	p.endpoints = eps
 }
 
 // GetPortDelta returns the observed consecutive port increment for Symmetric NAT prediction.
@@ -1049,6 +1072,64 @@ func (p *UDPPuncher) probePortRange(ctx context.Context, ip string, start, end, 
 	return true
 }
 
+// ScheduleSimultaneousOpen coordinates a precision timed burst of hole punching probes
+// to penetrate Symmetric NAT at the exact agreed Unix timestamp.
+func (p *UDPPuncher) ScheduleSimultaneousOpen(ctx context.Context, startAtUnix int64, targetIP string, targetPorts []int, burstCount, intervalMs int) error {
+	if targetIP == "" || len(targetPorts) == 0 {
+		return errors.New("invalid target IP or ports for simultaneous open")
+	}
+	if burstCount <= 0 {
+		burstCount = 8
+	}
+	if burstCount > 32 {
+		burstCount = 32
+	}
+	if intervalMs <= 0 {
+		intervalMs = 15
+	}
+
+	nowUnix := time.Now().Unix()
+	diffSec := startAtUnix - nowUnix
+
+	// If signal is older than 5 seconds, it expired (clock drift or delayed delivery)
+	if diffSec < -5 {
+		return errors.New("simultaneous open signal expired")
+	}
+
+	var waitDuration time.Duration
+	if diffSec > 0 {
+		waitDuration = time.Duration(diffSec) * time.Second
+	}
+
+	// Precision wait using single time.NewTimer without leaking goroutines
+	timer := time.NewTimer(waitDuration)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+	}
+
+	// Burst phase: sequentially probe target ports with intervalMs delay (no goroutine spawns)
+	for i := 0; i < burstCount; i++ {
+		for _, port := range targetPorts {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if port > 1024 && port < 65535 {
+				target := fmt.Sprintf("%s:%d", targetIP, port)
+				_ = p.SendHolePunchProbe(target)
+			}
+		}
+		time.Sleep(time.Duration(intervalMs) * time.Millisecond)
+	}
+
+	return nil
+}
+
 // SendHolePunchProbeWithDelta отправляет probe пакеты с маскировкой QUIC Initial (RFC 9000) для обхода ТСПУ/DPI
 // и выполняет delta-aware spraying при наличии известного port delta для Symmetric NAT.
 func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta int) error {
@@ -1235,7 +1316,8 @@ func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 
 	if hasCKey {
 		if enc, encErr := crypto.EncryptSelf(probeData, cKey); encErr == nil && len(enc) > 0 {
-			_, _ = p.conn.WriteToUDP(enc, rAddr)
+			_, err = p.conn.WriteToUDP(enc, rAddr)
+			return err
 		}
 	}
 

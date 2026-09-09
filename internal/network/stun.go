@@ -9,10 +9,13 @@ package network
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"net"
+	"sync"
 	"time"
 
+	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/pion/stun/v2"
 )
 
@@ -215,93 +218,241 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 	}
 }
 
-// DetectNATType classifies the NAT type by querying two different STUN servers
-// from the EXACT SAME local socket.
-//
-//   - Same IP + Same Port  в†’ Full Cone / Restricted NAT (P2P hole punching works)
-//   - Same IP + Diff Port  в†’ Symmetric NAT (CGNAT assigns a different port per destination)
-//   - Diff IP              в†’ Symmetric NAT / Multi-WAN
-func DetectNATType(ctx context.Context, _ *net.UDPConn, servers []string) (NATType, error) {
+var stunBufPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 1024)
+		return &b
+	},
+}
+
+// STUNConsensusResult holds the outcome of multi-STUN server consensus discovery.
+type STUNConsensusResult struct {
+	IP        net.IP
+	Port      int
+	NATType   NATType
+	NATDelta  int
+	Endpoints []signaling.EndpointDesc
+	Samples   []int
+}
+
+// DetectNATConsensus queries 3-5 diverse STUN servers in parallel from the same socket
+// to classify NAT behavior, calculate port delta, and build candidate endpoints with zero-allocation buffers.
+func DetectNATConsensus(ctx context.Context, sock *net.UDPConn, servers []string) (*STUNConsensusResult, error) {
 	if len(servers) == 0 {
 		servers = defaultSTUNServers
 	}
 
-	srv1 := servers[0]
-	srv2 := ""
-	for _, s := range servers[1:] {
-		if s != srv1 {
-			srv2 = s
+	distinctServers := make([]string, 0, 5)
+	seen := make(map[string]bool)
+	for _, s := range servers {
+		if !seen[s] {
+			seen[s] = true
+			distinctServers = append(distinctServers, s)
+			if len(distinctServers) >= 5 {
+				break
+			}
+		}
+	}
+	if len(distinctServers) < 2 {
+		return nil, errors.New("need at least 2 STUN servers for consensus")
+	}
+
+	var activeSock *net.UDPConn
+	if sock != nil {
+		activeSock = sock
+	} else {
+		lAddr, err := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
+		if err != nil {
+			return nil, err
+		}
+		tempSock, err := net.ListenUDP("udp4", lAddr)
+		if err != nil {
+			return nil, err
+		}
+		defer tempSock.Close()
+		activeSock = tempSock
+	}
+
+	probes := make(map[[stun.TransactionIDSize]byte]string)
+	for _, srv := range distinctServers {
+		srvAddr, err := net.ResolveUDPAddr("udp4", srv)
+		if err != nil {
+			continue
+		}
+		var txID [stun.TransactionIDSize]byte
+		if _, err := rand.Read(txID[:]); err != nil {
+			continue
+		}
+		msg := stun.New()
+		msg.TransactionID = txID
+		msg.Type = stun.BindingRequest
+		msg.WriteHeader()
+
+		if _, err := activeSock.WriteToUDP(msg.Raw, srvAddr); err == nil {
+			probes[txID] = srv
+		}
+	}
+
+	if len(probes) == 0 {
+		return nil, errors.New("failed to send STUN binding requests to any server")
+	}
+
+	type mappedResult struct {
+		server string
+		ip     net.IP
+		port   int
+	}
+
+	results := make([]mappedResult, 0, len(probes))
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+
+	bufPtr := stunBufPool.Get().(*[]byte)
+	defer stunBufPool.Put(bufPtr)
+	buf := *bufPtr
+
+	for len(results) < len(probes) {
+		if time.Now().After(deadline) {
 			break
 		}
-	}
-	if srv2 == "" {
-		return NATTypeUnknown, errors.New("need at least 2 STUN servers")
-	}
-
-	// Create ONE temporary UDP socket bound to an ephemeral port
-	lAddr, err := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
-	if err != nil {
-		return NATTypeUnknown, err
-	}
-	sock, err := net.ListenUDP("udp4", lAddr)
-	if err != nil {
-		return NATTypeUnknown, err
-	}
-	defer sock.Close()
-
-	probeServer := func(server string) (net.IP, int, error) {
-		srvAddr, err := net.ResolveUDPAddr("udp4", server)
+		_ = activeSock.SetReadDeadline(deadline)
+		n, _, err := activeSock.ReadFromUDP(buf)
 		if err != nil {
-			return nil, 0, err
+			break
 		}
-
-		msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
-		if _, err := sock.WriteToUDP(msg.Raw, srvAddr); err != nil {
-			return nil, 0, err
-		}
-
-		buf := make([]byte, 1024)
-		_ = sock.SetReadDeadline(time.Now().Add(2 * time.Second))
-		n, _, err := sock.ReadFromUDP(buf)
-		if err != nil {
-			return nil, 0, err
+		if n <= 0 {
+			continue
 		}
 
 		var stunMsg stun.Message
-		stunMsg.Raw = make([]byte, n)
-		copy(stunMsg.Raw, buf[:n])
+		stunMsg.Raw = buf[:n]
 		if err := stunMsg.Decode(); err != nil {
-			return nil, 0, err
+			continue
 		}
 
+		srv, matched := probes[stunMsg.TransactionID]
+		if !matched {
+			continue // ignore unknown or spoofed Transaction ID (anti-reflection)
+		}
+		delete(probes, stunMsg.TransactionID)
+
+		var mappedIP net.IP
+		var mappedPort int
 		var xor stun.XORMappedAddress
 		if err := xor.GetFrom(&stunMsg); err == nil {
-			return xor.IP, xor.Port, nil
+			mappedIP = xor.IP
+			mappedPort = xor.Port
+		} else {
+			var plain stun.MappedAddress
+			if err := plain.GetFrom(&stunMsg); err == nil {
+				mappedIP = plain.IP
+				mappedPort = plain.Port
+			}
 		}
-		var plain stun.MappedAddress
-		if err := plain.GetFrom(&stunMsg); err == nil {
-			return plain.IP, plain.Port, nil
+
+		if mappedIP != nil && mappedPort > 0 {
+			results = append(results, mappedResult{
+				server: srv,
+				ip:     mappedIP,
+				port:   mappedPort,
+			})
 		}
-		return nil, 0, errors.New("no mapped address attribute in STUN response")
 	}
 
-	ip1, port1, err1 := probeServer(srv1)
-	if err1 != nil {
-		return NATTypeUnknown, err1
+	if len(results) == 0 {
+		return nil, errors.New("no responses received from STUN servers")
 	}
 
-	// Small delay between probes from the same socket
-	time.Sleep(50 * time.Millisecond)
+	type epKey struct {
+		ip   string
+		port int
+	}
+	freq := make(map[epKey]int)
+	portSamples := make([]int, 0, len(results))
+	var primaryIP net.IP
+	var primaryPort int
+	maxCount := 0
 
-	ip2, port2, err2 := probeServer(srv2)
-	if err2 != nil {
-		return NATTypeUnknown, err2
+	for _, r := range results {
+		k := epKey{ip: r.ip.String(), port: r.port}
+		freq[k]++
+		if freq[k] > maxCount {
+			maxCount = freq[k]
+			primaryIP = r.ip
+			primaryPort = r.port
+		}
+		portSamples = append(portSamples, r.port)
 	}
 
-	if ip1.Equal(ip2) && port1 == port2 {
-		return NATTypeFullCone, nil
+	delta := 0
+	if len(portSamples) >= 2 {
+		d := portSamples[1] - portSamples[0]
+		if d < 0 {
+			d = -d
+		}
+		delta = d
 	}
-	return NATTypeSymmetric, nil
+
+	var natType NATType
+	if len(results) >= 3 && maxCount >= 3 {
+		natType = NATTypeFullCone
+		delta = 0
+	} else if len(results) >= 2 && maxCount == len(results) {
+		natType = NATTypeFullCone
+		delta = 0
+	} else if len(results) >= 2 && maxCount < len(results) {
+		natType = NATTypeSymmetric
+		if delta == 0 {
+			delta = 1
+		}
+	} else {
+		natType = NATTypeUnknown
+	}
+
+	endpoints := make([]signaling.EndpointDesc, 0, len(freq))
+	endpoints = append(endpoints, signaling.EndpointDesc{
+		Proto:    "udp",
+		IP:       primaryIP.String(),
+		Port:     primaryPort,
+		NATType:  natType.String(),
+		TTL:      20,
+		Priority: 100,
+	})
+
+	for k := range freq {
+		if k.ip == primaryIP.String() && k.port == primaryPort {
+			continue
+		}
+		endpoints = append(endpoints, signaling.EndpointDesc{
+			Proto:    "udp",
+			IP:       k.ip,
+			Port:     k.port,
+			NATType:  natType.String(),
+			TTL:      20,
+			Priority: 80,
+		})
+	}
+
+	return &STUNConsensusResult{
+		IP:        primaryIP,
+		Port:      primaryPort,
+		NATType:   natType,
+		NATDelta:  delta,
+		Endpoints: endpoints,
+		Samples:   portSamples,
+	}, nil
+}
+
+// DetectNATType classifies the NAT type by querying diverse STUN servers
+// from the same socket using consensus voting.
+func DetectNATType(ctx context.Context, sock *net.UDPConn, servers []string) (NATType, error) {
+	res, err := DetectNATConsensus(ctx, sock, servers)
+	if err != nil {
+		return NATTypeUnknown, err
+	}
+	return res.NATType, nil
 }
 
 
