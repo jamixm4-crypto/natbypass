@@ -180,7 +180,11 @@ func detectDefaultGateway(ifaceName string) net.IP {
 		if gw := getGatewayFromProcNetRoute(ifaceName); gw != nil {
 			return gw
 		}
-		// Fallback via ip route command
+		// Fallback via ip route command — skip on MIPS/ARM embedded routers to avoid
+		// fork exhaustion: sh+ip+grep+awk = 4 processes per call, called every 2s on watchdog.
+		if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "arm" {
+			return nil
+		}
 		cmd := exec.Command("sh", "-c", "ip route show default 2>/dev/null | grep -v 'nb0' | head -n1 | awk '{print $3}'")
 		if out, err := cmd.Output(); err == nil {
 			str := strings.TrimSpace(string(out))

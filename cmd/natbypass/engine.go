@@ -288,7 +288,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		defer puncher.Close()
 
 		// Фоновый NetworkWatchdog для мгновенной реакции на смену сети (Wi-Fi ↔ LTE / смена кабеля/DHCP)
-		watchdog := network.NewNetworkWatchdog(engineCtx, 2*time.Second, func(oldInfo, newInfo *network.EgressInfo) {
+		// On MIPS/ARM routers: use 30s interval to prevent fork exhaustion — DetectEgress may fork
+		// "sh -c ip route show default" if /proc/net/route parsing fails, which on a busy 580MHz MIPS
+		// router at 2s intervals creates 30 shell processes per minute, exhausting the process table.
+		watchdogInterval := 2 * time.Second
+		if isLowPowerArch() {
+			watchdogInterval = 30 * time.Second
+		}
+		watchdog := network.NewNetworkWatchdog(engineCtx, watchdogInterval, func(oldInfo, newInfo *network.EgressInfo) {
 			oldIP := ""
 			if oldInfo != nil && oldInfo.LocalIP != nil {
 				oldIP = oldInfo.LocalIP.String()

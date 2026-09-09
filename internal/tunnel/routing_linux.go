@@ -34,8 +34,51 @@ func runLinuxCmd(name string, args ...string) error {
 var (
 	isKeeneticOnce   sync.Once
 	isKeeneticCached bool
-	peerHostRoutes   sync.Map
+
+	// peerHostRoutes tracks the last time a /32 host route was installed per VIP.
+	// Value type: int64 (Unix timestamp of last installation).
+	// Routes are re-installed by the watchdog every peerRouteRefreshInterval seconds
+	// so that NDM / kernel routing flushes on Keenetic are automatically healed.
+	peerHostRoutes sync.Map
+
+	peerRouteWatchdogOnce sync.Once
 )
+
+const peerRouteRefreshInterval = 25 * time.Second
+
+// startPeerRouteWatchdog launches a single background goroutine that re-installs
+// all known peer host routes on a fixed interval. This ensures Keenetic NDM
+// routing-table flushes are healed within peerRouteRefreshInterval seconds.
+func startPeerRouteWatchdog() {
+	peerRouteWatchdogOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(peerRouteRefreshInterval)
+			defer ticker.Stop()
+			for range ticker.C {
+				now := time.Now().Unix()
+				peerHostRoutes.Range(func(key, value any) bool {
+					vip, ok := key.(string)
+					if !ok {
+						return true
+					}
+					lastTs, ok := value.(int64)
+					if !ok || now-lastTs >= int64(peerRouteRefreshInterval.Seconds()) {
+						peerHostRoutes.Store(vip, now)
+						go func(targetVIP string) {
+							_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "table", "main", "onlink")
+							_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "onlink")
+							if isKeeneticDevice() {
+								_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", targetVIP+"/32", "lookup", "main")
+								_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", targetVIP+"/32", "lookup", "main")
+							}
+						}(vip)
+					}
+					return true
+				})
+			}
+		}()
+	})
+}
 
 // isKeeneticDevice checks if running on KeeneticOS.
 func isKeeneticDevice() bool {
@@ -452,28 +495,31 @@ func FlushAllRouting(gatewayVIP string, subnets []string) {
 // EnsurePeerHostRoute adds a /32 host route for a peer's VirtualIP via the nb0 TUN interface.
 // Required on Linux routers (Keenetic/OpenWrt/mipsle) so the kernel routes ICMP replies and
 // forwarded return traffic back through nb0 instead of escaping via the WAN interface.
-// Fast path: thread-safe, cached in memory via peerHostRoutes to execute OS commands at most once.
-// Background execution avoids blocking the high-frequency inbound packet processing loop.
+//
+// Fast path: thread-safe, keyed by cleanVIP. If the route was installed within the last
+// peerRouteRefreshInterval, the call returns immediately with zero syscalls.
+// The background watchdog goroutine (started once) re-installs all routes every
+// peerRouteRefreshInterval so NDM / kernel routing flushes on Keenetic are auto-healed.
 func EnsurePeerHostRoute(peerVIP string) {
 	if peerVIP == "" {
-		return
-	}
-	if _, loaded := peerHostRoutes.Load(peerVIP); loaded {
 		return
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(peerVIP, "/")[0])
 	if net.ParseIP(cleanVIP) == nil {
 		return
 	}
-	if _, loaded := peerHostRoutes.LoadOrStore(cleanVIP, struct{}{}); loaded {
-		if peerVIP != cleanVIP {
-			peerHostRoutes.Store(peerVIP, struct{}{})
+
+	now := time.Now().Unix()
+	cutoff := now - int64(peerRouteRefreshInterval.Seconds())
+	if prev, loaded := peerHostRoutes.LoadOrStore(cleanVIP, now); loaded {
+		if ts, ok := prev.(int64); ok && ts > cutoff {
+			return // route installed recently — no need to reinstall
 		}
-		return
+		peerHostRoutes.Store(cleanVIP, now)
 	}
-	if peerVIP != cleanVIP {
-		peerHostRoutes.Store(peerVIP, struct{}{})
-	}
+
+	// Ensure watchdog is running so NDM flushes are healed automatically
+	startPeerRouteWatchdog()
 
 	go func(targetVIP string) {
 		_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "table", "main", "onlink")
