@@ -20,10 +20,8 @@ import (
 )
 
 const (
-	// maxSkipMessages limits how far ahead the chain can advance for missing UDP packets.
+	// maxSkipMessages limits how far ahead the packet sequence can advance for missing UDP packets.
 	maxSkipMessages = 64
-	// maxSkippedKeysLimit bounds the in-memory cache of skipped message keys to prevent memory leaks.
-	maxSkippedKeysLimit = 256
 )
 
 // SessionState (также доступен как SymmetricKDFChain) реализует устойчивую к потерям UDP-пакетов
@@ -35,10 +33,9 @@ type SessionState struct {
 	SendingChain   Chain
 	ReceivingChain Chain
 	MessageNumber  uint32
-	skippedKeys    map[uint32][]byte // для обратной совместимости
-	replayWindow   uint64            // 64-битная битовая маска скользящего окна
-	replayBase     uint32            // максимальный полученный номер пакета
-	hasReceived    bool              // флаг первого полученного пакета
+	replayWindow   uint64 // 64-битная битовая маска скользящего окна
+	replayBase     uint32 // максимальный полученный номер пакета
+	hasReceived    bool   // флаг первого полученного пакета
 	mu             sync.Mutex
 }
 
@@ -49,19 +46,6 @@ type SymmetricKDFChain = SessionState
 type Chain struct {
 	ChainKey []byte
 	Counter  uint32
-}
-
-// deriveStepKeys сохранен для обратной совместимости.
-func deriveStepKeys(chainKey []byte) (nextChainKey, msgKey []byte, err error) {
-	nextChainKey = make([]byte, 32)
-	msgKey = make([]byte, 32)
-	if _, err := io.ReadFull(hkdf.Expand(sha256.New, chainKey, []byte("NatBypass-Chain-Next-v1")), nextChainKey); err != nil {
-		return nil, nil, fmt.Errorf("hkdf next chain key derivation failed: %w", err)
-	}
-	if _, err := io.ReadFull(hkdf.Expand(sha256.New, chainKey, []byte("NatBypass-Msg-Key-v1")), msgKey); err != nil {
-		return nil, nil, fmt.Errorf("hkdf msg key derivation failed: %w", err)
-	}
-	return nextChainKey, msgKey, nil
 }
 
 // deriveMsgKeyStateless деривирует ключ для конкретного пакета напрямую из rootKey и counter.
@@ -110,7 +94,6 @@ func NewSessionState(sharedSecret []byte) (*SessionState, error) {
 			ChainKey: recvKey,
 			Counter:  0,
 		},
-		skippedKeys: make(map[uint32][]byte),
 	}, nil
 }
 
