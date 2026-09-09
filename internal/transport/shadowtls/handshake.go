@@ -30,7 +30,6 @@ const (
 	// Record Content Types (RFC 8446)
 	RecordChangeCipherSpec = 0x14
 	RecordHandshake        = 0x16
-	RecordApplicationData  = 0x17
 
 	// Handshake Types
 	HandshakeClientHello = 0x01
