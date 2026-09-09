@@ -31,14 +31,23 @@ func runLinuxCmd(name string, args ...string) error {
 	return nil
 }
 
+var (
+	isKeeneticOnce   sync.Once
+	isKeeneticCached bool
+	peerHostRoutes   sync.Map
+)
+
 // isKeeneticDevice checks if running on KeeneticOS.
 func isKeeneticDevice() bool {
-	for _, p := range []string{"/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq"} {
-		if _, err := os.Stat(p); err == nil {
-			return true
+	isKeeneticOnce.Do(func() {
+		for _, p := range []string{"/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq"} {
+			if _, err := os.Stat(p); err == nil {
+				isKeeneticCached = true
+				return
+			}
 		}
-	}
-	return false
+	})
+	return isKeeneticCached
 }
 
 // findIptablesBinary finds the preferred iptables executable.
@@ -434,26 +443,46 @@ func FlushAllRouting(gatewayVIP string, subnets []string) {
 	for _, s := range subnets {
 		_ = RemoveSubnetRoute(s, gatewayVIP)
 	}
+	peerHostRoutes.Range(func(key, value any) bool {
+		peerHostRoutes.Delete(key)
+		return true
+	})
 }
 
 // EnsurePeerHostRoute adds a /32 host route for a peer's VirtualIP via the nb0 TUN interface.
 // Required on Linux routers (Keenetic/OpenWrt/mipsle) so the kernel routes ICMP replies and
 // forwarded return traffic back through nb0 instead of escaping via the WAN interface.
-// Idempotent — replaces route in main and default tables, and sets Keenetic rule priority 40.
+// Fast path: thread-safe, cached in memory via peerHostRoutes to execute OS commands at most once.
+// Background execution avoids blocking the high-frequency inbound packet processing loop.
 func EnsurePeerHostRoute(peerVIP string) {
 	if peerVIP == "" {
+		return
+	}
+	if _, loaded := peerHostRoutes.Load(peerVIP); loaded {
 		return
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(peerVIP, "/")[0])
 	if net.ParseIP(cleanVIP) == nil {
 		return
 	}
-	_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "table", "main", "onlink")
-	_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "onlink")
-	if isKeeneticDevice() {
-		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
-		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
+	if _, loaded := peerHostRoutes.LoadOrStore(cleanVIP, struct{}{}); loaded {
+		if peerVIP != cleanVIP {
+			peerHostRoutes.Store(peerVIP, struct{}{})
+		}
+		return
 	}
+	if peerVIP != cleanVIP {
+		peerHostRoutes.Store(peerVIP, struct{}{})
+	}
+
+	go func(targetVIP string) {
+		_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "table", "main", "onlink")
+		_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "onlink")
+		if isKeeneticDevice() {
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", targetVIP+"/32", "lookup", "main")
+			_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", targetVIP+"/32", "lookup", "main")
+		}
+	}(cleanVIP)
 }
 
 // EnableMSSClamping принудительно снижает MSS для TCP-соединений через TUN.
