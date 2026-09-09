@@ -93,13 +93,15 @@ func (c *ShadowTLSConn) WritePacket(payload []byte) error {
 		return ErrPayloadTooLarge
 	}
 
-	// Traffic shaping: inject micro-jitter (1..15ms) for interactive packets (<512 bytes)
+	// Traffic shaping: inject micro-jitter (0..50ms) for interactive packets (<512 bytes)
 	// to disrupt uniform Inter-Arrival Time (IAT) analysis by TSPU/DPI classifiers.
 	if len(payload) < 512 {
 		var jitterByte [1]byte
 		if _, err := io.ReadFull(rand.Reader, jitterByte[:]); err == nil {
-			jitterMs := 1 + int(jitterByte[0]%15) // 1..15 ms
-			time.Sleep(time.Duration(jitterMs) * time.Millisecond)
+			jitterMs := int(jitterByte[0] % 51) // 0..50 ms
+			if jitterMs > 0 {
+				time.Sleep(time.Duration(jitterMs) * time.Millisecond)
+			}
 		}
 	}
 

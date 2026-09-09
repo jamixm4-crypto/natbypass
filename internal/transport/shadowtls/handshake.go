@@ -46,6 +46,7 @@ const (
 	ExtSignatureAlgorithm = 0x000d
 	ExtSupportedVersions  = 0x002b
 	ExtKeyShare           = 0x0033
+	ExtEncryptedClientHello = 0xfe0d
 )
 
 var (
@@ -64,6 +65,12 @@ func computeHMAC(key [32]byte, data []byte) []byte {
 
 // BuildClientHello constructs a byte-perfect TLS 1.3 ClientHello with embedded HMAC authentication.
 func BuildClientHello(sni string, networkKey [32]byte) ([]byte, error) {
+	return BuildClientHelloWithECH(sni, networkKey, nil)
+}
+
+// BuildClientHelloWithECH constructs a byte-perfect TLS 1.3 ClientHello with embedded HMAC authentication
+// and optional Encrypted Client Hello (RFC 8744) extension.
+func BuildClientHelloWithECH(sni string, networkKey [32]byte, echConfig []byte) ([]byte, error) {
 	if sni == "" {
 		sni = DefaultSNI
 	}
@@ -113,6 +120,13 @@ func BuildClientHello(sni string, networkKey [32]byte) ([]byte, error) {
 	extBuf.Write([]byte{0x00, 0x1d})                   // X25519
 	binary.Write(extBuf, binary.BigEndian, uint16(32)) // key len
 	extBuf.Write(keyShareData[:])
+
+	// 5. Encrypted Client Hello Extension (RFC 8744)
+	if len(echConfig) > 0 {
+		extBuf.Write([]byte{0xfe, 0x0d}) // ExtEncryptedClientHello
+		binary.Write(extBuf, binary.BigEndian, uint16(len(echConfig)))
+		extBuf.Write(echConfig)
+	}
 
 	// ClientHello Body
 	chBody := new(bytes.Buffer)
@@ -216,10 +230,15 @@ func BuildServerHello(clientRandom [32]byte, clientSessionID [32]byte, networkKe
 // It returns (shadowConn, isServerRole, err). When a TCP Simultaneous Open collision is detected (both sides sent
 // ClientHello simultaneously), a deterministic tie-break determines which side acts as Server.
 func ClientHandshake(conn net.Conn, sni string, networkKey [32]byte, timeout time.Duration) (*ShadowTLSConn, bool, error) {
+	return ClientHandshakeWithECH(conn, sni, networkKey, timeout, nil)
+}
+
+// ClientHandshakeWithECH performs client-side ShadowTLS handshake with optional ECHConfigList.
+func ClientHandshakeWithECH(conn net.Conn, sni string, networkKey [32]byte, timeout time.Duration, echConfig []byte) (*ShadowTLSConn, bool, error) {
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	defer conn.SetDeadline(time.Time{})
 
-	chPkt, err := BuildClientHello(sni, networkKey)
+	chPkt, err := BuildClientHelloWithECH(sni, networkKey, echConfig)
 	if err != nil {
 		return nil, false, err
 	}
@@ -441,12 +460,10 @@ func ProxyActiveProbe(conn net.Conn, initialBytes []byte, sni string) {
 	target := net.JoinHostPort(sni, "443")
 	remoteConn, err := net.DialTimeout("tcp", target, 5*time.Second)
 	if err != nil {
-		// If dial fails, send standard TLS 1.3 Handshake Failure alert (Record Type 0x15)
-		alert := []byte{0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28}
-		_ = conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
-		_, _ = conn.Write(alert)
-		time.Sleep(200 * time.Millisecond)
-		_ = conn.Close()
+		// Honeyport Anti-Probing: If dial fails or is blocked by ISP/censor, deflect probe
+		// with authentic Nginx HTTP/HTTPS response instead of sending TLS Alert or TCP RST.
+		var zeroKey [32]byte
+		ServeNginxTLS(conn, zeroKey, sni)
 		return
 	}
 
@@ -494,11 +511,9 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 		return nil, fmt.Errorf("failed to read ClientHello header: %w", err)
 	}
 	if hdr[0] != RecordHandshake {
-		// Non-TLS probe (e.g. HTTP scanner): respond with HTTP 400 Bad Request
-		_ = conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
-		_, _ = conn.Write([]byte("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n400 Bad Request\r\n"))
-		time.Sleep(200 * time.Millisecond)
-		_ = conn.Close()
+		// Honeyport Anti-Probing: Non-TLS probe (e.g. plain HTTP scanner, Shodan, Censys, TSPU)
+		// Respond with authentic Nginx 1.24 HTTP 200 OK page
+		ServeNginxHTTP(conn)
 		return nil, ErrActiveProbeHandled
 	}
 	recLen := binary.BigEndian.Uint16(hdr[3:5])

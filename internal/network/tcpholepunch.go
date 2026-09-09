@@ -462,8 +462,14 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 	m.mu.RUnlock()
 
 	if hasKey {
-		// 1. Stealth TLS 1.3 Client Handshake (DPI bypass) with Simultaneous Open collision resolution
-		tlsConn, isServer, err := shadowtls.ClientHandshake(conn, sni, netKey, 5*time.Second)
+		// 1. Stealth TLS 1.3 Client Handshake (DPI bypass) with ECH and Simultaneous Open collision resolution
+		var echBytes []byte
+		if sni != "" {
+			echCtx, echCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			echBytes, _ = GetDefaultECHManager().GetECHConfigList(echCtx, sni)
+			echCancel()
+		}
+		tlsConn, isServer, err := shadowtls.ClientHandshakeWithECH(conn, sni, netKey, 5*time.Second, echBytes)
 		if err != nil {
 			_ = conn.Close()
 			return fmt.Errorf("shadowtls handshake failed: %w", err)

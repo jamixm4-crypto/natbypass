@@ -361,6 +361,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	}
 
+	// Task 2.3: Random MTU in range 1280..1380 to disrupt DPI packet length fingerprinting
+	initialMTU := cfg.WireGuard.MTU
+	if initialMTU < 1280 || initialMTU > 1380 {
+		initialMTU = wireguard.GenerateRandomMTU()
+	}
+	mdarMu.Lock()
+	currentMTU = initialMTU
+	mdarMu.Unlock()
+	if tunDev != nil && tunErr == nil {
+		_ = tunDev.SetMTU(initialMTU)
+		log.Info().Int("initial_mtu", initialMTU).Msg("🛡️ [Random MTU] Initialized dynamic MTU to defeat DPI/TSPU fingerprinting")
+	}
+
 	if uiServer != nil {
 		onCfgReload := func() {
 			if configFile != "" {

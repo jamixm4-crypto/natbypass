@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/natbypass/natbypass/internal/network"
 	"github.com/rs/zerolog/log"
 )
 
@@ -108,6 +109,11 @@ func (c *WSSClient) connect() error {
 		tlsConf.ServerName = u.Hostname()
 	}
 
+	// Task 2.1: Apply ECH (Encrypted Client Hello) to camouflage SNI against DPI/TSPU
+	if tlsConf.ServerName != "" {
+		network.ApplyDefaultECH(tlsConf, tlsConf.ServerName)
+	}
+
 	dialer := websocket.Dialer{
 		TLSClientConfig:  tlsConf,
 		HandshakeTimeout: 5 * time.Second,
@@ -189,13 +195,15 @@ func (c *WSSClient) SendPacket(targetDevID string, payload []byte) error {
 		return fmt.Errorf("target device ID too long")
 	}
 
-	// Traffic shaping: inject micro-jitter (1..15ms) for interactive packets (<512 bytes)
+	// Traffic shaping: inject micro-jitter (0..50ms) for interactive packets (<512 bytes)
 	// to disrupt uniform Inter-Arrival Time (IAT) analysis by TSPU/DPI classifiers.
 	if len(payload) < 512 {
 		var jitterByte [1]byte
 		if _, err := io.ReadFull(rand.Reader, jitterByte[:]); err == nil {
-			jitterMs := 1 + int(jitterByte[0]%15) // 1..15 ms
-			time.Sleep(time.Duration(jitterMs) * time.Millisecond)
+			jitterMs := int(jitterByte[0] % 51) // 0..50 ms
+			if jitterMs > 0 {
+				time.Sleep(time.Duration(jitterMs) * time.Millisecond)
+			}
 		}
 	}
 
