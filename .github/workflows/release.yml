@@ -20,7 +20,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22.12'
+          go-version: '1.23.x'
           cache: true
 
       - name: Compile Windows PE resources
@@ -29,6 +29,7 @@ jobs:
           GOPROXY: "https://proxy.golang.org,direct"
         run: |
           go install github.com/tc-hib/go-winres@latest
+          $env:PATH = "$((go env GOPATH))\bin;$env:PATH"
           go-winres make --in winres/winres.json --out cmd/natbypass/rsrc
           go-winres make --in winres/winres.json --out cmd/natbypass-cli/rsrc
           go-winres make --in winres/winres.json --out cmd/natbypass-gui/rsrc

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/natbypass/natbypass/internal/constants"
@@ -76,15 +77,11 @@ type Peer struct {
 	LastRelayPing            time.Time               `json:"last_relay_ping,omitempty"`      // Timestamp of last Hot-Standby heartbeat
 	ReplayFilter             *crypto.ReplayFilter    `json:"-"`                              // Anti-Replay sliding window (RFC 6479)
 	OutboundSeq              uint64                  `json:"-"`                              // Monotonic outbound sequence counter
-	OutboundSeqMu            sync.Mutex              `json:"-"`                              // Protects OutboundSeq
 }
 
 // NextOutboundSeq returns the next monotonically increasing sequence number for this peer.
 func (p *Peer) NextOutboundSeq() uint64 {
-	p.OutboundSeqMu.Lock()
-	defer p.OutboundSeqMu.Unlock()
-	p.OutboundSeq++
-	return p.OutboundSeq
+	return atomic.AddUint64(&p.OutboundSeq, 1)
 }
 
 // GetReplayFilter returns the initialized Anti-Replay filter for this peer.
