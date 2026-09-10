@@ -897,7 +897,29 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}
-						// Relay fallback for TUN data disabled: MQTT/Telegram channels are strictly control plane / signaling
+						// 3. Multi-Hop Mesh TCP Relay fallback: route echo reply through public VPS server peer
+						if !sent && senderPeer != nil {
+							if relayPeer := findMeshRelayPeer(registry, tcpDirectMgr, senderPeer.DeviceID); relayPeer != nil {
+								if mhPkt, mhErr := network.EncodeMultiHopPacket(deviceID, senderPeer.DeviceID, network.DefaultMaxTTL, 0x00, reply); mhErr == nil {
+									if tcpDirectMgr != nil && tcpDirectMgr.HasConn(relayPeer.DeviceID) {
+										if err := tcpDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
+											sent = true
+										}
+									}
+								}
+							}
+						}
+						// 4. Fallback: relay via MQTT if direct and multihop not available
+						if !sent && senderPeer != nil && sigMgr != nil {
+							dataToSend := reply
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+								cKey := crypto.DeriveKey(activeProf.NetworkKey)
+								if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
+									dataToSend = enc
+								}
+							}
+							_ = sigMgr.PublishTunnelData(senderPeer.DeviceID, dataToSend)
+						}
 					}
 				}
 
@@ -953,6 +975,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				_ = tunDev.WritePacket(payload)
 			}
+		}
+
+		if multiHopRouter != nil {
+			multiHopRouter.SetDeliverFunc(func(srcID string, payload []byte) error {
+				onInboundPacket(payload, nil, true, false)
+				return nil
+			})
 		}
 
 		if puncher != nil {
@@ -1210,7 +1239,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 						// 1e. Mesh Userspace Multi-Hop Relay Fallback:
 						// If neither direct TCP nor confirmed direct UDP succeeded, forward encapsulated in MultiHopPacket
-						if !sentTCP && !sentDirect && !isForceUDP {
+						if !sentTCP && (!sentDirect || !p.DirectP2P || p.LossPercent > 30) && !isForceUDP {
 							if relayPeer := findMeshRelayPeer(registry, tcpDirectMgr, p.DeviceID); relayPeer != nil {
 								mhPkt, mhErr := network.EncodeMultiHopPacket(deviceID, p.DeviceID, network.DefaultMaxTTL, 0x00, pkt)
 								if mhErr == nil {

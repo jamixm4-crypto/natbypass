@@ -4922,11 +4922,13 @@ func startEngineFromConfig(c *config.Config) {
 									go connectPeerTCPDirect(targetPeer)
 								}
 								// 1e. Mesh Userspace TCP Relay Fallback:
-								if !sentTCP && !sentDirect && !isForceUDP && guiTCPDirectMgr != nil {
+								if !sentTCP && (!sentDirect || !targetPeer.DirectP2P || targetPeer.LossPercent > 30) && !isForceUDP && guiTCPDirectMgr != nil {
 									if relayPeer := findMeshRelayPeerGUI(registry, guiTCPDirectMgr, targetPeer.DeviceID); relayPeer != nil {
-										if err := guiTCPDirectMgr.SendPacket(relayPeer.DeviceID, packet); err == nil {
-											sentDirect = true
-											writeDebug(fmt.Sprintf("🔀 Routed packet to %s via Mesh TCP Relay %s", targetPeer.DeviceID, relayPeer.DeviceID))
+										if mhPkt, mhErr := network.EncodeMultiHopPacket(myDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, packet); mhErr == nil {
+											if err := guiTCPDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
+												sentDirect = true
+												writeDebug(fmt.Sprintf("🔀 Routed packet to %s via Mesh TCP Relay %s", targetPeer.DeviceID, relayPeer.DeviceID))
+											}
 										}
 									}
 								}

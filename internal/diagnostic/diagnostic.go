@@ -526,13 +526,14 @@ func CheckMeshPeersAndEngine() DiagnosticItem {
 		}
 	}
 
-	// Concurrent ICMP ping to all discovered peer Virtual IPs
+	// Rate-limited ICMP ping to all discovered peer Virtual IPs (max 2 concurrent workers to prevent socket contention on routers)
 	type peerPingResult struct {
 		vip string
 		ok  bool
 		rtt time.Duration
 	}
 	pingChan := make(chan peerPingResult, len(peersData)+1)
+	sem := make(chan struct{}, 2)
 	var wg sync.WaitGroup
 
 	for _, p := range peersData {
@@ -541,9 +542,27 @@ func CheckMeshPeersAndEngine() DiagnosticItem {
 		if cleanVIP == "" || net.ParseIP(cleanVIP) == nil {
 			continue
 		}
+
+		// If local engine already verified L3 ping and recorded latency, trust engine telemetry
+		var enginePingMs int64
+		if pm, ok := p["ping_ms"].(float64); ok && pm > 0 {
+			enginePingMs = int64(pm)
+		}
+		if enginePingMs > 0 {
+			pingChan <- peerPingResult{
+				vip: cleanVIP,
+				ok:  true,
+				rtt: time.Duration(enginePingMs) * time.Millisecond,
+			}
+			continue
+		}
+
 		wg.Add(1)
 		go func(targetVIP string) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
 			pCtx, pCancel := context.WithTimeout(context.Background(), 2600*time.Millisecond)
 			defer pCancel()
 			rtt, pErr := PingVirtualIP(pCtx, targetVIP, 2500*time.Millisecond)

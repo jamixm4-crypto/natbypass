@@ -10,6 +10,7 @@ package network
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 )
 
@@ -118,6 +119,7 @@ type MultiHopRouter struct {
 	selfDeviceID string
 	forwardFunc  func(dstID string, packet []byte) error
 	deliverFunc  func(srcID string, payload []byte) error
+	mu           sync.RWMutex
 
 	// Atomic telemetry metrics (64-bit aligned for MIPS)
 	forwardedCount uint64
@@ -138,6 +140,13 @@ func NewMultiHopRouter(
 	}
 }
 
+// SetDeliverFunc safely updates the packet delivery function for packets destined to this node.
+func (r *MultiHopRouter) SetDeliverFunc(fn func(srcID string, payload []byte) error) {
+	r.mu.Lock()
+	r.deliverFunc = fn
+	r.mu.Unlock()
+}
+
 // Route processes an incoming packet.
 // - If destination is local node: strips header and delivers payload locally.
 // - If destination is remote: decrements TTL in place and forwards to next hop.
@@ -150,8 +159,11 @@ func (r *MultiHopRouter) Route(data []byte) error {
 	// Case 1: Destination is THIS node
 	if pkt.DstID == r.selfDeviceID {
 		atomic.AddUint64(&r.deliveredCount, 1)
-		if r.deliverFunc != nil {
-			return r.deliverFunc(pkt.SrcID, pkt.Payload)
+		r.mu.RLock()
+		deliv := r.deliverFunc
+		r.mu.RUnlock()
+		if deliv != nil {
+			return deliv(pkt.SrcID, pkt.Payload)
 		}
 		return nil
 	}
@@ -166,8 +178,11 @@ func (r *MultiHopRouter) Route(data []byte) error {
 	data[2]--
 	atomic.AddUint64(&r.forwardedCount, 1)
 
-	if r.forwardFunc != nil {
-		return r.forwardFunc(pkt.DstID, data)
+	r.mu.RLock()
+	fwd := r.forwardFunc
+	r.mu.RUnlock()
+	if fwd != nil {
+		return fwd(pkt.DstID, data)
 	}
 	return nil
 }

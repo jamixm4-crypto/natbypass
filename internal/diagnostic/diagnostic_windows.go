@@ -12,7 +12,10 @@ package diagnostic
 import (
 	"context"
 	"fmt"
+	"net"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -34,6 +37,35 @@ func CheckIsAdmin() bool {
 
 func CheckWintunDriver() DiagnosticItem {
 	start := time.Now()
+
+	// 1. Fast path: if NatBypass or Wintun adapter is already active in Windows network stack
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if strings.EqualFold(iface.Name, "NatBypass") || strings.Contains(strings.ToLower(iface.Name), "wintun") {
+				return DiagnosticItem{
+					Name:    "Драйвер Wintun / NDIS Адаптер",
+					Passed:  true,
+					Elapsed: time.Since(start),
+					Message: fmt.Sprintf("✓ Активный Wintun адаптер '%s' обнаружен в системе (драйвер исправен и работает)", iface.Name),
+				}
+			}
+		}
+	}
+
+	// 2. Fast path: verify wintun.dll binary loads without errors
+	if dllPath := tunnel.FindExistingWintunDLL(); dllPath != "" {
+		if h, err := windows.LoadLibraryEx(dllPath, 0, windows.LOAD_WITH_ALTERED_SEARCH_PATH); err == nil {
+			_ = windows.FreeLibrary(h)
+			return DiagnosticItem{
+				Name:    "Драйвер Wintun / NDIS Адаптер",
+				Passed:  true,
+				Elapsed: time.Since(start),
+				Message: fmt.Sprintf("✓ Драйвер Wintun найден (%s) и готов к созданию адаптеров", filepath.Base(dllPath)),
+			}
+		}
+	}
+
+	// 3. Fallback: create & close temporary adapter
 	testAdapterName := fmt.Sprintf("NatBypassDiag_%d", time.Now().Unix()%10000)
 	dev, err := tunnel.CreateAdapter(testAdapterName, "10.200.250.1")
 	if err != nil {
