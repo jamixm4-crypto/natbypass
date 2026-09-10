@@ -388,16 +388,16 @@ func openAppWindow(port int) {
 		return
 	}
 
-	// 1. Readiness Gate: Poll 127.0.0.1:port for up to 10s before launching UI
+	// 1. Readiness Gate: Fast check that 127.0.0.1:port is listening
 	ready := false
-	for i := 0; i < 50; i++ {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
+	for i := 0; i < 25; i++ {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 50*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
 			ready = true
 			break
 		}
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 
 	if !ready {

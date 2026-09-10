@@ -1790,9 +1790,12 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 		if autoOpen {
 			go func() {
 				actualPort := uiServer.GetPort()
-				if err := tray.EnsureFirewallRule(actualPort); err != nil {
-					log.Debug().Err(err).Msg("Windows Firewall rule notice")
-				}
+				// Run firewall rule check in background so WebUI window opens instantly without waiting for netsh
+				go func() {
+					if err := tray.EnsureFirewallRule(actualPort); err != nil {
+						log.Debug().Err(err).Msg("Windows Firewall rule notice")
+					}
+				}()
 				if uiServer.WaitForReady(10 * time.Second) {
 					actualPort = uiServer.GetPort()
 					url := fmt.Sprintf("http://127.0.0.1:%d", actualPort)

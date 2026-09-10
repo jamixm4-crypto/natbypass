@@ -287,16 +287,17 @@ func (s *Server) WaitForReady(timeout time.Duration) bool {
 		timeout = 10 * time.Second
 	}
 	deadline := time.Now().Add(timeout)
+	sleepInterval := 10 * time.Millisecond
 	for time.Now().Before(deadline) {
 		p := s.GetPort()
 		if p > 0 {
 			addr := fmt.Sprintf("127.0.0.1:%d", p)
 			// 1. TCP probe
-			conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+			conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 			if err == nil {
 				_ = conn.Close()
 				// 2. HTTP probe to /healthz
-				client := &http.Client{Timeout: 1 * time.Second}
+				client := &http.Client{Timeout: 500 * time.Millisecond}
 				resp, httpErr := client.Get(fmt.Sprintf("http://%s/healthz", addr))
 				if httpErr == nil && resp != nil {
 					_ = resp.Body.Close()
@@ -306,7 +307,10 @@ func (s *Server) WaitForReady(timeout time.Duration) bool {
 				}
 			}
 		}
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(sleepInterval)
+		if sleepInterval < 100*time.Millisecond {
+			sleepInterval += 15 * time.Millisecond
+		}
 	}
 	return false
 }
