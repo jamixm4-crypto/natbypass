@@ -1756,6 +1756,9 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 		uiServer.SetCustomAuth(customAuth)
 	}
 	uiServer.SetOnConfigChange(triggerPublish)
+	uiServer.SetOnOpenWindow(func() {
+		openAppWindow(uiServer.GetPort())
+	})
 	uiServer.SetConfig(cfg)
 	uiServer.SetConfigPath(configFile)
 	uiServer.SetAppState(deviceID, "Определяется...", "Определяется...")

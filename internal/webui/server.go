@@ -101,6 +101,7 @@ type Server struct {
 	customAuth      func(user, pass string) bool
 	onProfileSwitch func(p *config.Profile) error
 	onConfigChange  func()
+	onOpenWindow    func()
 	readyCh         chan struct{}
 	readyOnce       sync.Once
 }
@@ -320,6 +321,22 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("OK"))
 }
 
+// SetOnOpenWindow sets the callback to restore or open the desktop window.
+func (s *Server) SetOnOpenWindow(fn func()) {
+	s.onOpenWindow = fn
+}
+
+func (s *Server) handleOpenWindow(w http.ResponseWriter, r *http.Request) {
+	if s.onOpenWindow != nil {
+		go s.onOpenWindow()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "window open triggered",
+	})
+}
+
 // AddEvent добавляет событие в кольцевой буфер (до 200 записей)
 func (s *Server) AddEvent(eventType, message, detail string) {
 	s.eventsMu.Lock()
@@ -350,6 +367,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/peers", s.handlePeers)
 	mux.HandleFunc("/api/peers/clear", s.handlePeersClear)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/window/open", s.handleOpenWindow)
 	mux.HandleFunc("/api/admin/password", s.handleAdminPasswordChange)
 	mux.HandleFunc("/api/refresh-ip", s.handleRefreshIP)
 	mux.HandleFunc("/api/channel/switch", s.handleChannelSwitch)
@@ -614,6 +632,21 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			r.URL.Path == "/api/auth/check" ||
 			r.URL.Path == "/api/qr/image" {
 			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Разрешить вызов /api/window/open только с локального хоста (127.0.0.1 / ::1)
+		if r.URL.Path == "/api/window/open" {
+			host, _, _ := net.SplitHostPort(r.RemoteAddr)
+			if host == "" {
+				host = r.RemoteAddr
+			}
+			ip := net.ParseIP(strings.TrimSpace(host))
+			if ip != nil && ip.IsLoopback() {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.Error(w, "Forbidden: local access only", http.StatusForbidden)
 			return
 		}
 

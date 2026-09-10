@@ -183,18 +183,36 @@ func cleanupStaleBackups() {
 }
 
 func activateExistingWindow() {
+	port := lastWebUIPort
+	if port <= 0 {
+		port = 8080
+	}
+
+	// 1. In-process check (e.g. called from Tray menu in the primary process)
 	if mainAppHWnd != 0 {
 		procIsWindow := moduser32Instance.NewProc("IsWindow")
 		if r, _, _ := procIsWindow.Call(mainAppHWnd); r != 0 {
 			procShowWindow := moduser32Instance.NewProc("ShowWindow")
 			procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
 			procShowWindow.Call(mainAppHWnd, 9 /* SW_RESTORE */)
+			procShowWindow.Call(mainAppHWnd, 5 /* SW_SHOW */)
 			procSetForegroundWindow.Call(mainAppHWnd)
 			return
 		}
 		mainAppHWnd = 0
 	}
 
+	// 2. Cross-process activation: notify running daemon via loopback HTTP to restore/open its window
+	client := http.Client{Timeout: 800 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/window/open", port))
+	if err == nil && resp != nil {
+		_ = resp.Body.Close()
+		if resp.StatusCode == 200 {
+			return
+		}
+	}
+
+	// 3. Fallback: find existing top-level window by title
 	procFindWindowW := moduser32Instance.NewProc("FindWindowW")
 	procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
 	procShowWindow := moduser32Instance.NewProc("ShowWindow")
@@ -203,15 +221,21 @@ func activateExistingWindow() {
 	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
 	if hwnd != 0 {
 		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
+		procShowWindow.Call(hwnd, 5 /* SW_SHOW */)
 		procSetForegroundWindow.Call(hwnd)
 		return
 	}
 
-	port := lastWebUIPort
-	if port <= 0 {
-		port = 8080
+	// 4. Last-resort fallback: launch dedicated Chromium App window or default browser SYNCHRONOUSLY
+	// Synchronous execution ensures the browser process starts before this duplicate CLI process terminates.
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	if browserPath := findChromiumAppBrowser(); browserPath != "" {
+		cmd := exec.Command(browserPath, fmt.Sprintf("--app=%s", url), "--new-window", "--window-size=1220,780")
+		if startErr := cmd.Start(); startErr == nil {
+			return
+		}
 	}
-	openAppWindow(port)
+	_ = exec.Command("cmd.exe", "/c", "start", "", url).Run()
 }
 
 // subclassWebViewWindow intercepts WM_CLOSE to minimize to tray instead of exiting
@@ -280,29 +304,51 @@ func launchNativeWebView(url string, port int) bool {
 		_, _, _ = procSetProcessDpiAwarenessContext.Call(^uintptr(3))
 	}
 
-	userDataDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "NatBypass", "webview2")
-	_ = os.MkdirAll(userDataDir, 0755)
-
-	var w webview2.WebView
-	var initErr error
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				initErr = fmt.Errorf("panic in webview2 init: %v", r)
-			}
+	createWebView := func(dataPath string) (webview2.WebView, error) {
+		var wv webview2.WebView
+		var initErr error
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					initErr = fmt.Errorf("panic in webview2 init: %v", r)
+				}
+			}()
+			wv = webview2.NewWithOptions(webview2.WebViewOptions{
+				Debug:     false,
+				AutoFocus: true,
+				DataPath:  dataPath,
+				WindowOptions: webview2.WindowOptions{
+					Title:  "NatBypass — P2P Mesh Network",
+					Width:  uint(winWidth),
+					Height: uint(winHeight),
+					Center: true,
+				},
+			})
 		}()
-		w = webview2.NewWithOptions(webview2.WebViewOptions{
-			Debug:     false,
-			AutoFocus: true,
-			DataPath:  userDataDir,
-			WindowOptions: webview2.WindowOptions{
-				Title:  "NatBypass — P2P Mesh Network",
-				Width:  uint(winWidth),
-				Height: uint(winHeight),
-				Center: true,
-			},
-		})
-	}()
+		return wv, initErr
+	}
+
+	// 1. Primary: Use Edge WebView2 default data path (empty string) - standard, reliable, avoids local lockups
+	w, initErr := createWebView("")
+	if w == nil || initErr != nil {
+		// 2. Fallback: LocalAppData directory
+		userDataDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "NatBypass", "webview2")
+		_ = os.MkdirAll(userDataDir, 0755)
+		_ = os.Remove(filepath.Join(userDataDir, "EBWebView", "lockfile"))
+		w, initErr = createWebView(userDataDir)
+		if w == nil || initErr != nil {
+			// 3. Fallback: PID-isolated temp directory
+			fallbackDir := filepath.Join(os.TempDir(), fmt.Sprintf("nb_wv2_%d", os.Getpid()))
+			_ = os.MkdirAll(fallbackDir, 0755)
+			w, initErr = createWebView(fallbackDir)
+			if w == nil || initErr != nil {
+				return false
+			}
+			defer func() {
+				_ = os.RemoveAll(fallbackDir)
+			}()
+		}
+	}
 
 	if w == nil || initErr != nil {
 		return false
@@ -370,6 +416,7 @@ func openAppWindow(port int) {
 			procShowWindow := moduser32Instance.NewProc("ShowWindow")
 			procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
 			procShowWindow.Call(mainAppHWnd, 9 /* SW_RESTORE */)
+			procShowWindow.Call(mainAppHWnd, 5 /* SW_SHOW */)
 			procSetForegroundWindow.Call(mainAppHWnd)
 			return
 		}
@@ -381,6 +428,7 @@ func openAppWindow(port int) {
 		procShowWindow := moduser32Instance.NewProc("ShowWindow")
 		procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
 		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
+		procShowWindow.Call(hwnd, 5 /* SW_SHOW */)
 		procSetForegroundWindow.Call(hwnd)
 		return
 	}
@@ -438,11 +486,8 @@ func openAppWindow(port int) {
 		// This runs on Windows 10/11 and Windows Server, opening a dedicated frameless app window without browser tabs or address bar.
 		if browserPath := findChromiumAppBrowser(); browserPath != "" {
 			fmt.Printf("Launching NatBypass in dedicated app window (%s)...\n", filepath.Base(browserPath))
-			userDataDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "NatBypass", "edge-profile")
-			_ = os.MkdirAll(userDataDir, 0755)
 			appArgs := []string{
 				fmt.Sprintf("--app=%s", url),
-				fmt.Sprintf("--user-data-dir=%s", userDataDir),
 				"--new-window",
 				"--disable-features=Translate",
 				"--window-size=1220,780",
