@@ -11,9 +11,11 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -349,6 +351,32 @@ collectLoop:
 
 			if p.RemoteDiag != nil && p.RemoteDiag.SessionID == sessionID {
 				r := p.RemoteDiag
+
+				// Ensure discoveredPeers has full OS/Arch/Version metadata from the response signal
+				if dp, ok := discoveredPeers[r.SenderID]; ok {
+					if dp.OS == "" && r.OS != "" {
+						dp.OS = r.OS
+					}
+					if dp.Platform == "" && r.Platform != "" {
+						dp.Platform = r.Platform
+					}
+					if dp.Arch == "" && r.Arch != "" {
+						dp.Arch = r.Arch
+					}
+					if (dp.Version == "" || dp.Version == "не указана") && r.Version != "" {
+						dp.Version = r.Version
+					}
+				} else {
+					discoveredPeers[r.SenderID] = &DiscoveredNodeInfo{
+						DeviceID: r.SenderID,
+						OS:       r.OS,
+						Platform: r.Platform,
+						Arch:     r.Arch,
+						Version:  r.Version,
+						LastSeen: time.Now(),
+					}
+				}
+
 				node, exists := nodes[r.SenderID]
 				if !exists {
 					node = &NodeResponse{
@@ -397,7 +425,7 @@ collectLoop:
 						}
 						node.FullReport = sb.String()
 						fmt.Printf(colorGreen+colorBold+"  [✓] Узел %-20s (%s/%s v%s): Диагностический отчет ПОЛНОСТЬЮ получен (%d байт)\n"+colorReset,
-							r.SenderID, r.OS, r.Arch, r.Version, len(node.FullReport))
+							r.SenderID, r.OS, r.Arch, strings.TrimPrefix(r.Version, "v"), len(node.FullReport))
 					}
 				}
 
@@ -436,8 +464,15 @@ collectLoop:
 }
 
 func printSummaryTable(discoveredPeers map[string]*DiscoveredNodeInfo, nodes map[string]*NodeResponse) {
-	var allPeerIDs []string
+	peerSet := make(map[string]bool)
 	for id := range discoveredPeers {
+		peerSet[id] = true
+	}
+	for id := range nodes {
+		peerSet[id] = true
+	}
+	var allPeerIDs []string
+	for id := range peerSet {
 		allPeerIDs = append(allPeerIDs, id)
 	}
 	sort.Strings(allPeerIDs)
@@ -449,13 +484,37 @@ func printSummaryTable(discoveredPeers map[string]*DiscoveredNodeInfo, nodes map
 	fmt.Println(colorGray + "─────────────────────────┼─────────────────┼────────────────┼──────────────────────────┼───────────" + colorReset)
 	for _, id := range allPeerIDs {
 		dp := discoveredPeers[id]
-		plat := fmt.Sprintf("%s/%s", dp.OS, dp.Arch)
-		if dp.Arch == "" {
-			plat = dp.OS
+		osStr := ""
+		archStr := ""
+		verStr := "не указана"
+		if dp != nil {
+			osStr = dp.OS
+			archStr = dp.Arch
+			if dp.Version != "" {
+				verStr = dp.Version
+			}
+		}
+		if n, ok := nodes[id]; ok {
+			if osStr == "" && n.OS != "" {
+				osStr = n.OS
+			}
+			if archStr == "" && n.Arch != "" {
+				archStr = n.Arch
+			}
+			if (verStr == "" || verStr == "не указана") && n.Version != "" {
+				verStr = n.Version
+			}
+		}
+		plat := fmt.Sprintf("%s/%s", osStr, archStr)
+		if archStr == "" {
+			plat = osStr
+		}
+		if plat == "/" || plat == "" {
+			plat = "-"
 		}
 		st := "Старая beta (нет RemoteDiag)"
 		stColor := colorBrightRed
-		if isBeta7OrNewer(dp.Version) {
+		if isBeta7OrNewer(verStr) {
 			st = "⌛ Таймаут / Занят"
 			stColor = colorBrightYellow
 		}
@@ -473,9 +532,9 @@ func printSummaryTable(discoveredPeers map[string]*DiscoveredNodeInfo, nodes map
 			}
 		}
 		fmt.Printf("%s%-24s%s │ %s%-15s%s │ %s%-14s%s │ %s%-24s%s │ %s%-10s%s\n",
-			colorBrightWhite+colorBold, truncateStr(dp.DeviceID, 24), colorReset,
+			colorBrightWhite+colorBold, truncateStr(id, 24), colorReset,
 			colorBrightCyan, truncateStr(plat, 15), colorReset,
-			colorBrightYellow, truncateStr(dp.Version, 14), colorReset,
+			colorBrightYellow, truncateStr(verStr, 14), colorReset,
 			stColor+colorBold, truncateStr(st, 24), colorReset,
 			colorBrightWhite, szStr, colorReset)
 	}
@@ -654,8 +713,15 @@ func saveConsolidatedReport(
 	discoveredPeers map[string]*DiscoveredNodeInfo,
 	nodes map[string]*NodeResponse,
 ) {
-	var allPeerIDs []string
+	peerSet := make(map[string]bool)
 	for id := range discoveredPeers {
+		peerSet[id] = true
+	}
+	for id := range nodes {
+		peerSet[id] = true
+	}
+	var allPeerIDs []string
+	for id := range peerSet {
 		allPeerIDs = append(allPeerIDs, id)
 	}
 	sort.Strings(allPeerIDs)
@@ -667,28 +733,61 @@ func saveConsolidatedReport(
 	fileSb.WriteString(fmt.Sprintf("Timestamp:      %s\n", time.Now().UTC().Format(time.RFC3339)))
 	fileSb.WriteString(fmt.Sprintf("Topic:          %s\n", topic))
 	fileSb.WriteString(fmt.Sprintf("Encrypted:      %t\n", networkKey != ""))
-	fileSb.WriteString(fmt.Sprintf("Discovered:     %d nodes\n", len(discoveredPeers)))
+	fileSb.WriteString(fmt.Sprintf("Discovered:     %d nodes\n", len(allPeerIDs)))
 	fileSb.WriteString(fmt.Sprintf("Responded Beta: %d nodes\n", len(nodes)))
 	fileSb.WriteString("================================================================================\n\n")
 
 	fileSb.WriteString("================================================================================\n")
-	fileSb.WriteString(fmt.Sprintf(" СПИСОК ОБНАРУЖЕННЫХ УЗЛОВ В СЕТИ (ОНЛАЙН В ТОПИКЕ: %d)\n", len(discoveredPeers)))
+	fileSb.WriteString(fmt.Sprintf(" СПИСОК ОБНАРУЖЕННЫХ УЗЛОВ В СЕТИ (ОНЛАЙН В ТОПИКЕ: %d)\n", len(allPeerIDs)))
 	fileSb.WriteString("================================================================================\n\n")
 	for _, id := range allPeerIDs {
 		dp := discoveredPeers[id]
+		osStr := ""
+		archStr := ""
+		verStr := "не указана"
+		nickStr := "-"
+		vipStr := "-"
+		pubIPStr := "-"
+		if dp != nil {
+			osStr = dp.OS
+			archStr = dp.Arch
+			if dp.Version != "" {
+				verStr = dp.Version
+			}
+			if dp.Nickname != "" {
+				nickStr = dp.Nickname
+			}
+			if dp.VirtualIP != "" {
+				vipStr = dp.VirtualIP
+			}
+			if dp.PublicIP != "" {
+				pubIPStr = dp.PublicIP
+			}
+		}
+		if n, ok := nodes[id]; ok {
+			if osStr == "" && n.OS != "" {
+				osStr = n.OS
+			}
+			if archStr == "" && n.Arch != "" {
+				archStr = n.Arch
+			}
+			if (verStr == "" || verStr == "не указана") && n.Version != "" {
+				verStr = n.Version
+			}
+		}
 		hasDiag := false
 		if n, ok := nodes[id]; ok && n.Completed {
 			hasDiag = true
 		}
-		statusText := fmt.Sprintf("Требуется обновить бинарник до актуальной beta (на узле: %s, RemoteDiag с v1.9.224-beta7+)", dp.Version)
+		statusText := fmt.Sprintf("Требуется обновить бинарник до актуальной beta (на узле: %s, RemoteDiag с v1.9.224-beta7+)", verStr)
 		if hasDiag {
 			statusText = "OK (Диагностический отчет получен)"
-		} else if isBeta7OrNewer(dp.Version) {
+		} else if isBeta7OrNewer(verStr) {
 			statusText = "Таймаут сбора отчета (узел на актуальной beta, но не успел передать отчет за отведенное время)"
 		}
-		fileSb.WriteString(fmt.Sprintf("Узел:        %s (%s)\n", dp.DeviceID, dp.Nickname))
-		fileSb.WriteString(fmt.Sprintf("ОС/Арх:      %s/%s | Версия: %s\n", dp.OS, dp.Arch, dp.Version))
-		fileSb.WriteString(fmt.Sprintf("Virtual IP:  %s | Публичный IP: %s\n", dp.VirtualIP, dp.PublicIP))
+		fileSb.WriteString(fmt.Sprintf("Узел:        %s (%s)\n", id, nickStr))
+		fileSb.WriteString(fmt.Sprintf("ОС/Арх:      %s/%s | Версия: %s\n", osStr, archStr, verStr))
+		fileSb.WriteString(fmt.Sprintf("Virtual IP:  %s | Публичный IP: %s\n", vipStr, pubIPStr))
 		fileSb.WriteString(fmt.Sprintf("Статус:      %s\n", statusText))
 		fileSb.WriteString("--------------------------------------------------------------------------------\n")
 	}
@@ -756,16 +855,60 @@ func main() {
 		parsedBroker, parsedTopic, parsedKey = parseShareLink(rawInput)
 	}
 
-	if isInteractive && rawInput == "" {
-		printBanner()
-		if cfg, err := config.Load(*flagConfig); err == nil && cfg != nil {
-			activeProf := cfg.EnsureActiveProfile()
-			if activeProf != nil && activeProf.MQTTTopic != "" {
-				parsedTopic = activeProf.MQTTTopic
-				parsedBroker = activeProf.MQTTBroker
-				parsedKey = activeProf.NetworkKey
+	if rawInput == "" {
+		candidatePaths := []string{*flagConfig}
+		if exePath, err := os.Executable(); err == nil {
+			exeDir := filepath.Dir(exePath)
+			candidatePaths = append(candidatePaths,
+				filepath.Join(exeDir, "config.yaml"),
+				filepath.Join(exeDir, "..", "config.yaml"),
+			)
+		}
+		if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+			candidatePaths = append(candidatePaths,
+				filepath.Join(userProfile, "Downloads", "config.yaml"),
+				filepath.Join(userProfile, "Desktop", "config.yaml"),
+			)
+		}
+
+		for _, candPath := range candidatePaths {
+			if cfg, err := config.Load(candPath); err == nil && cfg != nil {
+				activeProf := cfg.EnsureActiveProfile()
+				if activeProf != nil && activeProf.MQTTTopic != "" {
+					parsedTopic = activeProf.MQTTTopic
+					parsedBroker = activeProf.MQTTBroker
+					parsedKey = activeProf.NetworkKey
+					break
+				}
 			}
 		}
+
+		// If still empty, attempt auto-detecting from locally running NatBypass WebUI
+		if parsedTopic == "" {
+			httpClient := &http.Client{Timeout: 600 * time.Millisecond}
+			req, err := http.NewRequest("GET", "http://127.0.0.1:8080/api/config", nil)
+			if err == nil {
+				req.SetBasicAuth("admin", "admin")
+				if resp, err := httpClient.Do(req); err == nil && resp.StatusCode == 200 {
+					var apiResp struct {
+						OK   bool           `json:"ok"`
+						Data *config.Config `json:"data"`
+					}
+					if err := json.NewDecoder(resp.Body).Decode(&apiResp); err == nil && apiResp.Data != nil {
+						if prof := apiResp.Data.EnsureActiveProfile(); prof != nil && prof.MQTTTopic != "" {
+							parsedTopic = prof.MQTTTopic
+							parsedBroker = prof.MQTTBroker
+							parsedKey = prof.NetworkKey
+						}
+					}
+					_ = resp.Body.Close()
+				}
+			}
+		}
+	}
+
+	if isInteractive && rawInput == "" {
+		printBanner()
 
 		prompt := "Вставьте ссылку сети (natbypass://profile?...) или название топика"
 		if parsedTopic != "" {
@@ -820,6 +963,9 @@ func main() {
 
 	ch := signaling.NewMQTTChannel(broker, topic, collectorID, "", "")
 	defer ch.Close()
+	if networkKey != "" {
+		ch.SetNetworkKey(networkKey)
+	}
 
 	rx, err := ch.Receive(ctx)
 	if err != nil {
@@ -912,7 +1058,7 @@ func main() {
 			_, nodes, _ := runCollection(ch, rx, topic, broker, networkKey, collectorID, tID, false, *flagTimeout, false)
 			if n, ok := nodes[tID]; ok && n.Completed {
 				fmt.Println(colorGreen + colorBold + "\n═════════════════════════════════════════════════════════════════════════" + colorReset)
-				fmt.Printf(colorBold+" ДИАГНОСТИЧЕСКИЙ ОТЧЕТ УЗЛА: %s (%s/%s v%s)\n"+colorReset, n.DeviceID, n.OS, n.Arch, n.Version)
+				fmt.Printf(colorBold+" ДИАГНОСТИЧЕСКИЙ ОТЧЕТ УЗЛА: %s (%s/%s v%s)\n"+colorReset, n.DeviceID, n.OS, n.Arch, strings.TrimPrefix(n.Version, "v"))
 				fmt.Println(colorBold + "═════════════════════════════════════════════════════════════════════════" + colorReset)
 				fmt.Println(n.FullReport)
 			} else {
@@ -961,6 +1107,9 @@ func main() {
 				fmt.Println(colorGreen + "Параметры обновлены. Переподключение..." + colorReset)
 				ch.Close()
 				ch = signaling.NewMQTTChannel(broker, topic, collectorID, "", "")
+				if networkKey != "" {
+					ch.SetNetworkKey(networkKey)
+				}
 				rx, _ = ch.Receive(ctx)
 			}
 
