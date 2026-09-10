@@ -2754,6 +2754,13 @@ func waitForTermination(
 				}
 				return port
 			},
+			OnOpenUI: func() {
+				actualP := port
+				if uiServer != nil {
+					actualP = uiServer.GetPort()
+				}
+				openAppWindow(actualP)
+			},
 			OnRefreshIP: func() {
 				ipDisc.GetPublicIP(ctx)
 			},

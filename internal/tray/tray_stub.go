@@ -18,6 +18,7 @@ type TrayOptions struct {
 	OnRefreshIP   func()
 	OnExit        func()
 	GetStatusText func() string
+	OnOpenUI      func()
 }
 
 type TrayApp struct{}

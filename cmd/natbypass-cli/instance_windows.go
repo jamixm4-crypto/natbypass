@@ -186,6 +186,18 @@ func cleanupStaleBackups() {
 }
 
 func activateExistingWindow() {
+	if mainAppHWnd != 0 {
+		procIsWindow := moduser32Instance.NewProc("IsWindow")
+		if r, _, _ := procIsWindow.Call(mainAppHWnd); r != 0 {
+			procShowWindow := moduser32Instance.NewProc("ShowWindow")
+			procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
+			procShowWindow.Call(mainAppHWnd, 9 /* SW_RESTORE */)
+			procSetForegroundWindow.Call(mainAppHWnd)
+			return
+		}
+		mainAppHWnd = 0
+	}
+
 	procFindWindowW := moduser32Instance.NewProc("FindWindowW")
 	procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
 	procShowWindow := moduser32Instance.NewProc("ShowWindow")
@@ -354,6 +366,28 @@ func openAppWindow(port int) {
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
 
+	// 0. If window already exists, activate and bring to foreground immediately
+	if mainAppHWnd != 0 {
+		procIsWindow := moduser32Instance.NewProc("IsWindow")
+		if r, _, _ := procIsWindow.Call(mainAppHWnd); r != 0 {
+			procShowWindow := moduser32Instance.NewProc("ShowWindow")
+			procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
+			procShowWindow.Call(mainAppHWnd, 9 /* SW_RESTORE */)
+			procSetForegroundWindow.Call(mainAppHWnd)
+			return
+		}
+		mainAppHWnd = 0
+	}
+	titlePtr, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Network")
+	procFindWindowW := moduser32Instance.NewProc("FindWindowW")
+	if hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr))); hwnd != 0 {
+		procShowWindow := moduser32Instance.NewProc("ShowWindow")
+		procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
+		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
+		procSetForegroundWindow.Call(hwnd)
+		return
+	}
+
 	// 1. Readiness Gate: Poll 127.0.0.1:port for up to 10s before launching UI
 	ready := false
 	for i := 0; i < 50; i++ {
@@ -383,16 +417,27 @@ func openAppWindow(port int) {
 		return
 	}
 
-
-
-	// 5. MULTI-TIER WINDOW LAUNCHER (Windows 7/10/11 & Windows Server 2012-2025):
+	// 4. MULTI-TIER WINDOW LAUNCHER (Windows 7/10/11 & Windows Server 2012-2025):
 	go func() {
 		// Tier 1: In-process WebView2 Native Window (Windows 10/11 & Servers with WebView2 runtime)
 		if launchNativeWebView(url, port) {
 			return
 		}
 
-		// Tier 2: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
+		// Tier 2: Pure Win32 Native Dark Mode GDI GUI (NatBypass-GUI.exe) - Zero dependencies, 100% native desktop window without browser
+		exeDir, err := os.Executable()
+		if err == nil {
+			guiPath := filepath.Join(filepath.Dir(exeDir), "NatBypass-GUI.exe")
+			if _, statErr := os.Stat(guiPath); statErr == nil {
+				fmt.Println("Launching Pure Win32 Native GUI window (NatBypass-GUI)...")
+				cmd := exec.Command(guiPath, "-port", strconv.Itoa(port))
+				if startErr := cmd.Start(); startErr == nil {
+					return
+				}
+			}
+		}
+
+		// Tier 3: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
 		// This runs on Windows 10/11 and Windows Server, opening a dedicated frameless app window without browser tabs or address bar.
 		if browserPath := findChromiumAppBrowser(); browserPath != "" {
 			fmt.Printf("Launching NatBypass in dedicated app window (%s)...\n", filepath.Base(browserPath))
@@ -408,19 +453,6 @@ func openAppWindow(port int) {
 			cmd := exec.Command(browserPath, appArgs...)
 			if err := cmd.Start(); err == nil {
 				return
-			}
-		}
-
-		// Tier 3: Pure Win32 Native Dark Mode GDI GUI (Zero dependencies - works on Windows Server 2012-2025 out of the box)
-		exeDir, err := os.Executable()
-		if err == nil {
-			guiPath := filepath.Join(filepath.Dir(exeDir), "NatBypass-GUI.exe")
-			if _, statErr := os.Stat(guiPath); statErr == nil {
-				fmt.Println("Launching Pure Win32 Native GUI window (NatBypass-GUI)...")
-				cmd := exec.Command(guiPath, "-port", strconv.Itoa(port))
-				if startErr := cmd.Start(); startErr == nil {
-					return
-				}
 			}
 		}
 
@@ -557,11 +589,7 @@ func startTrayIcon(port int) {
 
 					switch cmd {
 					case uintptr(menuItemOpen):
-						if mainAppHWnd != 0 {
-							activateExistingWindow()
-						} else {
-							go launchNativeWebView(fmt.Sprintf("http://127.0.0.1:%d/", port), port)
-						}
+						activateExistingWindow()
 					case uintptr(menuItemBrowse):
 						_ = exec.Command("cmd.exe", "/c", "start", "", fmt.Sprintf("http://127.0.0.1:%d/", port)).Start()
 					case uintptr(menuItemDiag):

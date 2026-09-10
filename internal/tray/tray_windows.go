@@ -16,8 +16,6 @@ import (
 	"os/exec"
 	"runtime"
 	"syscall"
-
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -86,6 +84,7 @@ const (
 	CMD_OPEN_CONFIG = 1003
 	CMD_STATUS_INFO = 1004
 	CMD_EXIT        = 1005
+	CMD_OPEN_BROWSER = 1006
 )
 
 type NOTIFYICONDATAW struct {
@@ -141,6 +140,7 @@ type TrayOptions struct {
 	OnRefreshIP   func()
 	OnExit        func()
 	GetStatusText func() string
+	OnOpenUI      func()
 }
 
 type TrayApp struct {
@@ -271,11 +271,6 @@ func (t *TrayApp) Run(ctx context.Context) error {
 	procShell_NotifyIconW.Call(uintptr(NIM_ADD), uintptr(unsafe.Pointer(&t.nid)))
 	defer procShell_NotifyIconW.Call(uintptr(NIM_DELETE), uintptr(unsafe.Pointer(&t.nid)))
 
-	// Automatically open the standalone application window on startup
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		t.activateExistingWindow()
-	}()
 
 	go func() {
 		select {
@@ -306,7 +301,8 @@ func (t *TrayApp) showMenu() {
 	}
 	defer procDestroyMenu.Call(uintptr(hMenu))
 
-	sWebUI, _ := windows.UTF16PtrFromString("🚀 Открыть панель управления (Web UI)")
+	sWebUI, _ := windows.UTF16PtrFromString("🚀 Открыть панель управления")
+	sBrowser, _ := windows.UTF16PtrFromString("🌐 Открыть в браузере")
 	sRefresh, _ := windows.UTF16PtrFromString("🔄 Обновить внешний IP")
 	sConfig, _ := windows.UTF16PtrFromString("⚙ Открыть файл настроек (config.yaml)")
 	sExit, _ := windows.UTF16PtrFromString("❌ Выход")
@@ -318,6 +314,7 @@ func (t *TrayApp) showMenu() {
 	sStatus, _ := windows.UTF16PtrFromString(statusText)
 
 	procAppendMenuW.Call(uintptr(hMenu), uintptr(MF_STRING), uintptr(CMD_OPEN_WEBUI), uintptr(unsafe.Pointer(sWebUI)))
+	procAppendMenuW.Call(uintptr(hMenu), uintptr(MF_STRING), uintptr(CMD_OPEN_BROWSER), uintptr(unsafe.Pointer(sBrowser)))
 	procAppendMenuW.Call(uintptr(hMenu), uintptr(MF_STRING), uintptr(CMD_REFRESH_IP), uintptr(unsafe.Pointer(sRefresh)))
 	procAppendMenuW.Call(uintptr(hMenu), uintptr(MF_STRING), uintptr(CMD_OPEN_CONFIG), uintptr(unsafe.Pointer(sConfig)))
 	procAppendMenuW.Call(uintptr(hMenu), uintptr(MF_SEPARATOR), 0, 0)
@@ -344,6 +341,8 @@ func (t *TrayApp) handleCommand(cmdID uint32) {
 	switch cmdID {
 	case CMD_OPEN_WEBUI:
 		t.activateExistingWindow()
+	case CMD_OPEN_BROWSER:
+		t.openInBrowser()
 	case CMD_REFRESH_IP:
 		if t.opts.OnRefreshIP != nil {
 			t.opts.OnRefreshIP()
@@ -376,6 +375,15 @@ func (t *TrayApp) activateExistingWindow() {
 		return
 	}
 
+	if t.opts.OnOpenUI != nil {
+		t.opts.OnOpenUI()
+		return
+	}
+
+	t.openInBrowser()
+}
+
+func (t *TrayApp) openInBrowser() {
 	port := t.opts.WebUIPort
 	if t.opts.GetWebUIPort != nil {
 		if p := t.opts.GetWebUIPort(); p > 0 {
