@@ -526,5 +526,5 @@ func GenerateRandomMTU() int {
 	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
 		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomMTU: %v", err))
 	}
-	return 1280 + int(b[0]%101) // 1280-1380
+	return 1280 + int(b[0]%100) // 1280-1379
 }
