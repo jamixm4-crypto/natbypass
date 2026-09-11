@@ -27,7 +27,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/jchv/go-webview2"
 	"github.com/natbypass/natbypass/internal/tray"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -268,127 +267,10 @@ func isHeadlessOrServerCore() bool {
 	return hDesktop == 0
 }
 
-// launchNativeWebView attempts to create and run an in-process native WebView2 window.
-// Returns true on success, false if WebView2 runtime is missing or fails to initialize.
-func launchNativeWebView(url string, port int) bool {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
+// launchNativeWebView is omitted in natbypass-cli (console daemon) to eliminate
+// heavy CGO/WebView2 runtime dependencies during cross-compilation.
+// NatBypass.exe and NatBypass-GUI.exe provide dedicated graphical windows.
 
-	modole32 := windows.NewLazySystemDLL("ole32.dll")
-	procOleInitialize := modole32.NewProc("OleInitialize")
-	if procOleInitialize.Find() == nil {
-		_, _, _ = procOleInitialize.Call(0)
-	}
-
-	screenWidth, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(0)
-	screenHeight, _, _ := moduser32Instance.NewProc("GetSystemMetrics").Call(1)
-
-	winWidth := 1220
-	winHeight := 780
-	if screenWidth > 0 && int(screenWidth) < winWidth+40 {
-		winWidth = int(screenWidth) - 40
-	}
-	if screenHeight > 0 && int(screenHeight) < winHeight+40 {
-		winHeight = int(screenHeight) - 40
-	}
-
-	// Set DPI awareness
-	procSetProcessDpiAwarenessContext := moduser32Instance.NewProc("SetProcessDpiAwarenessContext")
-	if procSetProcessDpiAwarenessContext.Find() == nil {
-		_, _, _ = procSetProcessDpiAwarenessContext.Call(^uintptr(3))
-	}
-
-	createWebView := func(dataPath string) (webview2.WebView, error) {
-		var wv webview2.WebView
-		var initErr error
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					initErr = fmt.Errorf("panic in webview2 init: %v", r)
-				}
-			}()
-			wv = webview2.NewWithOptions(webview2.WebViewOptions{
-				Debug:     false,
-				AutoFocus: true,
-				DataPath:  dataPath,
-				WindowOptions: webview2.WindowOptions{
-					Title:  "NatBypass — P2P Mesh Network",
-					Width:  uint(winWidth),
-					Height: uint(winHeight),
-					Center: true,
-				},
-			})
-		}()
-		return wv, initErr
-	}
-
-	// 1. Primary: Use Edge WebView2 default data path (empty string) - standard, reliable, avoids local lockups
-	w, initErr := createWebView("")
-	if w == nil || initErr != nil {
-		// 2. Fallback: LocalAppData directory
-		userDataDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "NatBypass", "webview2")
-		_ = os.MkdirAll(userDataDir, 0755)
-		_ = os.Remove(filepath.Join(userDataDir, "EBWebView", "lockfile"))
-		w, initErr = createWebView(userDataDir)
-		if w == nil || initErr != nil {
-			// 3. Fallback: PID-isolated temp directory
-			fallbackDir := filepath.Join(os.TempDir(), fmt.Sprintf("nb_wv2_%d", os.Getpid()))
-			_ = os.MkdirAll(fallbackDir, 0755)
-			w, initErr = createWebView(fallbackDir)
-			if w == nil || initErr != nil {
-				return false
-			}
-			defer func() {
-				_ = os.RemoveAll(fallbackDir)
-			}()
-		}
-	}
-
-	if w == nil || initErr != nil {
-		return false
-	}
-
-	defer func() {
-		defer func() { recover() }()
-		w.Destroy()
-		mainAppHWnd = 0
-	}()
-
-	hwnd := uintptr(w.Window())
-	subclassWebViewWindow(hwnd)
-
-	// Enable Dark Mode on titlebar
-	procDwmSetWindowAttribute := moddwmapiInstance.NewProc("DwmSetWindowAttribute")
-	if procDwmSetWindowAttribute.Find() == nil {
-		darkMode := int32(1)
-		_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
-		_, _, _ = procDwmSetWindowAttribute.Call(hwnd, 19, uintptr(unsafe.Pointer(&darkMode)), 4)
-	}
-
-	// Apply application icon to the window
-	if appHIcon != 0 {
-		procSendMessageW := moduser32Instance.NewProc("SendMessageW")
-		_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, appHIcon)
-		_, _, _ = procSendMessageW.Call(hwnd, 0x0080 /* WM_SETICON */, 0 /* ICON_SMALL */, appHIcon)
-	}
-
-	w.Init(`
-		window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
-		window.addEventListener('keydown', function(e) {
-			if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R' || e.key === 'f' || e.key === 'F' || e.key === 'u' || e.key === 'U' || e.key === 'p' || e.key === 'P'))) {
-				e.preventDefault();
-			}
-		});
-		window.open = function(url) { return null; };
-	`)
-
-	w.SetSize(880, 560, webview2.HintMin)
-	w.SetSize(winWidth, winHeight, webview2.HintNone)
-
-	w.Navigate(url)
-	w.Run()
-	return true
-}
 
 // openAppWindow launches the WebUI window using Native-First strategy:
 // 1. If uiMode == "browser" -> opens default browser immediately.
@@ -452,14 +334,9 @@ func openAppWindow(port int) {
 		return
 	}
 
-	// 4. MULTI-TIER WINDOW LAUNCHER (Windows 7/10/11 & Windows Server 2012-2025):
+	// 4. MULTI-TIER WINDOW LAUNCHER:
 	go func() {
-		// Tier 1: In-process WebView2 Native Window (Windows 10/11 & Servers with WebView2 runtime)
-		if launchNativeWebView(url, port) {
-			return
-		}
-
-		// Tier 2: Pure Win32 Native Dark Mode GDI GUI (NatBypass-GUI.exe) - Zero dependencies, 100% native desktop window without browser
+		// Tier 1: Pure Win32 Native Dark Mode GDI GUI (NatBypass-GUI.exe) - Zero dependencies
 		exeDir, err := os.Executable()
 		if err == nil {
 			guiPath := filepath.Join(filepath.Dir(exeDir), "NatBypass-GUI.exe")
@@ -472,8 +349,7 @@ func openAppWindow(port int) {
 			}
 		}
 
-		// Tier 3: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
-		// This runs on Windows 10/11 and Windows Server, opening a dedicated frameless app window without browser tabs or address bar.
+		// Tier 2: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
 		if browserPath := findChromiumAppBrowser(); browserPath != "" {
 			fmt.Printf("Launching NatBypass in dedicated app window (%s)...\n", filepath.Base(browserPath))
 			appArgs := []string{
@@ -488,18 +364,7 @@ func openAppWindow(port int) {
 			}
 		}
 
-		// Tier 4: If on Windows Server with Desktop Experience, trigger on-demand WebView2 auto-install
-		if tray.IsDesktopExperienceAvailable() && !tray.IsWebView2RuntimeAvailable() {
-			fmt.Println("Attempting on-demand WebView2 runtime setup...")
-			go func() {
-				installed, instErr := tray.InstallWebView2RuntimeIfNeeded()
-				if instErr == nil && installed {
-					_ = launchNativeWebView(url, port)
-				}
-			}()
-		}
-
-		// Tier 5: Fallback to default browser with IE ESC Intranet Zone preconfigured
+		// Tier 3: Fallback to default browser
 		configureLocalIntranetZone()
 		fmt.Printf("Opening WebUI in default browser at %s\n", url)
 		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()

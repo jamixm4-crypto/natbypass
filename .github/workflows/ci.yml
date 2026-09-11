@@ -118,6 +118,7 @@ jobs:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           GOMIPS: ${{ matrix.gomips }}
+          GOPROXY: 'https://proxy.golang.org,direct'
         run: |
           mkdir -p bin
           OUT_NAME="natbypass-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
