@@ -116,15 +116,15 @@ func IsMultiHopPacket(data []byte) bool {
 
 // MultiHopRouter handles multi-hop routing, transit forwarding, and local delivery.
 type MultiHopRouter struct {
+	// Atomic telemetry metrics MUST be first for 64-bit alignment on 32-bit MIPS/ARM/386
+	forwardedCount uint64
+	deliveredCount uint64
+	droppedLoops   uint64
+
 	selfDeviceID string
 	forwardFunc  func(dstID string, packet []byte) error
 	deliverFunc  func(srcID string, payload []byte) error
 	mu           sync.RWMutex
-
-	// Atomic telemetry metrics (64-bit aligned for MIPS)
-	forwardedCount uint64
-	deliveredCount uint64
-	droppedLoops   uint64
 }
 
 // NewMultiHopRouter creates a router instance for the local node.

@@ -150,7 +150,7 @@ func printBanner() {
 	fmt.Print(colorBrightCyan + colorBold + `
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║               NATBYPASS CLUSTER DIAGNOSTIC & CONTROL CENTER                  ║
-║                  (v1.9.226-beta9 | Local Engineering)                        ║
+║                  (v1.9.226-beta10 | Local Engineering)                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ` + colorReset)
 }
@@ -1042,6 +1042,7 @@ func main() {
 			}
 			saveConsolidatedReport(outFileName, topic, networkKey, localRep, discov, nodes)
 			printSummaryTable(discov, nodes)
+			printDpiMeshMatrix(discov, nodes)
 
 		case "2":
 			discov, nodes, _ := runCollection(ch, rx, topic, broker, networkKey, collectorID, "", false, *flagTimeout, false)

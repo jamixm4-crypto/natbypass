@@ -24,6 +24,10 @@ import (
 
 // Peer represents a discovered mesh network device.
 type Peer struct {
+	// OutboundSeq MUST be the first field in Peer (offset 0) to ensure 64-bit (8-byte) alignment
+	// for 64-bit atomic operations (atomic.AddUint64) on 32-bit architectures (MIPS, ARM, 386).
+	// Without this, Go panics on 32-bit MIPS routers with "panic: unaligned 64-bit atomic operation".
+	OutboundSeq      uint64               `json:"-"`
 	DeviceID         string               `json:"device_id"`
 	Nickname         string               `json:"nickname,omitempty"`
 	DeviceName       string               `json:"device_name,omitempty"`
@@ -76,7 +80,6 @@ type Peer struct {
 	StandbyRelayReady        bool                    `json:"standby_relay_ready,omitempty"`  // True if Hot-Standby Relay path is verified
 	LastRelayPing            time.Time               `json:"last_relay_ping,omitempty"`      // Timestamp of last Hot-Standby heartbeat
 	ReplayFilter             *crypto.ReplayFilter    `json:"-"`                              // Anti-Replay sliding window (RFC 6479)
-	OutboundSeq              uint64                  `json:"-"`                              // Monotonic outbound sequence counter
 }
 
 // NextOutboundSeq returns the next monotonically increasing sequence number for this peer.

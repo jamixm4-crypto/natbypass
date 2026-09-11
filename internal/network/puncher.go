@@ -103,6 +103,10 @@ type AWGPacketHandler interface {
 }
 
 type UDPPuncher struct {
+	// 64-bit atomic counters MUST be first in struct for alignment on 32-bit MIPS/ARM/x86
+	outboundSeq   uint64
+	connID        uint64
+
 	awgVersion     string
 	awgHandler     AWGPacketHandler
 	trafficShaper   *TrafficShaper
@@ -121,7 +125,6 @@ type UDPPuncher struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mu           sync.Mutex
-	connID       uint64
 
 	// NATType is detected asynchronously after construction.
 	NATType   NATType
@@ -149,7 +152,6 @@ type UDPPuncher struct {
 	cipherKey    [32]byte
 	hasCipherKey bool
 	cipherMu     sync.RWMutex
-	outboundSeq  uint64
 }
 
 // SetCipherKey конфигурирует ключ симметричного шифрования (ChaCha20-Poly1305) для L3 Data-plane пакетов.
