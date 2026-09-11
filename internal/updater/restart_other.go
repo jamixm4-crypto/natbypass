@@ -54,6 +54,8 @@ func hasBinaryInPath(name string) bool {
 //   - BusyBox (Keenetic MIPS, OpenWrt): экранирует SIGHUP через 'trap "" HUP INT TERM',
 //     предотвращая сброс дочернего процесса при завершении родительского процесса.
 func RestartService(execPath string) {
+	RunPreExitHooks()
+
 	// 1. Linux systemd: асинхронный перезапуск напрямую через PID 1
 	if isSystemdService() {
 		_ = exec.Command("systemctl", "--no-block", "restart", "natbypass").Run()

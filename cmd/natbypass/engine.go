@@ -39,6 +39,7 @@ import (
 	"github.com/natbypass/natbypass/internal/transport/quic"
 	"github.com/natbypass/natbypass/internal/tray"
 	"github.com/natbypass/natbypass/internal/tunnel"
+	"github.com/natbypass/natbypass/internal/updater"
 	"github.com/natbypass/natbypass/internal/webui"
 	"github.com/natbypass/natbypass/internal/wireguard"
 	"github.com/rs/zerolog/log"
@@ -1764,6 +1765,7 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 	}
 	uiServer.SetOnConfigChange(triggerPublish)
 	uiServer.SetOnOpenWindow(func() {
+		noWindow = false
 		openAppWindow(uiServer.GetPort())
 	})
 	uiServer.SetConfig(cfg)
@@ -2810,6 +2812,7 @@ func waitForTermination(
 				return port
 			},
 			OnOpenUI: func() {
+				noWindow = false
 				actualP := port
 				if uiServer != nil {
 					actualP = uiServer.GetPort()
@@ -2820,6 +2823,7 @@ func waitForTermination(
 				ipDisc.GetPublicIP(ctx)
 			},
 			OnExit: func() {
+				tray.Cleanup()
 				cancel()
 			},
 			GetStatusText: func() string {
@@ -2830,6 +2834,7 @@ func waitForTermination(
 				return fmt.Sprintf("💡 Статус: Онлайн (Канал: %s)", ch)
 			},
 		})
+		updater.RegisterPreExitHook(tray.Cleanup)
 		return trayApp.Run(ctx)
 	}
 

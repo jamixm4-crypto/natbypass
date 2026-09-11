@@ -354,6 +354,7 @@ func (t *TrayApp) handleCommand(cmdID uint32) {
 		}
 		exec.Command("notepad.exe", cfg).Start()
 	case CMD_EXIT:
+		t.DeleteTrayIcon()
 		if t.opts.OnExit != nil {
 			t.opts.OnExit()
 		}
@@ -362,16 +363,69 @@ func (t *TrayApp) handleCommand(cmdID uint32) {
 	}
 }
 
+// ForceForegroundWindow restores a window (even if hidden or minimized)
+// and brings it to the foreground, bypassing Windows focus-stealing prevention.
+func ForceForegroundWindow(hwnd uintptr) {
+	if hwnd == 0 {
+		return
+	}
+	procShowWindow := moduser32.NewProc("ShowWindow")
+	procSetForegroundWindow := moduser32.NewProc("SetForegroundWindow")
+	procBringWindowToTop := moduser32.NewProc("BringWindowToTop")
+	procSetWindowPos := moduser32.NewProc("SetWindowPos")
+	procGetForegroundWindow := moduser32.NewProc("GetForegroundWindow")
+	procGetWindowThreadProcessId := moduser32.NewProc("GetWindowThreadProcessId")
+	procAttachThreadInput := moduser32.NewProc("AttachThreadInput")
+	procGetCurrentThreadId := modkernel32.NewProc("GetCurrentThreadId")
+
+	foreHWnd, _, _ := procGetForegroundWindow.Call()
+	var foreThread uintptr
+	if foreHWnd != 0 {
+		foreThread, _, _ = procGetWindowThreadProcessId.Call(foreHWnd, 0)
+	}
+	curThread, _, _ := procGetCurrentThreadId.Call()
+
+	attached := false
+	if foreThread != 0 && curThread != 0 && curThread != foreThread {
+		r, _, _ := procAttachThreadInput.Call(curThread, foreThread, 1)
+		attached = (r != 0)
+	}
+
+	// 1. Restore from minimized state, then force WS_VISIBLE
+	procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
+	procShowWindow.Call(hwnd, 5 /* SW_SHOW */)
+
+	// 2. Set to top of Z-order and bring to top
+	procSetWindowPos.Call(hwnd, 0 /* HWND_TOP */, 0, 0, 0, 0, 0x0001 /* SWP_NOSIZE */|0x0002 /* SWP_NOMOVE */|0x0040 /* SWP_SHOWWINDOW */)
+	procBringWindowToTop.Call(hwnd)
+	procSetForegroundWindow.Call(hwnd)
+
+	if attached {
+		procAttachThreadInput.Call(curThread, foreThread, 0)
+	}
+}
+
+// DeleteTrayIcon removes the icon from the notification area immediately.
+func (t *TrayApp) DeleteTrayIcon() {
+	if t != nil && t.hwnd != 0 {
+		procShell_NotifyIconW.Call(uintptr(NIM_DELETE), uintptr(unsafe.Pointer(&t.nid)))
+	}
+}
+
+// Cleanup removes any active tray icon globally. Safe to call from exit hooks.
+func Cleanup() {
+	if globalTray != nil {
+		globalTray.DeleteTrayIcon()
+	}
+}
+
 func (t *TrayApp) activateExistingWindow() {
 	procFindWindowW := moduser32.NewProc("FindWindowW")
-	procSetForegroundWindow := moduser32.NewProc("SetForegroundWindow")
-	procShowWindow := moduser32.NewProc("ShowWindow")
 
 	titlePtr, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Network")
 	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
 	if hwnd != 0 {
-		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
-		procSetForegroundWindow.Call(hwnd)
+		ForceForegroundWindow(hwnd)
 		return
 	}
 

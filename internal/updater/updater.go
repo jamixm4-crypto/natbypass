@@ -865,3 +865,31 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	}()
 	return nil
 }
+
+var (
+	preExitMu    sync.Mutex
+	preExitHooks []func()
+)
+
+// RegisterPreExitHook adds a callback to be executed right before the process terminates for an update restart.
+func RegisterPreExitHook(fn func()) {
+	preExitMu.Lock()
+	defer preExitMu.Unlock()
+	preExitHooks = append(preExitHooks, fn)
+}
+
+// RunPreExitHooks executes all registered pre-exit hooks.
+func RunPreExitHooks() {
+	preExitMu.Lock()
+	hooks := make([]func(), len(preExitHooks))
+	copy(hooks, preExitHooks)
+	preExitMu.Unlock()
+	for _, h := range hooks {
+		if h != nil {
+			func() {
+				defer func() { recover() }()
+				h()
+			}()
+		}
+	}
+}

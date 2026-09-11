@@ -192,11 +192,7 @@ func activateExistingWindow() {
 	if mainAppHWnd != 0 {
 		procIsWindow := moduser32Instance.NewProc("IsWindow")
 		if r, _, _ := procIsWindow.Call(mainAppHWnd); r != 0 {
-			procShowWindow := moduser32Instance.NewProc("ShowWindow")
-			procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
-			procShowWindow.Call(mainAppHWnd, 9 /* SW_RESTORE */)
-			procShowWindow.Call(mainAppHWnd, 5 /* SW_SHOW */)
-			procSetForegroundWindow.Call(mainAppHWnd)
+			tray.ForceForegroundWindow(mainAppHWnd)
 			return
 		}
 		mainAppHWnd = 0
@@ -214,15 +210,10 @@ func activateExistingWindow() {
 
 	// 3. Fallback: find existing top-level window by title
 	procFindWindowW := moduser32Instance.NewProc("FindWindowW")
-	procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
-	procShowWindow := moduser32Instance.NewProc("ShowWindow")
-
 	titlePtr, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Network")
 	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
 	if hwnd != 0 {
-		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
-		procShowWindow.Call(hwnd, 5 /* SW_SHOW */)
-		procSetForegroundWindow.Call(hwnd)
+		tray.ForceForegroundWindow(hwnd)
 		return
 	}
 
@@ -401,7 +392,7 @@ func launchNativeWebView(url string, port int) bool {
 // 2. Otherwise (auto / native) -> ALWAYS tries native WebView2 first.
 // 3. If native fails (e.g. Server without runtime) -> checks auto-install or falls back to dedicated App window.
 func openAppWindow(port int) {
-	if noWindow || strings.EqualFold(uiMode, "none") || strings.EqualFold(uiMode, "off") || strings.EqualFold(uiMode, "silent") || strings.EqualFold(uiMode, "hidden") {
+	if strings.EqualFold(uiMode, "none") || strings.EqualFold(uiMode, "off") || strings.EqualFold(uiMode, "silent") || strings.EqualFold(uiMode, "hidden") {
 		return
 	}
 	if port <= 0 {
@@ -413,11 +404,7 @@ func openAppWindow(port int) {
 	if mainAppHWnd != 0 {
 		procIsWindow := moduser32Instance.NewProc("IsWindow")
 		if r, _, _ := procIsWindow.Call(mainAppHWnd); r != 0 {
-			procShowWindow := moduser32Instance.NewProc("ShowWindow")
-			procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
-			procShowWindow.Call(mainAppHWnd, 9 /* SW_RESTORE */)
-			procShowWindow.Call(mainAppHWnd, 5 /* SW_SHOW */)
-			procSetForegroundWindow.Call(mainAppHWnd)
+			tray.ForceForegroundWindow(mainAppHWnd)
 			return
 		}
 		mainAppHWnd = 0
@@ -425,11 +412,11 @@ func openAppWindow(port int) {
 	titlePtr, _ := windows.UTF16PtrFromString("NatBypass — P2P Mesh Network")
 	procFindWindowW := moduser32Instance.NewProc("FindWindowW")
 	if hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr))); hwnd != 0 {
-		procShowWindow := moduser32Instance.NewProc("ShowWindow")
-		procSetForegroundWindow := moduser32Instance.NewProc("SetForegroundWindow")
-		procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
-		procShowWindow.Call(hwnd, 5 /* SW_SHOW */)
-		procSetForegroundWindow.Call(hwnd)
+		tray.ForceForegroundWindow(hwnd)
+		return
+	}
+
+	if noWindow {
 		return
 	}
 
@@ -694,6 +681,7 @@ func startTrayIcon(port int) {
 	copy(nid.szTip[:], tip)
 
 	procShellNotifyIconW.Call(0 /* NIM_ADD */, uintptr(unsafe.Pointer(&nid)))
+	defer procShellNotifyIconW.Call(2 /* NIM_DELETE */, uintptr(unsafe.Pointer(&nid)))
 
 	var msg msgW
 	for {

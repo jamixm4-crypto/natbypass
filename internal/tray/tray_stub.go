@@ -33,3 +33,7 @@ func (t *TrayApp) Run(ctx context.Context) error {
 }
 
 func (t *TrayApp) ShowNotification(title, message string) {}
+
+func Cleanup() {}
+
+func ForceForegroundWindow(hwnd uintptr) {}

@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta6"
+	Version = "1.9.226-beta7"
 	Commit  = "release"
 )
 
@@ -175,8 +175,12 @@ var (
 	procCreatePopupMenu       = moduser32.NewProc("CreatePopupMenu")
 	procAppendMenuW           = moduser32.NewProc("AppendMenuW")
 	procTrackPopupMenu        = moduser32.NewProc("TrackPopupMenu")
-	procGetCursorPos          = moduser32.NewProc("GetCursorPos")
-	procLoadImageW            = moduser32.NewProc("LoadImageW")
+	procGetCursorPos             = moduser32.NewProc("GetCursorPos")
+	procLoadImageW               = moduser32.NewProc("LoadImageW")
+	procGetForegroundWindow      = moduser32.NewProc("GetForegroundWindow")
+	procAttachThreadInput        = moduser32.NewProc("AttachThreadInput")
+	procBringWindowToTop         = moduser32.NewProc("BringWindowToTop")
+	procGetCurrentThreadId       = modkernel32.NewProc("GetCurrentThreadId")
 
 	modshell32            = syscall.NewLazyDLL("shell32.dll")
 	procShell_NotifyIconW = modshell32.NewProc("Shell_NotifyIconW")
@@ -385,6 +389,7 @@ var (
 	// Настройки окна и автозапуска
 	minimizeToTray     bool = true
 	isAutostartEnabled bool = false
+	startInTray        bool = false
 
 	// Вкладка 0: Обзор (Dashboard)
 	hLblStatus            uintptr
@@ -810,6 +815,39 @@ func setupDPI() {
 	}
 }
 
+// activateExistingGUIWindow restores the GUI window (even from hidden/tray state)
+// and brings it to the foreground, bypassing Windows focus-stealing prevention.
+func activateExistingGUIWindow(hwnd uintptr) {
+	if hwnd == 0 {
+		return
+	}
+	foreHWnd, _, _ := procGetForegroundWindow.Call()
+	var foreThread uintptr
+	if foreHWnd != 0 {
+		foreThread, _, _ = procGetWindowThreadProcessId.Call(foreHWnd, 0)
+	}
+	curThread, _, _ := procGetCurrentThreadId.Call()
+
+	attached := false
+	if foreThread != 0 && curThread != 0 && curThread != foreThread {
+		r, _, _ := procAttachThreadInput.Call(curThread, foreThread, 1)
+		attached = (r != 0)
+	}
+
+	// 1. SW_RESTORE (9) + SW_SHOW (5)
+	procShowWindow.Call(hwnd, 9 /* SW_RESTORE */)
+	procShowWindow.Call(hwnd, 5 /* SW_SHOW */)
+
+	// 2. Set to top of Z-order and bring to top
+	procSetWindowPos.Call(hwnd, 0 /* HWND_TOP */, 0, 0, 0, 0, 0x0001 /* SWP_NOSIZE */|0x0002 /* SWP_NOMOVE */|0x0040 /* SWP_SHOWWINDOW */)
+	procBringWindowToTop.Call(hwnd)
+	procSetForegroundWindow.Call(hwnd)
+
+	if attached {
+		procAttachThreadInput.Call(curThread, foreThread, 0)
+	}
+}
+
 func main() {
 	runtime.LockOSThread()
 	defer func() {
@@ -831,8 +869,7 @@ func main() {
 		clsName, _ := windows.UTF16PtrFromString("NatBypassModernAppClass")
 		hExisting, _, _ := procFindWindowW.Call(uintptr(unsafe.Pointer(clsName)), 0)
 		if hExisting != 0 {
-			procShowWindow.Call(hExisting, 9 /* SW_RESTORE */)
-			procSetForegroundWindow.Call(hExisting)
+			activateExistingGUIWindow(hExisting)
 		}
 		os.Exit(0)
 		return
@@ -846,8 +883,14 @@ func main() {
 	startSystemWatchdog()
 
 	cfgFile := flag.String("config", "config.yaml", "Path to config.yaml")
+	noWindowFlag := flag.Bool("no-window", false, "Start minimized to system tray")
+	_ = flag.Bool("silent", false, "Start minimized to system tray")
+	_ = flag.Bool("updated", false, "Internal restart flag")
 
 	flag.Parse()
+	if *noWindowFlag {
+		startInTray = true
+	}
 	configPath = *cfgFile
 	if !filepath.IsAbs(configPath) {
 		if exe, err := os.Executable(); err == nil {
@@ -1071,10 +1114,15 @@ func main() {
 	buildModernUI(hInstance)
 
 	// Показываем нативное главное окно Win32
-	procShowWindow.Call(hMainWnd, SW_SHOW)
-	procUpdateWindow.Call(hMainWnd)
-	procSetForegroundWindow.Call(hMainWnd)
+	if startInTray {
+		procShowWindow.Call(hMainWnd, SW_HIDE)
+	} else {
+		procShowWindow.Call(hMainWnd, SW_SHOW)
+		procUpdateWindow.Call(hMainWnd)
+		procSetForegroundWindow.Call(hMainWnd)
+	}
 	procSetTimer.Call(hMainWnd, ID_TIMER_POLL, 1000, 0)
+	updater.RegisterPreExitHook(func() { removeTrayIcon(hMainWnd) })
 
 	// Запуск сетевого ядра напрямую из параметров cfg
 	writeDebug("Запуск сетевого ядра NatBypass Mesh...")
@@ -1216,13 +1264,19 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		}
 
 	case WM_SYSCOMMAND:
-		if wParam == SC_CLOSE {
+		sysCmd := wParam & 0xFFF0
+		if sysCmd == SC_CLOSE {
 			if minimizeToTray {
 				procShowWindow.Call(hwnd, SW_HIDE)
 				return 0
 			}
 			exitApp()
 			return 0
+		} else if sysCmd == 0xF020 /* SC_MINIMIZE */ {
+			if minimizeToTray {
+				procShowWindow.Call(hwnd, SW_HIDE)
+				return 0
+			}
 		}
 
 	case WM_CLOSE:
@@ -1315,9 +1369,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 			cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */|0x0002 /* TPM_RIGHTBUTTON */, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
 
 			if cmd == 1001 {
-				procShowWindow.Call(hMainWnd, SW_RESTORE)
-				procShowWindow.Call(hMainWnd, SW_SHOW)
-				procSetForegroundWindow.Call(hMainWnd)
+				activateExistingGUIWindow(hMainWnd)
 			} else if cmd == 1002 {
 				triggerPublish()
 			} else if cmd == 1003 {
@@ -1326,9 +1378,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 			}
 			return 0
 		} else if lParam == 0x0203 /* WM_LBUTTONDBLCLK */ || lParam == 0x0202 /* WM_LBUTTONUP */ {
-			procShowWindow.Call(hMainWnd, SW_RESTORE)
-			procShowWindow.Call(hMainWnd, SW_SHOW)
-			procSetForegroundWindow.Call(hMainWnd)
+			activateExistingGUIWindow(hMainWnd)
 			return 0
 		}
 		return 0
@@ -1728,11 +1778,11 @@ func handleCommand(id uint16) {
 	case ID_BTN_TOGGLE_LOGS:
 		saveLogsToDisk = !saveLogsToDisk
 		if saveLogsToDisk {
-			buttonLabels[ID_BTN_TOGGLE_LOGS] = "💾 Запись логов на диск: ВКЛ"
+			buttonLabels[ID_BTN_TOGGLE_LOGS] = "💾 Запись логов: ВКЛ"
 			buttonTypes[ID_BTN_TOGGLE_LOGS] = "green"
 			addLog("💾 Запись отладочных логов на диск ВКЛЮЧЕНА (natbypass_debug.log)")
 		} else {
-			buttonLabels[ID_BTN_TOGGLE_LOGS] = "💾 Запись логов на диск: ВЫКЛ"
+			buttonLabels[ID_BTN_TOGGLE_LOGS] = "💾 Запись логов: ВЫКЛ"
 			buttonTypes[ID_BTN_TOGGLE_LOGS] = "normal"
 			addLog("💾 Запись отладочных логов на диск ВЫКЛЮЧЕНА")
 		}
@@ -1757,11 +1807,11 @@ func handleCommand(id uint16) {
 			cfg.App.BetaChannel = !cfg.App.BetaChannel
 			_ = config.Save(cfg, configPath, false)
 			if cfg.App.BetaChannel {
-				buttonLabels[ID_BTN_TOGGLE_BETA] = "🧪 Канал обновлений: Тестовые (Beta)"
+				buttonLabels[ID_BTN_TOGGLE_BETA] = "🧪 Канал обновлений: Beta"
 				buttonTypes[ID_BTN_TOGGLE_BETA] = "green"
 				addLog("🧪 Включен канал обновлений: Тестовые сборки (Beta / Pre-release)")
 			} else {
-				buttonLabels[ID_BTN_TOGGLE_BETA] = "📦 Канал обновлений: Стабильные (Stable)"
+				buttonLabels[ID_BTN_TOGGLE_BETA] = "📦 Канал обновлений: Stable"
 				buttonTypes[ID_BTN_TOGGLE_BETA] = "normal"
 				addLog("📦 Включен канал обновлений: Стабильные релизы (Stable)")
 			}
@@ -3600,11 +3650,11 @@ func handleToggleAutostart() {
 		isAutostartEnabled = !isAutostartEnabled
 	} else {
 		if isAutostartEnabled {
-			buttonLabels[ID_BTN_TOGGLE_AUTOSTART] = "🚀 Автозапуск при старте Windows: ВКЛ"
+			buttonLabels[ID_BTN_TOGGLE_AUTOSTART] = "🚀 Автозапуск Windows: ВКЛ"
 			buttonTypes[ID_BTN_TOGGLE_AUTOSTART] = "green"
 			addLog("🚀 Автозапуск NatBypass в реестре Windows включен")
 		} else {
-			buttonLabels[ID_BTN_TOGGLE_AUTOSTART] = "🚀 Автозапуск при старте Windows: ВЫКЛ"
+			buttonLabels[ID_BTN_TOGGLE_AUTOSTART] = "🚀 Автозапуск Windows: ВЫКЛ"
 			buttonTypes[ID_BTN_TOGGLE_AUTOSTART] = "normal"
 			addLog("🚀 Автозапуск NatBypass в реестре Windows отключен")
 		}
@@ -3617,11 +3667,11 @@ func handleToggleAutostart() {
 func handleToggleMinimizeToTray() {
 	minimizeToTray = !minimizeToTray
 	if minimizeToTray {
-		buttonLabels[ID_BTN_TOGGLE_TRAY] = "📥 Сворачивать в трей при закрытии: ВКЛ"
+		buttonLabels[ID_BTN_TOGGLE_TRAY] = "📥 Сворачивать в трей: ВКЛ"
 		buttonTypes[ID_BTN_TOGGLE_TRAY] = "green"
 		addLog("📥 При нажатии на крестик окно сворачивается в системный трей")
 	} else {
-		buttonLabels[ID_BTN_TOGGLE_TRAY] = "📥 Сворачивать в трей при закрытии: ВЫКЛ"
+		buttonLabels[ID_BTN_TOGGLE_TRAY] = "📥 Сворачивать в трей: ВЫКЛ"
 		buttonTypes[ID_BTN_TOGGLE_TRAY] = "normal"
 		addLog("📥 При нажатии на крестик приложение будет полностью завершаться")
 	}
@@ -4069,34 +4119,34 @@ func buildModernUI(hInstance uintptr) {
 
 	lblSysHead := createLabel(hInstance, "🛠️ Интеграция с системой Windows:", cx, 130, cw, 22, hFontHeader)
 
-	autostartText := "🚀 Автозапуск при старте Windows: ВЫКЛ"
+	autostartText := "🚀 Автозапуск Windows: ВЫКЛ"
 	autostartType := "normal"
 	if isAutostartEnabled {
-		autostartText = "🚀 Автозапуск при старте Windows: ВКЛ"
+		autostartText = "🚀 Автозапуск Windows: ВКЛ"
 		autostartType = "green"
 	}
 	hBtnToggleAutostart = createOwnerDrawButton(hInstance, autostartText, cx, 158, 415, 38, ID_BTN_TOGGLE_AUTOSTART, autostartType)
 
-	trayText := "📥 Сворачивать в трей при закрытии: ВКЛ"
+	trayText := "📥 Сворачивать в трей: ВКЛ"
 	trayType := "green"
 	if !minimizeToTray {
-		trayText = "📥 Сворачивать в трей при закрытии: ВЫКЛ"
+		trayText = "📥 Сворачивать в трей: ВЫКЛ"
 		trayType = "normal"
 	}
 	hBtnToggleMinimizeToTray = createOwnerDrawButton(hInstance, trayText, cx+425, 158, 415, 38, ID_BTN_TOGGLE_TRAY, trayType)
 
-	logsText := "💾 Запись логов на диск: ВЫКЛ"
+	logsText := "💾 Запись логов: ВЫКЛ"
 	logsType := "normal"
 	if saveLogsToDisk {
-		logsText = "💾 Запись логов на диск: ВКЛ"
+		logsText = "💾 Запись логов: ВКЛ"
 		logsType = "green"
 	}
 	hBtnToggleLogs = createOwnerDrawButton(hInstance, logsText, cx, 204, 415, 38, ID_BTN_TOGGLE_LOGS, logsType)
 
-	betaText := "🧪 Канал обновлений: Тестовые (Beta)"
+	betaText := "🧪 Канал обновлений: Beta"
 	betaType := "green"
 	if cfg == nil || !cfg.App.BetaChannel {
-		betaText = "📦 Канал обновлений: Стабильные (Stable)"
+		betaText = "📦 Канал обновлений: Stable"
 		betaType = "normal"
 	}
 	hBtnToggleBetaChannel = createOwnerDrawButton(hInstance, betaText, cx+425, 204, 415, 38, ID_BTN_TOGGLE_BETA, betaType)
@@ -4118,11 +4168,13 @@ func buildModernUI(hInstance uintptr) {
 		transLabel = "📡 Режим транспорта: Только UDP P2P"
 		transType = "normal"
 	}
-	hBtnToggleTransportMode = createOwnerDrawButton(hInstance, transLabel, cx, 250, 415, 38, ID_BTN_TOGGLE_TRANSPORT, transType)
+	// Ширина cw (840px) на всю ширину вкладки для режима транспорта
+	hBtnToggleTransportMode = createOwnerDrawButton(hInstance, transLabel, cx, 250, cw, 38, ID_BTN_TOGGLE_TRANSPORT, transType)
 
-	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx, 298, cw, 42, ID_BTN_SAVE_CFG, "primary")
-	hBtnCheckUpdate = createOwnerDrawButton(hInstance, "🚀 Проверить обновления NatBypass на GitHub", cx, 348, cw, 38, ID_BTN_CHECK_UPDATE, "green")
-	lblUpdateStatus = createLabel(hInstance, fmt.Sprintf("Текущая версия: v%s • Нажмите для проверки наличия обновлений с GitHub Releases", Version), cx, 354, cw, 20, hFontNormal)
+	// Разносим по вертикали кнопку сохранения, кнопку проверки обновления и метку статуса:
+	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx, 296, cw, 38, ID_BTN_SAVE_CFG, "primary")
+	hBtnCheckUpdate = createOwnerDrawButton(hInstance, "🚀 Проверить обновления NatBypass на GitHub", cx, 342, cw, 38, ID_BTN_CHECK_UPDATE, "green")
+	lblUpdateStatus = createLabel(hInstance, fmt.Sprintf("Текущая версия: v%s • Нажмите кнопку выше для проверки наличия обновлений", Version), cx, 388, cw, 22, hFontNormal)
 
 	tabPages[7] = []uintptr{
 		lblSetTitle, lblSetDesc, lblNick, hEditMyNick, lblNickHint,

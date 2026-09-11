@@ -150,7 +150,7 @@ func printBanner() {
 	fmt.Print(colorBrightCyan + colorBold + `
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║               NATBYPASS CLUSTER DIAGNOSTIC & CONTROL CENTER                  ║
-║                  (v1.9.226-beta6 | Local Engineering)                        ║
+║                  (v1.9.226-beta7 | Local Engineering)                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ` + colorReset)
 }
@@ -1075,10 +1075,14 @@ func main() {
 			} else {
 				fmt.Printf(colorYellow+"[!] Проверка репозитория: %v\n"+colorReset, checkErr)
 			}
-			fmt.Println(colorYellow + "[!] Всем beta-узлам сети будет отправлена команда обновиться до последней версии." + colorReset)
-			fmt.Print("Подтверждаете отправку команды обновления? [y/N]: ")
-			conf, _ := reader.ReadString('\n')
-			conf = strings.TrimSpace(strings.ToLower(conf))
+			var conf string
+			if !isInteractive {
+				conf = "y"
+			} else {
+				fmt.Print("Подтверждаете отправку команды обновления? [y/N]: ")
+				conf, _ = reader.ReadString('\n')
+				conf = strings.TrimSpace(strings.ToLower(conf))
+			}
 			if conf == "y" || conf == "yes" || conf == "д" || conf == "да" {
 				_, nodes, _ := runCollection(ch, rx, topic, broker, networkKey, collectorID, "", true, *flagTimeout, false)
 				fmt.Println(colorBold + "\nРезультаты обновления:" + colorReset)
