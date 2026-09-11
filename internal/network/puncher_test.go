@@ -18,6 +18,7 @@ import (
 
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
+	"github.com/pion/stun/v2"
 )
 
 func TestHopPort_NoRace(t *testing.T) {
@@ -416,4 +417,87 @@ func TestSymmetricNATSession_RunsAndStops(t *testing.T) {
 		t.Fatalf("session did not terminate after NotifySuccess")
 	}
 }
+
+func TestSTUN_MultiWAN_QuorumConsensus(t *testing.T) {
+	p, err := NewUDPPuncher(0, "test-quorum", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	// Simulate STUN responses: 1 vote for 194.59.245.66, 3 votes for 77.37.196.76
+	msg194 := stun.MustBuild(stun.TransactionID, stun.BindingSuccess, &stun.XORMappedAddress{
+		IP:   net.ParseIP("194.59.245.66"),
+		Port: 54611,
+	})
+	msg77_a := stun.MustBuild(stun.TransactionID, stun.BindingSuccess, &stun.XORMappedAddress{
+		IP:   net.ParseIP("77.37.196.76"),
+		Port: 54611,
+	})
+	msg77_b := stun.MustBuild(stun.TransactionID, stun.BindingSuccess, &stun.XORMappedAddress{
+		IP:   net.ParseIP("77.37.196.76"),
+		Port: 54611,
+	})
+	msg77_c := stun.MustBuild(stun.TransactionID, stun.BindingSuccess, &stun.XORMappedAddress{
+		IP:   net.ParseIP("77.37.196.76"),
+		Port: 54611,
+	})
+
+	p.handleSTUNMessage(msg194.Raw)
+	p.handleSTUNMessage(msg77_a.Raw)
+	p.handleSTUNMessage(msg77_b.Raw)
+	p.handleSTUNMessage(msg77_c.Raw)
+
+	p.mu.Lock()
+	mappedIP := p.mappedIP
+	p.mu.Unlock()
+
+	if mappedIP == nil || mappedIP.String() != "77.37.196.76" {
+		t.Fatalf("expected quorum IP 77.37.196.76, got %v", mappedIP)
+	}
+
+	cands := p.DiscoverCandidates(context.Background(), "")
+	has77 := false
+	has194 := false
+	for _, c := range cands {
+		if strings.HasPrefix(c, "77.37.196.76") {
+			has77 = true
+		}
+		if strings.HasPrefix(c, "194.59.245.66") {
+			has194 = true
+		}
+	}
+	if !has77 || !has194 {
+		t.Fatalf("expected both Multi-WAN candidates in list, got %v", cands)
+	}
+}
+
+func TestSymmetricNATSession_FullConePreservesPort(t *testing.T) {
+	p, err := NewUDPPuncher(0, "test-fc-preserve", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	// Ensure NAT type is Full Cone
+	p.natTypeMu.Lock()
+	p.NATType = NATTypeFullCone
+	p.natTypeMu.Unlock()
+
+	origPort := p.LocalPort()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// Run session
+	_ = p.LaunchSymmetricNATSession(ctx, "127.0.0.1", 50000, nil)
+
+	<-ctx.Done()
+
+	newPort := p.LocalPort()
+	if newPort != origPort {
+		t.Fatalf("Full Cone node changed port from %d to %d during SymmetricNATSession", origPort, newPort)
+	}
+}
+
 

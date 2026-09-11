@@ -14,12 +14,14 @@ import (
 
 // LinkMetrics contains real-time latency, drop, and connection state metrics for a peer.
 type LinkMetrics struct {
-	RTT         time.Duration
-	LossPercent int
-	ConsecDrops int
-	DirectUDP   bool
-	DirectTCP   bool
-	Jitter      time.Duration
+	RTT          time.Duration
+	LossPercent  int
+	ConsecDrops  int
+	DirectUDP    bool
+	DirectTCP    bool
+	DirectWebRTC bool
+	MeshRelay    bool
+	Jitter       time.Duration
 }
 
 // TransportSelector dynamically selects the best transport for each peer based on link quality.
@@ -43,7 +45,8 @@ func NewTransportSelector(holdDuration time.Duration) *TransportSelector {
 	}
 }
 
-// SelectTransport evaluates metrics and returns the optimal transport identifier ("awg", "quic", "shadowtls", "wss").
+// SelectTransport evaluates metrics and returns the optimal transport identifier:
+// "awg" (Tier 1), "quic" (Tier 1 lossy), "shadowtls" (Tier 2), "webrtc" (Tier 3), "mesh_relay" (Tier 4), "wss" (Tier 5).
 func (s *TransportSelector) SelectTransport(peerID string, metrics LinkMetrics) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -56,31 +59,26 @@ func (s *TransportSelector) SelectTransport(peerID string, metrics LinkMetrics) 
 
 	target := "awg"
 
-	// 1. Catastrophic degradation or UDP block:
-	if metrics.LossPercent >= 50 || metrics.ConsecDrops >= 5 || (!metrics.DirectUDP && !metrics.DirectTCP) {
-		if metrics.DirectTCP {
-			target = "shadowtls"
-		} else {
-			target = "wss"
-		}
-	} else if metrics.LossPercent >= 10 || metrics.ConsecDrops >= 2 || metrics.Jitter > 50*time.Millisecond {
-		// 2. Moderate packet loss or high jitter: QUIC provides loss recovery and anti-DPI HTTP/3 framing
-		if metrics.DirectUDP {
+	// 5-Tier Connection Ladder:
+	// Tier 1: Direct UDP (AWG when healthy, QUIC on moderate loss/jitter)
+	// Tier 2: Direct TCP (ShadowTLS 3.1)
+	// Tier 3: Direct WebRTC (Pion Data Channels)
+	// Tier 4: P2P Multi-Hop Mesh Relay
+	// Tier 5: Central Relay (WSS or MQTT)
+	if metrics.DirectUDP && metrics.LossPercent < 50 && metrics.ConsecDrops < 5 {
+		if metrics.LossPercent >= 10 || metrics.ConsecDrops >= 2 || metrics.Jitter > 50*time.Millisecond {
 			target = "quic"
-		} else if metrics.DirectTCP {
-			target = "shadowtls"
 		} else {
-			target = "wss"
-		}
-	} else {
-		// 3. Healthy link: AWG provides lowest CPU and memory overhead
-		if metrics.DirectUDP {
 			target = "awg"
-		} else if metrics.DirectTCP {
-			target = "shadowtls"
-		} else {
-			target = "wss"
 		}
+	} else if metrics.DirectTCP {
+		target = "shadowtls"
+	} else if metrics.DirectWebRTC {
+		target = "webrtc"
+	} else if metrics.MeshRelay {
+		target = "mesh_relay"
+	} else {
+		target = "wss"
 	}
 
 	// Immediate switch if link is hard down (drops >= 3)

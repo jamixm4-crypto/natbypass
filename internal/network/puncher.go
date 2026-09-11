@@ -121,7 +121,8 @@ type UDPPuncher struct {
 	onDataPacket DirectDataCallback
 	onMTUResult  DirectMTUCallback
 	mappedEndpoints map[string]struct{}
-	stunRespCh   chan struct{}
+	stunIPVotes     map[string]int
+	stunRespCh      chan struct{}
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mu           sync.Mutex
@@ -278,6 +279,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		stunServers:     stunServers,
 		onPingResult:    onPing,
 		mappedEndpoints: make(map[string]struct{}),
+		stunIPVotes:     make(map[string]int),
 		stunRespCh:      make(chan struct{}, 8),
 		ctx:             ctx,
 		cancel:          cancel,
@@ -377,10 +379,15 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 	candidateSet := make(map[string]struct{})
 	localPort := p.LocalPort()
 
-	// 1. Mapped STUN endpoints
+	// 1. Mapped STUN endpoints (including all discovered Multi-WAN interfaces)
 	p.mu.Lock()
 	if p.mappedIP != nil && p.mappedPort > 0 {
 		candidateSet[fmt.Sprintf("%s:%d", p.mappedIP.String(), p.mappedPort)] = struct{}{}
+	}
+	for ep := range p.mappedEndpoints {
+		if ep != "" {
+			candidateSet[ep] = struct{}{}
+		}
 	}
 	p.mu.Unlock()
 
@@ -518,9 +525,15 @@ drained:
 		}
 	}
 
-	// 3. Ждём ответа из stunRespCh с таймаутом до 1200 мс
+	// 3. Ждём ответа из stunRespCh с таймаутом до 1200 мс.
+	// При первом ответе выжидаем 150 мс для сбора ответов от остальных STUN-серверов,
+	// чтобы стабилизировать кворум большинства голосов Multi-WAN.
 	select {
 	case <-p.stunRespCh:
+		select {
+		case <-time.After(150 * time.Millisecond):
+		case <-ctx.Done():
+		}
 		p.mu.Lock()
 		ip, port := p.mappedIP, p.mappedPort
 		p.mu.Unlock()
@@ -546,6 +559,8 @@ func (p *UDPPuncher) InvalidateMappedAddress() {
 	p.mu.Lock()
 	p.mappedIP = nil
 	p.mappedPort = 0
+	p.mappedEndpoints = make(map[string]struct{})
+	p.stunIPVotes = make(map[string]int)
 	p.mu.Unlock()
 }
 
@@ -1529,6 +1544,7 @@ func (p *UDPPuncher) SendQUICPacket(targetAddr string, payload []byte) error {
 }
 
 // handleSTUNMessage decodes incoming STUN responses and extracts mapped public IP/port.
+// Implements Multi-WAN Quorum Consensus to prevent secondary interfaces from flapping the primary WAN IP.
 func (p *UDPPuncher) handleSTUNMessage(data []byte) {
 	var stunResp stun.Message
 	stunResp.Raw = make([]byte, len(data))
@@ -1537,29 +1553,64 @@ func (p *UDPPuncher) handleSTUNMessage(data []byte) {
 		return
 	}
 
+	var resIP net.IP
+	var resPort int
+
 	var xorAddr stun.XORMappedAddress
 	if err := xorAddr.GetFrom(&stunResp); err == nil {
-		p.mu.Lock()
-		p.mappedIP = xorAddr.IP
-		p.mappedPort = xorAddr.Port
-		p.mu.Unlock()
-		select {
-		case p.stunRespCh <- struct{}{}:
-		default:
+		resIP = xorAddr.IP
+		resPort = xorAddr.Port
+	} else {
+		var mappedAddr stun.MappedAddress
+		if err := mappedAddr.GetFrom(&stunResp); err == nil {
+			resIP = mappedAddr.IP
+			resPort = mappedAddr.Port
 		}
+	}
+
+	if resIP == nil || resPort <= 0 {
 		return
 	}
 
-	var mappedAddr stun.MappedAddress
-	if err := mappedAddr.GetFrom(&stunResp); err == nil {
-		p.mu.Lock()
-		p.mappedIP = mappedAddr.IP
-		p.mappedPort = mappedAddr.Port
-		p.mu.Unlock()
-		select {
-		case p.stunRespCh <- struct{}{}:
-		default:
+	epStr := fmt.Sprintf("%s:%d", resIP.String(), resPort)
+
+	p.mu.Lock()
+	if p.mappedEndpoints == nil {
+		p.mappedEndpoints = make(map[string]struct{})
+	}
+	p.mappedEndpoints[epStr] = struct{}{}
+
+	if p.stunIPVotes == nil {
+		p.stunIPVotes = make(map[string]int)
+	}
+	p.stunIPVotes[resIP.String()]++
+
+	// Multi-WAN Quorum Consensus:
+	// Select the IP with the highest vote count among responding STUN servers.
+	// This prevents secondary routes / VPNs from flipping the primary WAN address.
+	bestIPStr := ""
+	maxVotes := 0
+	for ipStr, votes := range p.stunIPVotes {
+		if votes > maxVotes {
+			maxVotes = votes
+			bestIPStr = ipStr
 		}
+	}
+
+	if bestIPStr != "" {
+		p.mappedIP = net.ParseIP(bestIPStr)
+		if resIP.String() == bestIPStr || p.mappedPort == 0 {
+			p.mappedPort = resPort
+		}
+	} else {
+		p.mappedIP = resIP
+		p.mappedPort = resPort
+	}
+	p.mu.Unlock()
+
+	select {
+	case p.stunRespCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -1976,6 +2027,8 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	_ = conn.SetWriteBuffer(udpSocketBufSize)
 	DisableUDPConnReset(conn)
 	p.addrCache.Range(func(k, v any) bool { p.addrCache.Delete(k); return true })
+	p.mappedEndpoints = make(map[string]struct{})
+	p.stunIPVotes = make(map[string]int)
 	p.localPort = conn.LocalAddr().(*net.UDPAddr).Port
 	// BUG-13 FIX: capture localPort before releasing lock to avoid stale read
 	newPort := p.localPort

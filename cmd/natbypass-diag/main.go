@@ -150,7 +150,7 @@ func printBanner() {
 	fmt.Print(colorBrightCyan + colorBold + `
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║               NATBYPASS CLUSTER DIAGNOSTIC & CONTROL CENTER                  ║
-║                  (v1.9.226-beta10 | Local Engineering)                        ║
+║                  (v1.9.226-beta11 | Local Engineering)                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ` + colorReset)
 }

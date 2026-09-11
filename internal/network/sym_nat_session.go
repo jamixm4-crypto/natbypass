@@ -75,6 +75,8 @@ func (s *SymmetricNATSession) Run(ctx context.Context) string {
 	s.cancel = cancel
 	defer cancel()
 
+	isLocalSymmetric := s.puncher != nil && s.puncher.GetNATType().IsSymmetric()
+
 	for hop := 0; hop < SymmetricNATMaxHops; hop++ {
 		if w := s.getWinner(); w != "" {
 			return w
@@ -87,22 +89,29 @@ func (s *SymmetricNATSession) Run(ctx context.Context) string {
 		default:
 		}
 
-		// Step 1: HopPort -- create fresh NAT mapping
-		_, err := s.puncher.HopPort()
-		if err != nil {
-			continue
-		}
+		var myPort int
+		if isLocalSymmetric {
+			// Step 1: HopPort -- only for local Symmetric NAT (create fresh external mapping)
+			_, err := s.puncher.HopPort()
+			if err != nil {
+				continue
+			}
 
-		// Step 2: Discover our new mapped address (tells us our new external port)
-		discCtx, discCancel := context.WithTimeout(sessionCtx, 3*time.Second)
-		myIP, myPort, err := s.puncher.DiscoverMappedAddress(discCtx)
-		discCancel()
-		if err != nil || myPort == 0 {
-			// No STUN response -- still spray with base port
-			myIP = nil
-			myPort = s.basePort
+			// Step 2: Discover our new mapped address (tells us our new external port)
+			discCtx, discCancel := context.WithTimeout(sessionCtx, 3*time.Second)
+			_, myPort, err = s.puncher.DiscoverMappedAddress(discCtx)
+			discCancel()
+			if err != nil || myPort == 0 {
+				myPort = s.basePort
+			}
+		} else {
+			// Local node is Full Cone / Cone NAT: KEEP stable socket and port!
+			// Calling HopPort() would destroy our established external mapping and break incoming probes.
+			myPort = s.puncher.GetMappedPort()
+			if myPort <= 0 {
+				myPort = s.puncher.LocalPort()
+			}
 		}
-		_ = myIP
 
 		// Step 3: Build candidate remote port list from the fingerprinted CGNAT profile
 		candidates := s.puncher.candidatePorts(s.basePort)

@@ -29,15 +29,15 @@ func TestKademliaDHT_PublishAndLookup(t *testing.T) {
 
 func TestDHT_Replication(t *testing.T) {
 	// Node 1 (Storage Provider)
-	node1 := NewNode("node-1", "127.0.0.1:49152")
+	node1 := NewNode("node-1", "127.0.0.1:0")
 	defer node1.Close()
 
 	// Node 2 (Replication Recipient)
-	node2 := NewNode("node-2", "127.0.0.1:49153")
+	node2 := NewNode("node-2", "127.0.0.1:0")
 	defer node2.Close()
 
-	_ = node1.Bootstrap([]string{"127.0.0.1:49153"})
-	_ = node2.Bootstrap([]string{"127.0.0.1:49152"})
+	_ = node1.Bootstrap([]string{node2.Address})
+	_ = node2.Bootstrap([]string{node1.Address})
 
 	time.Sleep(30 * time.Millisecond)
 
@@ -47,10 +47,15 @@ func TestDHT_Replication(t *testing.T) {
 		t.Fatalf("failed to publish: %v", err)
 	}
 
-	time.Sleep(50 * time.Millisecond)
-
-	// Lookup on Node 2
-	endpoint, err := node2.LookupEndpoint("peer-target-x")
+	// Lookup on Node 2 with retry polling
+	var endpoint string
+	for i := 0; i < 10; i++ {
+		time.Sleep(50 * time.Millisecond)
+		endpoint, err = node2.LookupEndpoint("peer-target-x")
+		if err == nil && endpoint == "100.64.200.55:51820" {
+			break
+		}
+	}
 	if err != nil || endpoint != "100.64.200.55:51820" {
 		t.Fatalf("expected replicated endpoint 100.64.200.55:51820, got %s (err: %v)", endpoint, err)
 	}

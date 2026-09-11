@@ -107,10 +107,11 @@ func adaptivePublishInterval(cfgInterval int) time.Duration {
 	return constants.DefaultPublishInterval
 }
 
-// findMeshRelayPeer finds an online peer with an active TCP connection capable of acting as an L3 mesh relay.
-// Priority is given to public VPS/servers (e.g. DSTR_Serv_RUS / 10.1.1.102 / public IP nodes).
+// findMeshRelayPeer finds an online peer capable of acting as an L3 mesh relay.
+// Priority is given to public VPS/servers (e.g. DSTR_Serv_RUS / 10.1.1.102 / public IP nodes)
+// with either an active Direct TCP connection OR a confirmed Direct UDP P2P link.
 func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectManager, excludeDevID string) *peer.Peer {
-	if registry == nil || tcpDirectMgr == nil {
+	if registry == nil {
 		return nil
 	}
 	// Priority 1: Known VPS / Server nodes (e.g. 10.1.1.102 or name containing Serv)
@@ -120,25 +121,28 @@ func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectM
 		}
 		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 		isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(p.DeviceName), "serv") || strings.Contains(strings.ToLower(p.Nickname), "serv")
-		if isServ && tcpDirectMgr.HasConn(p.DeviceID) {
+		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
+		if isServ && hasConn {
 			return p
 		}
 	}
-	// Priority 2: Any peer with a public IP that has active TCP connection
+	// Priority 2: Any peer with a public IP that has active TCP connection or Direct UDP P2P
 	for _, p := range registry.List() {
 		if p.DeviceID == excludeDevID || !p.Online {
 			continue
 		}
-		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && tcpDirectMgr.HasConn(p.DeviceID) {
+		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
+		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && hasConn {
 			return p
 		}
 	}
-	// Priority 3: Any peer with active TCP connection
+	// Priority 3: Any peer with active TCP connection or Direct UDP P2P
 	for _, p := range registry.List() {
 		if p.DeviceID == excludeDevID || !p.Online {
 			continue
 		}
-		if tcpDirectMgr.HasConn(p.DeviceID) {
+		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
+		if hasConn {
 			return p
 		}
 	}
@@ -905,12 +909,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}
-						// 3. Multi-Hop Mesh TCP Relay fallback: route echo reply through public VPS server peer
+						// 3. Multi-Hop Mesh Relay fallback: route echo reply through mesh relay peer (TCP or UDP P2P)
 						if !sent && senderPeer != nil {
 							if relayPeer := findMeshRelayPeer(registry, tcpDirectMgr, senderPeer.DeviceID); relayPeer != nil {
 								if mhPkt, mhErr := network.EncodeMultiHopPacket(deviceID, senderPeer.DeviceID, network.DefaultMaxTTL, 0x00, reply); mhErr == nil {
 									if tcpDirectMgr != nil && tcpDirectMgr.HasConn(relayPeer.DeviceID) {
 										if err := tcpDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
+											sent = true
+										}
+									} else if puncher != nil && relayPeer.DirectP2P && relayPeer.ActiveEndpoint != "" {
+										if err := puncher.SendDataPacketWithPadding(relayPeer.ActiveEndpoint, mhPkt, 0, 0); err == nil {
 											sent = true
 										}
 									}
@@ -1276,9 +1284,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								registry.Upsert(p)
 							}
 						}
-						// 1f. Encrypted Relay Fallback (WSS or MQTT):
-						// If neither direct TCP nor confirmed direct UDP succeeded, or UDP packet loss > 30%:
-						if !sentTCP && (!sentDirect || !p.DirectP2P || p.LossPercent > 30) {
+						// 1f. Encrypted Central Relay Fallback (WSS or MQTT):
+						// Triggered ONLY if direct TCP, direct UDP, and Mesh Relay all failed to deliver the packet:
+						if !sentTCP && !sentDirect {
 							if wssClient != nil && wssClient.IsConnected() {
 								_ = wssClient.SendPacket(p.DeviceID, pkt)
 							} else if sigMgr != nil {
@@ -1624,7 +1632,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 											log.Warn().Str("peer", p.DeviceID).Int("loss", p.LossPercent).Int("drops", p.ConsecutiveDrops).Msg("🔀 UDP packet loss > 30% or drops >= 3: automatic fallback to Relay")
 										}
 										p.DirectP2P = false
-										p.Transport = "relay_mqtt"
+										if findMeshRelayPeer(registry, tcpDirectMgr, p.DeviceID) != nil {
+											p.Transport = "mesh_relay"
+										} else {
+											p.Transport = "relay_mqtt"
+										}
 									}
 								}
 								registry.Upsert(p)

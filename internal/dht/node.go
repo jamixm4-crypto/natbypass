@@ -57,6 +57,7 @@ func NewNode(deviceID string, address string) *Node {
 		if lAddr, err := net.ResolveUDPAddr("udp", address); err == nil {
 			if conn, err := net.ListenUDP("udp", lAddr); err == nil {
 				n.conn = conn
+				n.Address = conn.LocalAddr().String()
 				go n.listenLoop()
 			}
 		}

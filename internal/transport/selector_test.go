@@ -96,3 +96,37 @@ func TestTransportSelector_HysteresisPreventsFlapping(t *testing.T) {
 		t.Fatalf("Expected hysteresis to hold 'quic', got %s", chosen2)
 	}
 }
+
+func TestTransportSelector_WebRTCFallback(t *testing.T) {
+	sel := NewTransportSelector(100 * time.Millisecond)
+	mWebRTC := LinkMetrics{
+		DirectUDP:    false,
+		DirectTCP:    false,
+		DirectWebRTC: true,
+		LossPercent:  100,
+		ConsecDrops:  5,
+	}
+
+	chosen := sel.SelectTransport("peer-rtc", mWebRTC)
+	if chosen != "webrtc" {
+		t.Fatalf("Expected 'webrtc' when UDP and TCP are down but WebRTC connected, got %s", chosen)
+	}
+}
+
+func TestTransportSelector_MeshRelayFallback(t *testing.T) {
+	sel := NewTransportSelector(100 * time.Millisecond)
+	mMesh := LinkMetrics{
+		DirectUDP:    false,
+		DirectTCP:    false,
+		DirectWebRTC: false,
+		MeshRelay:    true,
+		LossPercent:  100,
+		ConsecDrops:  5,
+	}
+
+	chosen := sel.SelectTransport("peer-mesh", mMesh)
+	if chosen != "mesh_relay" {
+		t.Fatalf("Expected 'mesh_relay' when direct routes down but mesh relay exists, got %s", chosen)
+	}
+}
+
