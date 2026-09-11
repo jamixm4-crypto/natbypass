@@ -314,11 +314,11 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		}
 	}()
 
-	// Try UPnP automatic port mapping on gateway router in background (both UDP and TCP for ShadowTLS)
+	// Try UPnP automatic port mapping on gateway router in background (UDP for hole punch)
 	go func() {
 		upnpClient := NewUPnPClient()
 		_ = upnpClient.AddPortMapping(ctx, localPort, localPort, "UDP", "NatBypass P2P UDP", 3600)
-		_ = upnpClient.AddPortMapping(ctx, localPort, localPort, "TCP", "NatBypass P2P TCP", 3600)
+		// TCP mapping for ShadowTLS is deferred until SetUPnPTCPPort() is called with the actual listener port
 	}()
 
 	return p, nil
@@ -551,6 +551,18 @@ func (p *UDPPuncher) InvalidateMappedAddress() {
 func (p *UDPPuncher) ForceDiscoverMappedAddress(ctx context.Context) (net.IP, int, error) {
 	p.InvalidateMappedAddress()
 	return p.DiscoverMappedAddress(ctx)
+}
+
+// SetUPnPTCPPort maps the actual ShadowTLS TCP listener port via UPnP on the gateway router.
+// Must be called after TCPDirectManager.StartListener() returns the real TCP port.
+func (p *UDPPuncher) SetUPnPTCPPort(tcpPort int) {
+	if tcpPort <= 0 {
+		return
+	}
+	go func() {
+		upnpClient := NewUPnPClient()
+		_ = upnpClient.AddPortMapping(p.ctx, tcpPort, tcpPort, "TCP", "NatBypass P2P TCP (ShadowTLS)", 3600)
+	}()
 }
 
 // GetCachedSTUNAddr returns the last known external address (IP:port) from the STUN cache

@@ -134,7 +134,9 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 
 	// Dynamic P2P health check:
 	// If transport is TCP ShadowTLS, DirectP2P is backed by an active TCP stream, not UDP hole-punch probes.
-	// For UDP, if direct packets haven't been seen for 10 seconds or ProbeCount >= 2, demote to relay.
+	// For UDP, demote to relay only if no direct inbound packets seen for 30 seconds.
+	// ProbeCount is an outbound metric (probes sent), NOT an indicator of P2P health —
+	// it must NOT trigger demotion, or it creates a feedback loop where probing itself kills P2P.
 	directP2PExpired := false
 	if existing.DirectP2P {
 		if existing.Transport == "tcp_tls" || existing.Transport == "tcp_shadowtls" {
@@ -142,7 +144,7 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 				directP2PExpired = true
 			}
 		} else {
-			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 10*time.Second || existing.ProbeCount >= 2 {
+			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 15*time.Second {
 				directP2PExpired = true
 			}
 		}

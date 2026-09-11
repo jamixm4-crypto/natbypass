@@ -1584,10 +1584,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								} else {
 									p.Latency = rtt
 								}
-								p.PingMs = p.Latency.Milliseconds()
-								if p.ConsecutiveDirectSuccess >= 2 || p.DirectP2P {
-									p.DirectP2P = true
-								}
+								// Note: ICMP ping to VirtualIP may succeed over MQTT relay,
+								// not just direct UDP. Do NOT promote to DirectP2P here —
+								// that must only happen in onPingResult/onInboundPacket
+								// when a real UDP hole-punch pong or data packet arrives.
+								// Otherwise we create a "ghost P2P" that stops probes forever.
 								p.LastDirectSeen = time.Now()
 								if transSelector != nil {
 									metrics := transport.LinkMetrics{
@@ -1609,7 +1610,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								p.RecordProbeResult(false)
 								p.Latency = 0
 								p.PingMs = 0
-								if p.ProbeCount >= 2 || p.LossPercent > 30 || p.ConsecutiveDrops >= 3 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) {
+								if p.ProbeCount >= 15 || p.LossPercent > 30 || p.ConsecutiveDrops >= 5 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 45*time.Second) {
 									if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (tcpDirectMgr == nil || !tcpDirectMgr.HasConn(p.DeviceID)) {
 										if p.DirectP2P {
 											log.Warn().Str("peer", p.DeviceID).Int("loss", p.LossPercent).Int("drops", p.ConsecutiveDrops).Msg("🔀 UDP packet loss > 30% or drops >= 3: automatic fallback to Relay")
@@ -1943,6 +1944,10 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		})
 		if tcpPort, err := tcpDirectMgr.StartListener(desiredTCPPort); err == nil {
 			log.Info().Int("port", tcpPort).Str("mode", tcpDirectMgr.TransportMode()).Msg("Direct P2P TCP (ShadowTLS) listener active")
+			// Map the actual TCP listener port via UPnP (not the UDP socket port)
+			if puncher != nil {
+				puncher.SetUPnPTCPPort(tcpPort)
+			}
 		}
 		decoyMgr = network.NewDecoyManager(network.DefaultDecoyConfig(), tcpDirectMgr)
 		decoyMgr.Start(ctx)
@@ -2119,10 +2124,12 @@ func publishLoop(
 		if puncher != nil {
 			// On MIPS/ARM: cache STUN results to avoid 6 STUN queries every publish cycle.
 			// Re-query only when cache TTL expires or public IP has changed.
+			// IMPORTANT: Use ForceDiscoverMappedAddress when cache expires to bypass the
+			// internal puncher cache — otherwise stale NAT mappings are broadcast forever.
 			now := time.Now()
 			stunCacheExpired := now.Sub(stunCachedAt) >= stunCacheTTL
 			if stunCacheExpired || stunAddr == "" || stunAddr == "Недоступен (Relay / Symmetric NAT)" {
-				if extIP, port, err := puncher.DiscoverMappedAddress(ctx); err == nil && extIP != nil {
+				if extIP, port, err := puncher.ForceDiscoverMappedAddress(ctx); err == nil && extIP != nil {
 					newIPStr := extIP.String()
 					// R4: Если публичный IP изменился — это смена WAN/сети
 					if lastPublicIPStr != "" && lastPublicIPStr != newIPStr {
