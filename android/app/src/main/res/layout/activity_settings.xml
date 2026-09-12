@@ -215,7 +215,7 @@
                     android:id="@+id/etMqttBroker"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="tcp://broker.emqx.io:1883"
+                    android:text="tcp://broker.hivemq.com:1883"
                     android:textColor="@color/text_primary" />
             </com.google.android.material.textfield.TextInputLayout>
 

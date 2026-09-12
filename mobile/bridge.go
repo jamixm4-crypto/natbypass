@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta14"
+const Version = "1.9.226-beta15"
 
 
 
@@ -305,7 +305,7 @@ func StartEngine(configYAML string, tunFd int) string {
 	if err != nil || len(channels) == 0 {
 		broker := activeProf.MQTTBroker
 		if broker == "" {
-			broker = "tcp://broker.emqx.io:1883"
+			broker = "tcp://broker.hivemq.com:1883"
 		}
 		channels = append(channels, signaling.NewMQTTChannel(
 			broker,
@@ -314,6 +314,31 @@ func StartEngine(configYAML string, tunFd int) string {
 			activeProf.MQTTUser,
 			activeProf.MQTTPass,
 		))
+	}
+	// FIX-2: подключение резервных брокеров для параллельного приёма маяков
+	// Аналогично daemon и GUI — Android должен слушать все 3 публичных брокера,
+	// иначе маяки от узлов на других брокерах просто не приходят.
+	{
+		primaryBroker := ""
+		if len(channels) > 0 {
+			if mqCh, ok := channels[0].(*signaling.MQTTChannel); ok {
+				primaryBroker = mqCh.BrokerURL()
+			}
+		}
+		backupBrokers := []string{
+			"tcp://broker.hivemq.com:1883",
+			"tcp://test.mosquitto.org:1883",
+			"tcp://broker.emqx.io:1883",
+		}
+		mqttTopic := activeProf.MQTTTopic
+		for _, bURL := range backupBrokers {
+			if bURL != "" && bURL != primaryBroker {
+				channels = append(channels, signaling.NewMQTTChannelNamed(
+					"mqtt:backup:"+bURL, bURL, mqttTopic,
+					devID, "", "",
+				))
+			}
+		}
 	}
 	globalSigMgr = signaling.NewFallbackManager(channels)
 	if activeProf != nil && activeProf.NetworkKey != "" {
@@ -587,6 +612,137 @@ func StartEngine(configYAML string, tunFd int) string {
 		pubInterval = 5 * time.Second
 	}
 	go func() {
+		publishOnce := func() {
+			var awgParams *signaling.AWGParams
+			if cfg != nil {
+				awgP := cfg.GetAWGParams()
+				awgParams = &signaling.AWGParams{
+					Jc:                      awgP.Jc,
+					Jmin:                    awgP.Jmin,
+					Jmax:                    awgP.Jmax,
+					S1:                      awgP.S1,
+					S2:                      awgP.S2,
+					S3:                      awgP.S3,
+					S4:                      awgP.S4,
+					H1:                      fmt.Sprintf("%d", awgP.H1),
+					H2:                      fmt.Sprintf("%d", awgP.H2),
+					H3:                      fmt.Sprintf("%d", awgP.H3),
+					H4:                      fmt.Sprintf("%d", awgP.H4),
+					Pmin:                    awgP.ContentPaddingAdditionMin,
+					Pmax:                    awgP.ContentPaddingAdditionMax,
+					Version:                 string(awgP.Version),
+					Preset:                  cfg.WireGuard.AWGPreset,
+					HeaderProtectionEnabled: awgP.HeaderProtectionEnabled,
+					RandomTrailers:          awgP.RandomTrailers,
+					DisableCookies:          awgP.DisableCookies,
+				}
+			}
+
+			pPort := 47832
+			if puncher != nil {
+				pPort = puncher.LocalPort()
+			}
+			lanIP := network.GetLocalLANIP()
+			localAddr := ""
+			if lanIP != "" {
+				localAddr = fmt.Sprintf("%s:%d", lanIP, pPort)
+			}
+			activeProf := cfg.EnsureActiveProfile()
+			activeKey := ""
+			activeTopic := ""
+			if activeProf != nil {
+				activeKey = activeProf.NetworkKey
+				activeTopic = activeProf.MQTTTopic
+			}
+			hasDirect := false
+			if globalRegistry != nil {
+				for _, p := range globalRegistry.List() {
+					if p.DirectP2P {
+						hasDirect = true
+						break
+					}
+				}
+			}
+			natTypeStr := "unknown"
+			if puncher != nil {
+				natTypeStr = puncher.GetNATType().String()
+			}
+			payload := &signaling.Payload{
+				DeviceID:         devID,
+				Nickname:         globalDevName,
+				DeviceName:       globalDevName,
+				PublicKey:        crypto.KeyToHex(pubKey),
+				PublicIP:         globalPublicIP,
+				LocalAddr:        localAddr,
+				STUNAddr:         globalSTUN,
+				TCPAddr: func() string {
+					if globalTCPDirectMgr != nil && globalTCPDirectMgr.Port() > 0 {
+						host := globalPublicIP
+						if host == "" || host == "0.0.0.0" || host == "<nil>" {
+							if globalSTUN != "" {
+								host = strings.Split(globalSTUN, ":")[0]
+							}
+						}
+						if host != "" && host != "0.0.0.0" && host != "<nil>" {
+							return fmt.Sprintf("%s:%d", host, globalTCPDirectMgr.Port())
+						}
+					}
+					return ""
+				}(),
+				IPv6Addr:         globalIPv6,
+				WGPubKey:         wgKey.PublicKey,
+				WGPort:           pPort,
+				VirtualIP:        atomicGetVIP(),
+				DirectP2P:        hasDirect,
+				NATType:          natTypeStr,
+				IsExitNode:       globalAllowExitNode || cfg.Network.AllowExitNode,
+				AdvertisedRoutes: func() []string {
+					if len(globalAdvertisedRoutes) > 0 {
+						return globalAdvertisedRoutes
+					}
+					return cfg.Network.AdvertisedSubnets
+				}(),
+				Timestamp:        time.Now(),
+				AWG:              awgParams,
+				NetworkKey:       activeKey,
+				OS:               "android",
+				Platform:         "Android",
+				Arch:             runtime.GOARCH,
+				Version:          Version,
+				IsKeenetic:       false,
+				Topic:            activeTopic,
+			}
+			toSend := payload
+			if activeKey != "" {
+				if globalSigMgr != nil {
+					globalSigMgr.SetNetworkKey(activeKey)
+				}
+				if enc, err := signaling.EncryptPayloadWithKey(payload, activeKey); err == nil && enc != nil {
+					toSend = enc
+				}
+			}
+			if globalSigMgr != nil {
+				_ = globalSigMgr.Send(ctx, toSend)
+			}
+		}
+
+		// FIX-5: начальный burst — 3 маяка в первые 1.5 сек для мгновенного обнаружения
+		go func() {
+			publishOnce()
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(350 * time.Millisecond):
+				publishOnce()
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(900 * time.Millisecond):
+				publishOnce()
+			}
+		}()
+
 		ticker := time.NewTicker(pubInterval)
 		defer ticker.Stop()
 		for {
@@ -594,112 +750,7 @@ func StartEngine(configYAML string, tunFd int) string {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				var awgParams *signaling.AWGParams
-				if cfg != nil {
-					awgP := cfg.GetAWGParams()
-					awgParams = &signaling.AWGParams{
-						Jc:                      awgP.Jc,
-						Jmin:                    awgP.Jmin,
-						Jmax:                    awgP.Jmax,
-						S1:                      awgP.S1,
-						S2:                      awgP.S2,
-						S3:                      awgP.S3,
-						S4:                      awgP.S4,
-						H1:                      fmt.Sprintf("%d", awgP.H1),
-						H2:                      fmt.Sprintf("%d", awgP.H2),
-						H3:                      fmt.Sprintf("%d", awgP.H3),
-						H4:                      fmt.Sprintf("%d", awgP.H4),
-						Pmin:                    awgP.ContentPaddingAdditionMin,
-						Pmax:                    awgP.ContentPaddingAdditionMax,
-						Version:                 string(awgP.Version),
-						Preset:                  cfg.WireGuard.AWGPreset,
-						HeaderProtectionEnabled: awgP.HeaderProtectionEnabled,
-						RandomTrailers:          awgP.RandomTrailers,
-						DisableCookies:          awgP.DisableCookies,
-					}
-				}
-
-				pPort := 47832
-				if puncher != nil {
-					pPort = puncher.LocalPort()
-				}
-				lanIP := network.GetLocalLANIP()
-				localAddr := ""
-				if lanIP != "" {
-					localAddr = fmt.Sprintf("%s:%d", lanIP, pPort)
-				}
-				activeProf := cfg.EnsureActiveProfile()
-				activeKey := ""
-				activeTopic := ""
-				if activeProf != nil {
-					activeKey = activeProf.NetworkKey
-					activeTopic = activeProf.MQTTTopic
-				}
-				hasDirect := false
-				if globalRegistry != nil {
-					for _, p := range globalRegistry.List() {
-						if p.DirectP2P {
-							hasDirect = true
-							break
-						}
-					}
-				}
-				natTypeStr := "unknown"
-				if puncher != nil {
-					natTypeStr = puncher.GetNATType().String()
-				}
-				payload := &signaling.Payload{
-					DeviceID:         devID,
-					Nickname:         globalDevName,
-					DeviceName:       globalDevName,
-					PublicKey:        crypto.KeyToHex(pubKey),
-					PublicIP:         globalPublicIP,
-					LocalAddr:        localAddr,
-					STUNAddr:         globalSTUN,
-					TCPAddr: func() string {
-						if globalTCPDirectMgr != nil && globalTCPDirectMgr.Port() > 0 {
-							host := globalPublicIP
-							if host == "" || host == "0.0.0.0" || host == "<nil>" {
-								if globalSTUN != "" {
-									host = strings.Split(globalSTUN, ":")[0]
-								}
-							}
-							if host != "" && host != "0.0.0.0" && host != "<nil>" {
-								return fmt.Sprintf("%s:%d", host, globalTCPDirectMgr.Port())
-							}
-						}
-						return ""
-					}(),
-					IPv6Addr:         globalIPv6,
-					WGPubKey:         wgKey.PublicKey,
-					WGPort:           pPort,
-					VirtualIP:        atomicGetVIP(),
-					DirectP2P:        hasDirect,
-					NATType:          natTypeStr,
-					IsExitNode:       globalAllowExitNode || cfg.Network.AllowExitNode,
-					AdvertisedRoutes: func() []string {
-						if len(globalAdvertisedRoutes) > 0 {
-							return globalAdvertisedRoutes
-						}
-						return cfg.Network.AdvertisedSubnets
-					}(),
-					Timestamp:        time.Now(),
-					AWG:              awgParams,
-					NetworkKey:       activeKey,
-					OS:               "android",
-					Platform:         "Android",
-					Arch:             runtime.GOARCH,
-					Version:          Version,
-					IsKeenetic:       false,
-					Topic:            activeTopic,
-				}
-				toSend := payload
-				if activeKey != "" {
-					if enc, err := signaling.EncryptPayloadWithKey(payload, activeKey); err == nil && enc != nil {
-						toSend = enc
-					}
-				}
-				_ = globalSigMgr.Send(ctx, toSend)
+				publishOnce()
 			}
 		}
 	}()
@@ -738,6 +789,12 @@ func StartEngine(configYAML string, tunFd int) string {
 						}
 					}
 				}
+				// FIX-3: если после попытки расшифровки поле Encrypted всё ещё заполнено,
+				// значит ключ не подошёл — это маяк чужой сети. Сбрасываем, чтобы не
+				// отравлять реестр пустыми/повреждёнными полями (аналогично daemon engine.go:2497-2501).
+				if p != nil && len(p.Encrypted) > 0 {
+					continue
+				}
 				if p != nil && p.DeviceID != devID {
 					if p.Offline || p.Leave {
 						if globalRegistry != nil {
@@ -752,18 +809,11 @@ func StartEngine(configYAML string, tunFd int) string {
 						activeProf = cfg.EnsureActiveProfile()
 					}
 
-					if activeProf != nil {
-						match := false
-						if activeProf.MQTTTopic != "" && p.Topic == activeProf.MQTTTopic {
-							match = true
-						} else if activeProf.NetworkKey != "" && p.NetworkKey == activeProf.NetworkKey {
-							match = true
-						} else if p.Topic == "" && p.NetworkKey == "" {
-							match = true
-						} else if activeProf.MQTTTopic == "" && activeProf.NetworkKey == "" {
-							match = true
-						}
-						if !match {
+					if activeProf != nil && activeProf.NetworkKey != "" {
+						// FIX-4: Ослабляем фильтр — HMAC-подпись на уровне MQTT уже гарантирует,
+						// что маяк из нашей сети. Отфильтровываем только маяки с ЯВНО другим NetworkKey
+						// (но пропускаем маяки с пустым Key — от легаси/старых клиентов).
+						if p.NetworkKey != "" && p.NetworkKey != activeProf.NetworkKey {
 							continue
 						}
 					}
@@ -2486,7 +2536,7 @@ func CreateProfile(name, broker, topic, user, pass, tgToken string, tgChat int64
 		topic = "natbypass/mesh/" + config.GenerateRandomHex(8)
 	}
 	if broker == "" {
-		broker = "tcp://broker.emqx.io:1883"
+		broker = "tcp://broker.hivemq.com:1883"
 	}
 	if awgPreset == "" {
 		awgPreset = "dpi"

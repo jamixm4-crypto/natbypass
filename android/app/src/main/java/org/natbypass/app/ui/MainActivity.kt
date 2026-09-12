@@ -384,7 +384,7 @@ private fun ProfileEditDialog(
     val initial = (mode as? ProfileEditMode.Edit)?.profile
     var name      by remember { mutableStateOf(initial?.name ?: "") }
     var virtualIp by remember { mutableStateOf(initial?.virtualIp ?: "") }
-    var broker    by remember { mutableStateOf(initial?.mqttBroker ?: "tcp://broker.emqx.io:1883") }
+    var broker    by remember { mutableStateOf(initial?.mqttBroker ?: "tcp://broker.hivemq.com:1883") }
     var topic     by remember { mutableStateOf(initial?.mqttTopic ?: "") }
     var tgToken   by remember { mutableStateOf(initial?.tgToken ?: "") }
     var tgChat    by remember { mutableStateOf(initial?.tgChat?.takeIf { it > 0 }?.toString() ?: "") }

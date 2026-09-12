@@ -56,14 +56,14 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
-        android:hint="MQTT Брокер (по умолчанию tcp://broker.emqx.io:1883)">
+        android:hint="MQTT Брокер (по умолчанию tcp://broker.hivemq.com:1883)">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/etNewProfileBroker"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:inputType="text"
-            android:text="tcp://broker.emqx.io:1883"
+            android:text="tcp://broker.hivemq.com:1883"
             android:textColor="@color/text_primary" />
     </com.google.android.material.textfield.TextInputLayout>
 

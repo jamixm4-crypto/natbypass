@@ -63,7 +63,7 @@ fun SettingsScreen(
     var awgPreset       by remember { mutableStateOf("dpi") }
     var transportMode   by remember { mutableStateOf(prefs.getString("transport_mode", "auto") ?: "auto") }
     var tcpPort         by remember { mutableStateOf(prefs.getString("tcp_port", "8443") ?: "8443") }
-    var mqttBroker      by remember { mutableStateOf("tcp://broker.emqx.io:1883") }
+    var mqttBroker      by remember { mutableStateOf("tcp://broker.hivemq.com:1883") }
     var mqttTopic       by remember { mutableStateOf("natbypass/mynet/peers") }
     var mqttUser        by remember { mutableStateOf("") }
     var mqttPass        by remember { mutableStateOf("") }
@@ -100,7 +100,7 @@ fun SettingsScreen(
             if (active != null) {
                 activeProfileId   = active.optString("id", "")
                 activeProfileName = active.optString("name", "Основная сеть")
-                mqttBroker        = active.optString("mqtt_broker", "tcp://broker.emqx.io:1883")
+                mqttBroker        = active.optString("mqtt_broker", "tcp://broker.hivemq.com:1883")
                 mqttTopic         = active.optString("mqtt_topic", "")
                 virtualIp         = active.optString("virtual_ip", MobileBridge.getVirtualIP())
                 mqttUser          = active.optString("mqtt_user", "")
@@ -114,7 +114,7 @@ fun SettingsScreen(
                 val tpVal         = active.optInt("tcp_port", 8443)
                 tcpPort           = if (tpVal > 0) tpVal.toString() else (prefs.getString("tcp_port", "8443") ?: "8443")
             } else {
-                mqttBroker    = prefs.getString("mqtt_broker", "tcp://broker.emqx.io:1883") ?: ""
+                mqttBroker    = prefs.getString("mqtt_broker", "tcp://broker.hivemq.com:1883") ?: ""
                 mqttTopic     = prefs.getString("mqtt_topic", "natbypass/mynet/peers") ?: ""
                 virtualIp     = prefs.getString("virtual_ip", MobileBridge.getVirtualIP()) ?: MobileBridge.getVirtualIP()
                 mqttUser      = prefs.getString("mqtt_user", "") ?: ""
@@ -654,9 +654,9 @@ fun SettingsScreen(
             // ── MQTT ──────────────────────────────────────────────────────
             SettingsSection(title = "MQTT Брокер ($activeProfileName)", icon = Icons.Outlined.Cloud) {
                 val brokerPresets = listOf(
-                    "tcp://broker.emqx.io:1883",
                     "tcp://broker.hivemq.com:1883",
                     "tcp://test.mosquitto.org:1883",
+                    "tcp://broker.emqx.io:1883",
                 )
                 OutlinedTextField(
                     value = mqttBroker,

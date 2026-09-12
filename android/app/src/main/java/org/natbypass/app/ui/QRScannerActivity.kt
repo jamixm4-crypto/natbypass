@@ -115,7 +115,7 @@ class QRScannerActivity : AppCompatActivity() {
                     val devId = json.optString("device_id", "")
                     val tgToken = json.optString("tg_token", "")
                     val tgChat = json.optString("tg_chat", "")
-                    val mqttBroker = json.optString("mqtt_broker", "tcp://broker.emqx.io:1883")
+                    val mqttBroker = json.optString("mqtt_broker", "tcp://broker.hivemq.com:1883")
                     val mqttTopic = json.optString("mqtt_topic", "natbypass/mynet/peers")
                     
                     val editor = prefs.edit()
