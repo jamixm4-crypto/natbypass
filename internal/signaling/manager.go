@@ -66,10 +66,54 @@ func NewFallbackManager(channels []SignalingChannel) *FallbackManager {
 }
 
 func (m *FallbackManager) Send(ctx context.Context, payload *Payload) error {
-	// BUG-08 FIX: Do not hold mu.Lock() during network I/O (can block up to 600ms).
-	// Strategy: try each channel without holding the lock; update statistics briefly.
-	m.mu.Lock()
+	m.mu.RLock()
 	n := len(m.channels)
+	m.mu.RUnlock()
+
+	if n == 0 {
+		return fmt.Errorf("no signaling channels available")
+	}
+
+	// For signaling packets (discovery beacons, remote diag, punch coordination),
+	// broadcast in parallel to all configured channels so peers on different brokers
+	// (HiveMQ, Mosquitto, etc.) all receive beacons.
+	isBroadcast := (payload.RemoteDiag != nil || payload.Coordination != nil || payload.SymPunch != nil || payload.Rendezvous != nil || payload.VirtualIP != "" || payload.Offline || payload.Leave)
+	if isBroadcast && n > 1 {
+		m.mu.RLock()
+		chList := make([]SignalingChannel, len(m.channels))
+		copy(chList, m.channels)
+		m.mu.RUnlock()
+
+		var wg sync.WaitGroup
+		var firstErr error
+		var sentCount int
+		var broadcastMu sync.Mutex
+
+		for _, ch := range chList {
+			wg.Add(1)
+			go func(c SignalingChannel) {
+				defer wg.Done()
+				sCtx, sCancel := context.WithTimeout(ctx, 4*time.Second)
+				defer sCancel()
+				err := m.sendWithRetry(sCtx, c, payload)
+				broadcastMu.Lock()
+				if err == nil {
+					sentCount++
+				} else if firstErr == nil {
+					firstErr = err
+				}
+				broadcastMu.Unlock()
+			}(ch)
+		}
+		wg.Wait()
+		if sentCount > 0 {
+			return nil
+		}
+		return firstErr
+	}
+
+	// Single-channel fallback with retry for high-volume data
+	m.mu.Lock()
 	startIdx := m.currentIdx
 	m.mu.Unlock()
 
