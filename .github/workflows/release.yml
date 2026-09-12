@@ -38,6 +38,7 @@ jobs:
       - name: Build Windows Binaries
         env:
           CGO_ENABLED: '0'
+          GOTOOLCHAIN: 'local'
           GOOS: windows
           GOARCH: amd64
         run: |
@@ -61,6 +62,7 @@ jobs:
       - name: Build Linux Cross-Platform Binaries
         env:
           CGO_ENABLED: '0'
+          GOTOOLCHAIN: 'local'
           GOOS: linux
         run: |
           $VERSION = "${{ github.ref_name }}"
