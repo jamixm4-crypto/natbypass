@@ -353,32 +353,31 @@ func (m *FallbackManager) UpdateMQTTTopic(newTopic string) {
 	}
 }
 
-// PublishTunnelData пересылает сырой IP пакет через активный или подключенный MQTT канал
+// PublishTunnelData пересылает сырой IP пакет через все подключенные MQTT каналы (мульти-брокер relay)
 func (m *FallbackManager) PublishTunnelData(targetDevID string, pkt []byte) error {
 	m.mu.RLock()
-	// Пробуем сначала текущий активный канал
-	if m.currentIdx < len(m.channels) {
-		if mqttCh, ok := m.channels[m.currentIdx].(*MQTTChannel); ok && mqttCh.IsConnected() {
-			m.mu.RUnlock()
-			return mqttCh.PublishTunnelData(targetDevID, pkt)
-		}
-	}
-	// Затем любой подключенный канал
+	defer m.mu.RUnlock()
+
+	var sentCount int
+	var firstErr error
+
 	for _, ch := range m.channels {
 		if mqttCh, ok := ch.(*MQTTChannel); ok && mqttCh.IsConnected() {
-			m.mu.RUnlock()
-			return mqttCh.PublishTunnelData(targetDevID, pkt)
+			if err := mqttCh.PublishTunnelData(targetDevID, pkt); err == nil {
+				sentCount++
+			} else if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
-	// Если ни один не подключен, пробуем первый MQTT канал
-	for _, ch := range m.channels {
-		if mqttCh, ok := ch.(*MQTTChannel); ok {
-			m.mu.RUnlock()
-			return mqttCh.PublishTunnelData(targetDevID, pkt)
-		}
+
+	if sentCount > 0 {
+		return nil
 	}
-	m.mu.RUnlock()
-	return fmt.Errorf("no MQTT channels available for tunnel data")
+	if firstErr != nil {
+		return firstErr
+	}
+	return fmt.Errorf("no connected MQTT channels available for tunnel data")
 }
 
 // SubscribeTunnelData подписывается на входящие пакеты туннеля для текущего узла
