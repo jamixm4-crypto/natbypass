@@ -155,12 +155,45 @@ func (c *Config) GetAWGParams() wireguard.AWGParams {
 		preset = c.WireGuard.AWG.Preset
 	}
 	var params wireguard.AWGParams
-	if preset != "" && preset != "awg31_strict" {
-		params = wireguard.GetAWGParamsByPreset(preset)
-	} else if activeProf != nil && activeProf.NetworkKey != "" {
+	if activeProf != nil && activeProf.NetworkKey != "" {
 		// Mesh-wide deterministic derivation from shared NetworkKey:
 		// Guarantees all nodes in this network share identical H1..H4, S1..S2, and HeaderProtectionKey!
 		params = wireguard.DeriveAWGParamsFromKey(activeProf.NetworkKey)
+		if preset == "carrier_mobile" {
+			mobile := wireguard.GenerateAWGCarrierMobileParams()
+			params.Jc = mobile.Jc
+			params.Jmin = mobile.Jmin
+			params.Jmax = mobile.Jmax
+			params.S1 = mobile.S1
+			params.S2 = mobile.S2
+			params.S3 = mobile.S3
+			params.S4 = mobile.S4
+			params.ContentPaddingAdditionMin = mobile.ContentPaddingAdditionMin
+			params.ContentPaddingAdditionMax = mobile.ContentPaddingAdditionMax
+			params.I1 = mobile.I1
+			params.I2 = mobile.I2
+			params.KeepaliveTimeoutMin = mobile.KeepaliveTimeoutMin
+			params.KeepaliveTimeoutMax = mobile.KeepaliveTimeoutMax
+		} else if preset == "carrier_fixed" {
+			fixed := wireguard.GenerateAWGCarrierFixedParams()
+			params.Jc = fixed.Jc
+			params.Jmin = fixed.Jmin
+			params.Jmax = fixed.Jmax
+			params.S1 = fixed.S1
+			params.S2 = fixed.S2
+			params.S3 = fixed.S3
+			params.S4 = fixed.S4
+			params.ContentPaddingAdditionMin = fixed.ContentPaddingAdditionMin
+			params.ContentPaddingAdditionMax = fixed.ContentPaddingAdditionMax
+			params.I1 = fixed.I1
+			params.I2 = fixed.I2
+			params.KeepaliveTimeoutMin = fixed.KeepaliveTimeoutMin
+			params.KeepaliveTimeoutMax = fixed.KeepaliveTimeoutMax
+		} else if preset != "" && preset != "awg31_strict" {
+			params = wireguard.GetAWGParamsByPreset(preset)
+		}
+	} else if preset != "" {
+		params = wireguard.GetAWGParamsByPreset(preset)
 	} else {
 		params = wireguard.GetAWGParamsByPreset("awg31_strict")
 	}
@@ -267,7 +300,7 @@ func (c *Config) GetEffectiveMTU() int {
 	if preset == "" {
 		preset = c.WireGuard.AWG.Preset
 	}
-	if preset == "anti_tspu" && (c.WireGuard.MTU <= 0 || c.WireGuard.MTU == 1420) {
+	if (preset == "anti_tspu" || preset == "carrier_mobile" || preset == "carrier_fixed") && (c.WireGuard.MTU <= 0 || c.WireGuard.MTU == 1420) {
 		return 1280
 	}
 	if c.WireGuard.MTU > 0 {

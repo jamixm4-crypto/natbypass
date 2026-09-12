@@ -859,7 +859,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     function updateAWGSettings() {
       const preset = document.getElementById('awgPreset') ? document.getElementById('awgPreset').value : 'awg31_strict';
-      const isAWG31 = preset.startsWith('awg31');
+      const isAWG31 = preset.startsWith('awg31') || preset.startsWith('carrier_');
       const hp = document.getElementById('headerProtection');
       const rt = document.getElementById('randomTrailers');
       const dc = document.getElementById('disableCookies');
@@ -867,7 +867,21 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const jmin = document.getElementById('awgJmin');
       const jmax = document.getElementById('awgJmax');
 
-      if (preset === 'awg31_strict') {
+      if (preset === 'carrier_mobile') {
+        if (hp) hp.checked = true;
+        if (rt) rt.checked = true;
+        if (dc) dc.checked = true;
+        if (jc) jc.value = 3;
+        if (jmin) jmin.value = 40;
+        if (jmax) jmax.value = 80;
+      } else if (preset === 'carrier_fixed') {
+        if (hp) hp.checked = true;
+        if (rt) rt.checked = true;
+        if (dc) dc.checked = true;
+        if (jc) jc.value = 5;
+        if (jmin) jmin.value = 40;
+        if (jmax) jmax.value = 120;
+      } else if (preset === 'awg31_strict') {
         if (hp) hp.checked = true;
         if (rt) rt.checked = true;
         if (dc) dc.checked = true;
@@ -922,6 +936,23 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         const json = await res.json();
         if (json.ok) {
           showToast('✅ Настройки ' + preset + ' успешно сохранены и применены!');
+          refreshData();
+        } else {
+          showToast('❌ Ошибка: ' + json.error);
+        }
+      } catch(e) {
+        showToast('❌ Ошибка связи');
+      }
+    }
+
+    async function rotateAWGParams() {
+      if (!confirm('Ротировать параметры обфускации (H1..H4, S1..S4) для всех узлов сети?')) return;
+      showToast('🔄 Ротация параметров обфускации...');
+      try {
+        const res = await fetch('/api/awg/rotate', { method: 'POST' });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✅ ' + json.message);
           refreshData();
         } else {
           showToast('❌ Ошибка: ' + json.error);
@@ -1386,11 +1417,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <h2 style="font-size: 1.15rem; font-weight: 800;">🛡️ AmneziaWG 3.1 — Поведенческая Anti-DPI Защита</h2>
             <p style="color: var(--text-muted); font-size: 0.8rem;">Header Protection (ChaCha20), Random Trailers, Content Padding и диапазоны таймеров против AI-анализа ТСПУ</p>
           </div>
-          <div style="display:flex; gap: 8px;">
-            <button onclick="selectAWGPreset('awg31_strict')" class="btn btn-neon">🔒 AWG 3.1 Strict</button>
+          <div style="display:flex; gap: 8px; flex-wrap: wrap;">
+            <button onclick="selectAWGPreset('carrier_mobile')" class="btn btn-neon">📱 Mobile РФ</button>
+            <button onclick="selectAWGPreset('carrier_fixed')" class="btn btn-glass">🏠 Fixed РФ</button>
+            <button onclick="selectAWGPreset('awg31_strict')" class="btn btn-glass">🔒 AWG 3.1</button>
             <button onclick="selectAWGPreset('awg31_balanced')" class="btn btn-glass">⚖️ Balanced</button>
-            <button onclick="selectAWGPreset('anti_tspu')" class="btn btn-glass">🛡️ Anti-TSPU</button>
-            <button onclick="selectAWGPreset('awg20_legacy')" class="btn btn-glass">📜 Legacy 2.0</button>
+            <button onclick="rotateAWGParams()" class="btn btn-glass" style="border-color: #f59e0b; color: #f59e0b;" title="Сменить заголовки и обфускацию для всех узлов сети">🔄 Ротация</button>
           </div>
         </div>
 
@@ -1398,7 +1430,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <div class="form-group">
             <label class="form-label" for="awgPreset">Пресет протокола (Protocol Preset):</label>
             <select id="awgPreset" class="form-input mono" onchange="updateAWGSettings()" style="background: rgba(15,23,42,0.9); color: #fff;">
-              <option value="awg31_strict" selected>🔒 AWG 3.1 Strict (Максимальное пробитие ТСПУ / DPI)</option>
+              <option value="carrier_mobile" selected>📱 Carrier Mobile (МТС, МегаФон, Tele2, Yota — MTU 1280, Jc 3, CPS)</option>
+              <option value="carrier_fixed">🏠 Carrier Fixed (Ростелеком, Дом.ru — Jc 5, QUIC+DNS CPS)</option>
+              <option value="awg31_strict">🔒 AWG 3.1 Strict (Максимальное пробитие ТСПУ / DPI)</option>
               <option value="awg31_balanced">⚖️ AWG 3.1 Balanced (рекомендуется для стабильных сетей)</option>
               <option value="anti_tspu">🛡️ AWG 2.0 Anti-TSPU (тюнинг мусорных пакетов и S2=100)</option>
               <option value="awg20_legacy">📜 AWG 2.0 Legacy (совместимость со старыми версиями)</option>

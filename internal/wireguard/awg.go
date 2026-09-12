@@ -197,8 +197,67 @@ func GenerateAWG31StrictParams() AWGParams {
 	params.RekeyAfterTimeMax = 240
 
 	// Strict: добавляем CPS packets
-	params.I1 = "quic_initial"
-	params.I2 = "dns_query"
+	params.I1 = "<b 0xc3, 0x00, 0x00, 0x00, 0x01> <r 43>" // QUIC v1 Initial packet mimic
+	params.I2 = "<b 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00> <r 32>" // DNS Query mimic
+
+	return params
+}
+
+// GenerateAWGCarrierMobileParams генерирует параметры AWG 3.1, оптимизированные для мобильных операторов РФ
+// (МТС, МегаФон, Tele2, Yota, Билайн). Защита от фрагментации (MTU 1280), Jc=3, строгий инвариант S1 + 56 != S2,
+// и QUIC-mimic CPS для обхода эвристического анализа первых пакетов на ТСПУ.
+func GenerateAWGCarrierMobileParams() AWGParams {
+	params := GenerateAWG31StrictParams()
+
+	// На мобильных сетях Jc > 4 часто приводит к отбрасыванию пакетов и задержке Handshake
+	params.Jc = 3
+	params.Jmin = 40
+	params.Jmax = 80
+
+	// S1/S2: строго исключаем разницу в 56 байт (сигнатура WireGuard Init-Response) и S1 + 56 == S2
+	params.S1 = 64
+	params.S2 = 36 // S1 - S2 = 28 (!= 56); S1 + 56 = 120 (!= 36)
+	params.S3 = 24
+	params.S4 = 12
+
+	// Content padding в пределах мобильного MTU (1280)
+	params.ContentPaddingAdditionMin = 0
+	params.ContentPaddingAdditionMax = 64
+
+	// Тайминги с джиттером против поведенческого детектирования "метронома"
+	params.KeepaliveTimeoutMin = 9
+	params.KeepaliveTimeoutMax = 23
+	params.RekeyAfterTimeMin = 90
+	params.RekeyAfterTimeMax = 180
+
+	params.I1 = "<b 0xc3, 0x00, 0x00, 0x00, 0x01> <r 43>"
+	params.I2 = ""
+
+	return params
+}
+
+// GenerateAWGCarrierFixedParams генерирует параметры AWG 3.1 для фиксированных провайдеров РФ (Ростелеком, Дом.ru, МГТС).
+// Использует более широкий диапазон мусорных пакетов и двухуровневый CPS (QUIC + DNS).
+func GenerateAWGCarrierFixedParams() AWGParams {
+	params := GenerateAWG31StrictParams()
+
+	params.Jc = 5
+	params.Jmin = 40
+	params.Jmax = 120
+
+	params.S1 = 80
+	params.S2 = 48 // S1 - S2 = 32 (!= 56); S1 + 56 = 136 (!= 48)
+	params.S3 = 32
+	params.S4 = 16
+
+	params.ContentPaddingAdditionMin = 0
+	params.ContentPaddingAdditionMax = 96
+
+	params.KeepaliveTimeoutMin = 10
+	params.KeepaliveTimeoutMax = 25
+
+	params.I1 = "<b 0xc3, 0x00, 0x00, 0x00, 0x01> <r 43>"
+	params.I2 = "<b 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00> <r 32>"
 
 	return params
 }
@@ -206,16 +265,25 @@ func GenerateAWG31StrictParams() AWGParams {
 // DeriveAWGParamsFromKey derives deterministic AWG 3.1 parameters from a shared network key.
 // Ensures all nodes in the mesh automatically have matching H1..H4, S1..S2, and HeaderProtectionKey.
 func DeriveAWGParamsFromKey(networkKey string) AWGParams {
+	return DeriveAWGParamsFromKeyAndEpoch(networkKey, 0)
+}
+
+// DeriveAWGParamsFromKeyAndEpoch derives deterministic AWG 3.1 parameters incorporating an adaptation epoch.
+// Allows dynamic re-obfuscation / rotation of headers (H1..H4, S1..S4, HeaderProtectionKey) across all peers
+// in the mesh without breaking network topology or dropping connections.
+func DeriveAWGParamsFromKeyAndEpoch(networkKey string, epoch uint64) AWGParams {
 	params := GenerateAWG31StrictParams()
 	if networkKey == "" {
 		return params
 	}
 
+	salt := []byte(fmt.Sprintf("natbypass-awg-salt-v1-epoch-%d", epoch))
+	info := []byte(fmt.Sprintf("natbypass-awg-31-mesh-epoch-%d", epoch))
 	// Derive 64 bytes using HKDF-SHA256 from networkKey
-	hkdfReader := hkdf.New(sha256.New, []byte(networkKey), []byte("natbypass-awg-salt-v1"), []byte("natbypass-awg-31-mesh"))
+	hkdfReader := hkdf.New(sha256.New, []byte(networkKey), salt, info)
 	var derived [64]byte
 	if _, err := io.ReadFull(hkdfReader, derived[:]); err != nil {
-		panic(fmt.Sprintf("wireguard: critical hkdf failure in DeriveAWGParamsFromKey: %v", err))
+		panic(fmt.Sprintf("wireguard: critical hkdf failure in DeriveAWGParamsFromKeyAndEpoch: %v", err))
 	}
 
 	// 1. Header Protection Key (32 bytes)
@@ -229,29 +297,40 @@ func DeriveAWGParamsFromKey(networkKey string) AWGParams {
 	params.H4 = binary.BigEndian.Uint32(derived[44:48])
 
 	// Ensure headers are non-zero and distinct
-	if params.H1 < 1000 {
-		params.H1 += 1000
+	if params.H1 < 100000 {
+		params.H1 += 100000
 	}
-	if params.H2 < 1000 {
-		params.H2 += 2000
+	if params.H2 < 200000 {
+		params.H2 += 200000
 	}
-	if params.H3 < 1000 {
-		params.H3 += 3000
+	if params.H3 < 300000 {
+		params.H3 += 300000
 	}
-	if params.H4 < 1000 {
-		params.H4 += 4000
+	if params.H4 < 400000 {
+		params.H4 += 400000
 	}
 
-	// 3. S1..S4 (prefixes)
-	params.S1 = 20 + int(derived[48]%40)
-	params.S2 = 20 + int(derived[49]%40)
-	params.S3 = params.S1
-	params.S4 = params.S2
+	// 3. S1..S4 (prefixes) with strict anti-DPI invariant enforcement:
+	// Invariant: S1 != S2, |S1 - S2| != 56, and S1 + 56 != S2 (prevents WireGuard handshake size matching)
+	params.S1 = 30 + int(derived[48]%50) // 30..79
+	params.S2 = 20 + int(derived[49]%50) // 20..69
+	if params.S1 == params.S2 || params.S1+56 == params.S2 || params.S1-params.S2 == 56 || params.S2-params.S1 == 56 {
+		params.S1 += 15
+	}
+	params.S3 = 8 + int(derived[53]%24)  // 8..31
+	params.S4 = 4 + int(derived[54]%16)  // 4..19
 
-	// 4. Jc, Jmin, Jmax
-	params.Jc = 4 + int(derived[50]%4)
-	params.Jmin = 40 + int(derived[51]%30)
-	params.Jmax = params.Jmin + 30 + int(derived[52]%40)
+	// 4. Jc, Jmin, Jmax (tuned to avoid MTU overflow)
+	params.Jc = 3 + int(derived[50]%3) // 3..5
+	params.Jmin = 40 + int(derived[51]%25)
+	params.Jmax = params.Jmin + 25 + int(derived[52]%35)
+	if params.Jmax > 120 {
+		params.Jmax = 120
+	}
+
+	// 5. Protocol-shaped CPS packet
+	params.I1 = "<b 0xc3, 0x00, 0x00, 0x00, 0x01> <r 43>"
+	params.I2 = "<b 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00> <r 32>"
 
 	return params
 }
@@ -332,18 +411,24 @@ func GenerateRandomAWGParams() AWGParams {
 }
 
 // GetRecommendedMTU returns the recommended MTU for a given AWG preset.
-// For "anti_tspu", it returns 1280 to eliminate the standard WireGuard MTU (1420) signature,
-// matching the standard minimum IPv6/tunnel MTU. For other presets, it returns 1420.
+// For "anti_tspu", "carrier_mobile", and "carrier_fixed", it returns 1280 to eliminate the standard
+// WireGuard MTU (1420) signature, matching the standard minimum IPv6/tunnel MTU and preventing fragmentation on LTE/5G.
 func GetRecommendedMTU(preset string) int {
-	if preset == "anti_tspu" {
+	switch preset {
+	case "anti_tspu", "carrier_mobile", "carrier_fixed":
 		return 1280
+	default:
+		return 1420
 	}
-	return 1420
 }
 
 // GetAWGParamsByPreset возвращает параметры по имени пресета
 func GetAWGParamsByPreset(preset string) AWGParams {
 	switch preset {
+	case "carrier_mobile":
+		return GenerateAWGCarrierMobileParams()
+	case "carrier_fixed":
+		return GenerateAWGCarrierFixedParams()
 	case "awg31_strict":
 		return GenerateAWG31StrictParams()
 	case "awg31_balanced":

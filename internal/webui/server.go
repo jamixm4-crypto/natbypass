@@ -378,6 +378,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/awg/params", s.handleAWGParams)
 	mux.HandleFunc("/api/awg/random-params", s.handleAWGRandomParams)
 	mux.HandleFunc("/api/awg/apply", s.handleAWGApply)
+	mux.HandleFunc("/api/awg/rotate", s.handleAWGRotate)
 	mux.HandleFunc("/api/geoip", s.handleGeoIP)
 
 	mux.HandleFunc("/api/restart", s.handleRestart)
@@ -3686,7 +3687,7 @@ func (s *Server) handleAWGApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg.WireGuard.Enabled = true
-	if strings.HasPrefix(req.Preset, "awg31") {
+	if strings.HasPrefix(req.Preset, "awg31") || strings.HasPrefix(req.Preset, "carrier_") {
 		cfg.WireGuard.AWGVersion = "3.1"
 		cfg.WireGuard.AWG.Version = "3.1"
 	} else {
@@ -3708,6 +3709,41 @@ func (s *Server) handleAWGApply(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"message": "Настройки AmneziaWG успешно применены",
+	})
+}
+
+// handleAWGRotate — POST /api/awg/rotate — динамическая ротация параметров обфускации
+func (s *Server) handleAWGRotate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg, err := config.Load(s.configPath)
+	if err != nil || cfg == nil {
+		cfg = &config.Config{}
+	}
+	activeProf := cfg.EnsureActiveProfile()
+	if activeProf != nil {
+		newParams := wireguard.GenerateRandomAWGParams()
+		activeProf.H1 = newParams.H1
+		activeProf.H2 = newParams.H2
+		activeProf.H3 = newParams.H3
+		activeProf.H4 = newParams.H4
+		activeProf.S1 = newParams.S1
+		activeProf.S2 = newParams.S2
+		activeProf.Jc = newParams.Jc
+		activeProf.Jmin = newParams.Jmin
+		activeProf.Jmax = newParams.Jmax
+		_ = config.Save(cfg, s.configPath, false)
+		if s.onConfigChange != nil {
+			s.onConfigChange()
+		}
+		s.AddEvent("awg_rotate", "Параметры обфускации ротированы", fmt.Sprintf("H1=%d, Jc=%d", newParams.H1, newParams.Jc))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": "Параметры обфускации успешно обновлены",
 	})
 }
 

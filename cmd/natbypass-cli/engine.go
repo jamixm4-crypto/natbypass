@@ -1155,6 +1155,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								targetEP = bestEP
 							}
 						}
+						if targetEP == "" && p.IPv6Addr != "" && network.GetLocalIPv6() != "" {
+							targetEP = p.IPv6Addr
+						}
 						if targetEP == "" {
 							targetEP = p.STUNAddr
 						}
@@ -2306,6 +2309,12 @@ func publishLoop(
 			localAddr = fmt.Sprintf("%s:%d", localIP, puncher.LocalPort())
 		}
 
+		localIPv6 := network.GetLocalIPv6()
+		ipv6Addr := ""
+		if puncher != nil && localIPv6 != "" {
+			ipv6Addr = fmt.Sprintf("[%s]:%d", localIPv6, puncher.LocalPort())
+		}
+
 		activeProf = cfg.EnsureActiveProfile()
 		activeKey := ""
 		activeTopic := ""
@@ -2319,6 +2328,7 @@ func publishLoop(
 			NetworkKey:      activeKey,
 			Topic:           activeTopic,
 			LocalAddr:       localAddr,
+			IPv6Addr:        ipv6Addr,
 			Nickname:        cfg.App.DeviceName,
 			DeviceName:      cfg.App.DeviceName,
 			PublicKey:       crypto.KeyToHex(pubKey),

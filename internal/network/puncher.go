@@ -1104,8 +1104,14 @@ func (p *UDPPuncher) probePortRange(ctx context.Context, ip string, start, end, 
 }
 
 // ScheduleSimultaneousOpen coordinates a precision timed burst of hole punching probes
-// to penetrate Symmetric NAT at the exact agreed Unix timestamp.
+// to penetrate Symmetric NAT at the exact agreed Unix timestamp (seconds).
 func (p *UDPPuncher) ScheduleSimultaneousOpen(ctx context.Context, startAtUnix int64, targetIP string, targetPorts []int, burstCount, intervalMs int) error {
+	return p.ScheduleSimultaneousOpenMilli(ctx, startAtUnix*1000, targetIP, targetPorts, burstCount, intervalMs)
+}
+
+// ScheduleSimultaneousOpenMilli coordinates a DCUtR precision timed burst of hole punching probes
+// to penetrate Symmetric NAT and firewalls at the exact agreed millisecond Unix timestamp.
+func (p *UDPPuncher) ScheduleSimultaneousOpenMilli(ctx context.Context, startAtUnixMilli int64, targetIP string, targetPorts []int, burstCount, intervalMs int) error {
 	if targetIP == "" || len(targetPorts) == 0 {
 		return errors.New("invalid target IP or ports for simultaneous open")
 	}
@@ -1119,17 +1125,17 @@ func (p *UDPPuncher) ScheduleSimultaneousOpen(ctx context.Context, startAtUnix i
 		intervalMs = 15
 	}
 
-	nowUnix := time.Now().Unix()
-	diffSec := startAtUnix - nowUnix
+	nowMilli := time.Now().UnixMilli()
+	diffMilli := startAtUnixMilli - nowMilli
 
-	// If signal is older than 5 seconds, it expired (clock drift or delayed delivery)
-	if diffSec < -5 {
+	// If signal is older than 5000 milliseconds (5s), it expired (clock drift or delayed delivery)
+	if diffMilli < -5000 {
 		return errors.New("simultaneous open signal expired")
 	}
 
 	var waitDuration time.Duration
-	if diffSec > 0 {
-		waitDuration = time.Duration(diffSec) * time.Second
+	if diffMilli > 0 {
+		waitDuration = time.Duration(diffMilli) * time.Millisecond
 	}
 
 	// Precision wait using single time.NewTimer without leaking goroutines
@@ -1190,25 +1196,29 @@ func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta in
 		}
 	}
 
-	sendToAddr := func(dst *net.UDPAddr) {
+	sendToAddr := func(dst *net.UDPAddr, withDecoy bool) {
+		pkt := probeData
 		if len(chameleonProbe) > 0 {
-			_, _ = p.conn.WriteToUDP(chameleonProbe, dst)
+			pkt = chameleonProbe
 		} else if len(stealthProbe) > 0 {
-			_, _ = p.conn.WriteToUDP(stealthProbe, dst)
-		} else {
-			_, _ = p.conn.WriteToUDP(probeData, dst)
+			pkt = stealthProbe
 		}
+		if withDecoy && runtime.GOOS == "linux" {
+			_ = SendLowTTLDecoyProbe(p.conn, dst, pkt, 2)
+			time.Sleep(2 * time.Millisecond)
+		}
+		_, _ = p.conn.WriteToUDP(pkt, dst)
 	}
 
-	// 1. Отправляем пробу: приоритет отдается QUIC Chameleon probe (неотличим от HTTP/3 трафика для ТСПУ)
-	sendToAddr(rAddr)
+	// 1. Отправляем пробу: приоритет отдается QUIC Chameleon probe + low-TTL decoy на Linux
+	sendToAddr(rAddr, true)
 
 	// 2. Always probe immediate neighbor ports (±1, ±2, ±3, ±4, ±8) to overcome PON router port drift (Beltelecom, Rostelecom)
 	neighbors := []int{-4, -3, -2, -1, 1, 2, 3, 4, 8, -8}
 	for _, offset := range neighbors {
 		neighborPort := rAddr.Port + offset
 		if neighborPort > 1024 && neighborPort < 65535 {
-			sendToAddr(&net.UDPAddr{IP: rAddr.IP, Port: neighborPort})
+			sendToAddr(&net.UDPAddr{IP: rAddr.IP, Port: neighborPort}, false)
 		}
 	}
 
@@ -1230,7 +1240,7 @@ func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta in
 		for _, offset := range deltaOffsets {
 			targetPort := rAddr.Port + offset
 			if targetPort > 1024 && targetPort < 65535 {
-				sendToAddr(&net.UDPAddr{IP: rAddr.IP, Port: targetPort})
+				sendToAddr(&net.UDPAddr{IP: rAddr.IP, Port: targetPort}, false)
 			}
 		}
 	}
@@ -1241,7 +1251,7 @@ func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta in
 		candidates := p.candidatePorts(rAddr.Port)
 		for _, port := range candidates {
 			if port != rAddr.Port {
-				sendToAddr(&net.UDPAddr{IP: targetIP, Port: port})
+				sendToAddr(&net.UDPAddr{IP: targetIP, Port: port}, false)
 			}
 		}
 	}
@@ -1280,16 +1290,21 @@ func (p *UDPPuncher) SendHolePunchBurst(targets []string, bursts int) {
 
 
 // StartKeepAliveLoop запускает автоматическую отправку keepalive для активных пиров
+// с динамическим рандомизированным джиттером (9–23 сек) против поведенческого анализа ТСПУ/DPI ("метроном").
 func (p *UDPPuncher) StartKeepAliveLoop() {
 	go func() {
-		ticker := time.NewTicker(constants.KeepAliveInterval)
-		defer ticker.Stop()
-
 		for {
+			// Рандомизированный интервал 9..23 сек (zero-heap allocation)
+			var b [1]byte
+			_, _ = io.ReadFull(rand.Reader, b[:])
+			jitterSec := 9 + int(b[0]%15) // 9..23 seconds
+			timer := time.NewTimer(time.Duration(jitterSec) * time.Second)
+
 			select {
 			case <-p.ctx.Done():
+				timer.Stop()
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				p.keepAliveMu.Lock()
 				targets := make([]string, 0, len(p.keepAliveTargets))
 				for addr := range p.keepAliveTargets {
@@ -1328,7 +1343,8 @@ func (p *UDPPuncher) RemoveKeepAliveTarget(addr string) {
 	delete(p.keepAliveTargets, addr)
 }
 
-// SendKeepAlive sends a periodic active ping packet to maintain bidirectional CGNAT port mappings.
+// SendKeepAlive sends a periodic active ping packet to maintain bidirectional CGNAT port mappings
+// disguised as a QUIC Chameleon probe or padded encrypted datagram with dynamic size variation.
 func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 	if targetAddr == "" || p.conn == nil {
 		return nil
@@ -1346,7 +1362,20 @@ func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 	p.cipherMu.RUnlock()
 
 	if hasCKey {
-		if enc, encErr := crypto.EncryptSelf(probeData, cKey); encErr == nil && len(enc) > 0 {
+		// 1. Приоритет: QUIC Initial chameleon probe (мимикрия под трафик HTTP/3)
+		if qProbe, err := BuildQUICChameleonProbe(p.myDevID, cKey); err == nil && len(qProbe) > 0 {
+			_, err = p.conn.WriteToUDP(qProbe, rAddr)
+			return err
+		}
+		// 2. Резерв: зашифрованная проба с переменным случайным паддингом (16..47 байт)
+		var b [1]byte
+		_, _ = io.ReadFull(rand.Reader, b[:])
+		padLen := 16 + int(b[0]%32)
+		paddedProbe := make([]byte, len(probeData)+padLen)
+		copy(paddedProbe, probeData)
+		_, _ = io.ReadFull(rand.Reader, paddedProbe[len(probeData):])
+
+		if enc, encErr := crypto.EncryptSelf(paddedProbe, cKey); encErr == nil && len(enc) > 0 {
 			_, err = p.conn.WriteToUDP(enc, rAddr)
 			return err
 		}
