@@ -47,12 +47,12 @@
           "0409": {
             "CompanyName": "NatBypass Project",
             "FileDescription": "NatBypass Mesh VPN & DPI Bypass",
-            "FileVersion": "1.9.226.18",
+            "FileVersion": "1.9.226.22",
             "InternalName": "natbypass",
             "LegalCopyright": "Copyright © 2026 jamixm4-crypto",
             "OriginalFilename": "NatBypass.exe",
             "ProductName": "NatBypass",
-            "ProductVersion": "1.9.226-beta21"
+            "ProductVersion": "1.9.226-beta22"
           }
         }
       }
