@@ -4,16 +4,26 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
+import java.util.concurrent.atomic.AtomicLong
 
 sealed class UpdateState {
     object Idle : UpdateState()
@@ -161,72 +171,255 @@ object AppUpdateManager {
         if (destFile.exists()) destFile.delete()
 
         try {
-            val url = URL(apkUrl)
-            val conn = url.openConnection() as HttpURLConnection
-            conn.connectTimeout = 15000
-            conn.readTimeout = 30000
-            conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
+            // 1. Probe server for Range support and exact file length
+            var totalLength = sizeBytes
+            var acceptRanges = false
 
-            val totalLength = if (sizeBytes > 0) sizeBytes else conn.contentLengthLong.takeIf { it > 0 } ?: (15 * 1024 * 1024L)
-            val totalMB = (totalLength.toFloat() / (1024 * 1024))
-
-            conn.inputStream.use { input ->
-                FileOutputStream(destFile).use { output ->
-                    val buffer = ByteArray(32 * 1024)
-                    var bytesRead: Int
-                    var totalRead = 0L
-                    var startTime = System.currentTimeMillis()
-                    var lastUpdate = System.currentTimeMillis()
-                    var bytesInWindow = 0L
-
-                    while (input.read(buffer).also { bytesRead = it } != -1) {
-                        if (downloadCancelled) {
-                            destFile.delete()
-                            _updateState.value = UpdateState.Idle
-                            return@withContext
-                        }
-                        output.write(buffer, 0, bytesRead)
-                        totalRead += bytesRead
-                        bytesInWindow += bytesRead
-
-                        val now = System.currentTimeMillis()
-                        val dt = now - lastUpdate
-                        if (dt >= 200 || totalRead == totalLength) {
-                            val elapsedSec = (now - startTime) / 1000f
-                            val speedMBs = if (elapsedSec > 0.1f) {
-                                (totalRead.toFloat() / (1024 * 1024)) / elapsedSec
-                            } else 0f
-
-                            val downloadedMB = totalRead.toFloat() / (1024 * 1024)
-                            val progress = (totalRead.toFloat() / totalLength).coerceIn(0f, 1f)
-
-                            val remainingBytes = totalLength - totalRead
-                            val etaSec = if (speedMBs > 0.01f) {
-                                (remainingBytes / (speedMBs * 1024 * 1024)).toInt().coerceAtLeast(0)
-                            } else 0
-
-                            _updateState.value = UpdateState.Downloading(
-                                version      = version,
-                                progress     = progress,
-                                downloadedMB = downloadedMB,
-                                totalMB      = totalMB,
-                                speedMBs     = speedMBs,
-                                etaSec       = etaSec,
-                            )
-                            lastUpdate = now
-                            bytesInWindow = 0
-                        }
+            try {
+                val probeUrl = URL(apkUrl)
+                val probeConn = probeUrl.openConnection() as HttpURLConnection
+                probeConn.connectTimeout = 10000
+                probeConn.readTimeout = 15000
+                probeConn.setRequestProperty("User-Agent", "NatBypass-Android-App")
+                probeConn.setRequestProperty("Range", "bytes=0-0")
+                val probeCode = probeConn.responseCode
+                if (probeCode == 206) {
+                    acceptRanges = true
+                    val cr = probeConn.getHeaderField("Content-Range")
+                    if (cr != null && cr.contains("/")) {
+                        val totalStr = cr.substringAfter("/").trim()
+                        totalLength = totalStr.toLongOrNull() ?: totalLength
                     }
+                } else if (probeCode == 200) {
+                    val cl = probeConn.contentLengthLong
+                    if (cl > 0) totalLength = cl
+                }
+                probeConn.disconnect()
+            } catch (_: Exception) {
+                // Ignore probe error, fallback below
+            }
+
+            if (totalLength <= 0) {
+                totalLength = 15 * 1024 * 1024L
+            }
+
+            // 2. If Range supported and size > 1MB: multi-threaded 4-stream download
+            var multiThreadSuccess = false
+            if (acceptRanges && totalLength > 1024 * 1024L) {
+                try {
+                    downloadMultiThreaded(apkUrl, destFile, version, totalLength)
+                    multiThreadSuccess = true
+                } catch (e: Exception) {
+                    if (downloadCancelled) {
+                        destFile.delete()
+                        _updateState.value = UpdateState.Idle
+                        return@withContext
+                    }
+                    // Fallback to single stream below
                 }
             }
 
-            _updateState.value = UpdateState.ReadyToInstall(destFile)
-            launchInstaller(context, destFile)
+            // 3. Fallback: single stream download
+            if (!multiThreadSuccess && !downloadCancelled) {
+                downloadSingleStream(apkUrl, destFile, version, totalLength)
+            }
+
+            if (!downloadCancelled && destFile.exists() && destFile.length() > 500 * 1024) {
+                _updateState.value = UpdateState.ReadyToInstall(destFile)
+                launchInstaller(context, destFile)
+            } else if (!downloadCancelled) {
+                _updateState.value = UpdateState.Error("Файл загрузки повреждён или неполон")
+            }
 
         } catch (e: Exception) {
             _updateState.value = UpdateState.Error("Ошибка загрузки: ${e.message}")
         } finally {
             isDownloading.set(false)
+        }
+    }
+
+    private suspend fun downloadMultiThreaded(
+        apkUrl: String,
+        destFile: File,
+        version: String,
+        totalLength: Long
+    ) = coroutineScope {
+        val raf = RandomAccessFile(destFile, "rw")
+        raf.setLength(totalLength)
+        val fileChannel = raf.channel
+
+        val numWorkers = 4
+        val chunkSize = totalLength / numWorkers
+        val downloadedTotal = AtomicLong(0L)
+
+        // Background progress updater
+        val progressJob = launch(Dispatchers.IO) {
+            var lastBytes = 0L
+            var lastTime = System.currentTimeMillis()
+            val totalMB = totalLength.toFloat() / (1024 * 1024)
+
+            while (isActive && !downloadCancelled) {
+                delay(250)
+                val currentBytes = downloadedTotal.get()
+                val now = System.currentTimeMillis()
+                val dt = (now - lastTime) / 1000f
+                val speedMBs = if (dt > 0.05f) {
+                    ((currentBytes - lastBytes).toFloat() / (1024 * 1024)) / dt
+                } else 0f
+                lastBytes = currentBytes
+                lastTime = now
+
+                val downloadedMB = currentBytes.toFloat() / (1024 * 1024)
+                val progress = (currentBytes.toFloat() / totalLength).coerceIn(0f, 1f)
+                val remainingBytes = totalLength - currentBytes
+                val etaSec = if (speedMBs > 0.01f) {
+                    (remainingBytes / (speedMBs * 1024 * 1024)).toInt().coerceAtLeast(0)
+                } else 0
+
+                _updateState.value = UpdateState.Downloading(
+                    version      = version,
+                    progress     = progress,
+                    downloadedMB = downloadedMB,
+                    totalMB      = totalMB,
+                    speedMBs     = speedMBs,
+                    etaSec       = etaSec,
+                )
+            }
+        }
+
+        try {
+            val jobs = (0 until numWorkers).map { i ->
+                val start = i * chunkSize
+                val end = if (i == numWorkers - 1) totalLength - 1 else (start + chunkSize - 1)
+                async(Dispatchers.IO) {
+                    downloadChunkWithRetry(apkUrl, fileChannel, start, end, downloadedTotal)
+                }
+            }
+            jobs.awaitAll()
+        } finally {
+            progressJob.cancel()
+            try {
+                fileChannel.force(true)
+                fileChannel.close()
+                raf.close()
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun downloadChunkWithRetry(
+        apkUrl: String,
+        fileChannel: FileChannel,
+        startOffset: Long,
+        endOffset: Long,
+        downloadedTotal: AtomicLong
+    ) {
+        var currentOffset = startOffset
+        var retries = 0
+        val maxRetries = 3
+        val buffer = ByteArray(32 * 1024)
+
+        while (currentOffset <= endOffset && !downloadCancelled) {
+            var conn: HttpURLConnection? = null
+            try {
+                val url = URL(apkUrl)
+                conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 12000
+                conn.readTimeout = 25000
+                conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
+                conn.setRequestProperty("Range", "bytes=$currentOffset-$endOffset")
+
+                val code = conn.responseCode
+                if (code != 206 && code != 200) {
+                    throw java.io.IOException("HTTP code $code for range $currentOffset-$endOffset")
+                }
+
+                conn.inputStream.use { input ->
+                    while (currentOffset <= endOffset && !downloadCancelled) {
+                        val toRead = minOf(buffer.size.toLong(), endOffset - currentOffset + 1).toInt()
+                        val bytesRead = input.read(buffer, 0, toRead)
+                        if (bytesRead == -1) break
+
+                        val byteBuffer = ByteBuffer.wrap(buffer, 0, bytesRead)
+                        fileChannel.write(byteBuffer, currentOffset)
+                        currentOffset += bytesRead
+                        downloadedTotal.addAndGet(bytesRead.toLong())
+                    }
+                }
+                if (currentOffset > endOffset) {
+                    break
+                }
+            } catch (e: Exception) {
+                if (downloadCancelled) return
+                retries++
+                if (retries > maxRetries) {
+                    throw e
+                }
+                Thread.sleep(retries * 500L)
+            } finally {
+                conn?.disconnect()
+            }
+        }
+    }
+
+    private fun downloadSingleStream(
+        apkUrl: String,
+        destFile: File,
+        version: String,
+        totalLength: Long
+    ) {
+        val url = URL(apkUrl)
+        val conn = url.openConnection() as HttpURLConnection
+        conn.connectTimeout = 15000
+        conn.readTimeout = 30000
+        conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
+
+        val totalMB = (totalLength.toFloat() / (1024 * 1024))
+
+        conn.inputStream.use { input ->
+            FileOutputStream(destFile).use { output ->
+                val buffer = ByteArray(32 * 1024)
+                var bytesRead: Int
+                var totalRead = 0L
+                val startTime = System.currentTimeMillis()
+                var lastUpdate = System.currentTimeMillis()
+
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    if (downloadCancelled) {
+                        destFile.delete()
+                        _updateState.value = UpdateState.Idle
+                        return
+                    }
+                    output.write(buffer, 0, bytesRead)
+                    totalRead += bytesRead
+
+                    val now = System.currentTimeMillis()
+                    val dt = now - lastUpdate
+                    if (dt >= 200 || totalRead == totalLength) {
+                        val elapsedSec = (now - startTime) / 1000f
+                        val speedMBs = if (elapsedSec > 0.1f) {
+                            (totalRead.toFloat() / (1024 * 1024)) / elapsedSec
+                        } else 0f
+
+                        val downloadedMB = totalRead.toFloat() / (1024 * 1024)
+                        val progress = (totalRead.toFloat() / totalLength).coerceIn(0f, 1f)
+
+                        val remainingBytes = totalLength - totalRead
+                        val etaSec = if (speedMBs > 0.01f) {
+                            (remainingBytes / (speedMBs * 1024 * 1024)).toInt().coerceAtLeast(0)
+                        } else 0
+
+                        _updateState.value = UpdateState.Downloading(
+                            version      = version,
+                            progress     = progress,
+                            downloadedMB = downloadedMB,
+                            totalMB      = totalMB,
+                            speedMBs     = speedMBs,
+                            etaSec       = etaSec,
+                        )
+                        lastUpdate = now
+                    }
+                }
+            }
         }
     }
 

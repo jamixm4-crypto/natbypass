@@ -202,8 +202,19 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
 "
         for u in $CANDIDATE_URLS; do
             [ -z "$u" ] && continue
+            if command -v aria2c >/dev/null 2>&1; then
+                rm -f "${TMP_BIN}" "${TMP_BIN}.aria2"
+                if aria2c -q -x 4 -s 4 -k 512K --connect-timeout=8 --timeout=30 -d /tmp -o natbypass.new "$u" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                    if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
+                        DOWNLOADED=1
+                        SUCCESS_URL="$u"
+                        break 2
+                    fi
+                    rm -f "${TMP_BIN}"
+                fi
+            fi
             if command -v curl >/dev/null 2>&1; then
-                if curl -fsSL --connect-timeout 8 --max-time 180 "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if curl -fsSL --connect-timeout 8 --max-time 180 --retry 4 --retry-delay 1 --retry-connrefused "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         SUCCESS_URL="$u"
@@ -212,7 +223,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                     rm -f "${TMP_BIN}"
                 fi
             elif command -v wget >/dev/null 2>&1; then
-                if wget -q --timeout=8 -t 2 "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if wget -q --timeout=15 --tries=4 -c "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         SUCCESS_URL="$u"

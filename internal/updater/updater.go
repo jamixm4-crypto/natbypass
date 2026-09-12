@@ -675,80 +675,40 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	tmpPath := execPath + ".new"
 	_ = os.Remove(tmpPath)
 
-	client := &http.Client{Timeout: 5 * time.Minute}
-
-	// Пробуем скачать с каждого URL из списка (основной + зеркала)
-	var resp *http.Response
+	var downloadErr error
 	var usedURL string
 	for i, dlURL := range downloadURLs {
 		if i > 0 {
 			setStatus(true, 7, fmt.Sprintf("Основной источник недоступен, пробуем зеркало %d/%d...", i, len(downloadURLs)-1), "", false)
 		}
-		req, reqErr := http.NewRequestWithContext(ctx, "GET", dlURL, nil)
-		if reqErr != nil {
-			continue
-		}
-		req.Header.Set("User-Agent", "NatBypass-Updater")
-		r, dlErr := client.Do(req)
-		if dlErr != nil {
-			continue
-		}
-		if r.StatusCode != http.StatusOK {
-			r.Body.Close()
-			continue
-		}
-		resp = r
-		usedURL = dlURL
-		break
-	}
-	if resp == nil {
-		setStatus(false, 0, "", "Ошибка скачивания: все источники (GitHub + зеркала) недоступны", false)
-		return fmt.Errorf("все источники скачивания недоступны")
-	}
-	defer resp.Body.Close()
-	if usedURL != assetURL {
-		setStatus(true, 8, fmt.Sprintf("Скачивание с зеркала: %s", usedURL), "", false)
-	}
-
-	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-	if err != nil {
-		setStatus(false, 0, "", "Ошибка создания временного файла: "+err.Error(), false)
-		return err
-	}
-
-	totalSize := resp.ContentLength
-	var downloaded int64
-
-	buf := make([]byte, 64*1024)
-	for {
-		n, rErr := resp.Body.Read(buf)
-		if n > 0 {
-			_, wErr := out.Write(buf[:n])
-			if wErr != nil {
-				out.Close()
-				_ = os.Remove(tmpPath)
-				setStatus(false, 0, "", "Ошибка записи файла: "+wErr.Error(), false)
-				return wErr
+		dlCfg := DefaultDownloaderConfig()
+		dlCfg.OnProgress = func(downloaded, total int64, speedBytesSec float64, percent int, workers int) {
+			pct := 10 + int(float64(percent)*0.8)
+			speedMBs := speedBytesSec / (1024 * 1024)
+			var statusText string
+			if total > 0 {
+				statusText = fmt.Sprintf("Скачивание обновления (%d потоков)... %d%% (%0.2f / %0.2f MB, %0.2f MB/s)",
+					workers, pct, float64(downloaded)/(1024*1024), float64(total)/(1024*1024), speedMBs)
+			} else {
+				statusText = fmt.Sprintf("Скачивание обновления... %0.2f MB (%0.2f MB/s)",
+					float64(downloaded)/(1024*1024), speedMBs)
 			}
-			downloaded += int64(n)
-			pct := 10
-			if totalSize > 0 {
-				pct = 10 + int((float64(downloaded)/float64(totalSize))*80)
-			}
-			setStatus(true, pct, fmt.Sprintf("Скачивание обновления... %d%% (%d / %d KB)", pct, downloaded/1024, totalSize/1024), "", false)
-
+			setStatus(true, pct, statusText, "", false)
 		}
-		if rErr != nil {
-			if rErr == io.EOF {
-				break
-			}
-			out.Close()
-			_ = os.Remove(tmpPath)
-			setStatus(false, 0, "", "Ошибка при передаче данных: "+rErr.Error(), false)
-			return rErr
+
+		downloadErr = DownloadFile(ctx, dlURL, tmpPath, dlCfg)
+		if downloadErr == nil {
+			usedURL = dlURL
+			break
 		}
 	}
-	out.Close()
+	if downloadErr != nil {
+		setStatus(false, 0, "", "Ошибка скачивания: все источники (GitHub + зеркала) недоступны: "+downloadErr.Error(), false)
+		return fmt.Errorf("все источники скачивания недоступны: %w", downloadErr)
+	}
+	if usedURL != "" && usedURL != assetURL {
+		setStatus(true, 90, fmt.Sprintf("Загружено с зеркала: %s", usedURL), "", false)
+	}
 
 	// Валидация целостности и сигнатуры исполняемого файла
 	fi, statErr := os.Stat(tmpPath)
@@ -805,7 +765,8 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	sigReq, sErr := http.NewRequestWithContext(ctx, "GET", sigURL, nil)
 	if sErr == nil {
 		sigReq.Header.Set("User-Agent", "NatBypass-Updater")
-		if sigResp, err := client.Do(sigReq); err == nil && sigResp.StatusCode == http.StatusOK {
+		sigClient := &http.Client{Timeout: 15 * time.Second}
+		if sigResp, err := sigClient.Do(sigReq); err == nil && sigResp.StatusCode == http.StatusOK {
 			sigData, _ := io.ReadAll(sigResp.Body)
 			sigResp.Body.Close()
 			if len(sigData) == ed25519.SignatureSize && len(DefaultReleasePublicKey) == ed25519.PublicKeySize {

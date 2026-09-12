@@ -59,8 +59,60 @@ try {
     $DestFile = Join-Path $DestDir "NatBypass.exe"
     $TempFile = Join-Path $env:TEMP "NatBypass_update_$Tag.exe"
 
-    Write-Host ">> Скачивание $($Asset.name) ($([math]::Round($Asset.size/1MB, 2)) MB)..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempFile -UserAgent "NatBypass-Win-Updater"
+    # Ускоренная загрузка (BITS с многопоточной автодокачкой / .NET WebClient / зеркала ghproxy)
+    function Download-FileAccelerated {
+        param(
+            [string]$Url,
+            [string]$OutPath
+        )
+        $CandidateUrls = @($Url)
+        if ($Url -like "*github.com/jamixm4-crypto/natbypass/releases/download/*") {
+            $CandidateUrls += "https://ghproxy.net/$Url"
+            $CandidateUrls += "https://gh-proxy.com/$Url"
+        }
+
+        foreach ($dlUrl in $CandidateUrls) {
+            # 1. BITS: Многопоточная служба Windows с поддержкой Range, автодокачки и обхода троттлинга
+            try {
+                if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
+                    Write-Host ">> Загрузка через службу Windows BITS: $dlUrl..." -ForegroundColor Cyan
+                    Start-BitsTransfer -Source $dlUrl -Destination $OutPath -DisplayName "NatBypass Update" -Priority High -ErrorAction Stop
+                    if ((Test-Path $OutPath) -and (Get-Item $OutPath).Length -gt 524288) {
+                        return
+                    }
+                }
+            } catch {
+                Write-Host "  [i] BITS недоступен или вернул ошибку, переходим к следующему методу..." -ForegroundColor Gray
+            }
+
+            # 2. .NET WebClient
+            try {
+                Write-Host ">> Загрузка через .NET WebClient: $dlUrl..." -ForegroundColor Cyan
+                $wc = New-Object System.Net.WebClient
+                $wc.Headers.Add("User-Agent", "NatBypass-Win-Updater")
+                $wc.DownloadFile($dlUrl, $OutPath)
+                $wc.Dispose()
+                if ((Test-Path $OutPath) -and (Get-Item $OutPath).Length -gt 524288) {
+                    return
+                }
+            } catch {
+                Write-Host "  [i] WebClient ошибка: $($_.Exception.Message)" -ForegroundColor Gray
+            }
+
+            # 3. Invoke-WebRequest fallback
+            try {
+                Write-Host ">> Резервная загрузка через Invoke-WebRequest: $dlUrl..." -ForegroundColor Cyan
+                Invoke-WebRequest -Uri $dlUrl -OutFile $OutPath -UserAgent "NatBypass-Win-Updater" -TimeoutSec 180
+                if ((Test-Path $OutPath) -and (Get-Item $OutPath).Length -gt 524288) {
+                    return
+                }
+            } catch {}
+        }
+
+        throw "Не удалось скачать исполняемый файл обновления ни из одного источника."
+    }
+
+    Download-FileAccelerated -Url $DownloadUrl -OutPath $TempFile
 
     Write-Host ">> Остановка активных процессов NatBypass..." -ForegroundColor Yellow
     Stop-Process -Name "NatBypass", "NatBypass-GUI" -Force -ErrorAction SilentlyContinue
