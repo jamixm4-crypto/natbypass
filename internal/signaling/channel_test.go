@@ -266,4 +266,69 @@ func TestPayload_EndpointsAndCoordination(t *testing.T) {
 	}
 }
 
+func TestHMACSignAndDecryptPayload(t *testing.T) {
+	networkKey := "300d425a69b19128ed78ea994d30be44"
+	signKey := crypto.DeriveSignKey(networkKey)
+
+	original := &Payload{
+		DeviceID:   "node-remote-daemon",
+		Nickname:   "MarNet Keen",
+		VirtualIP:  "10.1.1.5",
+		PublicKey:  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		STUNAddr:   "198.51.100.1:47832",
+		LocalAddr:  "192.168.1.1:47832",
+		Platform:   "KeeneticOS",
+		IsKeenetic: true,
+		Version:    "v1.9.226-beta13",
+		Timestamp:  time.Now(),
+	}
+
+	// 1. Daemon encrypts payload with NetworkKey
+	encryptedPayload, err := EncryptPayloadWithKey(original, networkKey)
+	if err != nil {
+		t.Fatalf("EncryptPayloadWithKey failed: %v", err)
+	}
+
+	// 2. Daemon marshals to JSON and signs frame with SignFrame
+	jsonData, err := json.Marshal(encryptedPayload)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	signedFrame := crypto.SignFrame(jsonData, signKey)
+
+	// 3. GUI receives frame: verifies with signKey and 300s skew
+	verifiedInner, _, err := crypto.VerifyFrame(signedFrame, signKey, 300*time.Second)
+	if err != nil {
+		t.Fatalf("VerifyFrame failed: %v", err)
+	}
+
+	// 4. GUI unmarshals inner JSON
+	var receivedPayload Payload
+	if err := json.Unmarshal(verifiedInner, &receivedPayload); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if receivedPayload.DeviceID != "node-remote-daemon" {
+		t.Errorf("expected DeviceID 'node-remote-daemon', got %s", receivedPayload.DeviceID)
+	}
+
+	// 5. GUI decrypts payload with NetworkKey
+	decrypted, err := DecryptPayloadWithKey(&receivedPayload, networkKey)
+	if err != nil {
+		t.Fatalf("DecryptPayloadWithKey failed: %v", err)
+	}
+
+	if decrypted.DeviceID != original.DeviceID {
+		t.Errorf("DeviceID mismatch: got %s, want %s", decrypted.DeviceID, original.DeviceID)
+	}
+	if decrypted.Nickname != "MarNet Keen" {
+		t.Errorf("Nickname mismatch: got %s, want %s", decrypted.Nickname, original.Nickname)
+	}
+	if decrypted.VirtualIP != "10.1.1.5" {
+		t.Errorf("VirtualIP mismatch: got %s, want %s", decrypted.VirtualIP, original.VirtualIP)
+	}
+	if decrypted.STUNAddr != "198.51.100.1:47832" {
+		t.Errorf("STUNAddr mismatch: got %s, want %s", decrypted.STUNAddr, original.STUNAddr)
+	}
+}
+
 

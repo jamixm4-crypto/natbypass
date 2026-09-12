@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta13"
+	Version = "1.9.226-beta14"
 	Commit  = "release"
 )
 
@@ -557,6 +557,9 @@ var (
 	triggerPublishCh chan struct{}
 	isShuttingDown   int32
 	tgMuted          bool
+	myCountryFlagMu     sync.RWMutex
+	myCountryFlagCached string
+	lastCountryLookupIP string
 	guiInboundPacketHandler func(srcAddr *net.UDPAddr, payload []byte, isTCP, isRelay bool)
 
 	// Статистика дебаггера
@@ -2514,6 +2517,13 @@ func applyActiveProfileLive(target *config.Profile) {
 			guiTCPDirectMgr.SetTLSMode(target.TLSMode)
 		}
 	}
+	if target.NetworkKey != "" {
+		for _, ch := range sigChannels {
+			if mq, ok := ch.(*signaling.MQTTChannel); ok && mq != nil {
+				mq.SetNetworkKey(target.NetworkKey)
+			}
+		}
+	}
 	setControlText(hEditMqttBr, target.MQTTBroker)
 	setControlText(hEditMqttTp, target.MQTTTopic)
 	myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
@@ -4004,7 +4014,7 @@ func buildModernUI(hInstance uintptr) {
 	hBtnModeMQTT = createOwnerDrawButton(hInstance, "⚡ Только MQTT", cx+475, 72, 175, 32, ID_BTN_MODE_MQTT, "normal")
 	hBtnModeTG = createOwnerDrawButton(hInstance, "💬 Только Telegram", cx+660, 72, 180, 32, ID_BTN_MODE_TG, "normal")
 
-	initBroker := "tcp://broker.emqx.io:1883"
+	initBroker := "tcp://broker.hivemq.com:1883"
 	initTopic := "natbypass/mesh/default"
 	initTgToken := ""
 	initTgChat := ""
@@ -4984,7 +4994,23 @@ func startEngineFromConfig(c *config.Config) {
 										}
 									}
 								}
-								// Data transmission over MQTT relay disabled: signaling is strictly for connection establishment. Data only travels via Direct AWG (UDP) or Direct ShadowTLS (TCP).
+								// 1f. Parallel/Fallback MQTT relay transmission when direct P2P and Direct TCP are not active:
+								if (!sentDirect || !targetPeer.DirectP2P) && len(sigChannels) > 0 {
+									dataToSend := packet
+									if cfg != nil {
+										if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+											cKey := crypto.DeriveKey(activeProf.NetworkKey)
+											if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
+												dataToSend = enc
+											}
+										}
+									}
+									for _, ch := range sigChannels {
+										if mq, ok := ch.(*signaling.MQTTChannel); ok && mq != nil && mq.IsConnected() {
+											_ = mq.PublishTunnelData(targetPeer.DeviceID, dataToSend)
+										}
+									}
+								}
 								atomic.AddUint64(&packetsSentCount, 1)
 							}
 						}
@@ -5006,7 +5032,7 @@ func startEngineFromConfig(c *config.Config) {
 
 	tgToken := ""
 	tgChat := ""
-	mqBroker := "tcp://broker.emqx.io:1883"
+	mqBroker := "tcp://broker.hivemq.com:1883"
 	mqTopic := "natbypass/mesh/default"
 	if activeProf != nil {
 		if activeProf.MQTTBroker != "" {
@@ -5601,11 +5627,33 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 	}
 	sigChannels = nil
 
+	activeKey := ""
+	var backupBrokers []string
+	if cfg != nil {
+		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+			activeKey = activeProf.NetworkKey
+			backupBrokers = activeProf.GetEffectiveBackupBrokers()
+			if mqBroker == "" && activeProf.MQTTBroker != "" {
+				mqBroker = activeProf.MQTTBroker
+			}
+			if mqTopic == "" && activeProf.MQTTTopic != "" {
+				mqTopic = activeProf.MQTTTopic
+			}
+		}
+	}
+	if len(backupBrokers) == 0 {
+		backupBrokers = []string{
+			"tcp://broker.hivemq.com:1883",
+			"tcp://test.mosquitto.org:1883",
+			"tcp://broker.emqx.io:1883",
+		}
+	}
+
 	if mqBroker == "" {
-		mqBroker = "tcp://broker.emqx.io:1883"
+		mqBroker = "tcp://broker.hivemq.com:1883"
 	}
 	if mqTopic == "" {
-		mqTopic = "natbypass/mynet/peers"
+		mqTopic = "natbypass/mesh/default"
 	}
 
 	useMQTT := true
@@ -5628,7 +5676,7 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 		activeChannelStr = "Параллельно: MQTT + Telegram"
 	}
 
-	writeDebug(fmt.Sprintf("Перестройка сигнальных каналов: Режим=%s, useTG=%t, useMQTT=%t", sigMode, useTG, useMQTT))
+	writeDebug(fmt.Sprintf("Перестройка сигнальных каналов: Режим=%s, useTG=%t, useMQTT=%t, key_len=%d", sigMode, useTG, useMQTT, len(activeKey)))
 
 	if useTG && (tgToken == "" || tgChat == "") {
 		addLog("⚠️ Telegram выбран в режиме, но токен или Chat ID не заполнены!")
@@ -5643,48 +5691,68 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 	}
 
 	if useMQTT {
-		mqttCh := signaling.NewMQTTChannel(mqBroker, mqTopic, myDevID+"-"+crypto.KeyToHex(myPubKey)[:4], "", "")
-		activeMQTT = mqttCh
-		sigChannels = append(sigChannels, mqttCh)
-		addLog(fmt.Sprintf("✓ Подключен сигнальный канал: MQTT (%s / топик: %s)", mqBroker, mqTopic))
-		writeDebug(fmt.Sprintf("Запуск слушателя MQTT (%s, Topic: %s)...", mqBroker, mqTopic))
-		startChannelReceiver(ctx, mqttCh, "MQTT")
-
-		// Быстрый релей пакетов туннеля через MQTT (гарантирует сквозной пинг при любом типе NAT/VPN)
-		mqttCh.SubscribeTunnelData(myDevID, func(pkt []byte) {
-			dataToProcess := pkt
-			if cfg != nil {
-				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-					cKey := crypto.DeriveKey(activeProf.NetworkKey)
-					if dec, decErr := crypto.DecryptSelf(pkt, cKey); decErr == nil && len(dec) >= 20 {
-						dataToProcess = dec
+		attachTunnelRelay := func(mCh *signaling.MQTTChannel) {
+			mCh.SubscribeTunnelData(myDevID, func(pkt []byte) {
+				dataToProcess := pkt
+				if cfg != nil {
+					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+						cKey := crypto.DeriveKey(activeProf.NetworkKey)
+						if dec, decErr := crypto.DecryptSelf(pkt, cKey); decErr == nil && len(dec) >= 20 {
+							dataToProcess = dec
+						}
 					}
 				}
-			}
-			if len(dataToProcess) < 20 {
-				return
-			}
-			srcIP := tunnel.GetSrcIP(dataToProcess)
-			destIP := tunnel.GetDestIP(dataToProcess)
-			if srcIP == nil || destIP == nil {
-				return
-			}
-			// Защита от петель
-			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-			if cleanVIP != "" && srcIP.String() == cleanVIP {
-				return
-			}
-			_ = destIP
-
-			if guiInboundPacketHandler != nil {
-				guiInboundPacketHandler(nil, dataToProcess, false, true)
-			} else {
-				atomic.AddUint64(&packetsRecvCount, 1)
-				if tunDev != nil {
-					_ = tunDev.WritePacket(dataToProcess)
+				if len(dataToProcess) < 20 {
+					return
 				}
+				srcIP := tunnel.GetSrcIP(dataToProcess)
+				destIP := tunnel.GetDestIP(dataToProcess)
+				if srcIP == nil || destIP == nil {
+					return
+				}
+				// Защита от петель
+				cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+				if cleanVIP != "" && srcIP.String() == cleanVIP {
+					return
+				}
+				_ = destIP
+
+				if guiInboundPacketHandler != nil {
+					guiInboundPacketHandler(nil, dataToProcess, false, true)
+				} else {
+					atomic.AddUint64(&packetsRecvCount, 1)
+					if tunDev != nil {
+						_ = tunDev.WritePacket(dataToProcess)
+					}
+				}
+			})
+		}
+
+		clientID := myDevID + "-" + crypto.KeyToHex(myPubKey)[:4]
+		primaryCh := signaling.NewMQTTChannelNamed("mqtt:"+mqBroker, mqBroker, mqTopic, clientID, "", "")
+		if activeKey != "" {
+			primaryCh.SetNetworkKey(activeKey)
+		}
+		activeMQTT = primaryCh
+		sigChannels = append(sigChannels, primaryCh)
+		addLog(fmt.Sprintf("✓ Подключен сигнальный канал: MQTT (%s / топик: %s)", mqBroker, mqTopic))
+		writeDebug(fmt.Sprintf("Запуск слушателя MQTT (%s, Topic: %s, HMAC=%t)...", mqBroker, mqTopic, activeKey != ""))
+		startChannelReceiver(ctx, primaryCh, "MQTT")
+		attachTunnelRelay(primaryCh)
+
+		// Подключение резервных брокеров для параллельного приёма и фейловера
+		for _, bURL := range backupBrokers {
+			if bURL != "" && bURL != mqBroker {
+				backupCh := signaling.NewMQTTChannelNamed("mqtt:backup:"+bURL, bURL, mqTopic, clientID, "", "")
+				if activeKey != "" {
+					backupCh.SetNetworkKey(activeKey)
+				}
+				sigChannels = append(sigChannels, backupCh)
+				writeDebug(fmt.Sprintf("Запуск резервного брокера MQTT (%s, HMAC=%t)...", bURL, activeKey != ""))
+				startChannelReceiver(ctx, backupCh, "MQTT Backup ("+bURL+")")
+				attachTunnelRelay(backupCh)
 			}
-		})
+		}
 	}
 }
 
@@ -5918,7 +5986,16 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				}
 				pFlag := p.CountryFlag
 				if pFlag == "" && p.PublicIP != "" {
-					pFlag = network.LookupCountryFlag(ctx, p.PublicIP)
+					go func(ip, devID string) {
+						sCtx, sCancel := context.WithTimeout(context.Background(), 2*time.Second)
+						defer sCancel()
+						if flag := network.LookupCountryFlag(sCtx, ip); flag != "" && registry != nil {
+							if rp, ok := registry.Get(devID); ok && rp != nil && rp.CountryFlag == "" {
+								rp.CountryFlag = flag
+								registry.Upsert(rp)
+							}
+						}
+					}(p.PublicIP, p.DeviceID)
 				}
 
 				existingPeer, peerFound := registry.Get(p.DeviceID)
@@ -6159,8 +6236,20 @@ func negotiateVirtualIP() {
 	if hasConflict && conflictDev != "" {
 		if myDevID > conflictDev {
 			oldIP := myVirtualIP
+			prefix := "10.1.1"
+			if cfg != nil {
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+					pfx := config.ExtractSubnetPrefix(activeProf.VirtualIP)
+					if pfx == "" || pfx == "100.64.200" {
+						pfx = config.ExtractSubnetPrefix(activeProf.Subnet)
+					}
+					if pfx != "" {
+						prefix = pfx
+					}
+				}
+			}
 			for i := 1; i <= 254; i++ {
-				cand := fmt.Sprintf("100.64.200.%d", i)
+				cand := fmt.Sprintf("%s.%d", prefix, i)
 				if _, used := usedIPs[cand]; !used {
 					myVirtualIP = cand
 					break
@@ -6231,6 +6320,36 @@ func triggerPublish() {
 	case triggerPublishCh <- struct{}{}:
 	default:
 	}
+}
+
+func getMyCountryFlag(ip string) string {
+	myCountryFlagMu.RLock()
+	if myCountryFlagCached != "" && lastCountryLookupIP == ip {
+		f := myCountryFlagCached
+		myCountryFlagMu.RUnlock()
+		return f
+	}
+	myCountryFlagMu.RUnlock()
+
+	if ip == "" || ip == "0.0.0.0" || ip == "<nil>" || ip == "Определяется..." {
+		return ""
+	}
+
+	go func(lookupIP string) {
+		sCtx, sCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer sCancel()
+		flag := network.LookupCountryFlag(sCtx, lookupIP)
+		if flag != "" {
+			myCountryFlagMu.Lock()
+			myCountryFlagCached = flag
+			lastCountryLookupIP = lookupIP
+			myCountryFlagMu.Unlock()
+		}
+	}(ip)
+
+	myCountryFlagMu.RLock()
+	defer myCountryFlagMu.RUnlock()
+	return myCountryFlagCached
 }
 
 func publishCurrentState(ctx context.Context) {
@@ -6406,7 +6525,7 @@ func publishCurrentState(ctx context.Context) {
 		Arch:             runtime.GOARCH,
 		Version:          Version,
 		IsKeenetic:       false,
-		CountryFlag:      network.LookupCountryFlag(ctx, ipStr),
+		CountryFlag:      getMyCountryFlag(ipStr),
 		NetworkKey:       activeKey,
 		Topic:            activeTopic,
 	}

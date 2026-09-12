@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta13"
+const Version = "1.9.226-beta14"
 
 
 
@@ -316,6 +316,9 @@ func StartEngine(configYAML string, tunFd int) string {
 		))
 	}
 	globalSigMgr = signaling.NewFallbackManager(channels)
+	if activeProf != nil && activeProf.NetworkKey != "" {
+		globalSigMgr.SetNetworkKey(activeProf.NetworkKey)
+	}
 	globalSigMgr.SubscribeTunnelData(devID, func(pkt []byte) {
 		globalRxBytes.Add(uint64(len(pkt)))
 		dataToProcess := pkt
@@ -2706,6 +2709,10 @@ func rebuildSignalingInternal(p *config.Profile) {
 		if p.TLSMode != "" {
 			globalTCPDirectMgr.SetTLSMode(p.TLSMode)
 		}
+	}
+
+	if globalSigMgr != nil && p != nil && p.NetworkKey != "" {
+		globalSigMgr.SetNetworkKey(p.NetworkKey)
 	}
 
 	if globalConfig != nil && globalDevID != "" {

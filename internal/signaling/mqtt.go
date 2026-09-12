@@ -171,7 +171,7 @@ func NewMQTTChannelNamed(name, brokerURL, topic, clientID, username, password st
 				ch.keyMu.RUnlock()
 
 				if hasKey && len(raw) >= 40 && raw[0] != '{' {
-					if inner, _, err := crypto.VerifyFrame(raw, signKey, 30*time.Second); err == nil && len(inner) >= 20 {
+					if inner, _, err := crypto.VerifyFrame(raw, signKey, 300*time.Second); err == nil && len(inner) >= 20 {
 						tHandler(inner)
 						return
 					}
@@ -272,7 +272,7 @@ func (m *MQTTChannel) ReconnectWithBroker(newBrokerURL string) error {
 				signKey := m.signKey
 				m.keyMu.RUnlock()
 				if hasKey && len(raw) >= 40 && raw[0] != '{' {
-					if inner, _, err := crypto.VerifyFrame(raw, signKey, 30*time.Second); err == nil && len(inner) >= 20 {
+					if inner, _, err := crypto.VerifyFrame(raw, signKey, 300*time.Second); err == nil && len(inner) >= 20 {
 						tHandler(inner)
 						return
 					}
@@ -315,13 +315,18 @@ func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 	m.keyMu.RUnlock()
 
 	var payloadBytes []byte
-	if hasKey && len(data) >= 40 && data[0] != '{' {
-		inner, _, err := crypto.VerifyFrame(data, signKey, 30*time.Second)
-		if err != nil {
-			log.Warn().Err(err).Msg("🛡️ MQTT signaling frame dropped: invalid HMAC signature or replay detected")
+	if len(data) >= 40 && data[0] != '{' {
+		if hasKey {
+			inner, _, err := crypto.VerifyFrame(data, signKey, 300*time.Second)
+			if err != nil {
+				log.Warn().Err(err).Msg("🛡️ MQTT signaling frame dropped: invalid HMAC signature or replay detected")
+				return
+			}
+			payloadBytes = inner
+		} else {
+			log.Warn().Msg("🛡️ MQTT frame is HMAC-signed, but channel has no NetworkKey configured — dropping")
 			return
 		}
-		payloadBytes = inner
 	} else {
 		payloadBytes = data
 	}
@@ -527,7 +532,7 @@ func (m *MQTTChannel) SubscribeTunnelData(myDevID string, onPkt func(pkt []byte)
 			m.keyMu.RUnlock()
 
 			if hasKey && len(raw) >= 40 && raw[0] != '{' {
-				if inner, _, err := crypto.VerifyFrame(raw, signKey, 30*time.Second); err == nil && len(inner) >= 20 {
+				if inner, _, err := crypto.VerifyFrame(raw, signKey, 300*time.Second); err == nil && len(inner) >= 20 {
 					onPkt(inner)
 					return
 				}
