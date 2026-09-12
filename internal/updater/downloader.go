@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -208,7 +207,7 @@ func downloadMultiThreaded(
 		}
 	}
 
-	var downloadedTotal atomic.Int64
+	progress := &progressTracker{}
 	errChan := make(chan error, numWorkers)
 	var wg sync.WaitGroup
 
@@ -226,7 +225,7 @@ func downloadMultiThreaded(
 			case <-stopProgress:
 				return
 			case now := <-ticker.C:
-				current := downloadedTotal.Load()
+				current := progress.load()
 				dt := now.Sub(lastTime).Seconds()
 				var speed float64
 				if dt > 0.05 {
@@ -257,7 +256,7 @@ func downloadMultiThreaded(
 		wg.Add(1)
 		go func(c chunkDesc) {
 			defer wg.Done()
-			wErr := downloadChunkWithRetry(ctx, client, targetURL, out, c, &downloadedTotal, cfg)
+			wErr := downloadChunkWithRetry(ctx, client, targetURL, out, c, progress, cfg)
 			if wErr != nil {
 				select {
 				case errChan <- fmt.Errorf("chunk %d [%d-%d] failed: %w", c.index, c.start, c.end, wErr):
@@ -299,6 +298,24 @@ func downloadMultiThreaded(
 	return nil
 }
 
+// progressTracker is thread-safe and 100% immune to unaligned 64-bit atomic panics on 32-bit architectures (MIPS/ARM).
+type progressTracker struct {
+	mu         sync.Mutex
+	downloaded int64
+}
+
+func (pt *progressTracker) add(n int64) {
+	pt.mu.Lock()
+	pt.downloaded += n
+	pt.mu.Unlock()
+}
+
+func (pt *progressTracker) load() int64 {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	return pt.downloaded
+}
+
 // downloadChunkWithRetry скачивает отдельный байтовый сегмент с повторами при сбоях
 func downloadChunkWithRetry(
 	ctx context.Context,
@@ -306,7 +323,7 @@ func downloadChunkWithRetry(
 	targetURL string,
 	out *os.File,
 	chunk chunkDesc,
-	downloadedTotal *atomic.Int64,
+	progress *progressTracker,
 	cfg DownloaderConfig,
 ) error {
 	curOffset := chunk.start
@@ -369,7 +386,7 @@ func downloadChunkWithRetry(
 						return fmt.Errorf("writeAt: %w", wErr)
 					}
 					curOffset += int64(n)
-					downloadedTotal.Add(int64(n))
+					progress.add(int64(n))
 				}
 				if rErr != nil {
 					if rErr == io.EOF {

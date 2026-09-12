@@ -554,7 +554,7 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 		} else if arch == "mips" {
 			candidates = []string{"-router-mips", "-linux-mips", "mips"}
 		} else if arch == "arm" {
-			candidates = []string{"-openwrt-armv7", "openwrt-armv7", "armv7", "-linux-arm", "arm"}
+			candidates = []string{"-router-armv7", "router-armv7", "-openwrt-armv7", "openwrt-armv7", "armv7", "-linux-arm", "arm"}
 		} else {
 			candidates = []string{"-linux-amd64", "linux-amd64", "amd64"}
 		}

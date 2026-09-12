@@ -7,7 +7,7 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.9.226-beta19"
+    DEFAULT_TAG="v1.9.226-beta20"
 
     # Try to resolve latest tag from GitHub API
     LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
@@ -138,26 +138,38 @@ main() {
             BIN_SUFFIX="linux-arm64"
             ARCH_DESC="ARM64 (Keenetic Titan/Hero/Giga/Ultra, RPi 4/5)"
             ;;
-        mips)
-            if echo -n I | hexdump -o 2>/dev/null | grep -q '0000000 0001'; then
-                BIN_SUFFIX="router-mips"
-                ARCH_DESC="MIPS Big-Endian"
-            else
+        mips|mips64|mipsel|mipsle)
+            # Detect endianness:
+            # 1. Check /proc/cpuinfo for known MediaTek/Ralink/Keenetic models (100% mipsle)
+            # 2. Check ELF header of /bin/sh (byte 5: 01=little-endian, 02=big-endian)
+            # 3. Fallback to arch name
+            IS_LE=0
+            if grep -qiE 'MT7621|MT7628|MT7620|MediaTek|Ralink' /proc/cpuinfo 2>/dev/null; then
+                IS_LE=1
+            elif [ -f /bin/sh ]; then
+                ELF_ENDIAN=$(dd if=/bin/sh bs=1 count=1 skip=5 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n' || true)
+                if [ "$ELF_ENDIAN" = "01" ]; then
+                    IS_LE=1
+                elif [ "$ELF_ENDIAN" = "02" ]; then
+                    IS_LE=0
+                elif [ "$RAW_ARCH" = "mipsel" ] || [ "$RAW_ARCH" = "mipsle" ]; then
+                    IS_LE=1
+                fi
+            elif [ "$RAW_ARCH" = "mipsel" ] || [ "$RAW_ARCH" = "mipsle" ]; then
+                IS_LE=1
+            fi
+
+            if [ "$IS_LE" -eq 1 ]; then
                 BIN_SUFFIX="router-mipsle"
-                ARCH_DESC="MIPS Little-Endian (Keenetic MT7621 / KN-1010)"
+                ARCH_DESC="MIPS Little-Endian (Keenetic MT7621 / KN-1010 / Viva / Extra)"
+            else
+                BIN_SUFFIX="router-mips"
+                ARCH_DESC="MIPS Big-Endian (Atheros / QCA)"
             fi
             ;;
-        mips64)
-            BIN_SUFFIX="router-mips"
-            ARCH_DESC="MIPS64"
-            ;;
-        mipsel|mipsle)
-            BIN_SUFFIX="router-mipsle"
-            ARCH_DESC="MIPS Little-Endian (Keenetic / MT7621 / KN-1010 / Viva / Extra)"
-            ;;
-        armv7l|armv6l)
-            BIN_SUFFIX="linux-arm64"
-            ARCH_DESC="ARM 32/64"
+        armv7l|armv6l|armv7|armhf|arm)
+            BIN_SUFFIX="router-armv7"
+            ARCH_DESC="ARMv7 32-bit (Keenetic Hopper/Voyager, Cortex-A7)"
             ;;
         *)
             print_yellow "[!] Нестандартная архитектура: ${RAW_ARCH}"

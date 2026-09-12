@@ -142,17 +142,29 @@ func NewMQTTChannelNamed(name, brokerURL, topic, clientID, username, password st
 		opts.SetTLSConfig(crypto.BuildTLSConfig(brokerURL))
 	}
 
-	opts.SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).
+	brokerSuffix := fmt.Sprintf("%04x", fnv32a(brokerURL)&0xffff)
+	safeClientID := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '_'
+	}, clientID)
+	if len(safeClientID) > 12 {
+		safeClientID = safeClientID[:12]
+	}
+
+	opts.SetClientID(fmt.Sprintf("nb-%s-%s-%04x", safeClientID, brokerSuffix, time.Now().UnixNano()&0xffff)).
 		SetUsername(username).
 		SetPassword(password).
 		SetCleanSession(true).
 		SetAutoReconnect(true).
 		SetConnectRetry(true).
-		SetConnectRetryInterval(1 * time.Second).
-		SetConnectTimeout(5 * time.Second).
-		SetKeepAlive(20 * time.Second).
-		SetPingTimeout(5 * time.Second).
-		SetWriteTimeout(5 * time.Second).
+		SetConnectRetryInterval(5 * time.Second).
+		SetMaxReconnectInterval(1 * time.Minute).
+		SetConnectTimeout(8 * time.Second).
+		SetKeepAlive(30 * time.Second).
+		SetPingTimeout(8 * time.Second).
+		SetWriteTimeout(8 * time.Second).
 		SetResumeSubs(true)
 
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
@@ -232,17 +244,29 @@ func (m *MQTTChannel) ReconnectWithBroker(newBrokerURL string) error {
 		opts.SetTLSConfig(crypto.BuildTLSConfig(newBrokerURL))
 	}
 
-	opts.SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).
+	brokerSuffix := fmt.Sprintf("%04x", fnv32a(newBrokerURL)&0xffff)
+	safeClientID := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '_'
+	}, clientID)
+	if len(safeClientID) > 12 {
+		safeClientID = safeClientID[:12]
+	}
+
+	opts.SetClientID(fmt.Sprintf("nb-%s-%s-%04x", safeClientID, brokerSuffix, time.Now().UnixNano()&0xffff)).
 		SetUsername(username).
 		SetPassword(password).
 		SetCleanSession(true).
 		SetAutoReconnect(true).
 		SetConnectRetry(true).
-		SetConnectRetryInterval(1 * time.Second).
-		SetConnectTimeout(5 * time.Second).
-		SetKeepAlive(20 * time.Second).
-		SetPingTimeout(5 * time.Second).
-		SetWriteTimeout(5 * time.Second).
+		SetConnectRetryInterval(5 * time.Second).
+		SetMaxReconnectInterval(1 * time.Minute).
+		SetConnectTimeout(8 * time.Second).
+		SetKeepAlive(30 * time.Second).
+		SetPingTimeout(8 * time.Second).
+		SetWriteTimeout(8 * time.Second).
 		SetResumeSubs(true)
 
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
@@ -566,4 +590,18 @@ func (m *MQTTChannel) handleTunnelPayload(raw []byte) {
 func (m *MQTTChannel) Close() error {
 	m.client.Disconnect(250)
 	return nil
+}
+
+// fnv32a is a fast non-cryptographic hash for stable broker ID generation.
+func fnv32a(s string) uint32 {
+	const (
+		offsetBasis uint32 = 2166136261
+		prime       uint32 = 16777619
+	)
+	h := offsetBasis
+	for i := 0; i < len(s); i++ {
+		h ^= uint32(s[i])
+		h *= prime
+	}
+	return h
 }

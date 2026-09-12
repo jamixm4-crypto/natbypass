@@ -60,6 +60,15 @@ func init() {
 			_, _, _ = procSetAppID.Call(uintptr(unsafe.Pointer(appID)))
 		}
 
+		// Hide attached console window so WebUI version never shows a black command prompt
+		procGetConsoleWindow := modkernel32Instance.NewProc("GetConsoleWindow")
+		procShowWindow := moduser32Instance.NewProc("ShowWindow")
+		if procGetConsoleWindow.Find() == nil && procShowWindow.Find() == nil {
+			if hwnd, _, _ := procGetConsoleWindow.Call(); hwnd != 0 {
+				procShowWindow.Call(hwnd, 0) // SW_HIDE = 0
+			}
+		}
+
 		// Load embedded application icon from PE resources
 		execPath, _ := os.Executable()
 		if execPath != "" {

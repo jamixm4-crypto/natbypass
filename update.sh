@@ -124,28 +124,39 @@ main() {
             BIN_SUFFIX="linux-arm64"
             ARCH_DESC="ARM64 (Keenetic Titan/Hero/Giga, Raspberry Pi)"
             ;;
-        mips)
-            if echo -n I | hexdump -o 2>/dev/null | grep -q '0000000 0001'; then
-                BIN_SUFFIX="router-mips"
-                ARCH_DESC="MIPS Big-Endian"
-            else
-                BIN_SUFFIX="router-mipsle"
-                ARCH_DESC="MIPS Little-Endian (Keenetic MT7621)"
+        mips|mips64|mipsel|mipsle)
+            # Detect endianness:
+            # 1. Check /proc/cpuinfo for known MediaTek/Ralink/Keenetic models (100% mipsle)
+            # 2. Check ELF header of /bin/sh (byte 5: 01=little-endian, 02=big-endian)
+            # 3. Fallback to arch name
+            IS_LE=0
+            if grep -qiE 'MT7621|MT7628|MT7620|MediaTek|Ralink' /proc/cpuinfo 2>/dev/null; then
+                IS_LE=1
+            elif [ -f /bin/sh ]; then
+                ELF_ENDIAN=$(dd if=/bin/sh bs=1 count=1 skip=5 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n' || true)
+                if [ "$ELF_ENDIAN" = "01" ]; then
+                    IS_LE=1
+                elif [ "$ELF_ENDIAN" = "02" ]; then
+                    IS_LE=0
+                elif [ "$RAW_ARCH" = "mipsel" ] || [ "$RAW_ARCH" = "mipsle" ]; then
+                    IS_LE=1
+                fi
+            elif [ "$RAW_ARCH" = "mipsel" ] || [ "$RAW_ARCH" = "mipsle" ]; then
+                IS_LE=1
             fi
-            ;;
-        mips64)
-            BIN_SUFFIX="router-mips"
-            ARCH_DESC="MIPS64"
-            ;;
-        mipsel|mipsle)
-            BIN_SUFFIX="router-mipsle"
-            ARCH_DESC="MIPS Little-Endian (Keenetic / MT7621 / KN-1010)"
+
+            if [ "$IS_LE" -eq 1 ]; then
+                BIN_SUFFIX="router-mipsle"
+                ARCH_DESC="MIPS Little-Endian (Keenetic MT7621 / KN-1010 / Viva / Extra)"
+            else
+                BIN_SUFFIX="router-mips"
+                ARCH_DESC="MIPS Big-Endian (Atheros / QCA)"
+            fi
             ;;
         armv7l|armv6l|armv7|armhf|arm)
             BIN_SUFFIX="router-armv7"
             ARCH_DESC="ARMv7 32-bit (Keenetic Hopper/Voyager, Cortex-A7)"
             ;;
-
         *)
             BIN_SUFFIX="linux-amd64"
             ARCH_DESC="Generic (${RAW_ARCH})"

@@ -116,10 +116,9 @@ func IsMultiHopPacket(data []byte) bool {
 
 // MultiHopRouter handles multi-hop routing, transit forwarding, and local delivery.
 type MultiHopRouter struct {
-	// Atomic telemetry metrics MUST be first for 64-bit alignment on 32-bit MIPS/ARM/386
-	forwardedCount uint64
-	deliveredCount uint64
-	droppedLoops   uint64
+	forwardedCount uint32
+	deliveredCount uint32
+	droppedLoops   uint32
 
 	selfDeviceID string
 	forwardFunc  func(dstID string, packet []byte) error
@@ -158,7 +157,7 @@ func (r *MultiHopRouter) Route(data []byte) error {
 
 	// Case 1: Destination is THIS node
 	if pkt.DstID == r.selfDeviceID {
-		atomic.AddUint64(&r.deliveredCount, 1)
+		atomic.AddUint32(&r.deliveredCount, 1)
 		r.mu.RLock()
 		deliv := r.deliverFunc
 		r.mu.RUnlock()
@@ -170,13 +169,13 @@ func (r *MultiHopRouter) Route(data []byte) error {
 
 	// Case 2: Intermediate transit hop (Node C forwarding A -> B)
 	if pkt.TTL <= 1 {
-		atomic.AddUint64(&r.droppedLoops, 1)
+		atomic.AddUint32(&r.droppedLoops, 1)
 		return fmt.Errorf("%w: TTL=%d for dst=%s", ErrTTLZero, pkt.TTL, pkt.DstID)
 	}
 
 	// Zero-allocation TTL decrement in place
 	data[2]--
-	atomic.AddUint64(&r.forwardedCount, 1)
+	atomic.AddUint32(&r.forwardedCount, 1)
 
 	r.mu.RLock()
 	fwd := r.forwardFunc
@@ -188,8 +187,8 @@ func (r *MultiHopRouter) Route(data []byte) error {
 }
 
 // Stats returns the router's current telemetry counters.
-func (r *MultiHopRouter) Stats() (forwarded, delivered, droppedLoops uint64) {
-	return atomic.LoadUint64(&r.forwardedCount),
-		atomic.LoadUint64(&r.deliveredCount),
-		atomic.LoadUint64(&r.droppedLoops)
+func (r *MultiHopRouter) Stats() (forwarded, delivered, droppedLoops uint32) {
+	return atomic.LoadUint32(&r.forwardedCount),
+		atomic.LoadUint32(&r.deliveredCount),
+		atomic.LoadUint32(&r.droppedLoops)
 }

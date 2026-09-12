@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -60,38 +61,64 @@ type Profile struct {
 	CreatedAt           time.Time `json:"created_at" mapstructure:"created_at" yaml:"created_at"`
 }
 
-// DefaultPublicMQTTBrokers — список проверенных публичных MQTT брокеров для отказоустойчивого сигналинга
+// DefaultPublicMQTTBrokers — список проверенных публичных MQTT брокеров для отказоустойчивого сигналинга.
+// ВАЖНО: содержит строго один URL на физический кластер/хост (без дублей tcp/ssl одного сервера),
+// чтобы предотвратить взаимный разрыв соединений (EOF-storm) брокерами EMQX/HiveMQ.
 var DefaultPublicMQTTBrokers = []string{
 	"tcp://broker.hivemq.com:1883",
-	"ssl://broker.hivemq.com:8883",
-	"tcp://test.mosquitto.org:1883",
-	"ssl://test.mosquitto.org:8883",
 	"tcp://broker.emqx.io:1883",
-	"ssl://broker.emqx.io:8883",
+	"tcp://test.mosquitto.org:1883",
 }
 
-// GetEffectiveBackupBrokers возвращает список резервных брокеров, исключая текущий основной брокер
+// extractBrokerHost возвращает хостнейм брокера без протокола и порта для дедупликации (e.g. "broker.emqx.io")
+func extractBrokerHost(rawURL string) string {
+	u := strings.TrimSpace(strings.ToLower(rawURL))
+	if idx := strings.Index(u, "://"); idx != -1 {
+		u = u[idx+3:]
+	}
+	if host, _, err := net.SplitHostPort(u); err == nil && host != "" {
+		return host
+	}
+	if idx := strings.Index(u, ":"); idx != -1 {
+		return u[:idx]
+	}
+	if idx := strings.Index(u, "/"); idx != -1 {
+		return u[:idx]
+	}
+	return u
+}
+
+// GetEffectiveBackupBrokers возвращает список резервных брокеров, гарантированно исключая
+// хосты, совпадающие с основным брокером или уже добавленными резервными (дедупликация по домену).
 func (p *Profile) GetEffectiveBackupBrokers() []string {
-	seen := make(map[string]bool)
+	seenHosts := make(map[string]bool)
 	primaryClean := strings.TrimSpace(strings.ToLower(p.MQTTBroker))
 	if primaryClean != "" {
-		seen[primaryClean] = true
+		host := extractBrokerHost(primaryClean)
+		if host != "" {
+			seenHosts[host] = true
+		}
 	}
 
 	var backups []string
 	for _, b := range p.MQTTBackupBrokers {
 		bClean := strings.TrimSpace(strings.ToLower(b))
-		if bClean != "" && !seen[bClean] {
-			seen[bClean] = true
+		if bClean == "" {
+			continue
+		}
+		host := extractBrokerHost(bClean)
+		if host != "" && !seenHosts[host] {
+			seenHosts[host] = true
 			backups = append(backups, b)
 		}
 	}
 
-	// Дополняем проверенными общедоступными резервными брокерами
+	// Дополняем проверенными общедоступными резервными брокерами (по одному на уникальный сервер)
 	for _, b := range DefaultPublicMQTTBrokers {
 		bClean := strings.TrimSpace(strings.ToLower(b))
-		if !seen[bClean] {
-			seen[bClean] = true
+		host := extractBrokerHost(bClean)
+		if host != "" && !seenHosts[host] {
+			seenHosts[host] = true
 			backups = append(backups, b)
 		}
 	}

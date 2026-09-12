@@ -16,7 +16,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/natbypass/natbypass/internal/constants"
@@ -83,11 +82,17 @@ type Peer struct {
 	StandbyRelayReady        bool                    `json:"standby_relay_ready,omitempty"`  // True if Hot-Standby Relay path is verified
 	LastRelayPing            time.Time               `json:"last_relay_ping,omitempty"`      // Timestamp of last Hot-Standby heartbeat
 	ReplayFilter             *crypto.ReplayFilter    `json:"-"`                              // Anti-Replay sliding window (RFC 6479)
+	seqMu                    sync.Mutex              `json:"-"`                              // Mutex for 64-bit OutboundSeq on 32-bit arch
 }
 
 // NextOutboundSeq returns the next monotonically increasing sequence number for this peer.
+// Protected by mutex to guarantee 100% safety on 32-bit MIPS/ARM architectures.
 func (p *Peer) NextOutboundSeq() uint64 {
-	return atomic.AddUint64(&p.OutboundSeq, 1)
+	p.seqMu.Lock()
+	p.OutboundSeq++
+	seq := p.OutboundSeq
+	p.seqMu.Unlock()
+	return seq
 }
 
 // GetReplayFilter returns the initialized Anti-Replay filter for this peer.

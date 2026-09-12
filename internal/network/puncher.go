@@ -101,8 +101,8 @@ type AWGPacketHandler interface {
 }
 
 type UDPPuncher struct {
-	// 64-bit atomic counters MUST be first in struct for alignment on 32-bit MIPS/ARM/x86
-	outboundSeq   uint64
+	// 32-bit atomic counters are 100% safe against alignment panics on 32-bit MIPS/ARM/x86
+	outboundSeq   uint32
 	connID        uint64
 
 	awgVersion     string
@@ -1446,7 +1446,7 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 		}
 
 		epoch := crypto.GetCurrentEpoch()
-		seq := atomic.AddUint64(&p.outboundSeq, 1)
+		seq := uint64(atomic.AddUint32(&p.outboundSeq, 1))
 		if enc, encErr := crypto.EncryptWithEpochSeq(payloadToEncrypt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
 			if p.pacer != nil {
 				p.pacer.Pace()

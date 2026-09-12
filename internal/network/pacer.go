@@ -22,8 +22,8 @@ import (
 // aligned. Using atomic.Uint64 placed at the very beginning of the struct guarantees 8-byte alignment
 // on all platforms and prevents "panic: unaligned 64-bit atomic operation".
 type AdaptivePacer struct {
-	sentCount    atomic.Uint64 // 64-bit aligned at offset 0
-	lossCount    atomic.Uint64 // 64-bit aligned at offset 8
+	sentCount    atomic.Uint32 // 32-bit atomic is 100% safe against unaligned panic on MIPS/ARM
+	lossCount    atomic.Uint32
 	mu           sync.RWMutex
 	srtt         time.Duration // Smoothed RTT (EWMA)
 	rttMin       time.Duration // Minimum RTT observed (RTprop)
