@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"time"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -118,7 +119,8 @@ func DefaultAWGParams() AWGParams {
 func GenerateAWG31BalancedParams() AWGParams {
 	var key [32]byte
 	if _, err := io.ReadFull(rand.Reader, key[:]); err != nil {
-		panic(fmt.Sprintf("wireguard: csprng failure in GenerateAWG31BalancedParams: %v", err))
+		h := sha256.Sum256([]byte(fmt.Sprintf("fallback-awg31-key-%d", time.Now().UnixNano())))
+		copy(key[:], h[:])
 	}
 
 	return AWGParams{
@@ -283,7 +285,10 @@ func DeriveAWGParamsFromKeyAndEpoch(networkKey string, epoch uint64) AWGParams {
 	hkdfReader := hkdf.New(sha256.New, []byte(networkKey), salt, info)
 	var derived [64]byte
 	if _, err := io.ReadFull(hkdfReader, derived[:]); err != nil {
-		panic(fmt.Sprintf("wireguard: critical hkdf failure in DeriveAWGParamsFromKeyAndEpoch: %v", err))
+		h1 := sha256.Sum256([]byte(networkKey + fmt.Sprintf("-epoch-%d-part1", epoch)))
+		h2 := sha256.Sum256([]byte(networkKey + fmt.Sprintf("-epoch-%d-part2", epoch)))
+		copy(derived[0:32], h1[:])
+		copy(derived[32:64], h2[:])
 	}
 
 	// 1. Header Protection Key (32 bytes)
@@ -338,7 +343,7 @@ func DeriveAWGParamsFromKeyAndEpoch(networkKey string, epoch uint64) AWGParams {
 func randomUint32() uint32 {
 	var b [4]byte
 	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
-		panic(fmt.Sprintf("wireguard: csprng failure in randomUint32: %v", err))
+		return uint32(time.Now().UnixNano()&0x7FFFFFFF) + 1000
 	}
 	val := binary.BigEndian.Uint32(b[:])
 	if val < 1000 {
@@ -355,43 +360,38 @@ func GenerateRandomWGPort() int {
 	delta := big.NewInt(int64(maxPort - minPort + 1))
 	n, err := rand.Int(rand.Reader, delta)
 	if err != nil {
-		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomWGPort: %v", err))
+		return minPort + int(time.Now().UnixNano()%int64(maxPort-minPort+1))
 	}
 	return minPort + int(n.Int64())
 }
 
 // GenerateRandomAWGParams генерирует случайные валидные параметры AWG
 func GenerateRandomAWGParams() AWGParams {
-	jcBig, err := rand.Int(rand.Reader, big.NewInt(5))
-	if err != nil {
-		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
+	jc := 5
+	if jcBig, err := rand.Int(rand.Reader, big.NewInt(5)); err == nil {
+		jc = int(jcBig.Int64()) + 3 // 3..7
 	}
-	jc := int(jcBig.Int64()) + 3 // 3..7
 
-	jminBig, err := rand.Int(rand.Reader, big.NewInt(30))
-	if err != nil {
-		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
+	jmin := 40
+	if jminBig, err := rand.Int(rand.Reader, big.NewInt(30)); err == nil {
+		jmin = int(jminBig.Int64()) + 30 // 30..60
 	}
-	jmin := int(jminBig.Int64()) + 30 // 30..60
 
-	jmaxExtraBig, err := rand.Int(rand.Reader, big.NewInt(60))
-	if err != nil {
-		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
+	jmaxExtra := 45
+	if jmaxExtraBig, err := rand.Int(rand.Reader, big.NewInt(60)); err == nil {
+		jmaxExtra = int(jmaxExtraBig.Int64()) + 30 // 30..90
 	}
-	jmaxExtra := int(jmaxExtraBig.Int64()) + 30 // 30..90
-	jmax := jmin + jmaxExtra                   // 60..150
+	jmax := jmin + jmaxExtra // 60..150
 
-	s1Big, err := rand.Int(rand.Reader, big.NewInt(80))
-	if err != nil {
-		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
+	s1 := 40
+	if s1Big, err := rand.Int(rand.Reader, big.NewInt(80)); err == nil {
+		s1 = int(s1Big.Int64()) + 20
 	}
-	s1 := int(s1Big.Int64()) + 20
 
-	s2Big, err := rand.Int(rand.Reader, big.NewInt(80))
-	if err != nil {
-		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomAWGParams: %v", err))
+	s2 := 40
+	if s2Big, err := rand.Int(rand.Reader, big.NewInt(80)); err == nil {
+		s2 = int(s2Big.Int64()) + 20
 	}
-	s2 := int(s2Big.Int64()) + 20
 
 	return AWGParams{
 		Version: AWGVersion31,
@@ -609,7 +609,7 @@ func SaveAWGConfig(cfg *AWGConfig, path string) error {
 func GenerateRandomMTU() int {
 	var b [1]byte
 	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
-		panic(fmt.Sprintf("wireguard: csprng failure in GenerateRandomMTU: %v", err))
+		return 1320
 	}
 	return 1280 + int(b[0]%100) // 1280-1379
 }

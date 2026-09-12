@@ -10,7 +10,6 @@ package network
 import (
 	"crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"net"
 	"runtime"
@@ -218,7 +217,7 @@ func (s *TrafficShaper) AdaptivePadding(payloadLen int) int {
 	// Add random variation within the bin so packets form a continuous distribution rather than exact multiples
 	var jitterByte [1]byte
 	if _, err := io.ReadFull(rand.Reader, jitterByte[:]); err != nil {
-		panic(fmt.Sprintf("trafficshaper: csprng failure: %v", err))
+		jitterByte[0] = byte(time.Now().UnixNano() & 0xFF)
 	}
 	jitter := int(jitterByte[0] % 32) // 0-31 bytes
 
@@ -249,7 +248,7 @@ func (s *TrafficShaper) ApplyAdaptivePadding(payload []byte) []byte {
 	padded := make([]byte, len(payload)+padLen)
 	copy(padded, payload)
 	if _, err := io.ReadFull(rand.Reader, padded[len(payload):]); err != nil {
-		panic(fmt.Sprintf("trafficshaper: csprng failure: %v", err))
+		return payload
 	}
 	return padded
 }

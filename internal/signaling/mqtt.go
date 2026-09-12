@@ -9,7 +9,6 @@ package signaling
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -130,9 +129,7 @@ func NewMQTTChannelNamed(name, brokerURL, topic, clientID, username, password st
 
 	// Настройка TLS для безопасного шифрования MQTT
 	if strings.HasPrefix(brokerURL, "ssl://") || strings.HasPrefix(brokerURL, "tls://") || strings.HasPrefix(brokerURL, "tcps://") || strings.HasPrefix(brokerURL, "wss://") {
-		opts.SetTLSConfig(&tls.Config{
-			InsecureSkipVerify: true, // Совместимость с роутерами без системных корневых CA
-		})
+		opts.SetTLSConfig(crypto.BuildTLSConfig(brokerURL))
 	}
 
 	opts.SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).
@@ -164,21 +161,7 @@ func NewMQTTChannelNamed(name, brokerURL, topic, clientID, username, password st
 		if tTopic != "" && tHandler != nil {
 			log.Info().Str("tunnel_topic", tTopic).Msg("MQTT подписка на туннельный поток...")
 			c.Subscribe(tTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-				raw := msg.Payload()
-				ch.keyMu.RLock()
-				hasKey := ch.hasSignKey
-				signKey := ch.signKey
-				ch.keyMu.RUnlock()
-
-				if hasKey && len(raw) >= 40 && raw[0] != '{' {
-					if inner, _, err := crypto.VerifyFrame(raw, signKey, 300*time.Second); err == nil && len(inner) >= 20 {
-						tHandler(inner)
-						return
-					}
-				}
-				if len(raw) >= 20 {
-					tHandler(raw)
-				}
+				ch.handleTunnelPayload(msg.Payload())
 			})
 		}
 	}).
@@ -236,7 +219,7 @@ func (m *MQTTChannel) ReconnectWithBroker(newBrokerURL string) error {
 
 	opts := mqtt.NewClientOptions().AddBroker(newBrokerURL)
 	if strings.HasPrefix(newBrokerURL, "ssl://") || strings.HasPrefix(newBrokerURL, "tls://") || strings.HasPrefix(newBrokerURL, "tcps://") || strings.HasPrefix(newBrokerURL, "wss://") {
-		opts.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
+		opts.SetTLSConfig(crypto.BuildTLSConfig(newBrokerURL))
 	}
 
 	opts.SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).
@@ -266,20 +249,7 @@ func (m *MQTTChannel) ReconnectWithBroker(newBrokerURL string) error {
 		m.tunnelMu.RUnlock()
 		if tTopic != "" && tHandler != nil {
 			c.Subscribe(tTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-				raw := msg.Payload()
-				m.keyMu.RLock()
-				hasKey := m.hasSignKey
-				signKey := m.signKey
-				m.keyMu.RUnlock()
-				if hasKey && len(raw) >= 40 && raw[0] != '{' {
-					if inner, _, err := crypto.VerifyFrame(raw, signKey, 300*time.Second); err == nil && len(inner) >= 20 {
-						tHandler(inner)
-						return
-					}
-				}
-				if len(raw) >= 20 {
-					tHandler(raw)
-				}
+				m.handleTunnelPayload(msg.Payload())
 			})
 		}
 	}).
@@ -315,19 +285,31 @@ func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 	m.keyMu.RUnlock()
 
 	var payloadBytes []byte
-	if len(data) >= 40 && data[0] != '{' {
-		if hasKey {
-			inner, _, err := crypto.VerifyFrame(data, signKey, 300*time.Second)
-			if err != nil {
-				log.Warn().Err(err).Msg("🛡️ MQTT signaling frame dropped: invalid HMAC signature or replay detected")
-				return
-			}
-			payloadBytes = inner
-		} else {
-			log.Warn().Msg("🛡️ MQTT frame is HMAC-signed, but channel has no NetworkKey configured — dropping")
+	if hasKey {
+		// Режим строгой безопасности: задан NetworkKey.
+		// ВСЕ сигналы ОБЯЗАТЕЛЬНО должны быть подписаны HMAC-SHA256 фреймом.
+		if len(data) < 40 {
+			log.Warn().Int("len", len(data)).Msg("🛡️ MQTT signaling frame dropped: payload too short for signed frame")
 			return
 		}
+		// Запрещаем сырой JSON в защищённом режиме
+		if data[0] == '{' {
+			log.Warn().Msg("🛡️ MQTT signaling frame dropped: plaintext JSON rejected when NetworkKey is active")
+			return
+		}
+
+		inner, _, err := crypto.VerifyFrame(data, signKey, 300*time.Second)
+		if err != nil {
+			log.Warn().Err(err).Msg("🛡️ MQTT signaling frame dropped: invalid HMAC signature or replay detected")
+			return
+		}
+		payloadBytes = inner
 	} else {
+		// Легаси режим: NetworkKey не задан. Разрешаем только сырой JSON.
+		if len(data) > 0 && data[0] != '{' {
+			log.Warn().Msg("🛡️ MQTT frame is HMAC-signed or binary, but channel has no NetworkKey configured — dropping")
+			return
+		}
 		payloadBytes = data
 	}
 
@@ -525,22 +507,49 @@ func (m *MQTTChannel) SubscribeTunnelData(myDevID string, onPkt func(pkt []byte)
 
 	if m.client != nil && m.client.IsConnected() {
 		m.client.Subscribe(topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
-			raw := msg.Payload()
-			m.keyMu.RLock()
-			hasKey := m.hasSignKey
-			signKey := m.signKey
-			m.keyMu.RUnlock()
-
-			if hasKey && len(raw) >= 40 && raw[0] != '{' {
-				if inner, _, err := crypto.VerifyFrame(raw, signKey, 300*time.Second); err == nil && len(inner) >= 20 {
-					onPkt(inner)
-					return
-				}
-			}
-			if len(raw) >= 20 && onPkt != nil {
-				onPkt(raw)
-			}
+			m.handleTunnelPayload(msg.Payload())
 		})
+	}
+}
+
+// handleTunnelPayload верифицирует и передаёт входящий пакет туннеля обработчику.
+func (m *MQTTChannel) handleTunnelPayload(raw []byte) {
+	m.tunnelMu.RLock()
+	handler := m.tunnelHandler
+	m.tunnelMu.RUnlock()
+
+	if handler == nil || len(raw) == 0 {
+		return
+	}
+
+	m.keyMu.RLock()
+	hasKey := m.hasSignKey
+	signKey := m.signKey
+	m.keyMu.RUnlock()
+
+	if hasKey {
+		if len(raw) < 40 {
+			log.Warn().Int("len", len(raw)).Msg("🛡️ MQTT tunnel frame dropped: payload too short for HMAC verification")
+			return
+		}
+		if raw[0] == '{' {
+			log.Warn().Msg("🛡️ MQTT tunnel frame dropped: plaintext payload rejected when NetworkKey is active")
+			return
+		}
+		inner, _, err := crypto.VerifyFrame(raw, signKey, 300*time.Second)
+		if err != nil {
+			log.Warn().Err(err).Msg("🛡️ MQTT tunnel frame dropped: invalid HMAC signature or replay detected")
+			return
+		}
+		if len(inner) >= 20 {
+			handler(inner)
+		}
+		return
+	}
+
+	// Legacy mode (без NetworkKey): разрешаем сырой IP-пакет (IPv4 заголовок >= 20 байт)
+	if len(raw) >= 20 {
+		handler(raw)
 	}
 }
 

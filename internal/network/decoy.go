@@ -10,7 +10,7 @@ package network
 import (
 	"context"
 	"crypto/rand"
-	"fmt"
+	"encoding/binary"
 	"io"
 	"math/big"
 	"net/http"
@@ -91,7 +91,7 @@ func BuildDecoyFrame() []byte {
 
 	// 8 bytes random opaque data
 	if _, err := io.ReadFull(rand.Reader, frame[9:]); err != nil {
-		panic(fmt.Sprintf("decoy: csprng failure in BuildDecoyFrame: %v", err))
+		binary.BigEndian.PutUint64(frame[9:], uint64(time.Now().UnixNano()))
 	}
 	return frame
 }

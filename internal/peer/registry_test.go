@@ -320,3 +320,58 @@ func TestIsValidEndpointForPeer(t *testing.T) {
 		t.Errorf("expected 192.168.1.100:47832 to be accepted for same-NAT local peer")
 	}
 }
+
+func TestRegistry_DisplacementRejectionOnActivePeer(t *testing.T) {
+	reg := NewRegistry()
+
+	// 1. Legitimate active peer Alice
+	pAlice := &Peer{
+		DeviceID:  "node-alice",
+		Nickname:  "Alice",
+		VirtualIP: "10.11.12.5",
+		PublicKey: "alice-public-key-12345",
+		Online:    true,
+		LastSeen:  time.Now(),
+	}
+	reg.Upsert(pAlice)
+
+	if !reg.Exists("node-alice") {
+		t.Fatalf("expected node-alice to exist in registry")
+	}
+
+	// 2. Attacker Mallory tries to displace Alice by sending a newer beacon claiming Alice's VirtualIP with a different PublicKey
+	pMallory := &Peer{
+		DeviceID:  "node-mallory",
+		Nickname:  "Mallory",
+		VirtualIP: "10.11.12.5",
+		PublicKey: "mallory-different-key-67890",
+		Online:    true,
+		LastSeen:  time.Now().Add(1 * time.Second), // newer timestamp
+	}
+	reg.Upsert(pMallory)
+
+	// Alice MUST NOT be evicted!
+	if !reg.Exists("node-alice") {
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Active peer Alice was evicted by rogue node Mallory claiming the same VirtualIP!")
+	}
+
+	// Mallory must have IPConflict set and VirtualIP cleared
+	malloryInReg, ok := reg.Get("node-mallory")
+	if !ok || malloryInReg == nil {
+		t.Fatalf("expected node-mallory to be registered")
+	}
+	if malloryInReg.VirtualIP != "" {
+		t.Errorf("expected Mallory's conflicting VirtualIP to be stripped, but got: %s", malloryInReg.VirtualIP)
+	}
+	if !malloryInReg.IPConflict {
+		t.Errorf("expected Mallory to have IPConflict=true")
+	}
+
+	aliceInReg, ok := reg.Get("node-alice")
+	if !ok || aliceInReg == nil {
+		t.Fatalf("expected node-alice to be registered")
+	}
+	if !aliceInReg.IPConflict {
+		t.Errorf("expected Alice to have IPConflict=true")
+	}
+}

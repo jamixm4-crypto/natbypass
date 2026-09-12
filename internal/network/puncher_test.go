@@ -18,7 +18,7 @@ import (
 
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
-	"github.com/pion/stun/v2"
+	"github.com/pion/stun/v3"
 )
 
 func TestHopPort_NoRace(t *testing.T) {

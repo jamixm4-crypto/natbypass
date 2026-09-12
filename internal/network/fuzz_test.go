@@ -14,7 +14,7 @@ import (
 	"testing"
 
 	"github.com/natbypass/natbypass/internal/constants"
-	"github.com/pion/stun/v2"
+	"github.com/pion/stun/v3"
 )
 
 // FuzzParseQUICChameleonProbe tests robustness of QUIC Chameleon probe parser against arbitrary payload.

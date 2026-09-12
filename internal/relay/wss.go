@@ -9,8 +9,6 @@ package relay
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -19,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/natbypass/natbypass/internal/crypto"
 )
 
 // WSSRelayClient provides an encrypted HTTPS/WSS fallback tunnel over port 443.
@@ -89,14 +88,7 @@ func (c *WSSRelayClient) connectionLoop() {
 			continue
 		}
 
-		sysCerts, _ := x509.SystemCertPool()
-		tlsConfig := &tls.Config{
-			RootCAs:    sysCerts,
-			ServerName: u.Hostname(),
-		}
-		if u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" {
-			tlsConfig.InsecureSkipVerify = true
-		}
+		tlsConfig := crypto.BuildTLSConfig(c.serverURL)
 
 		dialer := websocket.Dialer{
 			TLSClientConfig:  tlsConfig,

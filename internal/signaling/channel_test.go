@@ -331,4 +331,102 @@ func TestHMACSignAndDecryptPayload(t *testing.T) {
 	}
 }
 
+type mockMQTTMessage struct {
+	payload []byte
+}
+
+func (m *mockMQTTMessage) Duplicate() bool   { return false }
+func (m *mockMQTTMessage) Qos() byte         { return 0 }
+func (m *mockMQTTMessage) Retained() bool    { return false }
+func (m *mockMQTTMessage) Topic() string     { return "test/topic" }
+func (m *mockMQTTMessage) MessageID() uint16 { return 0 }
+func (m *mockMQTTMessage) Payload() []byte   { return m.payload }
+func (m *mockMQTTMessage) Ack()              {}
+
+func TestSignatureBypass_RejectedWhenKeyActive(t *testing.T) {
+	networkKey := "secure-mesh-key-9988"
+	signKey := crypto.DeriveSignKey(networkKey)
+
+	ch := &MQTTChannel{
+		dedup: NewPacketDedup(),
+	}
+	ch.SetNetworkKey(networkKey)
+
+	outCh := make(chan *Payload, 10)
+	ch.outMu.Lock()
+	ch.outChans = append(ch.outChans, outCh)
+	ch.outMu.Unlock()
+
+	// 1. Attacker attempts Signature Bypass: sends raw JSON starting with '{'
+	rawJSON := []byte(`{"deviceID":"attacker-node","nickname":"Evil Node","virtual_ip":"10.99.0.1"}`)
+	ch.handleIncoming(&mockMQTTMessage{payload: rawJSON})
+
+	select {
+	case p := <-outCh:
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Plaintext JSON was accepted when NetworkKey was active! Got payload: %+v", p)
+	case <-time.After(50 * time.Millisecond):
+		// Expected: dropped
+	}
+
+	// 2. Attacker sends tampered / invalid HMAC frame
+	fakeFrame := make([]byte, 50)
+	fakeFrame[0] = 0xAA // binary
+	ch.handleIncoming(&mockMQTTMessage{payload: fakeFrame})
+
+	select {
+	case p := <-outCh:
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Invalid HMAC frame was accepted! Got payload: %+v", p)
+	case <-time.After(50 * time.Millisecond):
+		// Expected: dropped
+	}
+
+	// 3. Legitimate peer sends valid HMAC-signed frame
+	legitJSON := []byte(`{"deviceID":"legit-node","nickname":"Friendly Node","virtual_ip":"10.99.0.2"}`)
+	validSignedFrame := crypto.SignFrame(legitJSON, signKey)
+	ch.handleIncoming(&mockMQTTMessage{payload: validSignedFrame})
+
+	select {
+	case p := <-outCh:
+		if p.DeviceID != "legit-node" {
+			t.Errorf("expected DeviceID 'legit-node', got '%s'", p.DeviceID)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("Valid HMAC-signed frame was unexpectedly dropped")
+	}
+
+	// 4. Test Tunnel Payload: Raw packet must be rejected when NetworkKey is active
+	tunnelReceived := make(chan []byte, 1)
+	ch.tunnelMu.Lock()
+	ch.tunnelHandler = func(pkt []byte) {
+		tunnelReceived <- pkt
+	}
+	ch.tunnelMu.Unlock()
+
+	// Attacker sends raw IPv4 packet (starts with 0x45)
+	rawIP := make([]byte, 28)
+	rawIP[0] = 0x45 // IPv4 header
+	ch.handleTunnelPayload(rawIP)
+
+	select {
+	case pkt := <-tunnelReceived:
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Raw unauthenticated tunnel packet was accepted! Got: %x", pkt)
+	case <-time.After(50 * time.Millisecond):
+		// Expected: dropped
+	}
+
+	// Legitimate peer sends signed tunnel packet
+	signedIP := crypto.SignFrame(rawIP, signKey)
+	ch.handleTunnelPayload(signedIP)
+
+	select {
+	case pkt := <-tunnelReceived:
+		if len(pkt) != len(rawIP) || pkt[0] != 0x45 {
+			t.Errorf("Tunnel packet corrupted: got %x, want %x", pkt, rawIP)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("Valid signed tunnel packet was unexpectedly dropped")
+	}
+}
+
+
 

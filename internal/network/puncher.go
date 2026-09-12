@@ -28,7 +28,7 @@ import (
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/transport/quic"
-	"github.com/pion/stun/v2"
+	"github.com/pion/stun/v3"
 )
 
 // IPRateLimiter implements a per-IP Token Bucket rate limiter to protect against PING/PONG flood attacks.
@@ -882,7 +882,7 @@ func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 	// DCID: 8 random bytes
 	dcid := make([]byte, 8)
 	if _, err := io.ReadFull(rand.Reader, dcid); err != nil {
-		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICChameleonProbe (dcid): %v", err))
+		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICChameleonProbe (dcid): %w", err)
 	}
 	buf = append(buf, byte(len(dcid)))
 	buf = append(buf, dcid...)
@@ -890,7 +890,7 @@ func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 	// SCID: 8 random bytes
 	scid := make([]byte, 8)
 	if _, err := io.ReadFull(rand.Reader, scid); err != nil {
-		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICChameleonProbe (scid): %v", err))
+		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICChameleonProbe (scid): %w", err)
 	}
 	buf = append(buf, byte(len(scid)))
 	buf = append(buf, scid...)
@@ -904,7 +904,7 @@ func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 	buf = append(buf, 0x00, 0x01)
 	pad := make([]byte, 14)
 	if _, err := io.ReadFull(rand.Reader, pad); err != nil {
-		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICChameleonProbe (pad): %v", err))
+		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICChameleonProbe (pad): %w", err)
 	}
 	buf = append(buf, pad...)
 
@@ -928,14 +928,14 @@ func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte,
 
 	dcid := make([]byte, 8)
 	if _, err := io.ReadFull(rand.Reader, dcid); err != nil {
-		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICPongChameleonProbe (dcid): %v", err))
+		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICPongChameleonProbe (dcid): %w", err)
 	}
 	buf = append(buf, byte(len(dcid)))
 	buf = append(buf, dcid...)
 
 	scid := make([]byte, 8)
 	if _, err := io.ReadFull(rand.Reader, scid); err != nil {
-		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICPongChameleonProbe (scid): %v", err))
+		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICPongChameleonProbe (scid): %w", err)
 	}
 	buf = append(buf, byte(len(scid)))
 	buf = append(buf, scid...)
@@ -947,7 +947,7 @@ func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte,
 	buf = append(buf, 0x00, 0x01)
 	pad := make([]byte, 14)
 	if _, err := io.ReadFull(rand.Reader, pad); err != nil {
-		panic(fmt.Sprintf("puncher: csprng failure in BuildQUICPongChameleonProbe (pad): %v", err))
+		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICPongChameleonProbe (pad): %w", err)
 	}
 	buf = append(buf, pad...)
 
@@ -1429,20 +1429,18 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			padLen := pmin
 			if diff := pmax - pmin; diff > 0 {
 				var b [1]byte
-				if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
-					panic(fmt.Sprintf("puncher: csprng failure in SendDataPacketWithPadding: %v", err))
+				if _, err := io.ReadFull(rand.Reader, b[:]); err == nil {
+					padLen += int(b[0]) % (diff + 1)
 				}
-				padLen += int(b[0]) % (diff + 1)
 			}
 			if padLen > 0 {
 				pLen := uint16(len(payload))
 				padded := make([]byte, 2+len(payload)+padLen)
 				binary.BigEndian.PutUint16(padded[:2], pLen)
 				copy(padded[2:], payload)
-				if _, err := io.ReadFull(rand.Reader, padded[2+len(payload):]); err != nil {
-					panic(fmt.Sprintf("puncher: csprng failure in SendDataPacketWithPadding (padding bytes): %v", err))
+				if _, err := io.ReadFull(rand.Reader, padded[2+len(payload):]); err == nil {
+					payloadToEncrypt = padded
 				}
-				payloadToEncrypt = padded
 			}
 		} else {
 			// Dynamic Packet Size Obfuscation (Anti-Flow Analysis for TSPU/DPI)
@@ -1454,16 +1452,14 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			} else if len(payload) < 512 {
 				// Default light jitter padding for small packets (<512B) to mask keystrokes / interactive traffic
 				var b [1]byte
-				if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
-					panic(fmt.Sprintf("puncher: csprng failure in SendDataPacketWithPadding (jitter): %v", err))
+				if _, err := io.ReadFull(rand.Reader, b[:]); err == nil {
+					padLen := 16 + int(b[0]%48) // 16-63 bytes
+					padded := make([]byte, len(payload)+padLen)
+					copy(padded, payload)
+					if _, err := io.ReadFull(rand.Reader, padded[len(payload):]); err == nil {
+						payloadToEncrypt = padded
+					}
 				}
-				padLen := 16 + int(b[0]%48) // 16-63 bytes
-				padded := make([]byte, len(payload)+padLen)
-				copy(padded, payload)
-				if _, err := io.ReadFull(rand.Reader, padded[len(payload):]); err != nil {
-					panic(fmt.Sprintf("puncher: csprng failure in SendDataPacketWithPadding (jitter pad): %v", err))
-				}
-				payloadToEncrypt = padded
 			}
 		}
 

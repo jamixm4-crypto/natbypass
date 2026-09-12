@@ -9,6 +9,7 @@ package quic
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -58,7 +59,7 @@ func BuildQUICDataPacket(dcid []byte, pktNum uint16, payload []byte, cKey [32]by
 		copy(buf[1:1+DCIDLen], dcid[:DCIDLen])
 	} else {
 		if _, err := io.ReadFull(rand.Reader, buf[1:1+DCIDLen]); err != nil {
-			panic(fmt.Sprintf("quic: csprng failure in BuildQUICDataPacket (dcid): %v", err))
+			return nil, fmt.Errorf("quic: csprng failure in BuildQUICDataPacket (dcid): %w", err)
 		}
 	}
 
@@ -111,7 +112,8 @@ type Session struct {
 func NewSession(peerID string, remoteAddr string, cKey [32]byte) *Session {
 	var dcid [DCIDLen]byte
 	if _, err := io.ReadFull(rand.Reader, dcid[:]); err != nil {
-		panic(fmt.Sprintf("quic: csprng failure in NewSession (dcid): %v", err))
+		h := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", peerID, time.Now().UnixNano())))
+		copy(dcid[:], h[:DCIDLen])
 	}
 
 	return &Session{

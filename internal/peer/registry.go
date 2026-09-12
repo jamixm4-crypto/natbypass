@@ -20,6 +20,7 @@ import (
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/rs/zerolog/log"
 )
 
 // Peer represents a discovered mesh network device.
@@ -449,10 +450,37 @@ func (r *Registry) Upsert(p *Peer) {
 
 		// 1. Конфликт одного и того же Virtual IP:
 		if cleanPVIP != "" && cleanExistingVIP != "" && cleanPVIP == cleanExistingVIP {
-			// BUG-10 FIX: Only evict if existing peer is stale (not seen recently or newer beacon arrived)
-			existingIsStale := existing.LastSeen.IsZero() ||
-				now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold ||
-				(!p.LastSeen.IsZero() && p.LastSeen.After(existing.LastSeen))
+			hasSameKey := p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey
+
+			if hasSameKey {
+				// Тот же криптографический узел перезапустился с новым DeviceID: вытеснение разрешено
+				if !p.LastSeen.IsZero() && p.LastSeen.After(existing.LastSeen) {
+					staleConflictingIDs = append(staleConflictingIDs, id)
+				}
+				continue
+			}
+
+			// Разные PublicKey: коллизия адресов или попытка подмены / вытеснения
+			existingIsActive := existing.Online && now.Sub(existing.LastSeen) < constants.PeerOfflineThreshold
+
+			if existingIsActive {
+				// 🛡️ Защита от Peer Displacement: активный узел НЕЛЬЗЯ вытеснить чужим ключом!
+				p.IPConflict = true
+				existing.IPConflict = true
+				// Запрещаем новому узлу перехват чужого IP
+				p.VirtualIP = ""
+				log.Warn().
+					Str("victim_id", id).
+					Str("victim_key", existing.PublicKey).
+					Str("attacker_id", p.DeviceID).
+					Str("attacker_key", p.PublicKey).
+					Str("conflicting_vip", cleanPVIP).
+					Msg("🛡️ Security alert: Peer displacement rejected! Rogue or conflicting node attempted to hijack Virtual IP")
+				continue
+			}
+
+			// Существующий узел действительно офлайн / устарел (!Online или LastSeen > PeerOfflineThreshold)
+			existingIsStale := existing.LastSeen.IsZero() || !existing.Online || now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold
 			if existingIsStale {
 				staleConflictingIDs = append(staleConflictingIDs, id)
 			}
@@ -461,9 +489,7 @@ func (r *Registry) Upsert(p *Peer) {
 
 		// 2. Совпадение Public Key (тот же криптографический узел, перезапустившийся с новым ID):
 		if p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey {
-			existingIsStale := existing.LastSeen.IsZero() ||
-				now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold
-			if existingIsStale {
+			if !p.LastSeen.IsZero() && p.LastSeen.After(existing.LastSeen) {
 				staleConflictingIDs = append(staleConflictingIDs, id)
 			}
 			continue
@@ -472,9 +498,8 @@ func (r *Registry) Upsert(p *Peer) {
 		// 3. Переподключающийся Android с меняющимся DeviceID:
 		if strings.HasPrefix(p.DeviceID, "Android-") && strings.HasPrefix(id, "Android-") {
 			if cleanPVIP != "" && cleanExistingVIP == cleanPVIP {
-				existingIsStale := existing.LastSeen.IsZero() ||
-					now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold
-				if existingIsStale {
+				hasSameKey := p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey
+				if hasSameKey && !p.LastSeen.IsZero() && p.LastSeen.After(existing.LastSeen) {
 					staleConflictingIDs = append(staleConflictingIDs, id)
 				}
 				continue

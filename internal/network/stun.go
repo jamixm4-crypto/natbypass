@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/natbypass/natbypass/internal/signaling"
-	"github.com/pion/stun/v2"
+	"github.com/pion/stun/v3"
 )
 
 

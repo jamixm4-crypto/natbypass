@@ -102,7 +102,8 @@ func (p *Profile) GetEffectiveBackupBrokers() []string {
 func GenerateRandomHex(n int) string {
 	b := make([]byte, n)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		panic(fmt.Sprintf("profiles: csprng failure in GenerateRandomHex: %v", err))
+		h := sha256.Sum256([]byte(fmt.Sprintf("fallback-hex-%d", time.Now().UnixNano())))
+		copy(b, h[:])
 	}
 	return hex.EncodeToString(b)
 }
@@ -113,7 +114,8 @@ func GenerateRandomHex(n int) string {
 func GenerateRandomAWGProfileParams() (jc, jmin, jmax, s1, s2 int, h1, h2, h3, h4 uint32, hpKey string) {
 	var b [16]byte
 	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
-		panic(fmt.Sprintf("profiles: csprng failure in GenerateRandomAWGProfileParams: %v", err))
+		h := sha256.Sum256([]byte(fmt.Sprintf("fallback-awg-h-%d", time.Now().UnixNano())))
+		copy(b[:], h[:16])
 	}
 	h1 = uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
 	h2 = uint32(b[4])<<24 | uint32(b[5])<<16 | uint32(b[6])<<8 | uint32(b[7])
@@ -126,7 +128,8 @@ func GenerateRandomAWGProfileParams() (jc, jmin, jmax, s1, s2 int, h1, h2, h3, h
 
 	var r [4]byte
 	if _, err := io.ReadFull(rand.Reader, r[:]); err != nil {
-		panic(fmt.Sprintf("profiles: csprng failure in GenerateRandomAWGProfileParams: %v", err))
+		h := sha256.Sum256([]byte(fmt.Sprintf("fallback-awg-r-%d", time.Now().UnixNano())))
+		copy(r[:], h[:4])
 	}
 	jc = 3 + int(r[0]%4)
 	jmin = 25 + int(r[1]%25)
@@ -141,7 +144,7 @@ func GenerateRandomAWGProfileParams() (jc, jmin, jmax, s1, s2 int, h1, h2, h3, h
 func GenerateRandomWGPort() int {
 	var r [2]byte
 	if _, err := io.ReadFull(rand.Reader, r[:]); err != nil {
-		panic(fmt.Sprintf("profiles: csprng failure in GenerateRandomWGPort: %v", err))
+		return 25700 + int(time.Now().UnixNano()%(49000-25700+1))
 	}
 	portVal := int(r[0])<<8 | int(r[1])
 	return 25700 + (portVal % (49000 - 25700 + 1))

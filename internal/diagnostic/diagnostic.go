@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/stun/v2"
+	"github.com/pion/stun/v3"
 )
 
 type DiagnosticItem struct {

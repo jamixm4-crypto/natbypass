@@ -124,7 +124,7 @@ func (s *SessionState) Encrypt(plaintext []byte) ([]byte, error) {
 
 	nonce := make([]byte, aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		panic(fmt.Sprintf("ratchet: csprng failure: %v", err))
+		return nil, fmt.Errorf("ratchet: csprng failure: %w", err)
 	}
 
 	ciphertext := aead.Seal(nil, nonce, plaintext, nil)
