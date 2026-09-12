@@ -98,3 +98,31 @@ func TestIPWhitelistMiddleware(t *testing.T) {
 		t.Fatalf("denied IP expected 403, got %d", wDeny.Code)
 	}
 }
+
+func TestLoginRateLimit(t *testing.T) {
+	s := NewServer(0, "admin", "correctpassword", nil, nil)
+	testIP := "192.168.100.50"
+	resetLoginRateLimit(testIP)
+	defer resetLoginRateLimit(testIP)
+
+	// Send 5 failed login attempts
+	for i := 1; i <= 5; i++ {
+		req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		req.RemoteAddr = testIP + ":1234"
+		w := httptest.NewRecorder()
+		s.handleLogin(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d expected 401, got %d", i, w.Code)
+		}
+	}
+
+	// 6th attempt should be blocked with 429 Too Many Requests
+	reqBlocked := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"admin","password":"wrong"}`))
+	reqBlocked.RemoteAddr = testIP + ":1234"
+	wBlocked := httptest.NewRecorder()
+	s.handleLogin(wBlocked, reqBlocked)
+	if wBlocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("6th attempt expected 429 Too Many Requests, got %d", wBlocked.Code)
+	}
+}
+

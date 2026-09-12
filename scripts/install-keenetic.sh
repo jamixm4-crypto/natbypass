@@ -7,7 +7,15 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.1.0"
+    DEFAULT_TAG="v1.9.226-beta16"
+
+    # Try to resolve latest tag from GitHub API
+    LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+    if [ -n "$LATEST_TAG" ]; then
+        TAG="${LATEST_TAG}"
+    else
+        TAG="${DEFAULT_TAG}"
+    fi
 
     # Color Helpers
     print_purple() { printf "\033[0;35m%s\033[0m\n" "$1"; }
@@ -16,6 +24,43 @@ main() {
     print_yellow() { printf "\033[1;33m%s\033[0m\n" "$1"; }
     print_red()    { printf "\033[0;31m%s\033[0m\n" "$1"; }
     print_bold()   { printf "\033[1;37m%s\033[0m\n" "$1"; }
+
+    # Security & Entropy Helpers (BusyBox / Linux / POSIX compatible)
+    generate_random_hex() {
+        _bytes="${1:-16}"
+        _res=""
+        if [ -r /dev/urandom ]; then
+            if command -v od >/dev/null 2>&1; then
+                _res=$(dd if=/dev/urandom bs="${_bytes}" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+            elif command -v hexdump >/dev/null 2>&1; then
+                _res=$(dd if=/dev/urandom bs="${_bytes}" count=1 2>/dev/null | hexdump -e '1/1 "%02x"')
+            fi
+        fi
+        if [ -z "$_res" ]; then
+            _res=$( (date +%s%N 2>/dev/null || date +%s; echo "$$"; uname -a) | md5sum 2>/dev/null | awk '{print $1}' )
+        fi
+        echo "$_res"
+    }
+
+    verify_sha256() {
+        _file="$1"
+        _expected="$2"
+        _calculated=""
+        if command -v sha256sum >/dev/null 2>&1; then
+            _calculated=$(sha256sum "$_file" 2>/dev/null | awk '{print $1}' | tr 'A-Z' 'a-z')
+        elif command -v openssl >/dev/null 2>&1; then
+            _calculated=$(openssl dgst -sha256 "$_file" 2>/dev/null | awk '{print $NF}' | tr 'A-Z' 'a-z')
+        elif command -v shasum >/dev/null 2>&1; then
+            _calculated=$(shasum -a 256 "$_file" 2>/dev/null | awk '{print $1}' | tr 'A-Z' 'a-z')
+        fi
+        if [ -z "$_calculated" ]; then
+            return 2 # tool unavailable
+        fi
+        if [ "$_calculated" = "$_expected" ]; then
+            return 0 # match
+        fi
+        return 1 # mismatch
+    }
 
     printf "\033[0;35m%s\n%s\n%s\n%s\n%s\n%s\033[0m\n" \
       "  _   _       _   ____                                " \
@@ -136,24 +181,70 @@ main() {
     killall natbypass 2>/dev/null || true
 
     # 5. Download Release Binary
-    DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${DEFAULT_TAG}/natbypass-${DEFAULT_TAG}-${BIN_SUFFIX}"
-    FALLBACK_URL="https://github.com/${REPO}/releases/latest/download/natbypass-${DEFAULT_TAG}-${BIN_SUFFIX}"
+    URLS="
+https://github.com/${REPO}/releases/download/${TAG}/natbypass-${TAG}-${BIN_SUFFIX}
+https://github.com/${REPO}/releases/download/${TAG}/natbypass-${BIN_SUFFIX}
+https://github.com/${REPO}/releases/latest/download/natbypass-${TAG}-${BIN_SUFFIX}
+https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
+"
 
-    echo ">> Загрузка бинарного файла ${BIN_SUFFIX}..."
+    echo ">> Загрузка бинарного файла ${BIN_SUFFIX} (${TAG})..."
     DOWNLOADED=0
+    DOWNLOAD_SOURCE_URL=""
 
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "${DOWNLOAD_URL}" -o "${TARGET_BIN}" 2>/dev/null && DOWNLOADED=1 || \
-        curl -fsSL "${FALLBACK_URL}" -o "${TARGET_BIN}" 2>/dev/null && DOWNLOADED=1 || true
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q "${DOWNLOAD_URL}" -O "${TARGET_BIN}" 2>/dev/null && DOWNLOADED=1 || \
-        wget -q "${FALLBACK_URL}" -O "${TARGET_BIN}" 2>/dev/null && DOWNLOADED=1 || true
-    fi
+    for u in $URLS; do
+        [ -z "$u" ] && continue
+        if command -v curl >/dev/null 2>&1; then
+            if curl -fsSL "$u" -o "${TARGET_BIN}" 2>/dev/null && [ -s "${TARGET_BIN}" ]; then
+                DOWNLOADED=1
+                DOWNLOAD_SOURCE_URL="$u"
+                break
+            fi
+        elif command -v wget >/dev/null 2>&1; then
+            if wget -q "$u" -O "${TARGET_BIN}" 2>/dev/null && [ -s "${TARGET_BIN}" ]; then
+                DOWNLOADED=1
+                DOWNLOAD_SOURCE_URL="$u"
+                break
+            fi
+        fi
+    done
 
     if [ "$DOWNLOADED" -eq 0 ] || [ ! -s "${TARGET_BIN}" ]; then
         print_red "[!] Ошибка загрузки бинарного файла."
-        print_yellow "URL: ${DOWNLOAD_URL}"
+        print_yellow "Проверены URL:"
+        for u in $URLS; do [ -n "$u" ] && echo " - $u"; done
         exit 1
+    fi
+
+    # 5.1 Verify SHA256 Checksum
+    SHA_URL="${DOWNLOAD_SOURCE_URL}.sha256"
+    CHECKSUM_FILE="/tmp/natbypass_download.sha256"
+    rm -f "${CHECKSUM_FILE}"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$SHA_URL" -o "${CHECKSUM_FILE}" 2>/dev/null || true
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$SHA_URL" -O "${CHECKSUM_FILE}" 2>/dev/null || true
+    fi
+
+    EXPECTED_HASH=$(awk '{print $1}' "${CHECKSUM_FILE}" 2>/dev/null | tr 'A-Z' 'a-z')
+    rm -f "${CHECKSUM_FILE}"
+
+    if [ -n "$EXPECTED_HASH" ] && [ "${#EXPECTED_HASH}" -eq 64 ]; then
+        verify_sha256 "${TARGET_BIN}" "$EXPECTED_HASH"
+        V_STATUS=$?
+        if [ "$V_STATUS" -eq 0 ]; then
+            SHORT_HASH=$(echo "$EXPECTED_HASH" | cut -c 1-16)
+            print_green "✓ Контрольная сумма SHA-256 подтверждена (${SHORT_HASH}...)"
+        elif [ "$V_STATUS" -eq 1 ]; then
+            print_red "[!] КРИТИЧЕСКАЯ ОШИБКА: Несовпадение контрольной суммы SHA-256!"
+            print_red "  Ожидалось: ${EXPECTED_HASH}"
+            rm -f "${TARGET_BIN}"
+            exit 1
+        else
+            print_yellow "[!] Утилита sha256sum/openssl не найдена, пропуск проверки хеша."
+        fi
+    else
+        print_yellow "[i] Файл контрольной суммы .sha256 недоступен для этого релиза, пропуск верификации."
     fi
 
     chmod +x "${TARGET_BIN}"
@@ -171,18 +262,22 @@ main() {
 
     print_green "✓ Исполняемый файл успешно установлен и проверен."
 
+    # Генерация криптографически стойких случайных значений (16 байт = 32 hex символа)
+    RAND_HEX=$(generate_random_hex 16)
+    RAND_NET_KEY=$(generate_random_hex 16)
+    RAND_WEB_PASS=$(generate_random_hex 6)
+    HOST_NAME="${ROUTER_NAME}"
+    if [ -z "$HOST_NAME" ]; then
+        HOST_NAME=$(uname -n 2>/dev/null || echo "Keenetic")
+    fi
+    RAND_TOPIC="natbypass/mesh/${RAND_HEX}"
+    CONFIG_IS_NEW=0
+
     # 6. Generate Clean config.yaml if not exists
     CONFIG_FILE="${CONFIG_DIR}/config.yaml"
-    RAND_HEX=$(head -c 4 /dev/urandom 2>/dev/null | hexdump -e '1/1 "%02x"' 2>/dev/null || date +%s | md5sum 2>/dev/null | head -c 8 || echo "mesh_$RANDOM")
-    RAND_TOPIC="natbypass/mesh/${RAND_HEX}"
-
     if [ ! -f "${CONFIG_FILE}" ]; then
+        CONFIG_IS_NEW=1
         echo ">> Создание конфигурации ${CONFIG_FILE} с уникальной сетью (${RAND_TOPIC})..."
-        HOST_NAME="${ROUTER_NAME}"
-        if [ -z "$HOST_NAME" ]; then
-            HOST_NAME=$(uname -n 2>/dev/null || echo "Keenetic")
-        fi
-        
         cat > "${CONFIG_FILE}" << EOF
 app:
   log_level: "info"
@@ -193,10 +288,10 @@ webui:
   enabled: true
   port: 8080
   username: "admin"
-  password: ""
+  password: "${RAND_WEB_PASS}"
 
 network:
-  upnp_enabled: true
+  upnp_enabled: false
   ip_timeout: 10
   udp_port: 47832
   stun_servers:
@@ -207,9 +302,10 @@ network:
 profiles:
   - id: "default-mesh"
     name: "Основная сеть"
-    mqtt_broker: "tcp://broker.emqx.io:1883"
+    mqtt_broker: "ssl://broker.emqx.io:8883"
     mqtt_topic: "${RAND_TOPIC}"
     virtual_ip: "100.64.200.1/24"
+    network_key: "${RAND_NET_KEY}"
     is_active: true
 
 active_profile_id: "default-mesh"
@@ -220,7 +316,7 @@ signaling:
       priority: 1
       enabled: true
       params:
-        broker_url: "tcp://broker.emqx.io:1883"
+        broker_url: "ssl://broker.emqx.io:8883"
         topic: "${RAND_TOPIC}"
     - type: "telegram"
       priority: 2
@@ -234,7 +330,7 @@ wireguard:
   listen_port: 51820
   mtu: 1420
 EOF
-        print_green "✓ Конфигурация сохранена с уникальным топиком: ${RAND_TOPIC}"
+        print_green "✓ Конфигурация сохранена с уникальным топиком и сетевым ключом."
     fi
 
 
@@ -419,11 +515,19 @@ EOF
     print_green "🎉 NatBypass успешно установлен и работает!"
     echo "=============================================================="
     printf " 🌐 Панель управления (Web UI): "; print_cyan "http://${ROUTER_IP}:8080"
+    if [ "$CONFIG_IS_NEW" -eq 1 ]; then
+        printf " 👤 Логин Web UI:               "; print_cyan "admin"
+        printf " 🔑 Пароль Web UI:              "; print_yellow "${RAND_WEB_PASS}"
+        printf " 🔐 Сетевой ключ (Network Key): "; print_yellow "${RAND_NET_KEY}"
+    fi
     printf " 📁 Конфигурационный файл:     "; print_yellow "${CONFIG_FILE}"
     printf " 📋 Журнал работы (Логи):      "; print_cyan "/opt/var/log/natbypass.log"
     printf " ⚙️  Исполняемый файл:          %s\n" "${TARGET_BIN}"
     echo "=============================================================="
-    print_bold " 💡 Подсказка: откройте в браузере http://${ROUTER_IP}:8080 для управления"
+    if [ "$CONFIG_IS_NEW" -eq 1 ]; then
+        print_bold " 💡 ОБЯЗАТЕЛЬНО сохраните Пароль Web UI и Сетевой ключ!"
+    fi
+    print_bold " 💡 Откройте в браузере http://${ROUTER_IP}:8080 для управления"
     echo ""
 }
 

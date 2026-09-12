@@ -15,20 +15,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
 
-
+type loginAttemptInfo struct {
+	count        int
+	firstAttempt time.Time
+	blockedUntil time.Time
+}
 
 var (
-	sessionStore   = make(map[string]SessionEntry)
-	sessionStoreMu sync.RWMutex
+	sessionStore    = make(map[string]SessionEntry)
+	sessionStoreMu  sync.RWMutex
 	sessionFilePath = getSessionStoragePath()
+
+	loginLimiterMu sync.Mutex
+	loginAttempts  = make(map[string]*loginAttemptInfo)
 )
 
 type SessionEntry struct {
@@ -37,10 +46,72 @@ type SessionEntry struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+func checkLoginRateLimit(ip string) (bool, time.Duration) {
+	loginLimiterMu.Lock()
+	defer loginLimiterMu.Unlock()
+
+	now := time.Now()
+	info, exists := loginAttempts[ip]
+	if !exists {
+		return true, 0
+	}
+
+	if now.Before(info.blockedUntil) {
+		return false, info.blockedUntil.Sub(now)
+	}
+
+	if now.Sub(info.firstAttempt) > time.Minute {
+		delete(loginAttempts, ip)
+		return true, 0
+	}
+
+	if info.count >= 5 {
+		info.blockedUntil = now.Add(30 * time.Second)
+		return false, 30 * time.Second
+	}
+
+	return true, 0
+}
+
+func recordFailedLogin(ip string) {
+	loginLimiterMu.Lock()
+	defer loginLimiterMu.Unlock()
+
+	now := time.Now()
+	info, exists := loginAttempts[ip]
+	if !exists || now.Sub(info.firstAttempt) > time.Minute {
+		loginAttempts[ip] = &loginAttemptInfo{
+			count:        1,
+			firstAttempt: now,
+		}
+		return
+	}
+
+	info.count++
+	if info.count >= 5 {
+		info.blockedUntil = now.Add(30 * time.Second)
+	}
+}
+
+func resetLoginRateLimit(ip string) {
+	loginLimiterMu.Lock()
+	defer loginLimiterMu.Unlock()
+	delete(loginAttempts, ip)
+}
+
 func getSessionStoragePath() string {
 	if runtime.GOOS == "linux" {
 		if _, err := os.Stat("/opt/var/run"); err == nil {
 			return "/opt/var/run/.natbypass_sessions.json"
+		}
+		// Предпочитаем изолированные системные директории с правами 0700 вместо /tmp
+		for _, dir := range []string{"/var/run/natbypass", "/var/lib/natbypass", "/etc/natbypass"} {
+			if _, err := os.Stat(dir); err == nil {
+				return filepath.Join(dir, ".natbypass_sessions.json")
+			}
+			if err := os.MkdirAll(dir, 0700); err == nil {
+				return filepath.Join(dir, ".natbypass_sessions.json")
+			}
 		}
 		if _, err := os.Stat("/tmp"); err == nil {
 			return "/tmp/.natbypass_sessions.json"
@@ -186,8 +257,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP, _, ipErr := net.SplitHostPort(r.RemoteAddr)
+	if ipErr != nil {
+		clientIP = r.RemoteAddr
+	}
+	clientIP = strings.TrimSpace(clientIP)
+
+	allowed, waitDur := checkLoginRateLimit(clientIP)
+	if !allowed {
+		s.jsonResponse(w, http.StatusTooManyRequests, nil, fmt.Sprintf("Слишком много неудачных попыток входа. Повторите попытку через %d сек.", int(waitDur.Seconds())+1))
+		return
+	}
+
 	req.Username = strings.TrimSpace(req.Username)
 	if !s.checkCredentials(req.Username, req.Password) {
+		recordFailedLogin(clientIP)
+		time.Sleep(300 * time.Millisecond) // Защита от timing attacks и замедление брутфорса
 		if IsKeeneticOS() {
 			s.jsonResponse(w, http.StatusUnauthorized, nil, "Неверный логин или пароль. Введите учетные данные администратора вашего роутера Keenetic.")
 		} else {
@@ -195,6 +280,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	resetLoginRateLimit(clientIP)
 
 
 	token := createSession(req.Username)

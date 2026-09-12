@@ -32,8 +32,8 @@ network:
     - "stun1.l.google.com:19302"
     - "stun.cloudflare.com:3478"
     - "stun.stunprotocol.org:3478"
-  # UPnP/NAT-PMP для автоматического проброса портов
-  upnp_enabled: true
+  # UPnP/NAT-PMP для автоматического проброса портов (по умолчанию выключен ради безопасности)
+  upnp_enabled: false
   # Fallback API для определения публичного IP
   ip_apis:
     - "https://api.ipify.org?format=json"

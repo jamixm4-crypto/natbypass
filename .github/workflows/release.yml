@@ -105,6 +105,18 @@ jobs:
             }
           }
 
+          # Generate SHA256 checksums for all release binaries and assets
+          $binFiles = @(Get-ChildItem -Path "build/*" -File | Where-Object { -not $_.Name.EndsWith(".sha256") -and $_.Name -ne "sha256sums.txt" })
+          foreach ($file in $binFiles) {
+            $hash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($file.Name)" | Set-Content -Path (Join-Path "build" "$($file.Name).sha256") -Encoding ASCII
+          }
+          $checksumLines = foreach ($file in $binFiles) {
+            $hash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($file.Name)"
+          }
+          $checksumLines | Set-Content -Path (Join-Path "build" "sha256sums.txt") -Encoding ASCII
+
           $files = Get-ChildItem -Path "build/*" -File
           Write-Host "Uploading $($files.Count) assets to release $TAG..."
           foreach ($file in $files) {

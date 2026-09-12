@@ -33,6 +33,26 @@ main() {
     print_red()    { printf "\033[0;31m%s\033[0m\n" "$1"; }
     print_bold()   { printf "\033[1;37m%s\033[0m\n" "$1"; }
 
+    verify_sha256() {
+        _file="$1"
+        _expected="$2"
+        _calculated=""
+        if command -v sha256sum >/dev/null 2>&1; then
+            _calculated=$(sha256sum "$_file" 2>/dev/null | awk '{print $1}' | tr 'A-Z' 'a-z')
+        elif command -v openssl >/dev/null 2>&1; then
+            _calculated=$(openssl dgst -sha256 "$_file" 2>/dev/null | awk '{print $NF}' | tr 'A-Z' 'a-z')
+        elif command -v shasum >/dev/null 2>&1; then
+            _calculated=$(shasum -a 256 "$_file" 2>/dev/null | awk '{print $1}' | tr 'A-Z' 'a-z')
+        fi
+        if [ -z "$_calculated" ]; then
+            return 2 # tool unavailable
+        fi
+        if [ "$_calculated" = "$_expected" ]; then
+            return 0 # match
+        fi
+        return 1 # mismatch
+    }
+
     echo "--------------------------------------------------------------"
     print_bold ">> NatBypass Mesh Network — Универсальный авто-обновлятор"
     echo "--------------------------------------------------------------"
@@ -172,6 +192,7 @@ main() {
 
     echo ">> Загрузка новой версии (${TAG})..."
     DOWNLOADED=0
+    SUCCESS_URL=""
 
     for name in $DL_NAMES; do
         CANDIDATE_URLS="
@@ -185,6 +206,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                 if curl -fsSL --connect-timeout 8 --max-time 180 "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
+                        SUCCESS_URL="$u"
                         break 2
                     fi
                     rm -f "${TMP_BIN}"
@@ -193,6 +215,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                 if wget -q --timeout=8 -t 2 "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
+                        SUCCESS_URL="$u"
                         break 2
                     fi
                     rm -f "${TMP_BIN}"
@@ -206,6 +229,37 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
         print_yellow "Проверьте подключение к сети и доступность релизов на GitHub / зеркалах."
         rm -f "${TMP_BIN}"
         exit 1
+    fi
+
+    # 3. Verify SHA256 Checksum of the downloaded update binary
+    SHA_URL="${SUCCESS_URL}.sha256"
+    CHECKSUM_FILE="/tmp/natbypass_update.sha256"
+    rm -f "${CHECKSUM_FILE}"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --connect-timeout 8 --max-time 30 "$SHA_URL" -o "${CHECKSUM_FILE}" 2>/dev/null || true
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q --timeout=8 -t 2 "$SHA_URL" -O "${CHECKSUM_FILE}" 2>/dev/null || true
+    fi
+
+    EXPECTED_HASH=$(awk '{print $1}' "${CHECKSUM_FILE}" 2>/dev/null | tr 'A-Z' 'a-z')
+    rm -f "${CHECKSUM_FILE}"
+
+    if [ -n "$EXPECTED_HASH" ] && [ "${#EXPECTED_HASH}" -eq 64 ]; then
+        verify_sha256 "${TMP_BIN}" "$EXPECTED_HASH"
+        V_STATUS=$?
+        if [ "$V_STATUS" -eq 0 ]; then
+            SHORT_HASH=$(echo "$EXPECTED_HASH" | cut -c 1-16)
+            print_green "✓ Контрольная сумма SHA-256 обновления подтверждена (${SHORT_HASH}...)"
+        elif [ "$V_STATUS" -eq 1 ]; then
+            print_red "[!] КРИТИЧЕСКАЯ ОШИБКА: Контрольная сумма SHA-256 файла обновления не совпадает!"
+            print_red "  Ожидалось: ${EXPECTED_HASH}"
+            rm -f "${TMP_BIN}"
+            exit 1
+        else
+            print_yellow "[!] Утилита sha256sum/openssl не найдена, строгая проверка хеша пропущена."
+        fi
+    else
+        print_yellow "[i] Файл контрольной суммы .sha256 недоступен для релиза, пропуск верификации."
     fi
 
     chmod 0755 "${TMP_BIN}"

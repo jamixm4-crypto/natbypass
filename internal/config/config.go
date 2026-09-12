@@ -362,7 +362,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("web_ui.enabled", true)
 	v.SetDefault("web_ui.port", 8080)
 
-	v.SetDefault("network.upnp_enabled", true)
+	v.SetDefault("network.upnp_enabled", false)
 	v.SetDefault("network.tcp_port", 8443)
 	v.SetDefault("network.transport_mode", "auto")
 	v.SetDefault("network.tls_mode", "shadowtls")
