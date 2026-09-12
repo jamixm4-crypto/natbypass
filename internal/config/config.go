@@ -416,13 +416,15 @@ func Load(path string) (*Config, error) {
 
 	v := viper.New()
 
-	cleanPath := filepath.Clean(path)
-	// Защита от Path Traversal: отклоняем попытки выхода через ".."
-	for _, part := range strings.Split(filepath.ToSlash(cleanPath), "/") {
+	// Защита от Path Traversal: нормализуем слеши обоих типов (\ и /) и отклоняем любые сегменты ".."
+	normalized := strings.ReplaceAll(path, "\\", "/")
+	for _, part := range strings.Split(normalized, "/") {
 		if part == ".." {
 			return nil, fmt.Errorf("security: path traversal rejected in config path: %s", path)
 		}
 	}
+
+	cleanPath := filepath.Clean(path)
 
 	targetPath := cleanPath
 	// Если передан относительный путь, проверяем как в cwd, так и рядом с .exe
