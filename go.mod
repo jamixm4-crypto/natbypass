@@ -46,3 +46,5 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 )
+
+replace github.com/wlynxg/anet => ./third_party/anet
