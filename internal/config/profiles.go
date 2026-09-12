@@ -29,6 +29,7 @@ type Profile struct {
 	VirtualIP           string    `json:"virtual_ip,omitempty" mapstructure:"virtual_ip" yaml:"virtual_ip,omitempty"`
 	Subnet              string    `json:"subnet,omitempty" mapstructure:"subnet" yaml:"subnet,omitempty"`
 	MQTTBroker          string    `json:"mqtt_broker" mapstructure:"mqtt_broker" yaml:"mqtt_broker"`
+	MQTTBackupBrokers   []string  `json:"mqtt_backup_brokers,omitempty" mapstructure:"mqtt_backup_brokers" yaml:"mqtt_backup_brokers,omitempty"`
 	MQTTTopic           string    `json:"mqtt_topic" mapstructure:"mqtt_topic" yaml:"mqtt_topic"`
 	MQTTUser            string    `json:"mqtt_user,omitempty" mapstructure:"mqtt_user" yaml:"mqtt_user,omitempty"`
 	MQTTPass            string    `json:"mqtt_pass,omitempty" mapstructure:"mqtt_pass" yaml:"mqtt_pass,omitempty"`
@@ -57,6 +58,44 @@ type Profile struct {
 	WSSRelayURL         string    `json:"wss_relay_url,omitempty" mapstructure:"wss_relay_url" yaml:"wss_relay_url,omitempty"`
 	IsActive            bool      `json:"is_active" mapstructure:"is_active" yaml:"is_active"`
 	CreatedAt           time.Time `json:"created_at" mapstructure:"created_at" yaml:"created_at"`
+}
+
+// DefaultPublicMQTTBrokers — список проверенных публичных MQTT брокеров для отказоустойчивого сигналинга
+var DefaultPublicMQTTBrokers = []string{
+	"tcp://broker.hivemq.com:1883",
+	"ssl://broker.hivemq.com:8883",
+	"tcp://test.mosquitto.org:1883",
+	"ssl://test.mosquitto.org:8883",
+	"tcp://broker.emqx.io:1883",
+	"ssl://broker.emqx.io:8883",
+}
+
+// GetEffectiveBackupBrokers возвращает список резервных брокеров, исключая текущий основной брокер
+func (p *Profile) GetEffectiveBackupBrokers() []string {
+	seen := make(map[string]bool)
+	primaryClean := strings.TrimSpace(strings.ToLower(p.MQTTBroker))
+	if primaryClean != "" {
+		seen[primaryClean] = true
+	}
+
+	var backups []string
+	for _, b := range p.MQTTBackupBrokers {
+		bClean := strings.TrimSpace(strings.ToLower(b))
+		if bClean != "" && !seen[bClean] {
+			seen[bClean] = true
+			backups = append(backups, b)
+		}
+	}
+
+	// Дополняем проверенными общедоступными резервными брокерами
+	for _, b := range DefaultPublicMQTTBrokers {
+		bClean := strings.TrimSpace(strings.ToLower(b))
+		if !seen[bClean] {
+			seen[bClean] = true
+			backups = append(backups, b)
+		}
+	}
+	return backups
 }
 
 // GenerateRandomHex возвращает криптостойкую случайную hex-строку
@@ -288,6 +327,10 @@ func (c *Config) SyncSignalingWithProfile(p *Profile) {
 	}
 	if p.NetworkKey != "" {
 		mqttParams["network_key"] = p.NetworkKey
+	}
+	backups := p.GetEffectiveBackupBrokers()
+	if len(backups) > 0 {
+		mqttParams["backup_brokers"] = strings.Join(backups, ",")
 	}
 
 	newChannels = append(newChannels, ChannelConfig{

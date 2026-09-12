@@ -1807,14 +1807,22 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <div class="form-group">
               <label class="form-label">⚡ Выбор MQTT Брокера (Пресет):</label>
               <select id="selMqttPreset" class="form-input mono" onchange="onMqttPresetChange(this.value)" style="margin-bottom:8px; cursor:pointer;">
-                <option value="tcp://broker.emqx.io:1883">⚡ EMQX Public (Рекомендуется)</option>
-                <option value="tcp://broker.hivemq.com:1883">⚡ HiveMQ Public</option>
-                <option value="tcp://test.mosquitto.org:1883">⚡ Eclipse Mosquitto</option>
-                <option value="tcp://mqtt.eclipseprojects.io:1883">⚡ Eclipse Foundation</option>
+                <option value="tcp://broker.hivemq.com:1883">⚡ HiveMQ Public (Рекомендуется, высокая стабильность)</option>
+                <option value="ssl://broker.hivemq.com:8883">🔒 HiveMQ Secure TLS (порт 8883)</option>
+                <option value="tcp://test.mosquitto.org:1883">⚡ Eclipse Mosquitto Public</option>
+                <option value="ssl://test.mosquitto.org:8883">🔒 Mosquitto Secure TLS (порт 8883)</option>
+                <option value="tcp://broker.emqx.io:1883">⚡ EMQX Public</option>
+                <option value="ssl://broker.emqx.io:8883">🔒 EMQX Secure TLS (порт 8883)</option>
                 <option value="custom">✏️ Свой адрес сервера...</option>
               </select>
               <label class="form-label">⚡ Адрес MQTT Брокера:</label>
-              <input type="text" id="cfgMqttBroker" class="form-input mono" value="tcp://broker.emqx.io:1883">
+              <div style="display:flex; gap:8px;">
+                <input type="text" id="cfgMqttBroker" class="form-input mono" value="tcp://broker.hivemq.com:1883" style="flex:1;">
+                <button type="button" onclick="switchBrokerNow()" class="btn btn-neon" style="white-space:nowrap; padding:6px 12px; font-size:0.8rem;" title="Мгновенно переключить активный брокер">⚡ Переключить</button>
+              </div>
+              <div style="margin-top:6px; font-size:0.75rem; color:var(--text-muted);">
+                Текущий активный брокер: <span id="activeBrokerBadge" class="mono" style="color:#38bdf8; font-weight:700;">Определение...</span>
+              </div>
             </div>
 
             <div class="form-group">
@@ -4861,6 +4869,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const sWarn = document.getElementById('betaWarningSettings');
           if (sBadge) sBadge.style.display = isBeta ? 'inline-block' : 'none';
           if (sWarn) sWarn.style.display = isBeta ? 'block' : 'none';
+          loadSignalingBrokers();
         }
       } catch (e) {}
     }
@@ -4868,6 +4877,62 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     function onMqttPresetChange(val) {
       if (val !== 'custom') {
         document.getElementById('cfgMqttBroker').value = val;
+      }
+    }
+
+    async function loadSignalingBrokers() {
+      try {
+        const res = await fetch('/api/signaling/brokers');
+        const json = await res.json();
+        if (json && json.data) {
+          const d = json.data;
+          const badge = document.getElementById('activeBrokerBadge');
+          if (badge) {
+            let activeUrl = d.current_broker || 'Не задан';
+            let isConnected = false;
+            if (d.brokers && d.brokers.length > 0) {
+              const activeInfo = d.brokers.find(b => b.is_active) || d.brokers.find(b => b.url === activeUrl);
+              if (activeInfo) {
+                isConnected = !!activeInfo.connected;
+                if (activeInfo.url) activeUrl = activeInfo.url;
+              }
+            }
+            if (isConnected) {
+              badge.innerHTML = '<span style="color:#22c55e;">●</span> ' + escapeHtml(activeUrl) + ' <span style="color:#22c55e; font-size:0.75rem; font-weight:normal;">(Подключен)</span>';
+            } else {
+              badge.innerHTML = '<span style="color:#ef4444;">●</span> ' + escapeHtml(activeUrl) + ' <span style="color:#f59e0b; font-size:0.75rem; font-weight:normal;">(Переподключение...)</span>';
+            }
+          }
+        }
+      } catch (e) {
+        console.error('loadSignalingBrokers error', e);
+      }
+    }
+
+    async function switchBrokerNow() {
+      const brokerInput = document.getElementById('cfgMqttBroker');
+      const val = brokerInput ? brokerInput.value.trim() : '';
+      if (!val) {
+        showToast('❌ Укажите адрес MQTT брокера');
+        return;
+      }
+      showToast('🔄 Переключение брокера на ' + val + '...');
+      try {
+        const res = await fetch('/api/signaling/broker/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ broker: val, save_as_primary: true })
+        });
+        const json = await res.json();
+        if (json.status === 'ok') {
+          showToast('✅ Брокер переключен: ' + val);
+          await loadSignalingBrokers();
+          if (typeof loadConfig === 'function') loadConfig();
+        } else {
+          showToast('❌ Ошибка: ' + (json.error || 'Не удалось переключить'));
+        }
+      } catch (e) {
+        showToast('❌ Сетевая ошибка при переключении брокера');
       }
     }
 

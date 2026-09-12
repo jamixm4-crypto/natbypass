@@ -385,6 +385,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// Тест подключений
 	mux.HandleFunc("/api/test/telegram", s.handleTestTelegram)
 	mux.HandleFunc("/api/test/mqtt", s.handleTestMQTT)
+	mux.HandleFunc("/api/signaling/brokers", s.handleSignalingBrokers)
+	mux.HandleFunc("/api/signaling/broker/switch", s.handleSignalingBrokerSwitch)
 	// Новые UX-эндпоинты
 	mux.HandleFunc("/api/dashboard", s.handleDashboard)
 	mux.HandleFunc("/api/mesh/topology", s.handleMeshTopology)
@@ -658,7 +660,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 0. Разрешить локальный read-only опрос статуса, пиров, дашборда и топологии (localhost 127.0.0.1 / ::1) для diag/CLI/WebUI
-		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck") && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
+		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck" || r.URL.Path == "/api/signaling/brokers" || r.URL.Path == "/api/signaling/broker/switch") && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
 			host, _, _ := net.SplitHostPort(r.RemoteAddr)
 			if host == "" {
 				host = r.RemoteAddr
@@ -1202,6 +1204,98 @@ func (s *Server) handleTestMQTT(w http.ResponseWriter, r *http.Request) {
 	conn.Close()
 
 	s.jsonResponse(w, http.StatusOK, map[string]string{"status": "MQTT брокер доступен!"}, "")
+}
+
+// handleSignalingBrokers — GET /api/signaling/brokers — статус и список доступных MQTT брокеров
+func (s *Server) handleSignalingBrokers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	currentBroker := ""
+	var statuses []signaling.BrokerInfo
+	if s.sigMgr != nil {
+		currentBroker = s.sigMgr.ActiveBroker()
+		statuses = s.sigMgr.BrokerStatuses()
+	}
+
+	if len(statuses) == 0 {
+		var brokerList []string
+		if s.cfg != nil {
+			if prof := s.cfg.EnsureActiveProfile(); prof != nil {
+				if prof.MQTTBroker != "" {
+					brokerList = append(brokerList, prof.MQTTBroker)
+				}
+				brokerList = append(brokerList, prof.GetEffectiveBackupBrokers()...)
+			}
+		}
+		if len(brokerList) == 0 {
+			brokerList = config.DefaultPublicMQTTBrokers
+		}
+		for i, b := range brokerList {
+			statuses = append(statuses, signaling.BrokerInfo{
+				URL:       b,
+				Name:      "mqtt:" + b,
+				Available: true,
+				Connected: (i == 0),
+				IsActive:  (i == 0),
+			})
+		}
+		if currentBroker == "" && len(brokerList) > 0 {
+			currentBroker = brokerList[0]
+		}
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"current_broker": currentBroker,
+		"brokers":        statuses,
+		"default_public": config.DefaultPublicMQTTBrokers,
+	}, "")
+}
+
+// handleSignalingBrokerSwitch — POST /api/signaling/broker/switch — ручное переключение активного MQTT брокера
+func (s *Server) handleSignalingBrokerSwitch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	var req struct {
+		Broker        string `json:"broker"`
+		SaveAsPrimary bool   `json:"save_as_primary"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Broker) == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "не указан URL брокера")
+		return
+	}
+	req.Broker = strings.TrimSpace(req.Broker)
+
+	if s.sigMgr != nil {
+		if err := s.sigMgr.SwitchToBroker(req.Broker); err != nil {
+			slog.Warn("Не удалось переключить брокер в FallbackManager", "broker", req.Broker, "err", err)
+			s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка переключения брокера: "+err.Error())
+			return
+		}
+	}
+
+	if req.SaveAsPrimary && s.cfg != nil {
+		if active := s.cfg.EnsureActiveProfile(); active != nil {
+			active.MQTTBroker = req.Broker
+			s.cfg.SyncSignalingWithProfile(active)
+			if s.configPath != "" {
+				_ = config.Save(s.cfg, s.configPath, false)
+			}
+		}
+	}
+
+	s.AddEvent("info", "Активный MQTT брокер переключен: "+req.Broker, "")
+	slog.Info("Ручное переключение сигнального брокера", "broker", req.Broker, "save_as_primary", req.SaveAsPrimary)
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":             true,
+		"current_broker": req.Broker,
+		"message":        "Брокер успешно переключен",
+	}, "")
 }
 
 // handleWgConfig — GET /api/wg/config — генерация WireGuard конфига
@@ -3084,8 +3178,13 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if target.ID == cfg.ActiveProfileID {
 		cfg.SyncSignalingWithProfile(target)
-		if s.sigMgr != nil && target.MQTTTopic != "" {
-			s.sigMgr.UpdateMQTTTopic(target.MQTTTopic)
+		if s.sigMgr != nil {
+			if target.MQTTTopic != "" {
+				s.sigMgr.UpdateMQTTTopic(target.MQTTTopic)
+			}
+			if target.MQTTBroker != "" {
+				s.sigMgr.UpdateMQTTBroker(target.MQTTBroker)
+			}
 		}
 		if target.VirtualIP != "" {
 			s.SetVirtualIP(strings.TrimSpace(strings.Split(target.VirtualIP, "/")[0]))

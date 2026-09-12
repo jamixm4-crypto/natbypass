@@ -292,7 +292,33 @@ func buildSignalingChannels(cfg *config.Config) ([]signaling.SignalingChannel, e
 			if brokerURL == "" || topic == "" {
 				continue
 			}
-			ch = signaling.NewMQTTChannel(brokerURL, topic, clientID, username, password)
+			// Основной брокер
+			primaryCh := signaling.NewMQTTChannelNamed("mqtt:"+brokerURL, brokerURL, topic, clientID, username, password)
+			channels = append(channels, primaryCh)
+
+			// Резервные брокеры для автоматического Failover
+			backupRaw := chCfg.Params["backup_brokers"]
+			var backupBrokers []string
+			if backupRaw != "" {
+				for _, b := range strings.Split(backupRaw, ",") {
+					b = strings.TrimSpace(b)
+					if b != "" && b != brokerURL {
+						backupBrokers = append(backupBrokers, b)
+					}
+				}
+			}
+			if len(backupBrokers) == 0 && cfg != nil {
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+					backupBrokers = activeProf.GetEffectiveBackupBrokers()
+				}
+			}
+			for _, bURL := range backupBrokers {
+				if bURL != "" && bURL != brokerURL {
+					backupCh := signaling.NewMQTTChannelNamed("mqtt:backup:"+bURL, bURL, topic, clientID, username, password)
+					channels = append(channels, backupCh)
+				}
+			}
+			continue
 
 		case "webhook":
 			postURL := chCfg.Params["post_url"]

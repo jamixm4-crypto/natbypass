@@ -10,11 +10,22 @@ package signaling
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 )
+
+type BrokerInfo struct {
+	URL       string `json:"url"`
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
+	Connected bool   `json:"connected"`
+	IsActive  bool   `json:"is_active"`
+	LastError string `json:"last_error,omitempty"`
+	LastUsed  string `json:"last_used,omitempty"`
+}
 
 type ChannelStatus struct {
 	Name      string
@@ -31,6 +42,8 @@ type FallbackManager struct {
 	circuitBreaker map[string]time.Time
 	statuses       map[string]*ChannelStatus
 }
+
+var _ SignalingChannel = (*FallbackManager)(nil)
 
 func NewFallbackManager(channels []SignalingChannel) *FallbackManager {
 	fm := &FallbackManager{
@@ -82,7 +95,11 @@ func (m *FallbackManager) Send(ctx context.Context, payload *Payload) error {
 
 		m.mu.Lock()
 		if err == nil {
-			m.currentIdx = idx
+			if m.currentIdx != idx {
+				oldName := m.channels[m.currentIdx].Name()
+				log.Info().Str("from", oldName).Str("to", name).Msg("🔀 FallbackManager: успешный авто-фейловер на резервный сигнальный канал")
+				m.currentIdx = idx
+			}
 			m.consecFailures[name] = 0
 			m.statuses[name].Available = true
 			m.statuses[name].LastError = nil
@@ -196,6 +213,91 @@ func (m *FallbackManager) Status() []ChannelStatus {
 	return statuses
 }
 
+// ActiveBroker возвращает URL активного MQTT брокера (или имя канала)
+func (m *FallbackManager) ActiveBroker() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.channels) == 0 {
+		return ""
+	}
+	if ch, ok := m.channels[m.currentIdx].(*MQTTChannel); ok {
+		return ch.BrokerURL()
+	}
+	return m.channels[m.currentIdx].Name()
+}
+
+// SwitchToBroker переключает текущий активный канал на указанный адрес брокера
+func (m *FallbackManager) SwitchToBroker(brokerURL string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cleanTarget := strings.TrimSpace(strings.ToLower(brokerURL))
+	for i, ch := range m.channels {
+		if mqttCh, ok := ch.(*MQTTChannel); ok {
+			cleanCh := strings.TrimSpace(strings.ToLower(mqttCh.BrokerURL()))
+			if cleanCh == cleanTarget || strings.Contains(cleanCh, cleanTarget) || strings.Contains(cleanTarget, cleanCh) {
+				m.currentIdx = i
+				delete(m.circuitBreaker, ch.Name())
+				m.consecFailures[ch.Name()] = 0
+				log.Info().Str("broker", mqttCh.BrokerURL()).Msg("✅ FallbackManager: активный брокер переключен")
+				return nil
+			}
+		}
+	}
+
+	// Если канал с таким URL не найден, переподключаем первый доступный MQTTChannel
+	for _, ch := range m.channels {
+		if mqttCh, ok := ch.(*MQTTChannel); ok {
+			if err := mqttCh.ReconnectWithBroker(brokerURL); err == nil {
+				delete(m.circuitBreaker, ch.Name())
+				m.consecFailures[ch.Name()] = 0
+				log.Info().Str("broker", brokerURL).Msg("✅ FallbackManager: MQTT канал переподключен к новому брокеру")
+				return nil
+			} else {
+				return err
+			}
+		}
+	}
+
+	return fmt.Errorf("MQTT канал не найден для переключения на %s", brokerURL)
+}
+
+// UpdateMQTTBroker динамически переключает активный брокер
+func (m *FallbackManager) UpdateMQTTBroker(newBrokerURL string) {
+	_ = m.SwitchToBroker(newBrokerURL)
+}
+
+// BrokerStatuses возвращает информацию о статусе всех настроенных MQTT брокеров
+func (m *FallbackManager) BrokerStatuses() []BrokerInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []BrokerInfo
+	for i, ch := range m.channels {
+		if mqttCh, ok := ch.(*MQTTChannel); ok {
+			info := BrokerInfo{
+				URL:       mqttCh.BrokerURL(),
+				Name:      mqttCh.Name(),
+				Connected: mqttCh.IsConnected(),
+				IsActive:  (i == m.currentIdx),
+			}
+			if st, exists := m.statuses[ch.Name()]; exists && st != nil {
+				info.Available = st.Available
+				if st.LastError != nil {
+					info.LastError = st.LastError.Error()
+				}
+				if !st.LastUsed.IsZero() {
+					info.LastUsed = st.LastUsed.Format("15:04:05")
+				}
+			} else {
+				info.Available = mqttCh.IsConnected()
+			}
+			result = append(result, info)
+		}
+	}
+	return result
+}
+
 // UpdateMQTTTopic динамически обновляет топик во всех активных MQTT каналах
 func (m *FallbackManager) UpdateMQTTTopic(newTopic string) {
 	m.mu.RLock()
@@ -207,16 +309,32 @@ func (m *FallbackManager) UpdateMQTTTopic(newTopic string) {
 	}
 }
 
-// PublishTunnelData пересылает сырой IP пакет через активный MQTT канал
+// PublishTunnelData пересылает сырой IP пакет через активный или подключенный MQTT канал
 func (m *FallbackManager) PublishTunnelData(targetDevID string, pkt []byte) error {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, ch := range m.channels {
-		if mqttCh, ok := ch.(*MQTTChannel); ok {
+	// Пробуем сначала текущий активный канал
+	if m.currentIdx < len(m.channels) {
+		if mqttCh, ok := m.channels[m.currentIdx].(*MQTTChannel); ok && mqttCh.IsConnected() {
+			m.mu.RUnlock()
 			return mqttCh.PublishTunnelData(targetDevID, pkt)
 		}
 	}
-	return nil
+	// Затем любой подключенный канал
+	for _, ch := range m.channels {
+		if mqttCh, ok := ch.(*MQTTChannel); ok && mqttCh.IsConnected() {
+			m.mu.RUnlock()
+			return mqttCh.PublishTunnelData(targetDevID, pkt)
+		}
+	}
+	// Если ни один не подключен, пробуем первый MQTT канал
+	for _, ch := range m.channels {
+		if mqttCh, ok := ch.(*MQTTChannel); ok {
+			m.mu.RUnlock()
+			return mqttCh.PublishTunnelData(targetDevID, pkt)
+		}
+	}
+	m.mu.RUnlock()
+	return fmt.Errorf("no MQTT channels available for tunnel data")
 }
 
 // SubscribeTunnelData подписывается на входящие пакеты туннеля для текущего узла
@@ -239,6 +357,49 @@ func (m *FallbackManager) SetNetworkKey(networkKey string) {
 			mqttCh.SetNetworkKey(networkKey)
 		}
 	}
+}
+
+// Name returns the name of the fallback manager and its active channel.
+func (m *FallbackManager) Name() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.channels) == 0 {
+		return "fallback"
+	}
+	return "fallback:" + m.channels[m.currentIdx].Name()
+}
+
+// IsAvailable checks if the active channel or any underlying channel is available.
+func (m *FallbackManager) IsAvailable(ctx context.Context) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.channels) == 0 {
+		return false
+	}
+	// Check active channel first
+	if m.currentIdx < len(m.channels) && m.channels[m.currentIdx].IsAvailable(ctx) {
+		return true
+	}
+	// Check any channel
+	for _, ch := range m.channels {
+		if ch.IsAvailable(ctx) {
+			return true
+		}
+	}
+	return false
+}
+
+// Close closes all underlying signaling channels.
+func (m *FallbackManager) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var lastErr error
+	for _, ch := range m.channels {
+		if err := ch.Close(); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
 }
 
 

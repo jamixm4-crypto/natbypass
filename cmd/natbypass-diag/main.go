@@ -150,7 +150,7 @@ func printBanner() {
 	fmt.Print(colorBrightCyan + colorBold + `
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║               NATBYPASS CLUSTER DIAGNOSTIC & CONTROL CENTER                  ║
-║                  (v1.9.226-beta12 | Local Engineering)                        ║
+║                  (v1.9.226-beta13 | Local Engineering)                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ` + colorReset)
 }
@@ -837,6 +837,22 @@ func saveConsolidatedReport(
 	}
 }
 
+func createSignalingChannel(ctx context.Context, broker, topic, collectorID, networkKey string) (signaling.SignalingChannel, <-chan *signaling.Payload, error) {
+	var sigChannels []signaling.SignalingChannel
+	sigChannels = append(sigChannels, signaling.NewMQTTChannelNamed("mqtt:primary", broker, topic, collectorID, "", ""))
+	for _, b := range config.DefaultPublicMQTTBrokers {
+		if b != broker {
+			sigChannels = append(sigChannels, signaling.NewMQTTChannelNamed("mqtt:backup:"+b, b, topic, collectorID, "", ""))
+		}
+	}
+	fm := signaling.NewFallbackManager(sigChannels)
+	if networkKey != "" {
+		fm.SetNetworkKey(networkKey)
+	}
+	rx, err := fm.Receive(ctx)
+	return fm, rx, err
+}
+
 func main() {
 	initConsole()
 	os.Args = reorderArgs(os.Args)
@@ -844,12 +860,8 @@ func main() {
 
 	reader := bufio.NewReader(os.Stdin)
 	isInteractive := len(os.Args) <= 1
-
+	// 1. Resolve room parameters: CLI flags > share link in flag > local config.yaml > WebUI API
 	rawInput := *flagTopic
-	if rawInput == "" && flag.NArg() > 0 {
-		rawInput = flag.Arg(0)
-	}
-
 	var parsedBroker, parsedTopic, parsedKey string
 	if rawInput != "" {
 		parsedBroker, parsedTopic, parsedKey = parseShareLink(rawInput)
@@ -858,20 +870,15 @@ func main() {
 	if rawInput == "" {
 		candidatePaths := []string{*flagConfig}
 		if exePath, err := os.Executable(); err == nil {
-			exeDir := filepath.Dir(exePath)
-			candidatePaths = append(candidatePaths,
-				filepath.Join(exeDir, "config.yaml"),
-				filepath.Join(exeDir, "..", "config.yaml"),
-			)
+			candidatePaths = append(candidatePaths, filepath.Join(filepath.Dir(exePath), "config.yaml"))
 		}
-		if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
-			candidatePaths = append(candidatePaths,
-				filepath.Join(userProfile, "Downloads", "config.yaml"),
-				filepath.Join(userProfile, "Desktop", "config.yaml"),
-			)
+		if wd, err := os.Getwd(); err == nil {
+			candidatePaths = append(candidatePaths, filepath.Join(wd, "config.yaml"))
 		}
-
 		for _, candPath := range candidatePaths {
+			if candPath == "" {
+				continue
+			}
 			if cfg, err := config.Load(candPath); err == nil && cfg != nil {
 				activeProf := cfg.EnsureActiveProfile()
 				if activeProf != nil && activeProf.MQTTTopic != "" {
@@ -882,16 +889,12 @@ func main() {
 				}
 			}
 		}
-
-		// If still empty, attempt auto-detecting from locally running NatBypass WebUI
 		if parsedTopic == "" {
-			httpClient := &http.Client{Timeout: 600 * time.Millisecond}
-			req, err := http.NewRequest("GET", "http://127.0.0.1:8080/api/config", nil)
-			if err == nil {
-				req.SetBasicAuth("admin", "admin")
-				if resp, err := httpClient.Do(req); err == nil && resp.StatusCode == 200 {
+			client := &http.Client{Timeout: 800 * time.Millisecond}
+			for _, port := range []string{"8080", "8081", "8082"} {
+				resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/api/config", port))
+				if err == nil && resp.StatusCode == http.StatusOK {
 					var apiResp struct {
-						OK   bool           `json:"ok"`
 						Data *config.Config `json:"data"`
 					}
 					if err := json.NewDecoder(resp.Body).Decode(&apiResp); err == nil && apiResp.Data != nil {
@@ -903,23 +906,24 @@ func main() {
 					}
 					_ = resp.Body.Close()
 				}
+				if parsedTopic != "" {
+					break
+				}
 			}
 		}
 	}
 
-	if isInteractive && rawInput == "" {
+	if *flagTarget == "" && !*flagUpdate && parsedTopic == "" && *flagTopic == "" {
+		isInteractive = true
+	}
+
+	if parsedTopic == "" && *flagTopic == "" {
 		printBanner()
-
-		prompt := "Вставьте ссылку сети (natbypass://profile?...) или название топика"
-		if parsedTopic != "" {
-			prompt = fmt.Sprintf("%s [по умолчанию: %s]", prompt, parsedTopic)
-		}
-		fmt.Printf(colorYellow+"%s: "+colorReset, prompt)
-		inputStr, _ := reader.ReadString('\n')
-		inputStr = strings.TrimSpace(inputStr)
-
-		if inputStr != "" {
-			b, t, k := parseShareLink(inputStr)
+		fmt.Print(colorYellow + "Вставьте natbypass:// ссылку или нажмите Enter для ручного ввода: " + colorReset)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input != "" {
+			b, t, k := parseShareLink(input)
 			if t != "" {
 				parsedTopic = t
 			}
@@ -948,7 +952,7 @@ func main() {
 	}
 
 	if broker == "" {
-		broker = "ssl://broker.emqx.io:8883"
+		broker = "tcp://broker.hivemq.com:1883"
 	}
 
 	randBytes := make([]byte, 4)
@@ -957,23 +961,18 @@ func main() {
 	}
 	collectorID := fmt.Sprintf("natbypass-diag-%x", randBytes)
 
-	// Connect to signaling channel once
+	// Connect to signaling channel once with multi-broker fallback
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ch := signaling.NewMQTTChannel(broker, topic, collectorID, "", "")
-	defer ch.Close()
-	if networkKey != "" {
-		ch.SetNetworkKey(networkKey)
-	}
-
-	rx, err := ch.Receive(ctx)
+	ch, rx, err := createSignalingChannel(ctx, broker, topic, collectorID, networkKey)
 	if err != nil {
-		fmt.Printf(colorRed+"[✗] Ошибка подключения к брокеру: %v\n"+colorReset, err)
+		fmt.Printf(colorRed+"[✗] Ошибка подключения к сигнальным брокерам: %v\n"+colorReset, err)
 		os.Exit(1)
 	}
+	defer ch.Close()
 
-	fmt.Print(colorCyan + "⏳ Подключение к брокеру..." + colorReset)
+	fmt.Print(colorCyan + "⏳ Подключение к сигнальным брокерам (основной + резерв)..." + colorReset)
 	connStart := time.Now()
 	for time.Since(connStart) < 7*time.Second {
 		if ch.IsAvailable(ctx) {
@@ -1110,12 +1109,8 @@ func main() {
 					networkKey = nk
 				}
 				fmt.Println(colorGreen + "Параметры обновлены. Переподключение..." + colorReset)
-				ch.Close()
-				ch = signaling.NewMQTTChannel(broker, topic, collectorID, "", "")
-				if networkKey != "" {
-					ch.SetNetworkKey(networkKey)
-				}
-				rx, _ = ch.Receive(ctx)
+				_ = ch.Close()
+				ch, rx, _ = createSignalingChannel(ctx, broker, topic, collectorID, networkKey)
 			}
 
 		case "0":

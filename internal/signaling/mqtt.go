@@ -72,6 +72,12 @@ type MQTTChannel struct {
 	client        mqtt.Client
 	topicMu       sync.RWMutex
 	topic         string
+	name          string
+	brokerMu      sync.RWMutex
+	brokerURL     string
+	clientID      string
+	username      string
+	password      string
 	myDevID       string
 	outMu         sync.RWMutex
 	outChans      []chan *Payload
@@ -98,13 +104,25 @@ func (m *MQTTChannel) SetNetworkKey(networkKey string) {
 }
 
 func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTTChannel {
-	ch := &MQTTChannel{
-		topic: topic,
-		dedup: NewPacketDedup(),
-	}
+	return NewMQTTChannelNamed("", brokerURL, topic, clientID, username, password)
+}
 
+func NewMQTTChannelNamed(name, brokerURL, topic, clientID, username, password string) *MQTTChannel {
 	if brokerURL == "" {
 		brokerURL = "ssl://broker.emqx.io:8883"
+	}
+	if name == "" {
+		name = "mqtt:" + brokerURL
+	}
+
+	ch := &MQTTChannel{
+		name:      name,
+		brokerURL: brokerURL,
+		clientID:  clientID,
+		username:  username,
+		password:  password,
+		topic:     topic,
+		dedup:     NewPacketDedup(),
 	}
 
 	opts := mqtt.NewClientOptions().
@@ -116,8 +134,6 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 			InsecureSkipVerify: true, // Совместимость с роутерами без системных корневых CA
 		})
 	}
-
-	// Подключаемся строго к брокеру, указанному в профиле (не смешиваем несовместимые публичные брокеры)
 
 	opts.SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).
 		SetUsername(username).
@@ -134,7 +150,8 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
 		currentTopic := ch.GetTopic()
-		log.Info().Str("broker", brokerURL).Str("topic", currentTopic).Msg("MQTT подключен, подписка на топики...")
+		currentBroker := ch.BrokerURL()
+		log.Info().Str("broker", currentBroker).Str("topic", currentTopic).Msg("MQTT подключен, подписка на топики...")
 		if currentTopic != "" {
 			c.Subscribe(currentTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
 				ch.handleIncoming(msg)
@@ -166,7 +183,7 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 		}
 	}).
 		SetConnectionLostHandler(func(c mqtt.Client, err error) {
-			log.Warn().Err(err).Msg("MQTT connection lost, reconnecting...")
+			log.Warn().Err(err).Str("broker", ch.BrokerURL()).Msg("MQTT connection lost, reconnecting...")
 		})
 
 	client := mqtt.NewClient(opts)
@@ -179,6 +196,105 @@ func NewMQTTChannel(brokerURL, topic, clientID, username, password string) *MQTT
 	}()
 
 	return ch
+}
+
+// BrokerURL возвращает текущий адрес брокера
+func (m *MQTTChannel) BrokerURL() string {
+	m.brokerMu.RLock()
+	defer m.brokerMu.RUnlock()
+	return m.brokerURL
+}
+
+// IsConnected возвращает true если соединение с брокером активно
+func (m *MQTTChannel) IsConnected() bool {
+	return m.client != nil && m.client.IsConnected()
+}
+
+// ReconnectWithBroker переключает MQTT канал на новый брокер «на лету»
+func (m *MQTTChannel) ReconnectWithBroker(newBrokerURL string) error {
+	if newBrokerURL == "" {
+		return fmt.Errorf("empty broker URL")
+	}
+	m.brokerMu.Lock()
+	if m.brokerURL == newBrokerURL && m.client != nil && m.client.IsConnected() {
+		m.brokerMu.Unlock()
+		return nil
+	}
+	oldURL := m.brokerURL
+	m.brokerURL = newBrokerURL
+	clientID := m.clientID
+	username := m.username
+	password := m.password
+	m.name = "mqtt:" + newBrokerURL
+	m.brokerMu.Unlock()
+
+	log.Info().Str("old_broker", oldURL).Str("new_broker", newBrokerURL).Msg("🔄 Переподключение MQTT канала к новому брокеру...")
+
+	if m.client != nil {
+		m.client.Disconnect(250)
+	}
+
+	opts := mqtt.NewClientOptions().AddBroker(newBrokerURL)
+	if strings.HasPrefix(newBrokerURL, "ssl://") || strings.HasPrefix(newBrokerURL, "tls://") || strings.HasPrefix(newBrokerURL, "tcps://") || strings.HasPrefix(newBrokerURL, "wss://") {
+		opts.SetTLSConfig(&tls.Config{InsecureSkipVerify: true})
+	}
+
+	opts.SetClientID(fmt.Sprintf("nb-%s-%d", clientID, time.Now().UnixNano()%1000000)).
+		SetUsername(username).
+		SetPassword(password).
+		SetCleanSession(true).
+		SetAutoReconnect(true).
+		SetConnectRetry(true).
+		SetConnectRetryInterval(1 * time.Second).
+		SetConnectTimeout(5 * time.Second).
+		SetKeepAlive(20 * time.Second).
+		SetPingTimeout(5 * time.Second).
+		SetWriteTimeout(5 * time.Second).
+		SetResumeSubs(true)
+
+	opts.SetOnConnectHandler(func(c mqtt.Client) {
+		currentTopic := m.GetTopic()
+		log.Info().Str("broker", newBrokerURL).Str("topic", currentTopic).Msg("MQTT подключен к новому брокеру, подписка на топики...")
+		if currentTopic != "" {
+			c.Subscribe(currentTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				m.handleIncoming(msg)
+			})
+		}
+		m.tunnelMu.RLock()
+		tTopic := m.tunnelTopic
+		tHandler := m.tunnelHandler
+		m.tunnelMu.RUnlock()
+		if tTopic != "" && tHandler != nil {
+			c.Subscribe(tTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				raw := msg.Payload()
+				m.keyMu.RLock()
+				hasKey := m.hasSignKey
+				signKey := m.signKey
+				m.keyMu.RUnlock()
+				if hasKey && len(raw) >= 40 && raw[0] != '{' {
+					if inner, _, err := crypto.VerifyFrame(raw, signKey, 30*time.Second); err == nil && len(inner) >= 20 {
+						tHandler(inner)
+						return
+					}
+				}
+				if len(raw) >= 20 {
+					tHandler(raw)
+				}
+			})
+		}
+	}).
+		SetConnectionLostHandler(func(c mqtt.Client, err error) {
+			log.Warn().Err(err).Str("broker", newBrokerURL).Msg("MQTT connection lost, reconnecting...")
+		})
+
+	newClient := mqtt.NewClient(opts)
+	m.client = newClient
+
+	tok := newClient.Connect()
+	if !tok.WaitTimeout(5 * time.Second) {
+		return fmt.Errorf("MQTT connect timeout к %s", newBrokerURL)
+	}
+	return tok.Error()
 }
 
 func (m *MQTTChannel) GetTopic() string {
@@ -232,6 +348,15 @@ func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 }
 
 func (m *MQTTChannel) Name() string {
+	if m.name != "" {
+		return m.name
+	}
+	m.brokerMu.RLock()
+	b := m.brokerURL
+	m.brokerMu.RUnlock()
+	if b != "" {
+		return "mqtt:" + b
+	}
 	return "mqtt"
 }
 
@@ -309,20 +434,23 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 		dataToSend = crypto.SignFrame(data, signKey)
 	}
 
-	if !m.client.IsConnected() {
+	if m.client == nil || !m.client.IsConnected() {
+		if m.client == nil {
+			return fmt.Errorf("MQTT client is nil (%s)", m.BrokerURL())
+		}
 		tok := m.client.Connect()
-		if !tok.WaitTimeout(4 * time.Second) {
-			return fmt.Errorf("MQTT reconnect timeout")
+		if !tok.WaitTimeout(5 * time.Second) {
+			return fmt.Errorf("MQTT reconnect timeout (%s)", m.BrokerURL())
 		}
 		if err := tok.Error(); err != nil {
-			return fmt.Errorf("MQTT reconnect: %w", err)
+			return fmt.Errorf("MQTT reconnect (%s): %w", m.BrokerURL(), err)
 		}
 	}
 
 	targetTopic := m.GetTopic()
 	token := m.client.Publish(targetTopic, 0, false, dataToSend)
-	if !token.WaitTimeout(4 * time.Second) {
-		return fmt.Errorf("MQTT publish timeout")
+	if !token.WaitTimeout(8 * time.Second) {
+		return fmt.Errorf("MQTT publish timeout (%s)", m.BrokerURL())
 	}
 	return token.Error()
 }
@@ -357,7 +485,7 @@ func (m *MQTTChannel) Receive(ctx context.Context) (<-chan *Payload, error) {
 }
 
 func (m *MQTTChannel) IsAvailable(ctx context.Context) bool {
-	return m.client.IsConnected()
+	return m.client != nil && m.client.IsConnected()
 }
 
 // PublishTunnelData отправляет сырой IP пакет туннеля целевому устройству через быстрый MQTT канал

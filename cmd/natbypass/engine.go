@@ -534,6 +534,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		uiServer.SetOnConfigChange(onCfgReload)
 		uiServer.SetOnProfileSwitch(func(p *config.Profile) error {
 			if p != nil {
+				if sigMgr != nil && p.MQTTBroker != "" {
+					sigMgr.UpdateMQTTBroker(p.MQTTBroker)
+				}
 				onCfgReload()
 			}
 			return nil
@@ -1738,10 +1741,22 @@ func startSignaling(ctx context.Context, cfg *config.Config, deviceID string) *s
 	}
 	if len(channels) == 0 {
 		topic := "natbypass/mesh/default"
-		if activeProf != nil && activeProf.MQTTTopic != "" {
-			topic = activeProf.MQTTTopic
+		broker := "tcp://broker.hivemq.com:1883"
+		if activeProf != nil {
+			if activeProf.MQTTTopic != "" {
+				topic = activeProf.MQTTTopic
+			}
+			if activeProf.MQTTBroker != "" {
+				broker = activeProf.MQTTBroker
+			}
 		}
-		channels = append(channels, signaling.NewMQTTChannel("tcp://broker.emqx.io:1883", topic, deviceID, "", ""))
+		channels = append(channels, signaling.NewMQTTChannelNamed("mqtt:"+broker, broker, topic, deviceID, "", ""))
+		backups := []string{"tcp://broker.hivemq.com:1883", "tcp://test.mosquitto.org:1883", "tcp://broker.emqx.io:1883"}
+		for _, bURL := range backups {
+			if bURL != broker {
+				channels = append(channels, signaling.NewMQTTChannelNamed("mqtt:backup:"+bURL, bURL, topic, deviceID, "", ""))
+			}
+		}
 	}
 
 	sigMgr := signaling.NewFallbackManager(channels)
