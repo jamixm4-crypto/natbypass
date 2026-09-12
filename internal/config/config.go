@@ -410,21 +410,39 @@ func setDefaults(v *viper.Viper) {
 
 // Load загружает конфигурацию из файла с поддержкой шифрования и переменных окружения
 func Load(path string) (*Config, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("empty config path")
+	}
+
 	v := viper.New()
 
+	cleanPath := filepath.Clean(path)
+	// Защита от Path Traversal: отклоняем попытки выхода через ".."
+	for _, part := range strings.Split(filepath.ToSlash(cleanPath), "/") {
+		if part == ".." {
+			return nil, fmt.Errorf("security: path traversal rejected in config path: %s", path)
+		}
+	}
+
+	targetPath := cleanPath
 	// Если передан относительный путь, проверяем как в cwd, так и рядом с .exe
-	if !filepath.IsAbs(path) {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+	if !filepath.IsAbs(cleanPath) {
+		if _, err := os.Stat(cleanPath); os.IsNotExist(err) {
 			if exePath, err := os.Executable(); err == nil {
-				candidate := filepath.Join(filepath.Dir(exePath), path)
-				if _, err := os.Stat(candidate); err == nil {
-					path = candidate
+				exeDir := filepath.Dir(exePath)
+				candidate := filepath.Join(exeDir, cleanPath)
+				// Убеждаемся, что candidate не покидает директорию исполняемого файла
+				rel, rErr := filepath.Rel(exeDir, candidate)
+				if rErr == nil && !strings.HasPrefix(rel, "..") {
+					if _, err := os.Stat(candidate); err == nil {
+						targetPath = candidate
+					}
 				}
 			}
 		}
 	}
 
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(targetPath)
 	if err != nil {
 		return nil, err
 	}

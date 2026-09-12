@@ -171,3 +171,22 @@ func TestDefaultConfigValues(t *testing.T) {
 		t.Errorf("Default AllowExitNode = %v, want false", loaded.Network.AllowExitNode)
 	}
 }
+
+func TestPathTraversalRejected(t *testing.T) {
+	traversalPaths := []string{
+		"../../etc/shadow",
+		"../../Windows/win.ini",
+		"..\\..\\Windows\\System32\\calc.exe",
+		"foo/../../bar/config.yaml",
+		"../config.yaml",
+	}
+
+	for _, p := range traversalPaths {
+		_, err := Load(p)
+		if err == nil {
+			t.Errorf("expected path traversal error for %q, but got nil", p)
+		} else if !strings.Contains(err.Error(), "path traversal rejected") {
+			t.Errorf("expected 'path traversal rejected' in error for %q, got: %v", p, err)
+		}
+	}
+}

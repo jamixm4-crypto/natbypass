@@ -46,6 +46,16 @@ func (d *PacketDedup) IsDuplicate(hash string, maxAgeMs int64) bool {
 		}
 	}
 
+	// Периодическая очистка устаревших записей по TTL (>60 сек) раз за цикл кольцевого буфера
+	if d.head == 0 && len(d.entries) > 0 {
+		expireBefore := now - 60000
+		for k, ts := range d.entries {
+			if ts < expireBefore {
+				delete(d.entries, k)
+			}
+		}
+	}
+
 	if d.size >= len(d.ring) {
 		oldestHash := d.ring[d.head]
 		delete(d.entries, oldestHash)
@@ -292,11 +302,6 @@ func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 			log.Warn().Int("len", len(data)).Msg("🛡️ MQTT signaling frame dropped: payload too short for signed frame")
 			return
 		}
-		// Запрещаем сырой JSON в защищённом режиме
-		if data[0] == '{' {
-			log.Warn().Msg("🛡️ MQTT signaling frame dropped: plaintext JSON rejected when NetworkKey is active")
-			return
-		}
 
 		inner, _, err := crypto.VerifyFrame(data, signKey, 300*time.Second)
 		if err != nil {
@@ -530,10 +535,6 @@ func (m *MQTTChannel) handleTunnelPayload(raw []byte) {
 	if hasKey {
 		if len(raw) < 40 {
 			log.Warn().Int("len", len(raw)).Msg("🛡️ MQTT tunnel frame dropped: payload too short for HMAC verification")
-			return
-		}
-		if raw[0] == '{' {
-			log.Warn().Msg("🛡️ MQTT tunnel frame dropped: plaintext payload rejected when NetworkKey is active")
 			return
 		}
 		inner, _, err := crypto.VerifyFrame(raw, signKey, 300*time.Second)

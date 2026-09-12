@@ -11,6 +11,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -37,6 +38,7 @@ var (
 	flagKey     = flag.String("key", "", "NetworkKey for room encryption/decryption")
 	flagTarget  = flag.String("target", "", "Target DeviceID to diagnose or update (empty = all beta nodes)")
 	flagUpdate  = flag.Bool("update", false, "Trigger remote beta update across target/all nodes")
+	flagBatch   = flag.Bool("batch", false, "Run non-interactively in batch mode (execute and exit)")
 	flagTimeout = flag.Duration("timeout", 45*time.Second, "Response collection timeout")
 	flagOutput  = flag.String("output", "", "Output filename for consolidated cluster report")
 	flagLocal   = flag.Bool("local", false, "Include local host diagnostic report in the consolidated output")
@@ -230,7 +232,8 @@ func runCollection(
 
 	randBytes := make([]byte, 4)
 	if _, err := io.ReadFull(rand.Reader, randBytes); err != nil {
-		panic(fmt.Sprintf("diag: csprng failure: %v", err))
+		h := sha256.Sum256([]byte(fmt.Sprintf("diag-session-%d", time.Now().UnixNano())))
+		copy(randBytes, h[:4])
 	}
 	sessionID := fmt.Sprintf("diag-sess-%x", randBytes)
 
@@ -859,7 +862,7 @@ func main() {
 	flag.Parse()
 
 	reader := bufio.NewReader(os.Stdin)
-	isInteractive := len(os.Args) <= 1
+	isInteractive := !*flagBatch && !*flagUpdate
 	// 1. Resolve room parameters: CLI flags > share link in flag > local config.yaml > WebUI API
 	rawInput := *flagTopic
 	var parsedBroker, parsedTopic, parsedKey string
@@ -913,10 +916,6 @@ func main() {
 		}
 	}
 
-	if *flagTarget == "" && !*flagUpdate && parsedTopic == "" && *flagTopic == "" {
-		isInteractive = true
-	}
-
 	if parsedTopic == "" && *flagTopic == "" {
 		printBanner()
 		fmt.Print(colorYellow + "Вставьте natbypass:// ссылку или нажмите Enter для ручного ввода: " + colorReset)
@@ -957,7 +956,8 @@ func main() {
 
 	randBytes := make([]byte, 4)
 	if _, err := io.ReadFull(rand.Reader, randBytes); err != nil {
-		panic(fmt.Sprintf("diag: csprng failure: %v", err))
+		h := sha256.Sum256([]byte(fmt.Sprintf("diag-collector-%d", time.Now().UnixNano())))
+		copy(randBytes, h[:4])
 	}
 	collectorID := fmt.Sprintf("natbypass-diag-%x", randBytes)
 
@@ -998,6 +998,8 @@ func main() {
 		if !isInteractive {
 			if *flagUpdate {
 				choice = "4"
+			} else if *flagTarget != "" {
+				choice = "3"
 			} else {
 				choice = "1"
 			}
@@ -1010,11 +1012,18 @@ func main() {
 			fmt.Println(colorBrightYellow + "  [ 5 ] " + colorBrightWhite + "Сменить профиль / топик / брокер" + colorReset)
 			fmt.Println(colorBrightYellow + "  [ 0 ] " + colorBrightWhite + "Выход из утилиты" + colorReset)
 			fmt.Println(colorGray + "─────────────────────────────────────────────────────────────────────────" + colorReset)
-			fmt.Print(colorBrightGreen + colorBold + "► Введите команду [1-5, 0] (по умолчанию 1): " + colorReset)
-			choice, _ = reader.ReadString('\n')
-			choice = strings.TrimSpace(choice)
+			fmt.Print(colorBrightGreen + colorBold + "► Введите номер команды [1-5, 0]: " + colorReset)
+			line, readErr := reader.ReadString('\n')
+			if readErr != nil {
+				if readErr == io.EOF && len(line) == 0 {
+					fmt.Println("\nВыход из утилиты.")
+					return
+				}
+			}
+			choice = strings.TrimSpace(line)
 			if choice == "" {
-				choice = "1"
+				fmt.Println(colorBrightYellow + "  [!] Команда не указана. Пожалуйста, введите цифру от 0 до 5.\n" + colorReset)
+				continue
 			}
 			menuNames := map[string]string{
 				"1": "Сбор полной диагностики со всех узлов",
@@ -1028,6 +1037,7 @@ func main() {
 				fmt.Printf(colorBrightCyan+"  >> Выбрано: [ %s ] %s\n\n"+colorReset, choice, name)
 			} else {
 				fmt.Printf(colorBrightRed+"  [!] Некорректный выбор '%s'. Введите цифру от 0 до 5.\n\n"+colorReset, choice)
+				continue
 			}
 		}
 
@@ -1149,7 +1159,7 @@ func reorderArgs(args []string) []string {
 			flags = append(flags, arg)
 			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				lower := strings.ToLower(arg)
-				if lower != "-update" && lower != "-local" && lower != "--update" && lower != "--local" {
+				if lower != "-update" && lower != "-local" && lower != "--update" && lower != "--local" && lower != "-batch" && lower != "--batch" {
 					i++
 					flags = append(flags, args[i])
 				}

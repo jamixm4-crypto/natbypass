@@ -375,3 +375,38 @@ func TestRegistry_DisplacementRejectionOnActivePeer(t *testing.T) {
 		t.Errorf("expected Alice to have IPConflict=true")
 	}
 }
+
+func TestRegistry_SecurityPeerDisplacement_SamePublicKeyRejected(t *testing.T) {
+	reg := NewRegistry()
+
+	// 1. Active peer Bob
+	pBob := &Peer{
+		DeviceID:  "node-bob",
+		Nickname:  "Bob",
+		VirtualIP: "10.11.12.10",
+		PublicKey: "bob-secret-public-key-abcdef",
+		Online:    true,
+		LastSeen:  time.Now(),
+	}
+	reg.Upsert(pBob)
+
+	if !reg.Exists("node-bob") {
+		t.Fatalf("expected node-bob to exist in registry")
+	}
+
+	// 2. Attacker Eve clones Bob's PublicKey with a new DeviceID and newer LastSeen
+	pEve := &Peer{
+		DeviceID:  "node-eve",
+		Nickname:  "Eve",
+		VirtualIP: "10.11.12.99",
+		PublicKey: "bob-secret-public-key-abcdef", // same public key
+		Online:    true,
+		LastSeen:  time.Now().Add(2 * time.Second),
+	}
+	reg.Upsert(pEve)
+
+	// Bob MUST NOT be evicted because Bob is active and online!
+	if !reg.Exists("node-bob") {
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Active peer Bob was evicted by spoofed node Eve claiming Bob's PublicKey!")
+	}
+}

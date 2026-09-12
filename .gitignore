@@ -1,6 +1,8 @@
 # Binaries and build outputs
 dist/
 release/
+releases/
+build/
 bin/
 *.exe
 *.exe~
@@ -18,6 +20,11 @@ soft/
 
 # Configuration with private credentials
 config.yaml
+config.yml
+config.*.yaml
+config.*.yml
+**/config.yaml
+**/config.yml
 
 # Runtime logs and PID
 *.log

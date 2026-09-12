@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  actions: write
 
 jobs:
   build-and-sign:
@@ -153,5 +154,35 @@ jobs:
               } else {
                 exit 1
               }
+            }
+          }
+
+      - name: Prune old workflow runs and historical beta tags
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Write-Host "Pruning completed workflow runs (keeping latest 5)..."
+          $runsJson = gh run list --workflow=release.yml --limit 30 --json databaseId,status
+          if ($runsJson) {
+            $runs = $runsJson | ConvertFrom-Json
+            $completedRuns = $runs | Where-Object { $_.status -eq "completed" }
+            if ($completedRuns.Count -gt 5) {
+              $toDelete = $completedRuns | Select-Object -Skip 5
+              foreach ($r in $toDelete) {
+                Write-Host "Deleting old workflow run: $($r.databaseId)"
+                gh run delete $($r.databaseId) 2>$null
+              }
+            }
+          }
+
+          Write-Host "Checking for old beta tags on remote (keeping latest 3)..."
+          $tags = git tag -l "v*-beta*" --sort=-v:refname
+          if ($tags.Count -gt 3) {
+            $staleTags = $tags | Select-Object -Skip 3
+            foreach ($st in $staleTags) {
+              Write-Host "Pruning old beta tag from remote: $st"
+              git push origin --delete $st 2>$null
+              git tag -d $st 2>$null
             }
           }

@@ -450,24 +450,12 @@ func (r *Registry) Upsert(p *Peer) {
 
 		// 1. Конфликт одного и того же Virtual IP:
 		if cleanPVIP != "" && cleanExistingVIP != "" && cleanPVIP == cleanExistingVIP {
-			hasSameKey := p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey
-
-			if hasSameKey {
-				// Тот же криптографический узел перезапустился с новым DeviceID: вытеснение разрешено
-				if !p.LastSeen.IsZero() && p.LastSeen.After(existing.LastSeen) {
-					staleConflictingIDs = append(staleConflictingIDs, id)
-				}
-				continue
-			}
-
-			// Разные PublicKey: коллизия адресов или попытка подмены / вытеснения
 			existingIsActive := existing.Online && now.Sub(existing.LastSeen) < constants.PeerOfflineThreshold
 
 			if existingIsActive {
-				// 🛡️ Защита от Peer Displacement: активный узел НЕЛЬЗЯ вытеснить чужим ключом!
+				// 🛡️ Защита от Peer Displacement: активный узел НЕЛЬЗЯ вытеснить, даже при совпадении ключа или времени!
 				p.IPConflict = true
 				existing.IPConflict = true
-				// Запрещаем новому узлу перехват чужого IP
 				p.VirtualIP = ""
 				log.Warn().
 					Str("victim_id", id).
@@ -475,7 +463,7 @@ func (r *Registry) Upsert(p *Peer) {
 					Str("attacker_id", p.DeviceID).
 					Str("attacker_key", p.PublicKey).
 					Str("conflicting_vip", cleanPVIP).
-					Msg("🛡️ Security alert: Peer displacement rejected! Rogue or conflicting node attempted to hijack Virtual IP")
+					Msg("🛡️ Security alert: Peer displacement rejected! Active peer protected against Virtual IP hijack")
 				continue
 			}
 
@@ -487,9 +475,20 @@ func (r *Registry) Upsert(p *Peer) {
 			continue
 		}
 
-		// 2. Совпадение Public Key (тот же криптографический узел, перезапустившийся с новым ID):
+		// 2. Совпадение Public Key (перезапуск узла с новым DeviceID или попытка подделки):
 		if p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey {
-			if !p.LastSeen.IsZero() && p.LastSeen.After(existing.LastSeen) {
+			existingIsActive := existing.Online && now.Sub(existing.LastSeen) < constants.PeerOfflineThreshold
+			if existingIsActive {
+				log.Warn().
+					Str("existing_id", id).
+					Str("conflicting_id", p.DeviceID).
+					Str("public_key", p.PublicKey).
+					Msg("🛡️ Security alert: Eviction rejected — active peer is online with the same PublicKey")
+				continue
+			}
+
+			existingIsStale := existing.LastSeen.IsZero() || !existing.Online || now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold
+			if existingIsStale {
 				staleConflictingIDs = append(staleConflictingIDs, id)
 			}
 			continue
@@ -498,8 +497,8 @@ func (r *Registry) Upsert(p *Peer) {
 		// 3. Переподключающийся Android с меняющимся DeviceID:
 		if strings.HasPrefix(p.DeviceID, "Android-") && strings.HasPrefix(id, "Android-") {
 			if cleanPVIP != "" && cleanExistingVIP == cleanPVIP {
-				hasSameKey := p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey
-				if hasSameKey && !p.LastSeen.IsZero() && p.LastSeen.After(existing.LastSeen) {
+				existingIsStale := existing.LastSeen.IsZero() || !existing.Online || now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold
+				if existingIsStale {
 					staleConflictingIDs = append(staleConflictingIDs, id)
 				}
 				continue

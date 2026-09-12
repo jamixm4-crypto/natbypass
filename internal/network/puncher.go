@@ -8,12 +8,10 @@
 package network
 
 import (
-	"crypto/rand"
 	"encoding/binary"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -881,17 +879,13 @@ func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 
 	// DCID: 8 random bytes
 	dcid := make([]byte, 8)
-	if _, err := io.ReadFull(rand.Reader, dcid); err != nil {
-		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICChameleonProbe (dcid): %w", err)
-	}
+	_ = crypto.SafeRandomBytes(dcid)
 	buf = append(buf, byte(len(dcid)))
 	buf = append(buf, dcid...)
 
 	// SCID: 8 random bytes
 	scid := make([]byte, 8)
-	if _, err := io.ReadFull(rand.Reader, scid); err != nil {
-		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICChameleonProbe (scid): %w", err)
-	}
+	_ = crypto.SafeRandomBytes(scid)
 	buf = append(buf, byte(len(scid)))
 	buf = append(buf, scid...)
 
@@ -903,9 +897,7 @@ func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 	buf = append(buf, putQUICVarint(16)...)
 	buf = append(buf, 0x00, 0x01)
 	pad := make([]byte, 14)
-	if _, err := io.ReadFull(rand.Reader, pad); err != nil {
-		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICChameleonProbe (pad): %w", err)
-	}
+	_ = crypto.SafeRandomBytes(pad)
 	buf = append(buf, pad...)
 
 	return buf, nil
@@ -927,16 +919,12 @@ func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte,
 	buf = append(buf, verBuf[:]...)
 
 	dcid := make([]byte, 8)
-	if _, err := io.ReadFull(rand.Reader, dcid); err != nil {
-		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICPongChameleonProbe (dcid): %w", err)
-	}
+	_ = crypto.SafeRandomBytes(dcid)
 	buf = append(buf, byte(len(dcid)))
 	buf = append(buf, dcid...)
 
 	scid := make([]byte, 8)
-	if _, err := io.ReadFull(rand.Reader, scid); err != nil {
-		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICPongChameleonProbe (scid): %w", err)
-	}
+	_ = crypto.SafeRandomBytes(scid)
 	buf = append(buf, byte(len(scid)))
 	buf = append(buf, scid...)
 
@@ -946,9 +934,7 @@ func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte,
 	buf = append(buf, putQUICVarint(16)...)
 	buf = append(buf, 0x00, 0x01)
 	pad := make([]byte, 14)
-	if _, err := io.ReadFull(rand.Reader, pad); err != nil {
-		return nil, fmt.Errorf("puncher: csprng failure in BuildQUICPongChameleonProbe (pad): %w", err)
-	}
+	_ = crypto.SafeRandomBytes(pad)
 	buf = append(buf, pad...)
 
 	return buf, nil
@@ -1296,7 +1282,7 @@ func (p *UDPPuncher) StartKeepAliveLoop() {
 		for {
 			// Рандомизированный интервал 9..23 сек (zero-heap allocation)
 			var b [1]byte
-			_, _ = io.ReadFull(rand.Reader, b[:])
+			_ = crypto.SafeRandomBytes(b[:])
 			jitterSec := 9 + int(b[0]%15) // 9..23 seconds
 			timer := time.NewTimer(time.Duration(jitterSec) * time.Second)
 
@@ -1369,11 +1355,11 @@ func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 		}
 		// 2. Резерв: зашифрованная проба с переменным случайным паддингом (16..47 байт)
 		var b [1]byte
-		_, _ = io.ReadFull(rand.Reader, b[:])
+		_ = crypto.SafeRandomBytes(b[:])
 		padLen := 16 + int(b[0]%32)
 		paddedProbe := make([]byte, len(probeData)+padLen)
 		copy(paddedProbe, probeData)
-		_, _ = io.ReadFull(rand.Reader, paddedProbe[len(probeData):])
+		_ = crypto.SafeRandomBytes(paddedProbe[len(probeData):])
 
 		if enc, encErr := crypto.EncryptSelf(paddedProbe, cKey); encErr == nil && len(enc) > 0 {
 			_, err = p.conn.WriteToUDP(enc, rAddr)
@@ -1429,18 +1415,16 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			padLen := pmin
 			if diff := pmax - pmin; diff > 0 {
 				var b [1]byte
-				if _, err := io.ReadFull(rand.Reader, b[:]); err == nil {
-					padLen += int(b[0]) % (diff + 1)
-				}
+				_ = crypto.SafeRandomBytes(b[:])
+				padLen += int(b[0]) % (diff + 1)
 			}
 			if padLen > 0 {
 				pLen := uint16(len(payload))
 				padded := make([]byte, 2+len(payload)+padLen)
 				binary.BigEndian.PutUint16(padded[:2], pLen)
 				copy(padded[2:], payload)
-				if _, err := io.ReadFull(rand.Reader, padded[2+len(payload):]); err == nil {
-					payloadToEncrypt = padded
-				}
+				_ = crypto.SafeRandomBytes(padded[2+len(payload):])
+				payloadToEncrypt = padded
 			}
 		} else {
 			// Dynamic Packet Size Obfuscation (Anti-Flow Analysis for TSPU/DPI)
@@ -1452,14 +1436,12 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			} else if len(payload) < 512 {
 				// Default light jitter padding for small packets (<512B) to mask keystrokes / interactive traffic
 				var b [1]byte
-				if _, err := io.ReadFull(rand.Reader, b[:]); err == nil {
-					padLen := 16 + int(b[0]%48) // 16-63 bytes
-					padded := make([]byte, len(payload)+padLen)
-					copy(padded, payload)
-					if _, err := io.ReadFull(rand.Reader, padded[len(payload):]); err == nil {
-						payloadToEncrypt = padded
-					}
-				}
+				_ = crypto.SafeRandomBytes(b[:])
+				padLen := 16 + int(b[0]%48) // 16-63 bytes
+				padded := make([]byte, len(payload)+padLen)
+				copy(padded, payload)
+				_ = crypto.SafeRandomBytes(padded[len(payload):])
+				payloadToEncrypt = padded
 			}
 		}
 
