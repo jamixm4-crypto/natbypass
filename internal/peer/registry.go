@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/natbypass/natbypass/internal/constants"
@@ -26,10 +27,9 @@ import (
 
 // Peer represents a discovered mesh network device.
 type Peer struct {
-	// OutboundSeq MUST be the first field in Peer (offset 0) to ensure 64-bit (8-byte) alignment
-	// for 64-bit atomic operations (atomic.AddUint64) on 32-bit architectures (MIPS, ARM, 386).
-	// Without this, Go panics on 32-bit MIPS routers with "panic: unaligned 64-bit atomic operation".
-	OutboundSeq      uint64               `json:"-"`
+	// OutboundSeq tracks monotonically increasing packet sequence numbers.
+	// 32-bit atomic is always 4-byte aligned on 32-bit MIPS/ARM and contains no mutex.
+	OutboundSeq      uint32               `json:"-"`
 	DeviceID         string               `json:"device_id"`
 	Nickname         string               `json:"nickname,omitempty"`
 	DeviceName       string               `json:"device_name,omitempty"`
@@ -82,17 +82,13 @@ type Peer struct {
 	StandbyRelayReady        bool                    `json:"standby_relay_ready,omitempty"`  // True if Hot-Standby Relay path is verified
 	LastRelayPing            time.Time               `json:"last_relay_ping,omitempty"`      // Timestamp of last Hot-Standby heartbeat
 	ReplayFilter             *crypto.ReplayFilter    `json:"-"`                              // Anti-Replay sliding window (RFC 6479)
-	seqMu                    sync.Mutex              `json:"-"`                              // Mutex for 64-bit OutboundSeq on 32-bit arch
 }
 
 // NextOutboundSeq returns the next monotonically increasing sequence number for this peer.
-// Protected by mutex to guarantee 100% safety on 32-bit MIPS/ARM architectures.
+// Uses atomic 32-bit increment which is always 4-byte aligned on 32-bit MIPS/ARM architectures
+// and avoids copylocks issues when copying Peer structs.
 func (p *Peer) NextOutboundSeq() uint64 {
-	p.seqMu.Lock()
-	p.OutboundSeq++
-	seq := p.OutboundSeq
-	p.seqMu.Unlock()
-	return seq
+	return uint64(atomic.AddUint32(&p.OutboundSeq, 1))
 }
 
 // GetReplayFilter returns the initialized Anti-Replay filter for this peer.
