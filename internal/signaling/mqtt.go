@@ -302,17 +302,22 @@ func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 			log.Warn().Int("len", len(data)).Msg("🛡️ MQTT signaling frame dropped: payload too short for signed frame")
 			return
 		}
+		// Запрещаем сырой JSON в защищённом режиме (защита от HMAC bypass)
+		if data[0] == '{' {
+			log.Warn().Msg("🛡️ MQTT signaling frame dropped: plaintext JSON rejected when NetworkKey is active")
+			return
+		}
 
-		inner, _, err := crypto.VerifyFrame(data, signKey, 300*time.Second)
+		inner, _, err := crypto.VerifyFrame(data, signKey, 24*time.Hour)
 		if err != nil {
 			log.Warn().Err(err).Msg("🛡️ MQTT signaling frame dropped: invalid HMAC signature or replay detected")
 			return
 		}
 		payloadBytes = inner
 	} else {
-		// Легаси режим: NetworkKey не задан. Разрешаем только сырой JSON.
+		// Легаси режим: NetworkKey не задан локально. Разрешаем только сырой JSON.
 		if len(data) > 0 && data[0] != '{' {
-			log.Warn().Msg("🛡️ MQTT frame is HMAC-signed or binary, but channel has no NetworkKey configured — dropping")
+			log.Debug().Msg("🛡️ MQTT frame is HMAC-signed, but channel has no NetworkKey configured — dropping")
 			return
 		}
 		payloadBytes = data
@@ -537,7 +542,11 @@ func (m *MQTTChannel) handleTunnelPayload(raw []byte) {
 			log.Warn().Int("len", len(raw)).Msg("🛡️ MQTT tunnel frame dropped: payload too short for HMAC verification")
 			return
 		}
-		inner, _, err := crypto.VerifyFrame(raw, signKey, 300*time.Second)
+		if raw[0] == '{' {
+			log.Warn().Msg("🛡️ MQTT tunnel frame dropped: plaintext payload rejected when NetworkKey is active")
+			return
+		}
+		inner, _, err := crypto.VerifyFrame(raw, signKey, 24*time.Hour)
 		if err != nil {
 			log.Warn().Err(err).Msg("🛡️ MQTT tunnel frame dropped: invalid HMAC signature or replay detected")
 			return

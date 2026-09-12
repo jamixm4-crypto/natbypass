@@ -9,6 +9,8 @@ package peer
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"math/bits"
 	"net"
 	"sort"
@@ -453,6 +455,29 @@ func (r *Registry) Upsert(p *Peer) {
 			existingIsActive := existing.Online && now.Sub(existing.LastSeen) < constants.PeerOfflineThreshold
 
 			if existingIsActive {
+				// Если конфликт вызван дефолтным адресом подсети (например, 100.64.200.1 или .0):
+				if strings.HasSuffix(cleanPVIP, ".1") || strings.HasSuffix(cleanPVIP, ".0") {
+					prefix := "100.64.200"
+					parts := strings.Split(cleanPVIP, ".")
+					if len(parts) >= 3 {
+						prefix = strings.Join(parts[:3], ".")
+					}
+					h := sha256.Sum256([]byte(p.DeviceID))
+					octet := int(h[0]%250) + 2
+					if octet == 1 {
+						octet = 2
+					}
+					p.VirtualIP = fmt.Sprintf("%s.%d", prefix, octet)
+					cleanPVIP = p.VirtualIP
+					p.IPConflict = false
+					log.Info().
+						Str("existing_id", id).
+						Str("peer_id", p.DeviceID).
+						Str("reassigned_vip", p.VirtualIP).
+						Msg("🛡️ Default Virtual IP collision resolved: assigned unique deterministic IP")
+					continue
+				}
+
 				// 🛡️ Защита от Peer Displacement: активный узел НЕЛЬЗЯ вытеснить, даже при совпадении ключа или времени!
 				p.IPConflict = true
 				existing.IPConflict = true

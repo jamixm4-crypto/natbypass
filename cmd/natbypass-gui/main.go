@@ -4994,8 +4994,8 @@ func startEngineFromConfig(c *config.Config) {
 										}
 									}
 								}
-								// 1f. Parallel/Fallback MQTT relay transmission when direct P2P and Direct TCP are not active:
-								if (!sentDirect || !targetPeer.DirectP2P) && len(sigChannels) > 0 {
+								// 1f. Parallel/Fallback MQTT relay transmission when direct P2P and Direct TCP are not active or high loss:
+								if (!sentDirect || !targetPeer.DirectP2P || targetPeer.LossPercent > 30) && len(sigChannels) > 0 {
 									dataToSend := packet
 									if cfg != nil {
 										if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
@@ -5923,21 +5923,16 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				atomic.AddUint64(&packetsRecvCount, 1)
 
 				peerVIP := p.VirtualIP
+				cleanMyVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+				cleanPVIP := strings.TrimSpace(strings.Split(peerVIP, "/")[0])
+				if peerVIP == "" || cleanPVIP == cleanMyVIP || strings.Contains(peerVIP, "/") || strings.HasSuffix(cleanPVIP, ".0") || strings.HasSuffix(cleanPVIP, ".1") {
+					prefix := config.ExtractSubnetPrefix(myVirtualIP)
+					peerVIP = config.GenerateSubnetIP(prefix, p.DeviceID)
+				}
 				if registry != nil {
 					if ex, ok := registry.Get(p.DeviceID); ok && ex != nil && ex.VirtualIP != "" {
-						if peerVIP == "" || (strings.HasPrefix(peerVIP, "100.64.200.") && !strings.HasPrefix(ex.VirtualIP, "100.64.200.")) {
+						if strings.HasPrefix(peerVIP, "100.64.200.") && !strings.HasPrefix(ex.VirtualIP, "100.64.200.") {
 							peerVIP = ex.VirtualIP
-						}
-					}
-				}
-				if peerVIP == "" && cfg != nil {
-					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && (activeProf.VirtualIP != "" || activeProf.Subnet != "") {
-						prefix := config.ExtractSubnetPrefix(activeProf.VirtualIP)
-						if prefix == "" || prefix == "100.64.200" {
-							prefix = config.ExtractSubnetPrefix(activeProf.Subnet)
-						}
-						if prefix != "" && prefix != "100.64.200" {
-							peerVIP = config.GenerateSubnetIP(prefix, p.DeviceID)
 						}
 					}
 				}
@@ -6005,7 +6000,9 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				preservedDirect := false
 				preservedLat := time.Duration(0)
 				preservedPingMs := int64(0)
+				lastDirect := time.Time{}
 				if existingPeer != nil {
+					lastDirect = existingPeer.LastDirectSeen
 					if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
 						// Peer roamed to a new network/IP (e.g. Wi-Fi -> Cellular)
 						preservedEP = p.STUNAddr
@@ -6014,8 +6011,12 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						preservedPingMs = 0
 					} else {
 						preservedEP = existingPeer.ActiveEndpoint
-						preservedDirect = existingPeer.DirectP2P
-						if existingPeer.DirectP2P || existingPeer.DirectTCP || existingPeer.Transport == "tcp_tls" || existingPeer.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID)) {
+						if existingPeer.DirectP2P && !existingPeer.LastDirectSeen.IsZero() && time.Since(existingPeer.LastDirectSeen) < 15*time.Second {
+							preservedDirect = true
+						} else {
+							preservedDirect = false
+						}
+						if preservedDirect || existingPeer.DirectTCP || existingPeer.Transport == "tcp_tls" || existingPeer.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID)) {
 							preservedLat = existingPeer.Latency
 							preservedPingMs = existingPeer.PingMs
 						} else {
@@ -6054,6 +6055,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					WGPubKey:         p.WGPubKey,
 					WGPort:           p.WGPort,
 					LastSeen:         time.Now(),
+					LastDirectSeen:   lastDirect,
 					Online:           true,
 					IsExitNode:       p.IsExitNode,
 					AdvertisedRoutes: p.AdvertisedRoutes,

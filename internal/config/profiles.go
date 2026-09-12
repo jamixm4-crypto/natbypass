@@ -697,7 +697,7 @@ func (p *Profile) GetNetworkKeyBytes() [32]byte {
 func (p *Profile) GetDeterministicVIP(deviceID string) string {
 	if p.VirtualIP != "" {
 		clean := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-		if !strings.HasSuffix(clean, ".0") && clean != "" {
+		if !strings.Contains(p.VirtualIP, "/") && !strings.HasSuffix(clean, ".0") && !strings.HasSuffix(clean, ".1") && clean != "" {
 			return clean
 		}
 	}
@@ -751,7 +751,7 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 	if activeProf != nil {
 		if activeProf.VirtualIP != "" {
 			clean := strings.TrimSpace(strings.Split(activeProf.VirtualIP, "/")[0])
-			if !strings.HasSuffix(clean, ".0") && clean != "" {
+			if !strings.Contains(activeProf.VirtualIP, "/") && !strings.HasSuffix(clean, ".0") && !strings.HasSuffix(clean, ".1") && clean != "" {
 				return clean
 			}
 			prefix := ExtractSubnetPrefix(activeProf.VirtualIP)
@@ -766,7 +766,7 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 	// 2. Прямой Network.Address в конфигурации (если в профиле не задана своя подсеть)
 	if cfg.Network.Address != "" {
 		clean := strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
-		if !strings.HasSuffix(clean, ".0") && clean != "" {
+		if !strings.Contains(cfg.Network.Address, "/") && !strings.HasSuffix(clean, ".0") && !strings.HasSuffix(clean, ".1") && clean != "" {
 			return clean
 		}
 		prefix := ExtractSubnetPrefix(cfg.Network.Address)

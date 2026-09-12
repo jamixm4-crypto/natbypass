@@ -9,6 +9,7 @@ package peer
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -409,4 +410,56 @@ func TestRegistry_SecurityPeerDisplacement_SamePublicKeyRejected(t *testing.T) {
 	if !reg.Exists("node-bob") {
 		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Active peer Bob was evicted by spoofed node Eve claiming Bob's PublicKey!")
 	}
-}
+}
+
+func TestRegistry_DefaultVIPCollisionAutoResolved(t *testing.T) {
+	reg := NewRegistry()
+
+	// 1. Peer 1 with default 100.64.200.1
+	p1 := &Peer{
+		DeviceID:  "node-peer1",
+		Nickname:  "Peer1",
+		VirtualIP: "100.64.200.1",
+		PublicKey: "pubkey-peer-1",
+		Online:    true,
+		LastSeen:  time.Now(),
+	}
+	reg.Upsert(p1)
+
+	// 2. Peer 2 also with default 100.64.200.1
+	p2 := &Peer{
+		DeviceID:  "node-peer2",
+		Nickname:  "Peer2",
+		VirtualIP: "100.64.200.1",
+		PublicKey: "pubkey-peer-2",
+		Online:    true,
+		LastSeen:  time.Now(),
+	}
+	reg.Upsert(p2)
+
+	// Both peers MUST exist in registry!
+	if !reg.Exists("node-peer1") {
+		t.Fatalf("expected node-peer1 to exist")
+	}
+	if !reg.Exists("node-peer2") {
+		t.Fatalf("expected node-peer2 to exist")
+	}
+
+	p2InReg, ok := reg.Get("node-peer2")
+	if !ok || p2InReg == nil {
+		t.Fatalf("expected to get node-peer2")
+	}
+	// p2 VirtualIP must NOT be empty!
+	if p2InReg.VirtualIP == "" {
+		t.Errorf("expected node-peer2 VirtualIP to be auto-resolved to non-empty, but was empty")
+	}
+	if p2InReg.VirtualIP == "100.64.200.1" {
+		t.Errorf("expected node-peer2 VirtualIP to be disambiguated from 100.64.200.1, but got %s", p2InReg.VirtualIP)
+	}
+	if !strings.HasPrefix(p2InReg.VirtualIP, "100.64.200.") {
+		t.Errorf("expected node-peer2 VirtualIP to stay in 100.64.200.x subnet, got %s", p2InReg.VirtualIP)
+	}
+	if p2InReg.IPConflict {
+		t.Errorf("expected p2 not to be flagged with IPConflict for default subnet auto-resolution")
+	}
+}

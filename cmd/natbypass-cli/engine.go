@@ -1284,8 +1284,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 						// 1f. Encrypted Central Relay Fallback (WSS or MQTT):
-						// Triggered ONLY if direct TCP, direct UDP, and Mesh Relay all failed to deliver the packet:
-						if !sentTCP && !sentDirect {
+						// Triggered if direct TCP and direct confirmed UDP failed or have severe packet loss (>30%):
+						if !sentTCP && (!sentDirect || !p.DirectP2P || p.LossPercent > 30) {
 							if wssClient != nil && wssClient.IsConnected() {
 								_ = wssClient.SendPacket(p.DeviceID, pkt)
 							} else if sigMgr != nil {
@@ -2652,6 +2652,15 @@ func receiveLoop(
 				mdarMu.Unlock()
 			}
 
+			// Disambiguate colliding virtual IP with local node or subnet default
+			myVIP := config.ResolveVirtualIP(cfg, deviceID)
+			cleanMyVIP := strings.TrimSpace(strings.Split(myVIP, "/")[0])
+			cleanPVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			if p.VirtualIP == "" || cleanPVIP == cleanMyVIP || strings.Contains(p.VirtualIP, "/") || strings.HasSuffix(cleanPVIP, ".0") || strings.HasSuffix(cleanPVIP, ".1") {
+				prefix := config.ExtractSubnetPrefix(myVIP)
+				p.VirtualIP = config.GenerateSubnetIP(prefix, p.DeviceID)
+			}
+
 			existingPeer, peerFound := registry.Get(p.DeviceID)
 			needsFastReply := !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
 
@@ -2708,7 +2717,9 @@ func receiveLoop(
 			preservedEP := ""
 			preservedDirect := false
 			preservedLat := int64(0)
+			lastDirect := time.Time{}
 			if existingPeer != nil {
+				lastDirect = existingPeer.LastDirectSeen
 				// If peer's STUNAddr changed, the old ActiveEndpoint is dead and must be refreshed!
 				if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
 					preservedEP = p.STUNAddr
@@ -2716,8 +2727,12 @@ func receiveLoop(
 					preservedLat = 0
 				} else {
 					preservedEP = existingPeer.ActiveEndpoint
-					preservedDirect = existingPeer.DirectP2P
-					if existingPeer.DirectP2P || existingPeer.DirectTCP || existingPeer.Transport == "tcp_tls" || existingPeer.Transport == "tcp_shadowtls" || (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) {
+					if existingPeer.DirectP2P && !existingPeer.LastDirectSeen.IsZero() && time.Since(existingPeer.LastDirectSeen) < 15*time.Second {
+						preservedDirect = true
+					} else {
+						preservedDirect = false
+					}
+					if preservedDirect || existingPeer.DirectTCP || existingPeer.Transport == "tcp_tls" || existingPeer.Transport == "tcp_shadowtls" || (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) {
 						preservedLat = existingPeer.PingMs
 					} else {
 						preservedLat = 0
@@ -2750,6 +2765,7 @@ func receiveLoop(
 				IsExitNode:       p.IsExitNode,
 				AdvertisedRoutes: p.AdvertisedRoutes,
 				LastSeen:         time.Now(),
+				LastDirectSeen:   lastDirect,
 				Online:           true,
 				DirectP2P:        preservedDirect,
 				ActiveEndpoint:   preservedEP,
