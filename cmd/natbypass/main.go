@@ -22,7 +22,7 @@ import (
 
 
 var (
-	Version   = "1.9.226-beta18"
+	Version   = "1.9.226-beta19"
 	Commit    = "release"
 	BuildDate = "unknown"
 )
@@ -37,6 +37,18 @@ var (
 	noWindow   bool
 )
 
+
+// appendCrashLog appends crashMsg to path, rotating the file to .1 when it exceeds 512 KB.
+func appendCrashLog(path, crashMsg string) {
+	const maxSize = 512 * 1024 // 512 KB
+	if fi, err := os.Stat(path); err == nil && fi.Size() >= maxSize {
+		_ = os.Rename(path, path+".1")
+	}
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
+		_, _ = f.WriteString(crashMsg)
+		_ = f.Close()
+	}
+}
 
 func main() {
 	// Normalize common single-dash long flags for seamless CLI UX (-config -> --config)
@@ -83,14 +95,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, crashMsg)
 
 			_ = os.MkdirAll("dist", 0755)
-			if f, err := os.OpenFile("dist/crash.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-				_, _ = f.WriteString(crashMsg)
-				_ = f.Close()
-			}
-			if f2, err2 := os.OpenFile("crash.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err2 == nil {
-				_, _ = f2.WriteString(crashMsg)
-				_ = f2.Close()
-			}
+			appendCrashLog("dist/crash.log", crashMsg)
+			appendCrashLog("crash.log", crashMsg)
 
 			cleanupTrayIcon()
 			os.Exit(2)

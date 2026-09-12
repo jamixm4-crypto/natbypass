@@ -60,3 +60,10 @@ cmd/natbypass-gui/frontend/node_modules/
 .system_generated/
 .antigravity/
 .agy/
+
+# WebUI authentication sessions
+.sessions.json
+*.sessions.json
+.natbypass_sessions.json
+# Cross-compiled Linux binary
+/natbypass

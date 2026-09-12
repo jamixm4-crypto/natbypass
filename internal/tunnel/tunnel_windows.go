@@ -27,6 +27,8 @@ import (
 	"time"
 	"unsafe"
 
+	"crypto/sha256"
+	"encoding/hex"
 	"golang.org/x/sys/windows"
 )
 
@@ -95,6 +97,19 @@ func downloadOfficialWintunDLL() ([]byte, error) {
 		return nil, fmt.Errorf("failed to read zip content: %w", err)
 	}
 
+	// Verify SHA-256 of the official zip archive before extracting
+	const expectedWintunZipSHA256 = "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51"
+	const wintunAMD64DllSHA256 = "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce"
+	const wintunARM64DllSHA256 = "f7ba89005544be9d85231a9e0d5f23b2d15b3311667e2dad0debd344918a3f80"
+	const wintunARMDllSHA256 = "daad267411ecdc70a0535e274d2c3e9da3d0084bdac7662cb8424dd4a031b4d9"
+	const wintunX86DllSHA256 = "d694fa46ab4cfebcb2632d094c7aa97278eef2f8052438621766d863ae98a931"
+
+	zipHash := sha256.Sum256(zipData)
+	if hex.EncodeToString(zipHash[:]) != expectedWintunZipSHA256 {
+		return nil, fmt.Errorf("wintun zip SHA-256 mismatch: possible supply chain attack. Expected %s, got %s",
+			expectedWintunZipSHA256, hex.EncodeToString(zipHash[:]))
+	}
+
 	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse zip archive: %w", err)
@@ -125,6 +140,24 @@ func downloadOfficialWintunDLL() ([]byte, error) {
 			dllBytes, err := io.ReadAll(rc)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read %s from archive: %w", f.Name, err)
+			}
+			var expectedDllHash string
+			switch runtime.GOARCH {
+			case "amd64":
+				expectedDllHash = wintunAMD64DllSHA256
+			case "arm64":
+				expectedDllHash = wintunARM64DllSHA256
+			case "arm":
+				expectedDllHash = wintunARMDllSHA256
+			case "386":
+				expectedDllHash = wintunX86DllSHA256
+			}
+			if expectedDllHash != "" {
+				dllHash := sha256.Sum256(dllBytes)
+				if hex.EncodeToString(dllHash[:]) != expectedDllHash {
+					return nil, fmt.Errorf("wintun.dll SHA-256 mismatch: possible supply chain attack. Expected %s, got %s",
+						expectedDllHash, hex.EncodeToString(dllHash[:]))
+				}
 			}
 			if len(dllBytes) < minWintunDLLSize {
 				return nil, fmt.Errorf("extracted %s is suspiciously small (%d bytes)", f.Name, len(dllBytes))

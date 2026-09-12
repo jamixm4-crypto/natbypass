@@ -99,8 +99,19 @@ func resetLoginRateLimit(ip string) {
 	delete(loginAttempts, ip)
 }
 
+// revokedSessionTokens contains blacklisted tokens that were compromised or leaked.
+var revokedSessionTokens = map[string]struct{}{
+	"a6712db72e2a2ed740ff041018615e9cd30d313aa1126b9ad39f93f021be2f07": {},
+}
+
 func getSessionStoragePath() string {
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "windows" {
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			dir := filepath.Join(appData, "natbypass")
+			_ = os.MkdirAll(dir, 0700)
+			return filepath.Join(dir, ".sessions.json")
+		}
+	} else if runtime.GOOS == "linux" {
 		if _, err := os.Stat("/opt/var/run"); err == nil {
 			return "/opt/var/run/.natbypass_sessions.json"
 		}
@@ -117,6 +128,11 @@ func getSessionStoragePath() string {
 			return "/tmp/.natbypass_sessions.json"
 		}
 	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dir := filepath.Join(home, ".natbypass")
+		_ = os.MkdirAll(dir, 0700)
+		return filepath.Join(dir, ".sessions.json")
+	}
 	return ".sessions.json"
 }
 
@@ -132,6 +148,9 @@ func loadSessionsFromDisk() {
 		if err := json.Unmarshal(data, &loaded); err == nil && loaded != nil {
 			now := time.Now()
 			for k, v := range loaded {
+				if _, revoked := revokedSessionTokens[k]; revoked {
+					continue
+				}
 				if now.Before(v.ExpiresAt) {
 					sessionStore[k] = v
 				}
@@ -179,6 +198,9 @@ func deleteSession(token string) {
 
 func isValidSession(token string) bool {
 	if token == "" {
+		return false
+	}
+	if _, revoked := revokedSessionTokens[token]; revoked {
 		return false
 	}
 	sessionStoreMu.RLock()

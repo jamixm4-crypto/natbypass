@@ -536,6 +536,26 @@ func (s *Server) isAuthRequired() bool {
 	return s.password != "" || s.customAuth != nil || IsKeeneticOS()
 }
 
+
+// isDirectLoopback returns true ONLY when the direct TCP connection from r.RemoteAddr
+// is a loopback address AND no X-Forwarded-For / X-Real-IP header is present
+// (i.e. we are NOT behind a reverse proxy).
+// This prevents external attackers from exploiting loopback bypass via reverse proxy:
+// if X-Forwarded-For is present, we cannot trust RemoteAddr == 127.0.0.1 to mean
+// "this is a local-only request", so we require the standard auth flow.
+func isDirectLoopback(r *http.Request) bool {
+	if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" {
+		// Behind a reverse proxy — cannot trust RemoteAddr for loopback bypass.
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || host == "" {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && ip.IsLoopback()
+}
+
 // csrfMiddleware validates CSRF tokens on mutating requests (POST, PUT, DELETE).
 func (s *Server) csrfMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -571,16 +591,13 @@ func (s *Server) csrfMiddleware(next http.Handler) http.Handler {
 			}
 
 			// 3. Local desktop loopback (127.0.0.1 / ::1) without cross-site origin: skip CSRF
-			host, _, _ := net.SplitHostPort(r.RemoteAddr)
-			if host == "" {
-				host = r.RemoteAddr
-			}
-			ip := net.ParseIP(strings.TrimSpace(host))
+			// isDirectLoopback() also checks that no X-Forwarded-For/X-Real-IP is present
+			// to prevent reverse-proxy bypass by external clients faking loopback origin.
 			origin := r.Header.Get("Origin")
 			referer := r.Header.Get("Referer")
 			isLocalOrigin := origin == "" || strings.HasPrefix(origin, "http://127.0.0.1") || strings.HasPrefix(origin, "http://localhost")
 			isLocalReferer := referer == "" || strings.HasPrefix(referer, "http://127.0.0.1") || strings.HasPrefix(referer, "http://localhost")
-			if ip != nil && ip.IsLoopback() && isLocalOrigin && isLocalReferer {
+			if isDirectLoopback(r) && isLocalOrigin && isLocalReferer {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -640,12 +657,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		// Разрешить вызов /api/window/open только с локального хоста (127.0.0.1 / ::1)
 		if r.URL.Path == "/api/window/open" {
-			host, _, _ := net.SplitHostPort(r.RemoteAddr)
-			if host == "" {
-				host = r.RemoteAddr
-			}
-			ip := net.ParseIP(strings.TrimSpace(host))
-			if ip != nil && ip.IsLoopback() {
+			if isDirectLoopback(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -661,12 +673,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		// 0. Разрешить локальный read-only опрос статуса, пиров, дашборда и топологии (localhost 127.0.0.1 / ::1) для diag/CLI/WebUI
 		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck" || r.URL.Path == "/api/signaling/brokers" || r.URL.Path == "/api/signaling/broker/switch") && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
-			host, _, _ := net.SplitHostPort(r.RemoteAddr)
-			if host == "" {
-				host = r.RemoteAddr
-			}
-			ip := net.ParseIP(strings.TrimSpace(host))
-			if ip != nil && ip.IsLoopback() {
+			if isDirectLoopback(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -3700,20 +3707,21 @@ func (s *Server) handleAdminPasswordChange(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if req.NewPassword == "" || len(req.NewPassword) < 3 {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "новый пароль должен содержать минимум 3 символа")
+	if len(req.NewPassword) < 8 {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "новый пароль должен содержать минимум 8 символов")
 		return
 	}
 
-	// Проверяем текущий пароль
+	// Проверяем текущий пароль строго — никаких хардкод-значений
 	if s.password != "" {
 		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte(s.password)) != 1 {
 			s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль")
 			return
 		}
 	} else {
-		if req.CurrentPassword != "admin" && req.CurrentPassword != "admin123" && req.CurrentPassword != "" {
-			s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль (по умолчанию: admin)")
+		// Пароль не установлен: допускаем только "admin" (дефолт), НЕ пустую строку и НЕ "admin123"
+		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte("admin")) != 1 {
+			s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль")
 			return
 		}
 	}

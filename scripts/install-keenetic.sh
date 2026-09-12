@@ -7,7 +7,7 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.9.226-beta18"
+    DEFAULT_TAG="v1.9.226-beta19"
 
     # Try to resolve latest tag from GitHub API
     LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
@@ -29,15 +29,37 @@ main() {
     generate_random_hex() {
         _bytes="${1:-16}"
         _res=""
-        if [ -r /dev/urandom ]; then
+        # Priority 1: openssl (most widely available, cryptographically secure)
+        if command -v openssl >/dev/null 2>&1; then
+            _res=$(openssl rand -hex "${_bytes}" 2>/dev/null)
+        fi
+        # Priority 2: /dev/urandom via od
+        if [ -z "$_res" ] && [ -r /dev/urandom ]; then
             if command -v od >/dev/null 2>&1; then
                 _res=$(dd if=/dev/urandom bs="${_bytes}" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
-            elif command -v hexdump >/dev/null 2>&1; then
+            fi
+        fi
+        # Priority 3: /dev/urandom via hexdump
+        if [ -z "$_res" ] && [ -r /dev/urandom ]; then
+            if command -v hexdump >/dev/null 2>&1; then
                 _res=$(dd if=/dev/urandom bs="${_bytes}" count=1 2>/dev/null | hexdump -e '1/1 "%02x"')
             fi
         fi
+        # Priority 4: /dev/urandom via xxd
+        if [ -z "$_res" ] && [ -r /dev/urandom ]; then
+            if command -v xxd >/dev/null 2>&1; then
+                _res=$(dd if=/dev/urandom bs="${_bytes}" count=1 2>/dev/null | xxd -p | tr -d '\n')
+            fi
+        fi
+        # Priority 5: python3 secrets module
         if [ -z "$_res" ]; then
-            _res=$( (date +%s%N 2>/dev/null || date +%s; echo "$$"; uname -a) | md5sum 2>/dev/null | awk '{print $1}' )
+            if command -v python3 >/dev/null 2>&1; then
+                _res=$(python3 -c "import secrets; print(secrets.token_hex(${_bytes}))" 2>/dev/null)
+            fi
+        fi
+        if [ -z "$_res" ]; then
+            echo "ERROR: No secure CSPRNG source available (openssl, /dev/urandom, python3 not found). Aborting." >&2
+            exit 1
         fi
         echo "$_res"
     }
@@ -331,6 +353,8 @@ wireguard:
   mtu: 1420
 EOF
         print_green "✓ Конфигурация сохранена с уникальным топиком и сетевым ключом."
+
+        chmod 600 "${CONFIG_FILE}"
     fi
 
 
