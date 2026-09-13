@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta33"
+const Version = "1.9.226-beta34"
 
 
 
@@ -1508,17 +1508,43 @@ func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
 		}
 	}
 
-	// Если прямой пакет не ушел по fromAddr, пробуем отправить по ActiveEndpoint или STUNAddr узла
-	if !sent && globalPuncher != nil && globalRegistry != nil {
+	// Если прямой пакет не ушел по fromAddr, пробуем отправить по TCP Direct, ActiveEndpoint или через Relay
+	if !sent && globalRegistry != nil {
 		for _, p := range globalRegistry.List() {
 			pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 			if pVIP == srcIP.String() || p.VirtualIP == srcIP.String() {
-				ep := p.ActiveEndpoint
-				if ep == "" {
-					ep = p.STUNAddr
+				if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(p.DeviceID) {
+					if err := globalTCPDirectMgr.SendPacket(p.DeviceID, reply); err == nil {
+						sent = true
+						break
+					}
 				}
-				if ep != "" {
-					_ = globalPuncher.SendDataPacket(ep, reply)
+				if globalPuncher != nil {
+					ep := p.ActiveEndpoint
+					if ep == "" {
+						ep = p.STUNAddr
+					}
+					if ep != "" {
+						if err := globalPuncher.SendDataPacket(ep, reply); err == nil {
+							sent = true
+							break
+						}
+					}
+				}
+				if !sent && globalSigMgr != nil {
+					dataToSend := reply
+					if globalConfig != nil {
+						if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+							cKey := crypto.DeriveKey(activeProf.NetworkKey)
+							seq := p.NextOutboundSeq()
+							epoch := crypto.GetCurrentEpoch()
+							if enc, encErr := crypto.EncryptWithEpochSeq(reply, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+								dataToSend = enc
+							}
+						}
+					}
+					_ = globalSigMgr.PublishTunnelData(p.DeviceID, dataToSend)
+					sent = true
 				}
 				break
 			}

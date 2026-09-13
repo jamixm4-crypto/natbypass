@@ -64,6 +64,8 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.6'
 
       - name: Build Go Mobile Core (AAR)
         run: |
@@ -94,6 +96,16 @@ jobs:
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
           echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
           chmod +x gradlew
+
+          # Pre-fetch / warm-up wrapper with retry loop against transient connection resets
+          for attempt in 1 2 3 4 5; do
+            echo "Gradle wrapper check (attempt $attempt)..."
+            if ./gradlew --version; then
+              break
+            fi
+            echo "Gradle wrapper download failed, retrying in 4 seconds..."
+            sleep 4
+          done
 
           TAG="${GITHUB_REF_NAME}"
           if [ "$TAG" = "main" ] || [ "$TAG" = "master" ] || [ -z "$TAG" ]; then

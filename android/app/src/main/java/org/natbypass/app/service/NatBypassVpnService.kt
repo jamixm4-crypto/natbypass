@@ -257,6 +257,12 @@ class NatBypassVpnService : VpnService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to add mesh route: ${e.message}")
                 }
+
+                // Гарантируем DNS серверы, чтобы Android не сбрасывал интернет для остальных приложений
+                try {
+                    builder.addDnsServer("1.1.1.1")
+                    builder.addDnsServer("8.8.8.8")
+                } catch (e: Exception) { Log.w(TAG, "addDnsServer error: ${e.message}") }
             }
 
 
@@ -283,6 +289,23 @@ class NatBypassVpnService : VpnService() {
                 Log.e(TAG, "builder.establish() returned NULL")
                 stopSelf()
                 return
+            }
+
+            // setUnderlyingNetworks ОБЯЗАН вызываться ПОСЛЕ establish()!
+            // Это сообщает Android, что VPN работает поверх физического интерфейса (Wi-Fi/LTE)
+            // и весь обычный трафик без маршрутов в VPN направляется в физическую сеть без разрыва интернета.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                try {
+                    val activeNet = cm.activeNetwork
+                    if (activeNet != null) {
+                        setUnderlyingNetworks(arrayOf(activeNet))
+                    } else {
+                        setUnderlyingNetworks(null)
+                    }
+                    Log.i(TAG, "setUnderlyingNetworks successfully applied after establish()")
+                } catch (e: Exception) {
+                    Log.w(TAG, "setUnderlyingNetworks error: ${e.message}")
+                }
             }
             // detachFd() передает владение дескриптором файловому объекту Go (os.File).
             // Сохраняем raw fd отдельно, чтобы disconnect() мог закрыть его через Os.close()
@@ -457,8 +480,14 @@ class NatBypassVpnService : VpnService() {
         if (now - lastNetworkChangeTs < 250) return
         lastNetworkChangeTs = now
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1 && network != null) {
-            try { setUnderlyingNetworks(arrayOf(network)) } catch (_: Exception) {}
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            try {
+                if (network != null) {
+                    setUnderlyingNetworks(arrayOf(network))
+                } else {
+                    setUnderlyingNetworks(null)
+                }
+            } catch (_: Exception) {}
         }
         serviceScope.launch(Dispatchers.IO) {
             try {
