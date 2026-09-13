@@ -9,19 +9,21 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
-	"time"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/wireguard"
 	"github.com/spf13/cobra"
 )
@@ -146,21 +148,118 @@ func newStatusCmd() *cobra.Command {
 			// 1. Check PID
 			runningPID := findRunningPID(cfg.Daemon.PidFile)
 
-			// 2. Probe HTTP API (127.0.0.1:port/healthz)
-			client := http.Client{Timeout: 500 * time.Millisecond}
-			resp, httpErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
-			isHttpRunning := (httpErr == nil && resp != nil && resp.StatusCode == 200)
-			if resp != nil {
+			// 2. Probe HTTP API (127.0.0.1:port/api/status and /healthz)
+			client := http.Client{Timeout: 800 * time.Millisecond}
+			resp, httpErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/status", port))
+			isHttpRunning := false
+
+			type statusData struct {
+				Version        string            `json:"version"`
+				PID            int               `json:"pid"`
+				DeviceID       string            `json:"device_id"`
+				DeviceName     string            `json:"device_name"`
+				VirtualIP      string            `json:"virtual_ip"`
+				PublicIP       string            `json:"public_ip"`
+				STUNAddr       string            `json:"stun_addr"`
+				Uptime         string            `json:"uptime"`
+				CurrentChannel string            `json:"current_channel"`
+				PeersCount     int               `json:"peers_count"`
+				ActiveProfile  string            `json:"active_profile"`
+				MQTTTopic      string            `json:"mqtt_topic"`
+				InterfaceName  string            `json:"interface_name"`
+				TUNStatus      *tunnel.TUNStatus `json:"tun_status"`
+			}
+			var stResp struct {
+				Ok   bool       `json:"ok"`
+				Data statusData `json:"data"`
+			}
+
+			if httpErr == nil && resp != nil {
+				if resp.StatusCode == 200 {
+					isHttpRunning = true
+					_ = json.NewDecoder(resp.Body).Decode(&stResp)
+				}
 				_ = resp.Body.Close()
+			} else {
+				// Fallback to /healthz
+				hResp, hErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
+				if hErr == nil && hResp != nil {
+					if hResp.StatusCode == 200 {
+						isHttpRunning = true
+					}
+					_ = hResp.Body.Close()
+				}
 			}
 
 			if runningPID > 0 || isHttpRunning {
-				if runningPID > 0 {
-					fmt.Printf("Status: RUNNING (PID: %d)\n", runningPID)
-				} else {
-					fmt.Println("Status: RUNNING")
+				pid := runningPID
+				if pid <= 0 && stResp.Data.PID > 0 {
+					pid = stResp.Data.PID
 				}
-				fmt.Printf("Web UI: http://localhost:%d\n", port)
+				if pid > 0 {
+					fmt.Printf("Status:         RUNNING (PID: %d)\n", pid)
+				} else {
+					fmt.Println("Status:         RUNNING")
+				}
+				fmt.Printf("Web UI:         http://localhost:%d\n", port)
+				if isHttpRunning && stResp.Ok {
+					data := stResp.Data
+					if data.Version != "" {
+						fmt.Printf("Version:        %s\n", data.Version)
+					}
+					if data.ActiveProfile != "" {
+						fmt.Printf("Active Profile: %s\n", data.ActiveProfile)
+					}
+					if data.DeviceID != "" {
+						devStr := data.DeviceID
+						if data.DeviceName != "" && data.DeviceName != data.DeviceID {
+							devStr = fmt.Sprintf("%s (%s)", data.DeviceName, data.DeviceID)
+						}
+						fmt.Printf("Device:         %s\n", devStr)
+					}
+					if data.VirtualIP != "" {
+						fmt.Printf("Virtual IP:     %s\n", data.VirtualIP)
+					}
+					if data.PublicIP != "" {
+						fmt.Printf("Public IP:      %s\n", data.PublicIP)
+					}
+					if data.CurrentChannel != "" {
+						fmt.Printf("Signaling:      %s\n", data.CurrentChannel)
+					}
+					fmt.Printf("Peers Online:   %d\n", data.PeersCount)
+					if data.Uptime != "" {
+						fmt.Printf("Uptime:         %s\n", data.Uptime)
+					}
+
+					// TUN Adapter Status display
+					tunSt := data.TUNStatus
+					if tunSt == nil {
+						localTun := tunnel.GetTUNStatus()
+						tunSt = &localTun
+					}
+					if tunSt.Active {
+						devName := tunSt.DeviceName
+						if devName == "" {
+							devName = data.InterfaceName
+						}
+						vip := tunSt.VirtualIP
+						if vip == "" {
+							vip = data.VirtualIP
+						}
+						fmt.Printf("TUN Adapter:    ACTIVE (%s, %s, MTU: %d)\n", devName, vip, tunSt.MTU)
+					} else {
+						fmt.Printf("TUN Adapter:    INACTIVE\n")
+						if tunSt.ErrorCause != "" {
+							fmt.Printf("  Причина:      %s\n", tunSt.ErrorCause)
+						}
+						if tunSt.ErrorRemedy != "" {
+							fmt.Printf("  Решение:      %s\n", tunSt.ErrorRemedy)
+						}
+						if !tunSt.IsAdmin {
+							fmt.Println("  Внимание:     Процесс запущен без прав Администратора!")
+						}
+					}
+				}
 				return nil
 			}
 

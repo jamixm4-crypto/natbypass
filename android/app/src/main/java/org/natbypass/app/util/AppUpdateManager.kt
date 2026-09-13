@@ -2,6 +2,7 @@ package org.natbypass.app.util
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -97,20 +98,39 @@ object AppUpdateManager {
                         ?: "Улучшена стабильность и производительность."
                 }
 
-                var apkDownloadUrl = ""
-                var apkSize = 0L
+                data class ApkAsset(val name: String, val url: String, val size: Long)
+                val apkAssets = mutableListOf<ApkAsset>()
                 val assets = releaseObj.optJSONArray("assets")
                 if (assets != null) {
                     for (i in 0 until assets.length()) {
                         val asset = assets.getJSONObject(i)
                         val name = asset.optString("name", "")
                         if (name.endsWith(".apk", ignoreCase = true)) {
-                            apkDownloadUrl = asset.optString("browser_download_url", "")
-                            apkSize = asset.optLong("size", 0L)
-                            break
+                            apkAssets.add(ApkAsset(
+                                name = name,
+                                url  = asset.optString("browser_download_url", ""),
+                                size = asset.optLong("size", 0L)
+                            ))
                         }
                     }
                 }
+
+                // Choose best APK matching device architecture from Build.SUPPORTED_ABIS
+                var chosenApk: ApkAsset? = null
+                val supportedAbis = Build.SUPPORTED_ABIS ?: emptyArray()
+                for (abi in supportedAbis) {
+                    val normalizedAbi = abi.lowercase()
+                    chosenApk = apkAssets.firstOrNull { it.name.lowercase().contains(normalizedAbi) }
+                    if (chosenApk != null) break
+                }
+                // Fallback: universal APK or first available APK
+                if (chosenApk == null) {
+                    chosenApk = apkAssets.firstOrNull { it.name.lowercase().contains("universal") }
+                        ?: apkAssets.firstOrNull()
+                }
+
+                val apkDownloadUrl = chosenApk?.url ?: ""
+                val apkSize = chosenApk?.size ?: 0L
 
                 val isCurrentBeta = currentVersion.contains("beta", ignoreCase = true) ||
                     currentVersion.contains("rc", ignoreCase = true) ||

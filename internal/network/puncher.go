@@ -1329,6 +1329,16 @@ func (p *UDPPuncher) RemoveKeepAliveTarget(addr string) {
 	delete(p.keepAliveTargets, addr)
 }
 
+// HasActiveDirectTargets reports whether there are established direct endpoints being kept alive.
+func (p *UDPPuncher) HasActiveDirectTargets() bool {
+	if p == nil {
+		return false
+	}
+	p.keepAliveMu.Lock()
+	defer p.keepAliveMu.Unlock()
+	return len(p.keepAliveTargets) > 0
+}
+
 // SendKeepAlive sends a periodic active ping packet to maintain bidirectional CGNAT port mappings
 // disguised as a QUIC Chameleon probe or padded encrypted datagram with dynamic size variation.
 func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {

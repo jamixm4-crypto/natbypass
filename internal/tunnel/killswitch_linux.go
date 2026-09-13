@@ -21,6 +21,7 @@ import (
 type KillSwitch struct {
 	enabled      bool
 	tunInterface string
+	meshSubnet   string
 	mu           sync.Mutex
 }
 
@@ -30,7 +31,7 @@ func NewKillSwitch() *KillSwitch {
 }
 
 // Enable активирует блокировку утечек трафика через iptables.
-func (k *KillSwitch) Enable(tunInterface string) error {
+func (k *KillSwitch) Enable(tunInterface string, meshSubnet ...string) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
@@ -38,6 +39,12 @@ func (k *KillSwitch) Enable(tunInterface string) error {
 		tunInterface = "nb0"
 	}
 	k.tunInterface = tunInterface
+
+	targetSubnet := "100.64.200.0/24"
+	if len(meshSubnet) > 0 && meshSubnet[0] != "" {
+		targetSubnet = meshSubnet[0]
+	}
+	k.meshSubnet = targetSubnet
 
 	// 1. Удаляем предыдущие правила если были
 	_ = k.disableInternal()
@@ -48,8 +55,8 @@ func (k *KillSwitch) Enable(tunInterface string) error {
 	// 3. Разрешаем трафик через TUN
 	_ = exec.Command("iptables", "-I", "OUTPUT", "2", "-o", tunInterface, "-j", "ACCEPT").Run()
 
-	// 4. Разрешаем локальную сеть mesh (100.64.200.0/24)
-	_ = exec.Command("iptables", "-I", "OUTPUT", "3", "-d", "100.64.200.0/24", "-j", "ACCEPT").Run()
+	// 4. Разрешаем локальную сеть mesh (активная подсеть)
+	_ = exec.Command("iptables", "-I", "OUTPUT", "3", "-d", targetSubnet, "-j", "ACCEPT").Run()
 
 	// 5. Разрешаем локальные LAN-подсети
 	_ = exec.Command("iptables", "-I", "OUTPUT", "4", "-d", "192.168.0.0/16", "-j", "ACCEPT").Run()
@@ -74,9 +81,16 @@ func (k *KillSwitch) disableInternal() error {
 	if k.tunInterface == "" {
 		k.tunInterface = "nb0"
 	}
+	targetSubnet := k.meshSubnet
+	if targetSubnet == "" {
+		targetSubnet = "100.64.200.0/24"
+	}
 	_ = exec.Command("iptables", "-D", "OUTPUT", "-o", "lo", "-j", "ACCEPT").Run()
 	_ = exec.Command("iptables", "-D", "OUTPUT", "-o", k.tunInterface, "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-D", "OUTPUT", "-d", "100.64.200.0/24", "-j", "ACCEPT").Run()
+	_ = exec.Command("iptables", "-D", "OUTPUT", "-d", targetSubnet, "-j", "ACCEPT").Run()
+	if targetSubnet != "100.64.200.0/24" {
+		_ = exec.Command("iptables", "-D", "OUTPUT", "-d", "100.64.200.0/24", "-j", "ACCEPT").Run()
+	}
 	_ = exec.Command("iptables", "-D", "OUTPUT", "-d", "192.168.0.0/16", "-j", "ACCEPT").Run()
 	_ = exec.Command("iptables", "-D", "OUTPUT", "-d", "10.0.0.0/8", "-j", "ACCEPT").Run()
 	_ = exec.Command("iptables", "-D", "OUTPUT", "-d", "172.16.0.0/12", "-j", "ACCEPT").Run()

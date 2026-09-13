@@ -40,19 +40,19 @@
     "#1": {
       "0000": {
         "fixed": {
-          "file_version": "1.9.226.26",
-          "product_version": "1.9.226.26"
+          "file_version": "1.9.226.27",
+          "product_version": "1.9.226.27"
         },
         "info": {
           "0409": {
             "CompanyName": "NatBypass Project",
             "FileDescription": "NatBypass Mesh VPN & DPI Bypass",
-            "FileVersion": "1.9.226.26",
+            "FileVersion": "1.9.226.27",
             "InternalName": "natbypass",
             "LegalCopyright": "Copyright © 2026 jamixm4-crypto",
             "OriginalFilename": "NatBypass.exe",
             "ProductName": "NatBypass",
-            "ProductVersion": "1.9.226-beta26"
+            "ProductVersion": "1.9.226-beta27"
           }
         }
       }

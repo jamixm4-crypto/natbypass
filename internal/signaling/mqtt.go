@@ -97,12 +97,14 @@ type MQTTChannel struct {
 	keyMu         sync.RWMutex
 	hasSignKey    bool
 	signKey       [32]byte
+	rawNetKey     string
 }
 
 // SetNetworkKey configures the HMAC-SHA256 signaling authentication key derived from the network key.
 func (m *MQTTChannel) SetNetworkKey(networkKey string) {
 	m.keyMu.Lock()
 	defer m.keyMu.Unlock()
+	m.rawNetKey = networkKey
 	if networkKey == "" {
 		m.hasSignKey = false
 		m.signKey = [32]byte{}
@@ -172,9 +174,17 @@ func NewMQTTChannelNamed(name, brokerURL, topic, clientID, username, password st
 		currentBroker := ch.BrokerURL()
 		log.Info().Str("broker", currentBroker).Str("topic", currentTopic).Msg("MQTT подключен, подписка на топики...")
 		if currentTopic != "" {
-			c.Subscribe(currentTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+			tok1 := c.Subscribe(currentTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
 				ch.handleIncoming(msg)
 			})
+			_ = tok1.WaitTimeout(3 * time.Second)
+
+			// Подписка на retained маяки пиров (<topic>/p/+)
+			peerTopicWildcard := fmt.Sprintf("%s/p/+", strings.TrimSuffix(currentTopic, "/#"))
+			tok2 := c.Subscribe(peerTopicWildcard, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				ch.handleIncoming(msg)
+			})
+			_ = tok2.WaitTimeout(3 * time.Second)
 		}
 		ch.tunnelMu.RLock()
 		tTopic := ch.tunnelTopic
@@ -182,9 +192,10 @@ func NewMQTTChannelNamed(name, brokerURL, topic, clientID, username, password st
 		ch.tunnelMu.RUnlock()
 		if tTopic != "" && tHandler != nil {
 			log.Info().Str("tunnel_topic", tTopic).Msg("MQTT подписка на туннельный поток...")
-			c.Subscribe(tTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+			tok3 := c.Subscribe(tTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
 				ch.handleTunnelPayload(msg.Payload())
 			})
+			_ = tok3.WaitTimeout(3 * time.Second)
 		}
 	}).
 		SetConnectionLostHandler(func(c mqtt.Client, err error) {
@@ -469,6 +480,25 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 	}
 
 	targetTopic := m.GetTopic()
+
+	// Retained peer beacon optimization for instant discovery after restart:
+	// If the payload is a presence beacon (not an ephemeral coordination signal),
+	// publish with retained=true to the dedicated peer subtopic <targetTopic>/p/<blindedID>!
+	isCoordination := payload.Coordination != nil || payload.Rendezvous != nil || payload.TCPConnect != nil || payload.SymPunch != nil || payload.RemoteDiag != nil
+	if !isCoordination && payload.DeviceID != "" {
+		m.keyMu.RLock()
+		netKey := m.rawNetKey
+		m.keyMu.RUnlock()
+		peerTopic := crypto.DerivePeerTopic(targetTopic, netKey, payload.DeviceID)
+
+		if payload.Leave || payload.Offline {
+			// Clear retained message on broker so departing node doesn't remain visible
+			_ = m.client.Publish(peerTopic, 0, true, []byte{}).WaitTimeout(2 * time.Second)
+		} else {
+			_ = m.client.Publish(peerTopic, 0, true, dataToSend).WaitTimeout(2 * time.Second)
+		}
+	}
+
 	token := m.client.Publish(targetTopic, 0, false, dataToSend)
 	if !token.WaitTimeout(8 * time.Second) {
 		return fmt.Errorf("MQTT publish timeout (%s)", m.BrokerURL())
@@ -485,6 +515,10 @@ func (m *MQTTChannel) Receive(ctx context.Context) (<-chan *Payload, error) {
 
 	if m.client.IsConnected() {
 		m.client.Subscribe(m.topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+			m.handleIncoming(msg)
+		})
+		peerWildcard := fmt.Sprintf("%s/p/+", strings.TrimSuffix(m.topic, "/#"))
+		m.client.Subscribe(peerWildcard, 0, func(cl mqtt.Client, msg mqtt.Message) {
 			m.handleIncoming(msg)
 		})
 	}
@@ -518,6 +552,7 @@ func (m *MQTTChannel) PublishTunnelData(targetDevID string, pkt []byte) error {
 	m.keyMu.RLock()
 	hasKey := m.hasSignKey
 	signKey := m.signKey
+	netKey := m.rawNetKey
 	m.keyMu.RUnlock()
 
 	dataToSend := pkt
@@ -525,14 +560,18 @@ func (m *MQTTChannel) PublishTunnelData(targetDevID string, pkt []byte) error {
 		dataToSend = crypto.SignFrame(pkt, signKey)
 	}
 
-	topic := fmt.Sprintf("%s/tunnel/%s", m.GetTopic(), targetDevID)
+	topic := crypto.DeriveTunnelTopic(m.GetTopic(), netKey, targetDevID)
 	tok := m.client.Publish(topic, 0, false, dataToSend)
 	return tok.Error()
 }
 
 // SubscribeTunnelData подписывается на входящие пакеты туннеля для текущего узла
 func (m *MQTTChannel) SubscribeTunnelData(myDevID string, onPkt func(pkt []byte)) {
-	topic := fmt.Sprintf("%s/tunnel/%s", m.GetTopic(), myDevID)
+	m.keyMu.RLock()
+	netKey := m.rawNetKey
+	m.keyMu.RUnlock()
+	topic := crypto.DeriveTunnelTopic(m.GetTopic(), netKey, myDevID)
+
 	m.tunnelMu.Lock()
 	m.myDevID = myDevID
 	m.tunnelTopic = topic
@@ -543,6 +582,12 @@ func (m *MQTTChannel) SubscribeTunnelData(myDevID string, onPkt func(pkt []byte)
 		m.client.Subscribe(topic, 0, func(cl mqtt.Client, msg mqtt.Message) {
 			m.handleTunnelPayload(msg.Payload())
 		})
+		legacyTopic := fmt.Sprintf("%s/tunnel/%s", m.GetTopic(), myDevID)
+		if legacyTopic != topic {
+			m.client.Subscribe(legacyTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				m.handleTunnelPayload(msg.Payload())
+			})
+		}
 	}
 }
 

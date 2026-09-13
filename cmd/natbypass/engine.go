@@ -82,6 +82,13 @@ func triggerPublish() {
 	}
 }
 
+func triggerPublishImmediate() {
+	select {
+	case triggerPublishCh <- struct{}{}:
+	default:
+	}
+}
+
 // isLowPowerArch returns true when running on MIPS/MIPSLE/ARM embedded routers.
 func isLowPowerArch() bool {
 	return runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "arm"
@@ -853,9 +860,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						targetPeer.Transport = "tcp_tls"
 						targetPeer.LastBilateralSeen = time.Now()
 					} else {
-						// For UDP: an inbound packet only confirms one-way reception (remote -> local).
-						// Strictly DO NOT promote to DirectP2P or switch Transport to udp_direct here!
-						// DirectP2P is ONLY activated upon verified bilateral delivery (RTT > 0 via PONG).
+						// For UDP: if peer is already in DirectP2P, an inbound data packet confirms
+						// active bidirectional data delivery. Refresh LastBilateralSeen so active traffic never gets demoted to relay!
+						if targetPeer.DirectP2P {
+							targetPeer.LastBilateralSeen = time.Now()
+						}
 					}
 					if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
 						targetPeer.ActiveEndpoint = fromAddrStr
@@ -879,8 +888,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							puncher.RemoveKeepAliveTarget(oldEP)
 						}
 						puncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
-						// If bilateral connection is not verified within 12s, fire a reverse probe to test return path
-						if !targetPeer.IsBilateralP2P(12 * time.Second) {
+						// If bilateral connection is not verified within window, fire a reverse probe to test return path
+						if !targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second) {
 							_ = puncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
 						}
 					}
@@ -1258,7 +1267,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
 							}
 						}
-						bilateralOK := p.IsBilateralP2P(12 * time.Second)
+						bilateralOK := p.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 
 						// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
 						if !isForceTCP && !sentTCP && (!p.DirectP2P || !bilateralOK) && puncher != nil && p.STUNAddr != "" && p.STUNAddr != targetEP {
@@ -1630,7 +1639,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	// Фоновый опрос реального ICMP пинга активных пиров (каждые 20 секунд)
 	if registry != nil {
 		go func() {
-			pingTicker := time.NewTicker(20 * time.Second)
+			pingTicker := time.NewTicker(constants.ICMPPingInterval)
 			defer pingTicker.Stop()
 			for {
 				select {
@@ -1653,8 +1662,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 						vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 						if vip != "" {
-							pingCtx, pingCancel := context.WithTimeout(engineCtx, 1500*time.Millisecond)
-							rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 1200*time.Millisecond)
+							pingCtx, pingCancel := context.WithTimeout(engineCtx, 3000*time.Millisecond)
+							rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 2500*time.Millisecond)
 							pingCancel()
 							if err == nil && rtt > 0 {
 								p.ProbeCount = 0
@@ -1684,6 +1693,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										DirectTCP:   tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID),
 									}
 									bestTrans := transSelector.SelectTransport(p.DeviceID, metrics)
+									if bestTrans == "shadowtls" {
+										bestTrans = "tcp_shadowtls"
+									} else if bestTrans == "tls" {
+										bestTrans = "tcp_tls"
+									}
 									if bestTrans != "" && p.Transport != bestTrans {
 										p.Transport = bestTrans
 									}
@@ -1695,7 +1709,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								p.RecordProbeResult(false)
 								p.Latency = 0
 								p.PingMs = 0
-								if p.ProbeCount >= 10 || p.LossPercent > 30 || p.ConsecutiveDrops >= 3 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 20*time.Second) || (!p.LastBilateralSeen.IsZero() && time.Since(p.LastBilateralSeen) > 15*time.Second) {
+								if p.ProbeCount >= 10 || p.LossPercent > 40 || p.ConsecutiveDrops >= 4 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > constants.PeerOfflineThreshold) || (!p.LastBilateralSeen.IsZero() && time.Since(p.LastBilateralSeen) > constants.BilateralDemotionThreshold) {
 									if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (tcpDirectMgr == nil || !tcpDirectMgr.HasConn(p.DeviceID)) {
 										if p.DirectP2P {
 											log.Warn().Str("peer", p.DeviceID).Int("loss", p.LossPercent).Int("drops", p.ConsecutiveDrops).Msg("🔀 UDP packet loss > 30% or drops >= 3: automatic fallback to Relay")
@@ -2010,6 +2024,14 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 				p.PingMs = rtt.Milliseconds()
 				p.LastBilateralSeen = time.Now()
 				p.ConsecutiveDrops = 0
+				p.ProbeCount = 0
+			} else {
+				// rtt == 0: Входящий PING зонд получен напрямую от удаленного пира
+				// Удаленный узел успешно достучался до нашего UDP сокета
+				if p.DirectP2P && !p.LastBilateralSeen.IsZero() {
+					p.LastBilateralSeen = time.Now()
+				}
+				p.ConsecutiveDrops = 0
 			}
 			targetEP := fromAddr
 			if magicSock != nil {
@@ -2224,7 +2246,7 @@ func publishLoop(
 	// R4: Отслеживаем смену публичного IP для немедленного обновления STUN после смены WAN
 	var lastPublicIPStr string
 
-	publishOnce := func() {
+	publishOnce := func(isBootBurst ...bool) {
 		// Dynamic reload of current config & Virtual IP & MQTT topic
 		currentVIP := virtualIP
 
@@ -2551,6 +2573,10 @@ func publishLoop(
 			AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 		}
 
+		if len(isBootBurst) > 0 && isBootBurst[0] {
+			payload.IsBootBurst = true
+		}
+
 		toSend := payload
 		if activeKey != "" {
 			if sigMgr != nil {
@@ -2565,11 +2591,11 @@ func publishLoop(
 
 	// Rapid initial discovery burst (3 beacons within 1.5s for instant mesh convergence)
 	go func() {
-		publishOnce()
+		publishOnce(true)
 		time.Sleep(350 * time.Millisecond)
-		publishOnce()
+		publishOnce(true)
 		time.Sleep(900 * time.Millisecond)
-		publishOnce()
+		publishOnce(true)
 	}()
 
 	for {
@@ -2840,7 +2866,7 @@ func receiveLoop(
 			}
 
 			existingPeer, peerFound := registry.Get(p.DeviceID)
-			needsFastReply := !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
+			needsFastReply := p.IsBootBurst || !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
 
 			// При наличии стабильного прямого P2P сокета — не сбиваем его зондированием чужих локальных подсетей
 			if puncher != nil {
@@ -2998,11 +3024,15 @@ func receiveLoop(
 
 			// Мгновенный ответный маяк при обнаружении нового узла, смене сокета или перезапуске клиента
 			if needsFastReply {
-				go func() {
+				go func(isBurst bool) {
 					jitter := time.Duration(10+rand.Intn(70)) * time.Millisecond
 					time.Sleep(jitter)
-					triggerPublish()
-				}()
+					if isBurst {
+						triggerPublishImmediate()
+					} else {
+						triggerPublish()
+					}
+				}(p.IsBootBurst)
 			}
 		}
 	}

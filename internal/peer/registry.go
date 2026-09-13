@@ -117,13 +117,18 @@ func (p *Peer) RecordProbeResult(success bool) {
 }
 
 // IsBilateralP2P returns true if direct P2P connection was verified bilaterally within maxAge.
+func isDirectTCPTransport(t string) bool {
+	return t == "tcp_tls" || t == "tcp_shadowtls" || t == "shadowtls" || t == "tls"
+}
+
+// IsBilateralP2P returns true if the peer has an actively verified two-way path.
 // Direct TCP (ShadowTLS) is intrinsically bilateral once connected.
 // UDP P2P requires DirectP2P=true AND verified bilateral communication within maxAge.
 func (p *Peer) IsBilateralP2P(maxAge time.Duration) bool {
 	if p == nil {
 		return false
 	}
-	if p.DirectTCP || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" {
+	if p.DirectTCP || isDirectTCPTransport(p.Transport) {
 		return true
 	}
 	if !p.DirectP2P {
@@ -166,26 +171,28 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.Transport = existing.Transport
 	}
 
+	isTCP := isDirectTCPTransport(existing.Transport) || existing.DirectTCP
+	newerIsTCP := isDirectTCPTransport(newer.Transport) || newer.DirectTCP
+
 	// Dynamic P2P health check:
 	// If transport is TCP ShadowTLS, DirectP2P is backed by an active TCP stream, not UDP hole-punch probes.
-	// For UDP, demote to relay only if no direct inbound packets seen for 15 seconds or bilateral confirmation expired.
-	// ProbeCount is an outbound metric (probes sent), NOT an indicator of P2P health —
-	// it must NOT trigger demotion, or it creates a feedback loop where probing itself kills P2P.
+	// For UDP, demote to relay only if no direct inbound packets seen for BilateralDemotionThreshold or bilateral confirmation expired.
 	directP2PExpired := false
 	if existing.DirectP2P {
-		if existing.Transport == "tcp_tls" || existing.Transport == "tcp_shadowtls" {
-			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 25*time.Second {
+		if isTCP {
+			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > constants.PeerOfflineThreshold {
 				directP2PExpired = true
 			}
 		} else {
-			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 15*time.Second || (!existing.LastBilateralSeen.IsZero() && time.Since(existing.LastBilateralSeen) > 15*time.Second) {
+			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > constants.PeerOfflineThreshold || (!existing.LastBilateralSeen.IsZero() && time.Since(existing.LastBilateralSeen) > constants.BilateralDemotionThreshold) {
 				directP2PExpired = true
 			}
 		}
 	}
 
-	// Unconditional preservation of measured latency and ping across periodic signaling beacons
-	stunChanged := newer.STUNAddr != "" && existing.STUNAddr != "" && newer.STUNAddr != existing.STUNAddr
+	// Unconditional preservation of measured latency and ping across periodic signaling beacons.
+	// Do NOT drop an active healthy direct connection if STUN jitter occurs while packets are actively flowing.
+	stunChanged := newer.STUNAddr != "" && existing.STUNAddr != "" && newer.STUNAddr != existing.STUNAddr && (existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 30*time.Second)
 	if stunChanged || directP2PExpired {
 		if stunChanged {
 			newer.ActiveEndpoint = newer.STUNAddr
@@ -210,16 +217,16 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
-	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty, never seen direct, failing UDP probes, or bilateral unconfirmed >15s
-	if newer.Transport != "tcp_tls" && newer.Transport != "tcp_shadowtls" {
-		if existing.Transport == "tcp_tls" || existing.Transport == "tcp_shadowtls" {
+	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty, never seen direct, or bilateral unconfirmed > BilateralDemotionThreshold
+	if !newerIsTCP {
+		if isTCP {
 			// If existing peer had an active direct TCP/ShadowTLS stream, preserve it across beacon updates!
-			if newer.Transport == "" {
+			if newer.Transport == "" || newer.Transport == "relay_mqtt" {
 				newer.Transport = existing.Transport
 				newer.DirectTCP = true
 				newer.DirectP2P = true
 			}
-		} else if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() || (existing.ProbeCount >= 2 && time.Since(newer.LastDirectSeen) > 10*time.Second) || (!newer.LastBilateralSeen.IsZero() && time.Since(newer.LastBilateralSeen) > 15*time.Second) {
+		} else if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() || (existing.ProbeCount >= 4 && time.Since(newer.LastDirectSeen) > 30*time.Second) || (!newer.LastBilateralSeen.IsZero() && time.Since(newer.LastBilateralSeen) > constants.BilateralDemotionThreshold) {
 			newer.DirectP2P = false
 			newer.Transport = "relay_mqtt"
 		}
@@ -236,18 +243,18 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	}
 
 	// Prune stale/dead endpoints if peer is persistently failing probes and unconfirmed
-	if existing.ProbeCount >= 4 && !newer.DirectP2P && newer.STUNAddr != "" {
+	if existing.ProbeCount >= 6 && !newer.DirectP2P && newer.STUNAddr != "" {
 		newer.ActiveEndpoint = newer.STUNAddr
 	}
 
-	if (newer.Latency == 0 || newer.PingMs == 0) && (existing.Latency > 0 || existing.PingMs > 0) && (existing.DirectP2P || existing.DirectTCP || existing.Transport == "tcp_tls" || existing.Transport == "tcp_shadowtls") && (newer.DirectP2P || newer.DirectTCP || newer.Transport == "tcp_tls" || newer.Transport == "tcp_shadowtls") {
+	if (newer.Latency == 0 || newer.PingMs == 0) && (existing.Latency > 0 || existing.PingMs > 0) && (existing.DirectP2P || isTCP) && (newer.DirectP2P || newerIsTCP) {
 		if newer.Latency == 0 && existing.Latency > 0 {
 			newer.Latency = existing.Latency
 		}
 		if newer.PingMs == 0 && existing.PingMs > 0 {
 			newer.PingMs = existing.PingMs
 		}
-	} else if !newer.DirectP2P && !newer.DirectTCP && newer.Transport != "tcp_tls" && newer.Transport != "tcp_shadowtls" {
+	} else if !newer.DirectP2P && !newerIsTCP {
 		newer.Latency = 0
 		newer.PingMs = 0
 	}

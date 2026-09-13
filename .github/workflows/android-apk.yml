@@ -122,7 +122,25 @@ jobs:
           ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" --stacktrace --no-daemon
           
           mkdir -p ../release_apk
-          find app/build/outputs/apk/ -name "*.apk" -exec cp {} ../release_apk/NatBypass-${TAG}.apk \;
+          find app/build/outputs/apk/ -name "*.apk" | while read -r f; do
+            fname=$(basename "$f")
+            if [[ "$fname" == *"arm64-v8a"* ]]; then
+              cp "$f" "../release_apk/NatBypass-${TAG}-arm64-v8a.apk"
+            elif [[ "$fname" == *"armeabi-v7a"* ]]; then
+              cp "$f" "../release_apk/NatBypass-${TAG}-armeabi-v7a.apk"
+            elif [[ "$fname" == *"x86_64"* ]]; then
+              cp "$f" "../release_apk/NatBypass-${TAG}-x86_64.apk"
+            elif [[ "$fname" == *"universal"* ]]; then
+              cp "$f" "../release_apk/NatBypass-${TAG}-universal.apk"
+              cp "$f" "../release_apk/NatBypass-${TAG}.apk"
+            else
+              cp "$f" "../release_apk/NatBypass-${TAG}.apk"
+            fi
+          done
+          if [ ! -f "../release_apk/NatBypass-${TAG}.apk" ]; then
+            first_apk=$(ls ../release_apk/*.apk 2>/dev/null | head -n 1)
+            [ -n "$first_apk" ] && cp "$first_apk" "../release_apk/NatBypass-${TAG}.apk"
+          fi
           ls -lh ../release_apk/
 
       - name: Upload APK Artifact

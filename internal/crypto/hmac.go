@@ -12,7 +12,9 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/hkdf"
@@ -91,4 +93,45 @@ func VerifyFrame(frame []byte, signKey [32]byte, maxSkew time.Duration) ([]byte,
 	}
 
 	return payload, ts, nil
+}
+
+// DeriveBaseTopic derives a cryptographic, opaque MQTT topic from a networkKey and an optional topic name.
+// If userTopic is empty or the default "natbypass/mesh/...", it generates a privacy-preserving "s_<hex>" topic
+// without leaking the "natbypass" product name or readable strings to MQTT brokers or DPI/TSPU filters.
+func DeriveBaseTopic(networkKey, userTopic string) string {
+	clean := strings.TrimSpace(userTopic)
+	if clean != "" && !strings.HasPrefix(clean, "natbypass/mesh/") && clean != "natbypass/mesh" && clean != "default" {
+		// User specified their own explicit custom topic, respect it
+		return clean
+	}
+	if networkKey == "" {
+		networkKey = "natbypass-fallback-secret-mesh-key"
+	}
+	// Deterministically derive opaque topic: s_<16-hex-chars>
+	mac := hmac.New(sha256.New, []byte(networkKey))
+	mac.Write([]byte("NatBypass-MeshTopic-V2:" + clean))
+	sum := mac.Sum(nil)
+	return fmt.Sprintf("s_%x", sum[:8])
+}
+
+// DerivePeerTopic derives an obfuscated per-peer subtopic for retained discovery beacons.
+func DerivePeerTopic(baseTopic, networkKey, deviceID string) string {
+	if networkKey == "" {
+		networkKey = "natbypass-fallback-secret-mesh-key"
+	}
+	mac := hmac.New(sha256.New, []byte(networkKey))
+	mac.Write([]byte("NatBypass-PeerTopic-V2:" + deviceID))
+	sum := mac.Sum(nil)
+	return fmt.Sprintf("%s/p/%x", baseTopic, sum[:6])
+}
+
+// DeriveTunnelTopic derives an obfuscated point-to-point subtopic without exposing plaintext DeviceIDs.
+func DeriveTunnelTopic(baseTopic, networkKey, targetDevID string) string {
+	if networkKey == "" {
+		networkKey = "natbypass-fallback-secret-mesh-key"
+	}
+	mac := hmac.New(sha256.New, []byte(networkKey))
+	mac.Write([]byte("NatBypass-TunnelTopic-V2:" + targetDevID))
+	sum := mac.Sum(nil)
+	return fmt.Sprintf("%s/t/%x", baseTopic, sum[:6])
 }

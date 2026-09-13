@@ -211,6 +211,7 @@ fun MainScreen(
                 ConnectSection(
                     state = uiState.connectionState,
                     avgRttMs = uiState.avgRttMs,
+                    tunActive = uiState.tunActive,
                     onToggle = onToggleVpn,
                 )
             }
@@ -327,6 +328,7 @@ fun MainScreen(
 private fun ConnectSection(
     state: ConnectionState,
     avgRttMs: Long,
+    tunActive: Boolean,
     onToggle: () -> Unit,
 ) {
     Column(
@@ -356,12 +358,31 @@ private fun ConnectSection(
 
         Spacer(Modifier.height(2.dp))
 
-        // RTT line
-        Text(
-            text = if (avgRttMs > 0) "RTT: $avgRttMs мс" else "RTT: —",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            // RTT line
+            Text(
+                text = if (avgRttMs > 0) "RTT: $avgRttMs мс" else "RTT: —",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state != ConnectionState.DISCONNECTED) {
+                Text(
+                    text = " • ",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val tunColor = if (tunActive) MaterialTheme.natColors.success else MaterialTheme.natColors.error
+                Text(
+                    text = if (tunActive) "TUN: nb0 OK" else "TUN: Сбой",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    color = tunColor,
+                )
+            }
+        }
     }
 }
 

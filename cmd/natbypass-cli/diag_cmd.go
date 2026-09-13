@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/peer"
@@ -54,6 +55,58 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 
 	report := diagnostic.RunFullDiagnostics()
 
+	// Resolve local daemon port
+	daemonPort := constants.DefaultWebUIPort
+	if cfg, _ := config.Load(cfgPath); cfg != nil && cfg.WebUI.Port > 0 {
+		daemonPort = cfg.WebUI.Port
+	}
+
+	// 0. Query running daemon first for accurate live state
+	daemonRunning := false
+	var daemonData struct {
+		Version        string            `json:"version"`
+		DeviceID       string            `json:"device_id"`
+		DeviceName     string            `json:"device_name"`
+		VirtualIP      string            `json:"virtual_ip"`
+		PublicIP       string            `json:"public_ip"`
+		STUNAddr       string            `json:"stun_addr"`
+		Uptime         string            `json:"uptime"`
+		CurrentChannel string            `json:"current_channel"`
+		PeersCount     int               `json:"peers_count"`
+		ActiveProfile  string            `json:"active_profile"`
+		MQTTTopic      string            `json:"mqtt_topic"`
+		InterfaceName  string            `json:"interface_name"`
+		TUNStatus      *tunnel.TUNStatus `json:"tun_status"`
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/status", daemonPort))
+	if err == nil && resp != nil && resp.StatusCode == 200 {
+		var rawResp struct {
+			Ok   bool `json:"ok"`
+			Data struct {
+				Version        string            `json:"version"`
+				DeviceID       string            `json:"device_id"`
+				DeviceName     string            `json:"device_name"`
+				VirtualIP      string            `json:"virtual_ip"`
+				PublicIP       string            `json:"public_ip"`
+				STUNAddr       string            `json:"stun_addr"`
+				Uptime         string            `json:"uptime"`
+				CurrentChannel string            `json:"current_channel"`
+				PeersCount     int               `json:"peers_count"`
+				ActiveProfile  string            `json:"active_profile"`
+				MQTTTopic      string            `json:"mqtt_topic"`
+				InterfaceName  string            `json:"interface_name"`
+				TUNStatus      *tunnel.TUNStatus `json:"tun_status"`
+			} `json:"data"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&rawResp) == nil && rawResp.Ok {
+			daemonRunning = true
+			daemonData = rawResp.Data
+		}
+		_ = resp.Body.Close()
+	}
+
 	// 1. System & Admin
 	fmt.Printf("\n\033[1;34m▶ 1. СИСТЕМНОЕ ОКРУЖЕНИЕ И ПЛАТФОРМА\033[0m\n")
 	fmt.Printf("  [i] Хост: %s | ОС: %s | Архитектура: %s\n", report.Hostname, report.OS, report.Arch)
@@ -65,6 +118,9 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 
 	// 1b. TUN Adapter & Driver Status
 	tunSt := tunnel.GetTUNStatus()
+	if daemonRunning && daemonData.TUNStatus != nil {
+		tunSt = *daemonData.TUNStatus
+	}
 	fmt.Printf("\n\033[1;34m▶ 1b. СТАТУС TUN АДАПТЕРА И СЕТЕВОГО ДРАЙВЕРА\033[0m\n")
 	if tunSt.Active {
 		fmt.Printf("  \033[1;32m[✓]\033[0m Адаптер '%s' активен (IP: %s, MTU: %d)\n", tunSt.DeviceName, tunSt.VirtualIP, tunSt.MTU)
@@ -122,29 +178,23 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 	}
 
 	// 3. Local Daemon Query
-	fmt.Printf("\n\033[1;34m▶ 3. ЛОКАЛЬНЫЙ ДЕМОН NATBYPASS (HTTP 127.0.0.1:8080)\033[0m\n")
-	daemonRunning := false
+	fmt.Printf("\n\033[1;34m▶ 3. ЛОКАЛЬНЫЙ ДЕМОН NATBYPASS (HTTP 127.0.0.1:%d)\033[0m\n", daemonPort)
 	localVIP := ""
 	var peers []*peer.Peer
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://127.0.0.1:8080/api/status")
-	if err == nil && resp.StatusCode == 200 {
-		daemonRunning = true
-		var st struct {
-			DeviceID  string `json:"device_id"`
-			VirtualIP string `json:"virtual_ip"`
-			WGPort    int    `json:"wg_port"`
-			PublicIP  string `json:"public_ip"`
-			DirectP2P int    `json:"direct_p2p_count"`
-			Peers     int    `json:"peer_count"`
+	if daemonRunning {
+		localVIP = daemonData.VirtualIP
+		profInfo := ""
+		if daemonData.ActiveProfile != "" {
+			profInfo = fmt.Sprintf(" | Профиль=%s", daemonData.ActiveProfile)
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&st)
-		_ = resp.Body.Close()
-		localVIP = st.VirtualIP
-		fmt.Printf("  \033[1;32m[✓]\033[0m Демон активен: DeviceID=%s | VirtualIP=%s | Port=%d | Peers=%d (Direct=%d)\n",
-			st.DeviceID, st.VirtualIP, st.WGPort, st.Peers, st.DirectP2P)
+		chanInfo := ""
+		if daemonData.CurrentChannel != "" {
+			chanInfo = fmt.Sprintf(" | Канал=%s", daemonData.CurrentChannel)
+		}
+		fmt.Printf("  \033[1;32m[✓]\033[0m Демон активен: DeviceID=%s | VirtualIP=%s | Peers=%d%s%s\n",
+			daemonData.DeviceID, daemonData.VirtualIP, daemonData.PeersCount, profInfo, chanInfo)
 
-		pResp, pErr := client.Get("http://127.0.0.1:8080/api/peers")
+		pResp, pErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/peers", daemonPort))
 		if pErr == nil && pResp.StatusCode == 200 {
 			var pData struct {
 				Data []*peer.Peer `json:"data"`
@@ -154,7 +204,7 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 			peers = pData.Data
 		}
 	} else {
-		fmt.Println("  \033[1;33m[!]\033[0m Локальный API http://127.0.0.1:8080 не отвечает (демон не запущен)")
+		fmt.Printf("  \033[1;33m[!]\033[0m Локальный API http://127.0.0.1:%d не отвечает (демон не запущен)\n", daemonPort)
 	}
 
 	// 4. Peers Table

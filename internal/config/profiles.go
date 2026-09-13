@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/natbypass/natbypass/internal/crypto"
 )
 
 // Profile — изолированный профиль mesh-сети с собственным топиком, ключами и настройками каналов
@@ -181,14 +183,15 @@ func GenerateDefaultProfile(name string) Profile {
 	if name == "" {
 		name = "Основная сеть"
 	}
-	topicID := GenerateRandomHex(8)
+	netKey := GenerateRandomHex(16)
+	topic := crypto.DeriveBaseTopic(netKey, "")
 	jc, jmin, jmax, s1, s2, h1, h2, h3, h4, hpKey := GenerateRandomAWGProfileParams()
 	return Profile{
 		ID:                  "p-" + GenerateRandomHex(4),
 		Name:                name,
-		NetworkKey:          GenerateRandomHex(16),
+		NetworkKey:          netKey,
 		MQTTBroker:          "ssl://broker.emqx.io:8883",
-		MQTTTopic:           "natbypass/mesh/" + topicID,
+		MQTTTopic:           topic,
 		AWGPreset:           "custom",
 		WGPort:              GenerateRandomWGPort(),
 		Jc:                  jc,
@@ -338,7 +341,7 @@ func (c *Config) SyncSignalingWithProfile(p *Profile) {
 			mqttTopic = c.Signaling.MQTTTopic
 			p.MQTTTopic = mqttTopic
 		} else {
-			mqttTopic = "natbypass/mesh/" + GenerateRandomHex(8)
+			mqttTopic = crypto.DeriveBaseTopic(p.NetworkKey, "")
 			p.MQTTTopic = mqttTopic
 		}
 	}
@@ -616,9 +619,10 @@ func ImportProfileURI(raw string) (*Profile, error) {
 			if name == "" {
 				name = "Импортированная сеть"
 			}
+			key := q.Get("key")
 			topic := q.Get("topic")
 			if topic == "" {
-				topic = "natbypass/mesh/" + GenerateRandomHex(8)
+				topic = crypto.DeriveBaseTopic(key, "")
 			}
 			broker := q.Get("broker")
 			if broker == "" {
@@ -778,7 +782,13 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 	if activeProf != nil {
 		if activeProf.VirtualIP != "" {
 			clean := strings.TrimSpace(strings.Split(activeProf.VirtualIP, "/")[0])
-			if !strings.Contains(activeProf.VirtualIP, "/") && !strings.HasSuffix(clean, ".0") && !strings.HasSuffix(clean, ".1") && clean != "" {
+			if parsed := net.ParseIP(clean); parsed != nil && parsed.To4() != nil {
+				// Если адрес заканчивается на .0 (адрес подсети), генерируем IP для хоста
+				if strings.HasSuffix(clean, ".0") {
+					prefix := ExtractSubnetPrefix(activeProf.VirtualIP)
+					return GenerateSubnetIP(prefix, deviceID)
+				}
+				// Пользователь явно указал свой IP (включая шлюз .1 или IP из CIDR типа 10.50.0.5/24)
 				return clean
 			}
 			prefix := ExtractSubnetPrefix(activeProf.VirtualIP)
@@ -793,7 +803,11 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 	// 2. Прямой Network.Address в конфигурации (если в профиле не задана своя подсеть)
 	if cfg.Network.Address != "" {
 		clean := strings.TrimSpace(strings.Split(cfg.Network.Address, "/")[0])
-		if !strings.Contains(cfg.Network.Address, "/") && !strings.HasSuffix(clean, ".0") && !strings.HasSuffix(clean, ".1") && clean != "" {
+		if parsed := net.ParseIP(clean); parsed != nil && parsed.To4() != nil {
+			if strings.HasSuffix(clean, ".0") {
+				prefix := ExtractSubnetPrefix(cfg.Network.Address)
+				return GenerateSubnetIP(prefix, deviceID)
+			}
 			return clean
 		}
 		prefix := ExtractSubnetPrefix(cfg.Network.Address)

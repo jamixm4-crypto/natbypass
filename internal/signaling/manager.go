@@ -77,7 +77,7 @@ func (m *FallbackManager) Send(ctx context.Context, payload *Payload) error {
 	// For signaling packets (discovery beacons, remote diag, punch coordination),
 	// broadcast in parallel to all configured channels so peers on different brokers
 	// (HiveMQ, Mosquitto, etc.) all receive beacons.
-	isBroadcast := (payload.RemoteDiag != nil || payload.Coordination != nil || payload.SymPunch != nil || payload.Rendezvous != nil || payload.TCPConnect != nil || payload.VirtualIP != "" || payload.Offline || payload.Leave)
+	isBroadcast := (payload.RemoteDiag != nil || payload.Coordination != nil || payload.SymPunch != nil || payload.Rendezvous != nil || payload.TCPConnect != nil || payload.VirtualIP != "" || payload.Offline || payload.Leave || len(payload.Encrypted) > 0 || payload.IsBootBurst)
 	if isBroadcast && n > 1 {
 		m.mu.RLock()
 		chList := make([]SignalingChannel, len(m.channels))

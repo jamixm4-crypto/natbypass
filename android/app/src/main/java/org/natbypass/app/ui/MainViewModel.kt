@@ -59,6 +59,9 @@ data class ProfileUiModel(
 data class MainUiState(
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val virtualIp: String = "",
+    val tunActive: Boolean = false,
+    val tunStatus: String = "INACTIVE",
+    val tunDevice: String = "nb0",
     val publicIp: String = "",
     val stunAddr: String = "",
     val activeChannel: String = "",
@@ -148,11 +151,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         var activeChannel = ""
         var natType = ""
         var isEngineRunning = false
+        var tunActive = false
+        var tunStatus = "INACTIVE"
+        var tunDevice = "nb0"
         var txBytes = 0L
         var rxBytes = 0L
         try {
             val obj = JSONObject(statusJson)
             isEngineRunning = obj.optBoolean("running", false)
+            tunActive = obj.optBoolean("tun_active", isEngineRunning)
+            tunStatus = obj.optString("tun_status", if (isEngineRunning) "ACTIVE" else "INACTIVE")
+            tunDevice = obj.optString("tun_device", "nb0")
             publicIp   = obj.optString("public_ip", "")
             stunAddr   = obj.optString("stun_addr", "")
             virtualIp  = obj.optString("virtual_ip", virtualIp)
@@ -343,6 +352,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 connectionState   = connState,
                 virtualIp         = virtualIp,
+                tunActive         = tunActive,
+                tunStatus         = tunStatus,
+                tunDevice         = tunDevice,
                 publicIp          = publicIp,
                 stunAddr          = stunAddr,
                 activeChannel     = activeChannel,

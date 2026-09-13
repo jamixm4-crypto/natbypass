@@ -193,13 +193,16 @@ jobs:
             }
           }
 
-          Write-Host "Checking for old beta tags on remote (keeping latest 3)..."
-          $tags = git tag -l "v*-beta*" --sort=-v:refname
-          if ($tags.Count -gt 3) {
-            $staleTags = $tags | Select-Object -Skip 3
-            foreach ($st in $staleTags) {
-              Write-Host "Pruning old beta tag from remote: $st"
-              git push origin --delete $st 2>$null
-              git tag -d $st 2>$null
+          Write-Host "Checking for old beta releases and remote tags via gh CLI (keeping latest 3)..."
+          $relJson = gh release list --limit 100 --json tagName,isPrerelease
+          if ($relJson) {
+            $releases = $relJson | ConvertFrom-Json
+            $betaReleases = @($releases | Where-Object { $_.isPrerelease -or ($_.tagName -like "*beta*") })
+            if ($betaReleases.Count -gt 3) {
+              $staleReleases = $betaReleases | Select-Object -Skip 3
+              foreach ($rel in $staleReleases) {
+                Write-Host "Pruning old beta release and remote tag: $($rel.tagName)"
+                gh release delete $($rel.tagName) --cleanup-tag --yes 2>$null
+              }
             }
           }

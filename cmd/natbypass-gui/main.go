@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta26"
+	Version = "1.9.226-beta27"
 	Commit  = "release"
 )
 
@@ -6985,7 +6985,11 @@ func updateData() {
 		tunSt := tunnel.GetTUNStatus()
 		if hLblTunStatus != 0 {
 			if tunSt.Active {
-				setControlText(hLblTunStatus, fmt.Sprintf("🟢 TUN: %s (MTU %d) — OK", tunSt.DeviceName, tunSt.MTU))
+				if tunSt.VirtualIP != "" {
+					setControlText(hLblTunStatus, fmt.Sprintf("🟢 TUN: %s (%s, MTU %d) — OK", tunSt.DeviceName, tunSt.VirtualIP, tunSt.MTU))
+				} else {
+					setControlText(hLblTunStatus, fmt.Sprintf("🟢 TUN: %s (MTU %d) — OK", tunSt.DeviceName, tunSt.MTU))
+				}
 			} else if !tunSt.IsAdmin {
 				setControlText(hLblTunStatus, "🔴 TUN: ТРЕБУЮТСЯ ПРАВА АДМИНИСТРАТОРА!")
 			} else if tunSt.ErrorCause != "" {

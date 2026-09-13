@@ -76,6 +76,7 @@ func (s *SymmetricNATSession) Run(ctx context.Context) string {
 	defer cancel()
 
 	isLocalSymmetric := s.puncher != nil && s.puncher.GetNATType().IsSymmetric()
+	canHop := isLocalSymmetric && (s.puncher == nil || !s.puncher.HasActiveDirectTargets())
 
 	for hop := 0; hop < SymmetricNATMaxHops; hop++ {
 		if w := s.getWinner(); w != "" {
@@ -90,8 +91,8 @@ func (s *SymmetricNATSession) Run(ctx context.Context) string {
 		}
 
 		var myPort int
-		if isLocalSymmetric {
-			// Step 1: HopPort -- only for local Symmetric NAT (create fresh external mapping)
+		if canHop {
+			// Step 1: HopPort -- only for local Symmetric NAT when NO other peers are actively connected
 			_, err := s.puncher.HopPort()
 			if err != nil {
 				continue
@@ -105,8 +106,8 @@ func (s *SymmetricNATSession) Run(ctx context.Context) string {
 				myPort = s.basePort
 			}
 		} else {
-			// Local node is Full Cone / Cone NAT: KEEP stable socket and port!
-			// Calling HopPort() would destroy our established external mapping and break incoming probes.
+			// Local node is Full Cone / Cone NAT OR has existing active P2P tunnels: KEEP stable socket and port!
+			// Calling HopPort() would destroy existing established external mappings and break active peers.
 			myPort = s.puncher.GetMappedPort()
 			if myPort <= 0 {
 				myPort = s.puncher.LocalPort()

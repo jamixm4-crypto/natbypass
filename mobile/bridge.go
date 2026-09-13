@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta26"
+const Version = "1.9.226-beta27"
 
 
 
@@ -2233,6 +2233,12 @@ func GetFullTelemetryJSON() string {
 		}
 	}
 
+	tunActive := globalTunFile != nil
+	tunStatus := "ACTIVE"
+	if !tunActive {
+		tunStatus = "INACTIVE"
+	}
+
 	res := map[string]interface{}{
 		"running":         engineRunning,
 		"version":         Version,
@@ -2241,6 +2247,9 @@ func GetFullTelemetryJSON() string {
 		"public_ip":       globalPublicIP,
 		"stun_addr":       globalSTUN,
 		"virtual_ip":      atomicGetVIP(),
+		"tun_active":      tunActive,
+		"tun_status":      tunStatus,
+		"tun_device":      "nb0",
 		"peers_count":     peersCount,
 		"direct_p2p":      directCount > 0,
 		"direct_count":    directCount,

@@ -12,8 +12,8 @@ android {
         minSdk = 24
         targetSdk = 34
 
-        val vName = (project.findProperty("versionName") as? String)?.trim() ?: "1.9.226-beta26"
-        val vCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 2126026
+        val vName = (project.findProperty("versionName") as? String)?.trim() ?: "1.9.226-beta27"
+        val vCode = (project.findProperty("versionCode") as? String)?.toIntOrNull() ?: 2126027
         versionCode = vCode
         versionName = vName
 
@@ -40,6 +40,15 @@ android {
         debug {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
         }
     }
 

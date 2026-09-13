@@ -273,7 +273,7 @@ func EnableHostIPForwarding() error {
 }
 
 // DisableHostIPForwarding removes iptables NAT masquerading rule.
-func DisableHostIPForwarding() error {
+func DisableHostIPForwarding(subnets ...string) error {
 	natWatchdogMu.Lock()
 	if natWatchdogCancel != nil {
 		natWatchdogCancel()
@@ -281,9 +281,17 @@ func DisableHostIPForwarding() error {
 	}
 	natWatchdogMu.Unlock()
 
+	targetSubnet := "100.64.200.0/24"
+	if len(subnets) > 0 && subnets[0] != "" {
+		targetSubnet = subnets[0]
+	}
+
 	iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
 	for _, ipt := range iptablesPaths {
-		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
+		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", targetSubnet, "-j", "MASQUERADE")
+		if targetSubnet != "100.64.200.0/24" {
+			_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
+		}
 	}
 	return nil
 }

@@ -240,6 +240,9 @@ type Payload struct {
 
 	// TCPConnect: on-demand direct TCP (ShadowTLS) connection coordination
 	TCPConnect *TCPConnectSignal `json:"tcp_connect,omitempty"`
+
+	// IsBootBurst: indicates rapid discovery burst upon node startup/restart
+	IsBootBurst bool `json:"is_boot_burst,omitempty"`
 }
 
 // TCPConnectSignal coordinates on-demand direct TCP (ShadowTLS) connection / simultaneous open between peers.

@@ -944,7 +944,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta26"
+		ver = "1.9.226-beta27"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1351,30 +1351,44 @@ func (s *Server) handleWgConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var wgPeers []wireguard.WGPeer
-	for i, p := range s.registry.List() {
-		if p.WGPubKey != "" {
-			wgPeers = append(wgPeers, wireguard.WGPeer{
-				PublicKey:  p.WGPubKey,
-				Endpoint:   fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort),
-				AllowedIPs: []string{fmt.Sprintf("100.64.200.%d/32", i+2)},
-			})
+	meshPrefix := "100.64.200"
+	listenPort := wireguard.GenerateRandomWGPort()
+	if curCfg, _ := config.Load(s.configPath); curCfg != nil {
+		if prof := curCfg.EnsureActiveProfile(); prof != nil {
+			if prof.WGPort > 0 {
+				listenPort = prof.WGPort
+			}
+			if prof.Subnet != "" {
+				meshPrefix = config.ExtractSubnetPrefix(prof.Subnet)
+			} else if prof.VirtualIP != "" {
+				meshPrefix = config.ExtractSubnetPrefix(prof.VirtualIP)
+			}
+		} else if curCfg.WireGuard.ListenPort > 0 {
+			listenPort = curCfg.WireGuard.ListenPort
 		}
 	}
 
-	listenPort := wireguard.GenerateRandomWGPort()
-	if curCfg, _ := config.Load(s.configPath); curCfg != nil {
-		if prof := curCfg.EnsureActiveProfile(); prof != nil && prof.WGPort > 0 {
-			listenPort = prof.WGPort
-		} else if curCfg.WireGuard.ListenPort > 0 {
-			listenPort = curCfg.WireGuard.ListenPort
+	var wgPeers []wireguard.WGPeer
+	for i, p := range s.registry.List() {
+		if p.WGPubKey != "" {
+			peerAllowed := p.VirtualIP
+			if peerAllowed == "" {
+				peerAllowed = fmt.Sprintf("%s.%d/32", meshPrefix, i+2)
+			} else if !strings.Contains(peerAllowed, "/") {
+				peerAllowed += "/32"
+			}
+			wgPeers = append(wgPeers, wireguard.WGPeer{
+				PublicKey:  p.WGPubKey,
+				Endpoint:   fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort),
+				AllowedIPs: []string{peerAllowed},
+			})
 		}
 	}
 
 	cfg := &wireguard.WGConfig{
 		InterfaceName: "wg0",
 		PrivateKey:    kp.PrivateKey,
-		Address:       "100.64.200.1/24",
+		Address:       fmt.Sprintf("%s.1/24", meshPrefix),
 		ListenPort:    listenPort,
 		MTU:           1420,
 		Peers:         wgPeers,
@@ -1886,7 +1900,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta26"
+		ver = "1.9.226-beta27"
 	}
 
 	vip := s.state.VirtualIP
