@@ -118,8 +118,15 @@ jobs:
           fi
           VERSION_CODE=$((V_MAJOR * 1000000 + V_MINOR * 100000 + V_PATCH * 1000 + V_BUILD))
 
-          echo "Building Android APK for version $VERSION_NAME (versionCode: $VERSION_CODE)..."
-          ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" --stacktrace --no-daemon
+          set +e
+          ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" --stacktrace --no-daemon 2>&1 | tee /tmp/gradle_err.log
+          gradle_status=${PIPESTATUS[0]}
+          set -e
+          if [ $gradle_status -ne 0 ]; then
+            err_msg=$(tail -n 25 /tmp/gradle_err.log | tr '\r' ' ' | tr '\n' ' ')
+            echo "::error title=GradleBuildFailure::$err_msg"
+            exit $gradle_status
+          fi
           
           mkdir -p ../release_apk
           for f in $(find app/build/outputs/apk/ -name "*.apk"); do
