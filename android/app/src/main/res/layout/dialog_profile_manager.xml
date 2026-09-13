@@ -85,7 +85,7 @@
             android:layout_marginTop="4dp"
             android:ellipsize="middle"
             android:maxLines="1"
-            android:text="Топик: natbypass/mesh/..."
+            android:text="Топик: v2/..."
             android:textColor="@color/text_muted"
             android:textSize="11sp" />
 

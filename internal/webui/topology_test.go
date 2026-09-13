@@ -179,7 +179,7 @@ func TestHandlePeers_DuplicateDefaultVIPNotSquashed(t *testing.T) {
 
 	srv := &Server{
 		registry: reg,
-		version:  "1.9.226-beta27",
+		version:  "1.9.226-beta28",
 		state: &AppState{
 			DeviceID: "my-self-node",
 		},

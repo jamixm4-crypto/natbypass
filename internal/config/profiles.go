@@ -469,7 +469,11 @@ func (c *Config) AddOrUpdateProfile(p Profile) *Profile {
 		p.ID = "p-" + GenerateRandomHex(4)
 	}
 	if p.MQTTTopic == "" {
-		p.MQTTTopic = "natbypass/mesh/" + GenerateRandomHex(8)
+		if p.NetworkKey != "" {
+			p.MQTTTopic = crypto.DeriveBaseTopic(p.NetworkKey, "")
+		} else {
+			p.MQTTTopic = "v2/" + GenerateRandomHex(12)
+		}
 	}
 	if p.MQTTBroker == "" {
 		p.MQTTBroker = "tcp://broker.emqx.io:1883"

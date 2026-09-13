@@ -7,7 +7,7 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.9.226-beta27"
+    DEFAULT_TAG="v1.9.226-beta28"
 
     # Try to resolve latest tag from GitHub API
     LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
@@ -307,7 +307,7 @@ https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
     SHORT_ID=$(echo "${RAND_HEX}" | cut -c1-6)
     RAND_OCTET=$(( (0x$(echo "${RAND_HEX}" | cut -c7-8) % 240) + 2 ))
     DEVICE_NAME="${HOST_NAME}-${SHORT_ID}"
-    RAND_TOPIC="natbypass/mesh/${RAND_HEX}"
+    RAND_TOPIC="v2/${RAND_HEX}"
     CONFIG_IS_NEW=0
 
     # 6. Generate Clean config.yaml if not exists

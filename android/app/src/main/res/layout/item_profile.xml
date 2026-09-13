@@ -59,7 +59,7 @@
         android:ellipsize="middle"
         android:maxLines="1"
         android:singleLine="true"
-        android:text="Топик: natbypass/mesh/..."
+        android:text="Топик: v2/..."
         android:textColor="@color/text_muted"
         android:textSize="10sp" />
 

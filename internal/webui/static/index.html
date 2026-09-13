@@ -1104,6 +1104,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <span id="topVipLabel" class="mono" style="font-weight:700; color:#ffffff; font-size:0.8rem;">10.200.0.1</span>
         </div>
 
+        <!-- TUN Adapter Status Badge -->
+        <div class="glow-pill" id="topTunBadge" title="Статус сетевого адаптера TUN" style="background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); color: #4ade80; padding: 4px 10px; border-radius: 14px; display: flex; align-items: center; gap: 5px;">
+          <span id="topTunDot" style="width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px #4ade80; display: inline-block;"></span>
+          <span style="font-size:0.75rem; font-weight:700; opacity:0.85;">TUN:</span>
+          <span id="topTunStatusLabel" class="mono" style="font-weight:700; color:#4ade80; font-size:0.8rem;">nb0 OK</span>
+        </div>
+
         <div class="glow-pill" onclick="openRenameModal()" title="Текущий внешний сокет NAT Hole Punching" style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); padding: 4px 10px; border-radius: 14px; font-size:0.76rem;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6Z"></path></svg>
           <span id="topStunLabel" style="font-size:0.76rem; max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">STUN: Определение...</span>
@@ -1238,7 +1245,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               <div class="metric-label">Средняя задержка Direct P2P</div>
             </div>
             <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-              <span class="badge badge-success" id="statAwgBadge">🛡️ AWG 3.1 Активен</span>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <span class="badge badge-success" id="statTunBadge">🔌 TUN: OK</span>
+                <span class="badge badge-success" id="statAwgBadge">🛡️ AWG 3.1 Активен</span>
+              </div>
               <span style="font-size:0.75rem; color:var(--text-dim);" id="statUptime">Uptime: 0m</span>
             </div>
           </div>
@@ -2066,7 +2076,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           </div>
         </div>
         <div style="font-size:0.78rem; color:var(--text-muted); font-family:monospace; line-height:1.4;">
-          <div>Топик: <span id="activeProfileTopic" style="color:#e2e8f0;">natbypass/mesh/...</span></div>
+          <div>Топик: <span id="activeProfileTopic" style="color:#e2e8f0;">v2/...</span></div>
           <div>Брокер: <span id="activeProfileBroker" style="color:#e2e8f0;">tcp://broker.emqx.io:1883</span></div>
         </div>
       </div>
@@ -2165,7 +2175,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
       <div class="form-group" style="margin-bottom:12px;">
         <label class="form-label">MQTT Топик (секрет сети):</label>
-        <input type="text" id="editProfTopic" class="form-input mono" placeholder="natbypass/mesh/...">
+        <input type="text" id="editProfTopic" class="form-input mono" placeholder="v2/...">
       </div>
       <div class="form-group" style="margin-bottom:14px;">
         <label class="form-label">MQTT Брокер:</label>
@@ -2351,9 +2361,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       let immediatePayload = '';
       if (targetProf) {
-        immediatePayload = `natbypass://profile?id=${encodeURIComponent(targetProf.id)}&name=${encodeURIComponent(targetProf.name)}&topic=${encodeURIComponent(targetProf.mqtt_topic || 'natbypass/mesh/default')}&broker=${encodeURIComponent(targetProf.mqtt_broker || 'tcp://broker.emqx.io:1883')}${targetProf.network_key ? '&key=' + encodeURIComponent(targetProf.network_key) : ''}&awg=${encodeURIComponent(targetProf.awg_preset || 'dpi')}`;
+        immediatePayload = `natbypass://profile?id=${encodeURIComponent(targetProf.id)}&name=${encodeURIComponent(targetProf.name)}&topic=${encodeURIComponent(targetProf.mqtt_topic || 'v2/default')}&broker=${encodeURIComponent(targetProf.mqtt_broker || 'tcp://broker.emqx.io:1883')}${targetProf.network_key ? '&key=' + encodeURIComponent(targetProf.network_key) : ''}&awg=${encodeURIComponent(targetProf.awg_preset || 'dpi')}`;
       } else {
-        const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'natbypass/mesh/default';
+        const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'v2/default';
         const cfgBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim() || 'tcp://broker.emqx.io:1883';
         immediatePayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
       }
@@ -2408,13 +2418,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           } catch(e) {}
 
           if (!qrPayload) {
-            let fallbackUri = `natbypass://profile?id=${encodeURIComponent(prof.id)}&name=${encodeURIComponent(prof.name)}&topic=${encodeURIComponent(prof.mqtt_topic || 'natbypass/mesh/default')}&broker=${encodeURIComponent(prof.mqtt_broker || 'tcp://broker.emqx.io:1883')}${prof.network_key ? '&key=' + encodeURIComponent(prof.network_key) : ''}${prof.awg_preset ? '&awg=' + encodeURIComponent(prof.awg_preset) : ''}`;
+            let fallbackUri = `natbypass://profile?id=${encodeURIComponent(prof.id)}&name=${encodeURIComponent(prof.name)}&topic=${encodeURIComponent(prof.mqtt_topic || 'v2/default')}&broker=${encodeURIComponent(prof.mqtt_broker || 'tcp://broker.emqx.io:1883')}${prof.network_key ? '&key=' + encodeURIComponent(prof.network_key) : ''}${prof.awg_preset ? '&awg=' + encodeURIComponent(prof.awg_preset) : ''}`;
             if (prof.h1) fallbackUri += `&h1=${prof.h1}&h2=${prof.h2}&h3=${prof.h3}&h4=${prof.h4}&s1=${prof.s1}&s2=${prof.s2}&jc=${prof.jc}&jmin=${prof.jmin}&jmax=${prof.jmax}`;
             if (prof.subnet) fallbackUri += `&subnet=${encodeURIComponent(prof.subnet)}`;
             qrPayload = fallbackUri;
           }
         } else {
-          const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'natbypass/mesh/default';
+          const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'v2/default';
           const cfgBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim() || 'tcp://broker.emqx.io:1883';
           qrPayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
         }
@@ -2449,9 +2459,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       } else {
         descEl.innerHTML = 'Универсальное приглашение в P2P сеть NatBypass для других компьютеров и телефонов.';
         if (currentActiveProfile) {
-          qrPayload = `natbypass://profile?id=${encodeURIComponent(currentActiveProfile.id)}&name=${encodeURIComponent(currentActiveProfile.name)}&topic=${encodeURIComponent(currentActiveProfile.mqtt_topic || 'natbypass/mesh/default')}&broker=${encodeURIComponent(currentActiveProfile.mqtt_broker || 'tcp://broker.emqx.io:1883')}${currentActiveProfile.network_key ? '&key=' + encodeURIComponent(currentActiveProfile.network_key) : ''}&awg=${encodeURIComponent(currentActiveProfile.awg_preset || 'dpi')}`;
+          qrPayload = `natbypass://profile?id=${encodeURIComponent(currentActiveProfile.id)}&name=${encodeURIComponent(currentActiveProfile.name)}&topic=${encodeURIComponent(currentActiveProfile.mqtt_topic || 'v2/default')}&broker=${encodeURIComponent(currentActiveProfile.mqtt_broker || 'tcp://broker.emqx.io:1883')}${currentActiveProfile.network_key ? '&key=' + encodeURIComponent(currentActiveProfile.network_key) : ''}&awg=${encodeURIComponent(currentActiveProfile.awg_preset || 'dpi')}`;
         } else {
-          const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'natbypass/mesh/default';
+          const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'v2/default';
           const cfgBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim() || 'tcp://broker.emqx.io:1883';
           qrPayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
         }
@@ -3503,25 +3513,72 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             }
           }
 
-          if (d.tun_status) {
-            const txtTun = document.getElementById('txtTunStatus');
-            const errBanner = document.getElementById('tunErrorBanner');
-            if (d.tun_status.active) {
-              if (txtTun) {
-                txtTun.innerHTML = `<span style="color:#34d399;">🟢 ${d.tun_status.device_name || 'nb0'} (${d.tun_status.virtual_ip || 'Активен'})</span>`;
-              }
-              if (errBanner) errBanner.style.display = 'none';
-            } else {
-              if (txtTun) {
-                txtTun.innerHTML = `<span style="color:#ef4444;" title="${d.tun_status.error_cause || 'Ошибка'}">🔴 Сбой интерфейса</span>`;
-              }
-              if (errBanner) {
-                errBanner.style.display = 'block';
-                const cEl = document.getElementById('tunErrorCause');
-                const rEl = document.getElementById('tunErrorRemedy');
-                if (cEl) cEl.innerText = d.tun_status.error_cause || 'Не удалось создать или инициализировать виртуальный сетевой адаптер TUN.';
-                if (rEl) rEl.innerText = '💡 ' + (d.tun_status.error_remedy || 'Запустите приложение с правами Администратора (root).');
-              }
+          const topTunBadge = document.getElementById('topTunBadge');
+          const topTunDot = document.getElementById('topTunDot');
+          const topTunStatusLabel = document.getElementById('topTunStatusLabel');
+          const statTunBadge = document.getElementById('statTunBadge');
+          const txtTun = document.getElementById('txtTunStatus');
+          const errBanner = document.getElementById('tunErrorBanner');
+
+          const tunObj = d.tun_status || (d.tun ? { active: d.tun.active, device_name: d.tun.device_name, virtual_ip: d.tun.virtual_ip } : null);
+          const isTunActive = tunObj ? Boolean(tunObj.active) : Boolean(d.active);
+          const tunDev = (tunObj && tunObj.device_name) ? tunObj.device_name : 'nb0';
+          const tunIP = (tunObj && tunObj.virtual_ip) ? tunObj.virtual_ip : (d.virtual_ip || '');
+          const errCause = (tunObj && tunObj.error_cause) ? tunObj.error_cause : (d.tun_error || '');
+
+          if (isTunActive) {
+            if (topTunBadge) {
+              topTunBadge.style.background = 'rgba(34, 197, 94, 0.12)';
+              topTunBadge.style.borderColor = 'rgba(34, 197, 94, 0.35)';
+              topTunBadge.style.color = '#4ade80';
+              topTunBadge.title = `TUN адаптер ${tunDev} активен (${tunIP || 'L3 Tunnel'})`;
+            }
+            if (topTunDot) {
+              topTunDot.style.background = '#4ade80';
+              topTunDot.style.boxShadow = '0 0 6px #4ade80';
+            }
+            if (topTunStatusLabel) {
+              topTunStatusLabel.style.color = '#4ade80';
+              topTunStatusLabel.innerText = `${tunDev} OK`;
+            }
+            if (statTunBadge) {
+              statTunBadge.className = 'badge badge-success';
+              statTunBadge.innerText = `🔌 TUN: ${tunDev} OK`;
+              statTunBadge.style.display = 'inline-flex';
+            }
+            if (txtTun) {
+              txtTun.innerHTML = `<span style="color:#34d399;">🟢 ${tunDev} (${tunIP || 'Активен'})</span>`;
+            }
+            if (errBanner) errBanner.style.display = 'none';
+          } else {
+            if (topTunBadge) {
+              topTunBadge.style.background = 'rgba(239, 68, 68, 0.15)';
+              topTunBadge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+              topTunBadge.style.color = '#f87171';
+              topTunBadge.title = errCause || 'TUN адаптер не активен или произошел сбой';
+            }
+            if (topTunDot) {
+              topTunDot.style.background = '#ef4444';
+              topTunDot.style.boxShadow = '0 0 6px #ef4444';
+            }
+            if (topTunStatusLabel) {
+              topTunStatusLabel.style.color = '#f87171';
+              topTunStatusLabel.innerText = errCause ? 'СБОЙ' : 'OFF';
+            }
+            if (statTunBadge) {
+              statTunBadge.className = 'badge badge-danger';
+              statTunBadge.innerText = errCause ? '⚠️ TUN: СБОЙ' : '🔌 TUN: OFF';
+              statTunBadge.style.display = 'inline-flex';
+            }
+            if (txtTun) {
+              txtTun.innerHTML = `<span style="color:#ef4444;" title="${escapeHtml(errCause || 'Ошибка')}">🔴 ${errCause ? 'Сбой интерфейса' : 'Отключен'}</span>`;
+            }
+            if (errBanner && errCause) {
+              errBanner.style.display = 'block';
+              const cEl = document.getElementById('tunErrorCause');
+              const rEl = document.getElementById('tunErrorRemedy');
+              if (cEl) cEl.innerText = errCause;
+              if (rEl) rEl.innerText = '💡 ' + ((tunObj && tunObj.error_remedy) || 'Запустите приложение с правами Администратора (root).');
             }
           }
 

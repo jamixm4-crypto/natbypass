@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta27"
+	Version = "1.9.226-beta28"
 	Commit  = "release"
 )
 
@@ -2587,12 +2587,13 @@ func handleProfileCreate() {
 	if cfg == nil {
 		return
 	}
+	profKey := config.GenerateRandomHex(16)
 	newProf := config.Profile{
 		ID:         "p-" + config.GenerateRandomHex(4),
 		Name:       fmt.Sprintf("Сеть #%d", len(cfg.Profiles)+1),
-		NetworkKey: config.GenerateRandomHex(16),
+		NetworkKey: profKey,
 		MQTTBroker: "tcp://broker.emqx.io:1883",
-		MQTTTopic:  "natbypass/mesh/" + config.GenerateRandomHex(8),
+		MQTTTopic:  crypto.DeriveBaseTopic(profKey, ""),
 		AWGPreset:  "awg31_strict",
 		IsActive:   true,
 		CreatedAt:  time.Now(),
@@ -4068,7 +4069,7 @@ func buildModernUI(hInstance uintptr) {
 	hBtnModeTG = createOwnerDrawButton(hInstance, "💬 Только Telegram", cx+660, 72, 180, 32, ID_BTN_MODE_TG, "normal")
 
 	initBroker := "tcp://broker.hivemq.com:1883"
-	initTopic := "natbypass/mesh/default"
+	initTopic := "v2/" + config.GenerateRandomHex(12)
 	initTgToken := ""
 	initTgChat := ""
 	if cfg != nil {
@@ -4078,6 +4079,8 @@ func buildModernUI(hInstance uintptr) {
 			}
 			if act.MQTTTopic != "" {
 				initTopic = act.MQTTTopic
+			} else if act.NetworkKey != "" {
+				initTopic = crypto.DeriveBaseTopic(act.NetworkKey, "")
 			}
 			if act.TGToken != "" {
 				initTgToken = act.TGToken
@@ -4099,7 +4102,7 @@ func buildModernUI(hInstance uintptr) {
 
 	lblMqTp := createLabel(hInstance, "Уникальный топик:", cx, 202, 200, 20, hFontNormal)
 	hEditMqttTp = createEdit(hInstance, initTopic, cx+210, 198, 630, 28, false, false, hFontNormal)
-	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: natbypass/mesh/default", cx+210, 228, 630, 18, hFontNormal)
+	lblMqTopicHint := createLabel(hInstance, "🔒 Задайте уникальный секретный топик (ключ вашей сети), например: v2/c4f19b02a8e1", cx+210, 228, 630, 18, hFontNormal)
 
 	lblTgHead := createLabel(hInstance, "💬 Telegram Bot API:", cx, 256, cw, 22, hFontHeader)
 	lblTgToken := createLabel(hInstance, "Токен бота (@BotFather):", cx, 282, 200, 20, hFontNormal)
@@ -4574,14 +4577,22 @@ func startEngineFromConfig(c *config.Config) {
 				p.Transport = "udp_direct"
 				p.LastBilateralSeen = time.Now()
 				p.ConsecutiveDrops = 0
+				p.ProbeCount = 0
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.70 + float64(rtt)*0.30)
 				} else {
 					p.Latency = rtt
 				}
-				if p.ProbeCount == 0 {
-					p.PingMs = p.Latency.Milliseconds()
+				p.PingMs = p.Latency.Milliseconds()
+			} else if rtt == 0 {
+				// rtt == 0: Inbound PING probe received directly from remote peer over UDP
+				p.DirectP2P = true
+				if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" {
+					p.Transport = "udp_direct"
 				}
+				p.LastBilateralSeen = time.Now()
+				p.ConsecutiveDrops = 0
+				p.ProbeCount = 0
 			}
 			var myPubIP string
 			if puncher != nil {
@@ -4607,6 +4618,10 @@ func startEngineFromConfig(c *config.Config) {
 			registry.Upsert(p)
 			if rtt > 0 {
 				msg := fmt.Sprintf("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг до %s (%s): %v! NAT пробит сокет-в-сокет!", remoteDevID, fromAddr, p.Latency.Round(time.Millisecond))
+				addLog(msg)
+				writeDebug(msg)
+			} else {
+				msg := fmt.Sprintf("⚡ [P2P Direct UDP] Входящий UDP-зонд от %s (%s) — прямой P2P сокет активен!", remoteDevID, fromAddr)
 				addLog(msg)
 				writeDebug(msg)
 			}
@@ -4800,9 +4815,12 @@ func startEngineFromConfig(c *config.Config) {
 						targetPeer.Transport = "tcp_tls"
 						targetPeer.LastBilateralSeen = time.Now()
 					} else {
-						// For UDP: an inbound packet only confirms one-way reception (remote -> local).
-						// Strictly DO NOT promote to DirectP2P or switch Transport to udp_direct here!
-						// DirectP2P is ONLY activated upon verified bilateral delivery (RTT > 0 via PONG).
+						// For UDP: verified inbound L3 packet from peer over direct socket.
+						targetPeer.DirectP2P = true
+						if targetPeer.Transport == "" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "mqtt" {
+							targetPeer.Transport = "udp_direct"
+						}
+						targetPeer.LastBilateralSeen = time.Now()
 					}
 					if srcAddr != nil {
 						fromAddrStr := srcAddr.String()
@@ -5155,13 +5173,15 @@ func startEngineFromConfig(c *config.Config) {
 	tgToken := ""
 	tgChat := ""
 	mqBroker := "tcp://broker.hivemq.com:1883"
-	mqTopic := "natbypass/mesh/default"
+	mqTopic := "v2/default"
 	if activeProf != nil {
 		if activeProf.MQTTBroker != "" {
 			mqBroker = activeProf.MQTTBroker
 		}
 		if activeProf.MQTTTopic != "" {
 			mqTopic = activeProf.MQTTTopic
+		} else if activeProf.NetworkKey != "" {
+			mqTopic = crypto.DeriveBaseTopic(activeProf.NetworkKey, "")
 		}
 		if activeProf.TGToken != "" {
 			tgToken = activeProf.TGToken
@@ -5778,7 +5798,11 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 		mqBroker = "tcp://broker.hivemq.com:1883"
 	}
 	if mqTopic == "" {
-		mqTopic = "natbypass/mesh/default"
+		if activeKey != "" {
+			mqTopic = crypto.DeriveBaseTopic(activeKey, "")
+		} else {
+			mqTopic = "v2/default"
+		}
 	}
 
 	useMQTT := true

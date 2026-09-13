@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta27"
+const Version = "1.9.226-beta28"
 
 
 
@@ -409,7 +409,7 @@ func StartEngine(configYAML string, tunFd int) string {
 			}
 			if rtt > 0 {
 				p.DirectP2P = true
-				if p.Transport == "" || p.Transport == "relay_mqtt" {
+				if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" {
 					p.Transport = "udp_direct"
 				}
 				p.LastDirectSeen = time.Now()
@@ -420,6 +420,11 @@ func StartEngine(configYAML string, tunFd int) string {
 					p.Latency = rtt
 				}
 			} else {
+				// rtt == 0: Inbound PING probe received directly from remote peer over UDP
+				p.DirectP2P = true
+				if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" {
+					p.Transport = "udp_direct"
+				}
 				p.LastDirectSeen = time.Now()
 			}
 			if peer.IsValidEndpointForPeer(fromAddr, p, myPubIP) {
@@ -1177,6 +1182,23 @@ func attachTUNLocked(tunFd int) {
 					}
 				}
 				return
+			}
+
+			// Прямой UDP пакет от пира подтверждает P2P доступность
+			if len(payload) >= 20 && (payload[0]>>4) == 4 {
+				srcVIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
+				if p, ok := globalRegistry.GetByVirtualIP(srcVIP); ok {
+					p.DirectP2P = true
+					if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" {
+						p.Transport = "udp_direct"
+					}
+					p.LastDirectSeen = time.Now()
+					p.LastSeen = time.Now()
+					if srcAddr != nil {
+						p.ActiveEndpoint = srcAddr.String()
+					}
+					globalRegistry.Upsert(p)
+				}
 			}
 
 			// Юзерспейс-ответ на входящие ICMP Echo запросы (чтобы другие узлы могли пинговать Android)
@@ -2454,8 +2476,12 @@ func parseConfigFromString(data string) (*config.Config, error) {
 	}
 
 	activeProf := cfg.EnsureActiveProfile()
-	if activeProf.MQTTTopic == "" || activeProf.MQTTTopic == "natbypass/mynet/peers" {
-		activeProf.MQTTTopic = "natbypass/mesh/" + config.GenerateRandomHex(8)
+	if activeProf.MQTTTopic == "" || activeProf.MQTTTopic == "natbypass/mynet/peers" || strings.HasPrefix(activeProf.MQTTTopic, "natbypass/mesh/") {
+		if activeProf.NetworkKey != "" {
+			activeProf.MQTTTopic = crypto.DeriveBaseTopic(activeProf.NetworkKey, "")
+		} else {
+			activeProf.MQTTTopic = "v2/" + config.GenerateRandomHex(12)
+		}
 		cfg.SyncSignalingWithProfile(activeProf)
 	}
 	return cfg, nil
@@ -2541,8 +2567,9 @@ func CreateProfile(name, broker, topic, user, pass, tgToken string, tgChat int64
 	if name == "" {
 		name = fmt.Sprintf("Сеть #%d", len(globalConfig.Profiles)+1)
 	}
+	profKey := config.GenerateRandomHex(16)
 	if topic == "" {
-		topic = "natbypass/mesh/" + config.GenerateRandomHex(8)
+		topic = crypto.DeriveBaseTopic(profKey, "")
 	}
 	if broker == "" {
 		broker = "tcp://broker.hivemq.com:1883"
@@ -2554,7 +2581,7 @@ func CreateProfile(name, broker, topic, user, pass, tgToken string, tgChat int64
 	newProf := config.Profile{
 		ID:         "p-" + config.GenerateRandomHex(4),
 		Name:       name,
-		NetworkKey: config.GenerateRandomHex(16),
+		NetworkKey: profKey,
 		MQTTBroker: broker,
 		MQTTTopic:  topic,
 		MQTTUser:   user,

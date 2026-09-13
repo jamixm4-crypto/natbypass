@@ -100,7 +100,7 @@ func VerifyFrame(frame []byte, signKey [32]byte, maxSkew time.Duration) ([]byte,
 // without leaking the "natbypass" product name or readable strings to MQTT brokers or DPI/TSPU filters.
 func DeriveBaseTopic(networkKey, userTopic string) string {
 	clean := strings.TrimSpace(userTopic)
-	if clean != "" && !strings.HasPrefix(clean, "natbypass/mesh/") && clean != "natbypass/mesh" && clean != "default" {
+	if clean != "" && !strings.HasPrefix(clean, "natbypass") && clean != "default" && clean != "v2/default" {
 		// User specified their own explicit custom topic, respect it
 		return clean
 	}
@@ -112,6 +112,11 @@ func DeriveBaseTopic(networkKey, userTopic string) string {
 	mac.Write([]byte("NatBypass-MeshTopic-V2:" + clean))
 	sum := mac.Sum(nil)
 	return fmt.Sprintf("s_%x", sum[:8])
+}
+
+// DeriveMeshTopic is an alias for DeriveBaseTopic.
+func DeriveMeshTopic(networkKey, userTopic string) string {
+	return DeriveBaseTopic(networkKey, userTopic)
 }
 
 // DerivePeerTopic derives an obfuscated per-peer subtopic for retained discovery beacons.

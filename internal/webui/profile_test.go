@@ -71,7 +71,7 @@ func TestProfileCreateListAndSwitch(t *testing.T) {
 	// 2. Create a new profile with auto_switch: true
 	createReqBody := map[string]interface{}{
 		"name":        "Second Mesh Network",
-		"mqtt_topic":  "natbypass/mesh/test-topic-second",
+		"mqtt_topic":  "v2/test-topic-second",
 		"mqtt_broker": "tcp://broker.emqx.io:1883",
 		"auto_switch": true,
 	}
@@ -161,7 +161,7 @@ func TestProfileCreateListAndSwitch(t *testing.T) {
 	updateReqBody := map[string]interface{}{
 		"id":         secondID,
 		"name":       "Renamed Mesh Network",
-		"mqtt_topic": "natbypass/mesh/renamed-topic",
+		"mqtt_topic": "v2/renamed-topic",
 	}
 	updateJSON, _ := json.Marshal(updateReqBody)
 	wUpdate := httptest.NewRecorder()

@@ -860,11 +860,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						targetPeer.Transport = "tcp_tls"
 						targetPeer.LastBilateralSeen = time.Now()
 					} else {
-						// For UDP: if peer is already in DirectP2P, an inbound data packet confirms
-						// active bidirectional data delivery. Refresh LastBilateralSeen so active traffic never gets demoted to relay!
-						if targetPeer.DirectP2P {
-							targetPeer.LastBilateralSeen = time.Now()
+						// For UDP: inbound data packet confirms direct UDP delivery from peer
+						targetPeer.DirectP2P = true
+						if targetPeer.Transport == "" || targetPeer.Transport == "mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "relay_mqtt" {
+							targetPeer.Transport = "udp_direct"
 						}
+						targetPeer.LastBilateralSeen = time.Now()
 					}
 					if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
 						targetPeer.ActiveEndpoint = fromAddrStr
@@ -1881,11 +1882,13 @@ func startSignaling(ctx context.Context, cfg *config.Config, deviceID string) *s
 		log.Warn().Err(err).Msg("Failed to parse signaling channels from configuration")
 	}
 	if len(channels) == 0 {
-		topic := "natbypass/mesh/default"
+		topic := "v2/default"
 		broker := "tcp://broker.hivemq.com:1883"
 		if activeProf != nil {
 			if activeProf.MQTTTopic != "" {
 				topic = activeProf.MQTTTopic
+			} else if activeProf.NetworkKey != "" {
+				topic = crypto.DeriveBaseTopic(activeProf.NetworkKey, "")
 			}
 			if activeProf.MQTTBroker != "" {
 				broker = activeProf.MQTTBroker
@@ -2027,11 +2030,14 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 				p.ProbeCount = 0
 			} else {
 				// rtt == 0: Входящий PING зонд получен напрямую от удаленного пира
-				// Удаленный узел успешно достучался до нашего UDP сокета
-				if p.DirectP2P && !p.LastBilateralSeen.IsZero() {
-					p.LastBilateralSeen = time.Now()
+				// Удаленный узел успешно достучался до нашего UDP сокета напрямую по P2P!
+				p.DirectP2P = true
+				if p.Transport == "" || p.Transport == "mqtt" || p.Transport == "relay" || p.Transport == "relay_mqtt" {
+					p.Transport = "udp_direct"
 				}
+				p.LastBilateralSeen = time.Now()
 				p.ConsecutiveDrops = 0
+				p.ProbeCount = 0
 			}
 			targetEP := fromAddr
 			if magicSock != nil {

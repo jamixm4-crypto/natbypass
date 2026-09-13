@@ -35,6 +35,7 @@ import (
 	"github.com/natbypass/natbypass/internal/autostart"
 	"github.com/natbypass/natbypass/internal/config"
 	"github.com/natbypass/natbypass/internal/constants"
+	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
@@ -944,7 +945,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta27"
+		ver = "1.9.226-beta28"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1900,7 +1901,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta27"
+		ver = "1.9.226-beta28"
 	}
 
 	vip := s.state.VirtualIP
@@ -3000,6 +3001,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Name                string `json:"name"`
+		NetworkKey          string `json:"network_key"`
 		MQTTBroker          string `json:"mqtt_broker"`
 		MQTTTopic           string `json:"mqtt_topic"`
 		MQTTUser            string `json:"mqtt_user"`
@@ -3039,8 +3041,11 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" {
 		req.Name = fmt.Sprintf("Сеть #%d", len(cfg.Profiles)+1)
 	}
+	if req.NetworkKey == "" {
+		req.NetworkKey = config.GenerateRandomHex(16)
+	}
 	if req.MQTTTopic == "" {
-		req.MQTTTopic = "natbypass/mesh/" + config.GenerateRandomHex(8)
+		req.MQTTTopic = crypto.DeriveBaseTopic(req.NetworkKey, "")
 	}
 	if req.MQTTBroker == "" {
 		req.MQTTBroker = "tcp://broker.emqx.io:1883"
@@ -3057,7 +3062,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	newProf := config.Profile{
 		ID:                  "p-" + config.GenerateRandomHex(4),
 		Name:                req.Name,
-		NetworkKey:          config.GenerateRandomHex(16),
+		NetworkKey:          req.NetworkKey,
 		MQTTBroker:          req.MQTTBroker,
 		MQTTTopic:           req.MQTTTopic,
 		MQTTUser:            req.MQTTUser,
