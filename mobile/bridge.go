@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta36"
+const Version = "1.9.226-beta37"
 
 
 
@@ -185,6 +185,29 @@ func deriveInitialVirtualIP(devID string) string {
 	}
 	return config.GenerateSubnetIP(prefix, devID)
 }
+
+// ResolveConfigVirtualIP parses the given configuration YAML and derives the exact Virtual IP
+// for this node, ensuring Android VpnService sets up TUN with the identical IP and subnet prefix.
+func ResolveConfigVirtualIP(configYAML string) string {
+	if configYAML == "" || configYAML == "{}" {
+		return GetVirtualIP()
+	}
+	cfg, err := parseConfigFromString(configYAML)
+	if err != nil {
+		return GetVirtualIP()
+	}
+	pubKey, _, _ := loadOrGenKeys(cfg)
+	devID := cfg.App.DeviceID
+	if devID == "" && len(pubKey) > 0 {
+		devID = "Android-" + crypto.KeyToHex(pubKey)[:8]
+	}
+	vip := config.ResolveVirtualIP(cfg, devID)
+	if vip != "" {
+		return vip
+	}
+	return GetVirtualIP()
+}
+
 
 func negotiateVirtualIP() {
 	// BUG-09 FIX: globalConfig, globalRegistry, globalDevID are protected by engineMu.
@@ -804,6 +827,23 @@ func StartEngine(configYAML string, tunFd int) string {
 					continue
 				}
 				if p != nil && p.DeviceID != devID {
+					if p.TCPConnect != nil && globalTCPDirectMgr != nil {
+						tcpSig := p.TCPConnect
+						if tcpSig.TargetDeviceID == devID && tcpSig.SenderDeviceID != "" && tcpSig.SenderTCPAddr != "" {
+							if !globalTCPDirectMgr.HasConn(tcpSig.SenderDeviceID) {
+								logger.Info().Str("peer", tcpSig.SenderDeviceID).Str("target", tcpSig.SenderTCPAddr).
+									Msg("⚡ [TCPConnect] Received on-demand TCP ShadowTLS connection request from peer")
+								lPort := globalTCPDirectMgr.Port()
+								if lPort <= 0 && puncher != nil {
+									lPort = puncher.LocalPort()
+								}
+								go func(targetID, targetAddr string, localP int) {
+									_ = globalTCPDirectMgr.ConnectPeer(targetID, targetAddr, localP)
+								}(tcpSig.SenderDeviceID, tcpSig.SenderTCPAddr, lPort)
+							}
+						}
+						continue
+					}
 					if p.Offline || p.Leave {
 						if globalRegistry != nil {
 							globalRegistry.Delete(p.DeviceID)
@@ -1370,8 +1410,12 @@ func attachTUNLocked(tunFd int) {
 							// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing or unconfirmed
 							if !isForceUDP && !sentTCP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) && (!targetPeer.DirectP2P || targetPeer.PingMs == 0 || targetPeer.ProbeCount >= 1 || isForceTCP) {
 								defTCPPort := 8443
-								if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
-									defTCPPort = activeProf.TCPPort
+								netKey := ""
+								if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil {
+									if activeProf.TCPPort > 0 {
+										defTCPPort = activeProf.TCPPort
+									}
+									netKey = activeProf.NetworkKey
 								}
 								tcpTarget := targetPeer.TCPAddr
 								if tcpTarget == "" {
@@ -1394,38 +1438,64 @@ func attachTUNLocked(tunFd int) {
 									go func(devID, target string, localP int) {
 										_ = globalTCPDirectMgr.ConnectPeer(devID, target, localP)
 									}(targetPeer.DeviceID, tcpTarget, lPort)
+
+									// Send bilateral TCPConnect signal over MQTT for coordinated simultaneous open
+									if globalSigMgr != nil && (!targetPeer.DirectP2P || targetPeer.ProbeCount >= 1 || isForceTCP) {
+										sendTCPConnectSignal(engineCtx, globalSigMgr, globalDevID, targetPeer.DeviceID, globalPuncher, globalTCPDirectMgr, defTCPPort, netKey)
+									}
 								}
 							}
 							// 1e. Mesh Userspace Relay Fallback (encapsulated in Multi-Hop header)
-							if !sentTCP && !sentDirect && !isForceUDP && globalTCPDirectMgr != nil && globalRegistry != nil {
+							// Dual-Path Shadow Relay Rule: If direct TCP is not active AND (direct UDP is unconfirmed or lossy >30%),
+							// immediately forward via Relay so traffic is never blackholed!
+							needsRelay := !sentTCP && (!sentDirect || !targetPeer.DirectP2P || targetPeer.LossPercent > 30)
+							if needsRelay && !isForceUDP && globalRegistry != nil {
 								relayPkt, mhErr := network.EncodeMultiHopPacket(globalDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, pkt)
 								if mhErr == nil {
-								for _, rp := range globalRegistry.List() {
-									if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
-										continue
-									}
-									vip := strings.TrimSpace(strings.Split(rp.VirtualIP, "/")[0])
-									isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(rp.DeviceName), "serv") || strings.Contains(strings.ToLower(rp.Nickname), "serv")
-									if isServ && globalTCPDirectMgr.HasConn(rp.DeviceID) {
-										if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
-											sentDirect = true
-											break
-										}
-									}
-								}
-								if !sentDirect {
+									relayed := false
+									// Try designated server or known relays first
 									for _, rp := range globalRegistry.List() {
 										if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
 											continue
 										}
-										if globalTCPDirectMgr.HasConn(rp.DeviceID) {
-											if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
-												sentDirect = true
-												break
+										vip := strings.TrimSpace(strings.Split(rp.VirtualIP, "/")[0])
+										isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(rp.DeviceName), "serv") || strings.Contains(strings.ToLower(rp.Nickname), "serv")
+										if isServ {
+											if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(rp.DeviceID) {
+												if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
+													relayed = true
+													sentDirect = true
+													break
+												}
+											} else if globalPuncher != nil && rp.DirectP2P && rp.ActiveEndpoint != "" {
+												if err := globalPuncher.SendDataPacketWithPadding(rp.ActiveEndpoint, relayPkt, 0, 0); err == nil {
+													relayed = true
+													sentDirect = true
+													break
+												}
 											}
 										}
 									}
-								}
+									if !relayed {
+										for _, rp := range globalRegistry.List() {
+											if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
+												continue
+											}
+											if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(rp.DeviceID) {
+												if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
+													relayed = true
+													sentDirect = true
+													break
+												}
+											} else if globalPuncher != nil && rp.DirectP2P && rp.ActiveEndpoint != "" {
+												if err := globalPuncher.SendDataPacketWithPadding(rp.ActiveEndpoint, relayPkt, 0, 0); err == nil {
+													relayed = true
+													sentDirect = true
+													break
+												}
+											}
+										}
+									}
 								}
 							}
 
@@ -1462,6 +1532,59 @@ func attachTUNLocked(tunFd int) {
 		}(tunCtx)
 	}
 }
+
+func sendTCPConnectSignal(ctx context.Context, sigMgr *signaling.FallbackManager, deviceID, targetDevID string, puncher *network.UDPPuncher, tcpDirectMgr *network.TCPDirectManager, defaultPort int, netKey string) {
+	if sigMgr == nil || targetDevID == "" || targetDevID == deviceID {
+		return
+	}
+	myTCPAddr := ""
+	if puncher != nil && puncher.GetCachedSTUNAddr() != "" {
+		if h, _, err := net.SplitHostPort(puncher.GetCachedSTUNAddr()); err == nil {
+			tcpP := defaultPort
+			if tcpDirectMgr != nil && tcpDirectMgr.Port() > 0 {
+				tcpP = tcpDirectMgr.Port()
+			}
+			myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
+		}
+	}
+	if myTCPAddr == "" {
+		engineMu.Lock()
+		stunSnap := globalSTUN
+		engineMu.Unlock()
+		if stunSnap != "" {
+			if h, _, err := net.SplitHostPort(stunSnap); err == nil {
+				tcpP := defaultPort
+				if tcpDirectMgr != nil && tcpDirectMgr.Port() > 0 {
+					tcpP = tcpDirectMgr.Port()
+				}
+				myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
+			}
+		}
+	}
+	if myTCPAddr == "" {
+		return
+	}
+	go func(tDev, myAddr string) {
+		tcpSig := &signaling.Payload{
+			DeviceID: deviceID,
+			TCPConnect: &signaling.TCPConnectSignal{
+				SenderDeviceID: deviceID,
+				TargetDeviceID: tDev,
+				SenderTCPAddr:  myAddr,
+				Timestamp:      time.Now().Unix(),
+			},
+			Timestamp: time.Now(),
+		}
+		toSend := tcpSig
+		if netKey != "" {
+			if enc, err := signaling.EncryptPayloadWithKey(tcpSig, netKey); err == nil && enc != nil {
+				toSend = enc
+			}
+		}
+		_ = sigMgr.Send(ctx, toSend)
+	}(targetDevID, myTCPAddr)
+}
+
 
 func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
 	if len(payload) < 20 {

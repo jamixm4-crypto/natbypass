@@ -141,10 +141,28 @@ class NatBypassVpnService : VpnService() {
         if (isRunning && !forceReconfigure) return
 
         try {
-            val rawVipStr = org.natbypass.app.util.MobileBridge.getVirtualIP().trim()
-            val parsedVip = rawVipStr.substringBefore("/").trim()
+            val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
+            val configFile = File(filesDir, "config.yaml")
+            val configYaml = if (configFile.exists()) configFile.readText() else "{}"
+            val prefVip = prefs.getString("virtual_ip", "")?.trim() ?: ""
+
+            var resolvedVip = ""
+            if (prefVip.isNotEmpty() && prefVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+(/\\d+)?$"))) {
+                resolvedVip = prefVip
+            } else {
+                resolvedVip = org.natbypass.app.util.MobileBridge.resolveConfigVirtualIP(configYaml).trim()
+            }
+            if (resolvedVip.isEmpty()) {
+                resolvedVip = org.natbypass.app.util.MobileBridge.getVirtualIP().trim()
+            }
+
+            val parsedVip = resolvedVip.substringBefore("/").trim()
             val currentVip = if (parsedVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))) parsedVip else "100.64.200.10"
-            val prefix = rawVipStr.substringAfter("/", "24").toIntOrNull() ?: 24
+            val prefix = resolvedVip.substringAfter("/", "24").toIntOrNull() ?: 24
+
+            try {
+                org.natbypass.app.util.MobileBridge.setVirtualIP("$currentVip/$prefix")
+            } catch (_: Throwable) {}
 
             val notif = buildNotification("Подключено к P2P сети ($currentVip)", showDisconnect = true)
             try {
@@ -198,7 +216,6 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
-            val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
             val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
             val useExitNode = selectedExitNode.isNotEmpty()
             org.natbypass.app.util.MobileBridge.selectExitNode(selectedExitNode)
@@ -236,13 +253,15 @@ class NatBypassVpnService : VpnService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to add default IPv4 route: ${e.message}")
                 }
-                // Гарантируем прямой маршрут к меш-подсети рядом с дефолтным шлюзом
+                // Прямой маршрут к меш-подсети рядом с дефолтным шлюзом
                 try { builder.addRoute(meshSubnet, prefix) } catch (_: Exception) {}
                 if (meshSubnet != "100.64.200.0") {
                     try { builder.addRoute("100.64.200.0", 24) } catch (_: Exception) {}
                 }
+                try { builder.addRoute("10.1.1.0", 24) } catch (_: Exception) {}
+                try { builder.addRoute("100.64.0.0", 10) } catch (_: Exception) {}
 
-                // Надежные IPv4 DNS (не добавляем ::/0 и IPv6 DNS, так как ядро меша обрабатывает только IPv4)
+                // Надежные IPv4 DNS (только для полного туннеля через Exit Node)
                 try {
                     builder.addDnsServer("1.1.1.1")
                     builder.addDnsServer("8.8.8.8")
@@ -251,18 +270,21 @@ class NatBypassVpnService : VpnService() {
                 try {
                     builder.addRoute(meshSubnet, prefix)
                     Log.i(TAG, "Mesh route $meshSubnet/$prefix added")
-                    if (meshSubnet != "100.64.200.0") {
-                        try { builder.addRoute("100.64.200.0", 24) } catch (_: Exception) {}
-                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to add mesh route: ${e.message}")
                 }
+                if (meshSubnet != "100.64.200.0") {
+                    try { builder.addRoute("100.64.200.0", 24) } catch (_: Exception) {}
+                }
+                if (meshSubnet != "10.1.1.0") {
+                    try { builder.addRoute("10.1.1.0", 24) } catch (_: Exception) {}
+                }
+                try { builder.addRoute("100.64.0.0", 10) } catch (_: Exception) {}
 
-                // Гарантируем DNS серверы, чтобы Android не сбрасывал интернет для остальных приложений
-                try {
-                    builder.addDnsServer("1.1.1.1")
-                    builder.addDnsServer("8.8.8.8")
-                } catch (e: Exception) { Log.w(TAG, "addDnsServer error: ${e.message}") }
+                // ВНИМАНИЕ: В режиме сплит-туннеля (без Exit Node) НЕ вызываем builder.addDnsServer()!
+                // Иначе Android перенаправит ВЕСЬ системный DNS в TUN интерфейс,
+                // где меш-ядро сбросит его, и на телефоне пропадет интернет для всех приложений.
+                // Без addDnsServer() Android сохраняет нативный DNS провайдера/Wi-Fi.
             }
 
 

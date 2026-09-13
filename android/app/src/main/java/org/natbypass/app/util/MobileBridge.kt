@@ -86,6 +86,15 @@ object MobileBridge {
         }
     }
 
+    fun resolveConfigVirtualIP(configYaml: String): String {
+        val method = getMethod("resolveConfigVirtualIP") ?: return getVirtualIP()
+        return try {
+            method.invoke(null, configYaml) as? String ?: getVirtualIP()
+        } catch (e: Exception) {
+            getVirtualIP()
+        }
+    }
+
     fun getStatusJSON(): String {
         val method = getMethod("getStatusJSON") ?: return "{}"
         return try {
