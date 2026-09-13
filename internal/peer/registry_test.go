@@ -463,3 +463,53 @@ func TestRegistry_DefaultVIPCollisionAutoResolved(t *testing.T) {
 		t.Errorf("expected p2 not to be flagged with IPConflict for default subnet auto-resolution")
 	}
 }
+
+func TestRegistry_TCPTransportPreservation(t *testing.T) {
+	reg := NewRegistry()
+
+	// Initial upsert: peer connects via Direct TCP (ShadowTLS)
+	p1 := &Peer{
+		DeviceID:       "node-tcp-peer",
+		Nickname:       "TCP Peer",
+		VirtualIP:      "100.64.200.5",
+		PublicKey:      "pubkey-tcp-1",
+		Online:         true,
+		DirectTCP:      true,
+		DirectP2P:      true,
+		Transport:      "tcp_tls",
+		PingMs:         28,
+		LastSeen:       time.Now(),
+		LastDirectSeen: time.Now(),
+	}
+	reg.Upsert(p1)
+
+	// Periodic MQTT discovery beacon arrives 8 seconds later (Transport is empty in beacon)
+	beacon := &Peer{
+		DeviceID:  "node-tcp-peer",
+		Nickname:  "TCP Peer",
+		VirtualIP: "100.64.200.5",
+		PublicKey: "pubkey-tcp-1",
+		Online:    true,
+		Transport: "", // Empty in periodic beacon!
+		PingMs:    0,
+		LastSeen:  time.Now(),
+	}
+	reg.Upsert(beacon)
+
+	got, ok := reg.Get("node-tcp-peer")
+	if !ok || got == nil {
+		t.Fatalf("expected node-tcp-peer to exist")
+	}
+	if got.Transport != "tcp_tls" {
+		t.Errorf("expected Transport to be preserved as 'tcp_tls', got '%s'", got.Transport)
+	}
+	if !got.DirectTCP {
+		t.Errorf("expected DirectTCP to remain true")
+	}
+	if !got.DirectP2P {
+		t.Errorf("expected DirectP2P to remain true")
+	}
+	if got.PingMs != 28 {
+		t.Errorf("expected PingMs to be preserved as 28, got %d", got.PingMs)
+	}
+}

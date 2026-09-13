@@ -846,28 +846,34 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 			activePeers = append(activePeers, p)
 		}
 
-		// Дедупликация по Virtual IP (чтобы в WebUI не дублировались фантомы одного устройства)
-		vipMap := make(map[string]*peer.Peer)
-		var uniquePeers []*peer.Peer
+		// Дедупликация по уникальному DeviceID (чтобы в WebUI не дублировались фантомы одного устройства,
+		// но при этом не скрывались реальные разные клиенты со схожим/шаблонным Virtual IP!)
+		devMap := make(map[string]*peer.Peer)
 		for _, p := range activePeers {
-			cleanVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-			if cleanVIP == "" {
-				uniquePeers = append(uniquePeers, p)
+			devKey := p.DeviceID
+			if devKey == "" {
+				devKey = p.PublicKey
+			}
+			if devKey == "" {
+				devKey = p.VirtualIP
+			}
+			if devKey == "" {
 				continue
 			}
-			existing, exists := vipMap[cleanVIP]
+			existing, exists := devMap[devKey]
 			if !exists {
-				vipMap[cleanVIP] = p
+				devMap[devKey] = p
 				continue
 			}
-			// При коллизии Virtual IP выбираем узел с DirectP2P / Online / более свежим LastSeen
+			// При коллизии записей одного и того же устройства выбираем более актуальную запись
 			if (!existing.Online && p.Online) ||
 				(!existing.DirectP2P && p.DirectP2P) ||
 				p.LastSeen.After(existing.LastSeen) {
-				vipMap[cleanVIP] = p
+				devMap[devKey] = p
 			}
 		}
-		for _, p := range vipMap {
+		var uniquePeers []*peer.Peer
+		for _, p := range devMap {
 			uniquePeers = append(uniquePeers, p)
 		}
 
@@ -938,7 +944,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta25"
+		ver = "1.9.226-beta26"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -977,6 +983,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"mtu":                  s.state.MTU,
 		"internet_live":        s.state.InternetLive,
 		"tun_status":           tunnel.GetTUNStatus(),
+		"transport_mode":       func() string {
+			if cfg != nil {
+				if prof := cfg.EnsureActiveProfile(); prof != nil && prof.TransportMode != "" {
+					return prof.TransportMode
+				}
+				if cfg.Network.TransportMode != "" {
+					return cfg.Network.TransportMode
+				}
+			}
+			return "auto"
+		}(),
 	}
 
 	awgEnabled := false
@@ -1869,7 +1886,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta25"
+		ver = "1.9.226-beta26"
 	}
 
 	vip := s.state.VirtualIP
@@ -2101,6 +2118,7 @@ type TelemetryData struct {
 	MTU               int    `json:"mtu"`
 	TotalPeers        int    `json:"total_peers"`
 	DirectP2PCount    int    `json:"direct_p2p_count"`
+	DirectTCPCount    int    `json:"direct_tcp_count"`
 	RelayCount        int    `json:"relay_count"`
 	StandbyReadyCount int    `json:"standby_ready_count"`
 }
@@ -2136,6 +2154,7 @@ func (s *Server) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 
 	total := 0
 	direct := 0
+	directTCP := 0
 	relay := 0
 	standby := 0
 	if s.registry != nil {
@@ -2145,7 +2164,11 @@ func (s *Server) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 			}
 			if p.Online && time.Since(p.LastSeen) < constants.PeerOfflineThreshold {
 				total++
-				if p.DirectP2P {
+				hasTCP := p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || p.DirectTCP
+				if hasTCP {
+					directTCP++
+				}
+				if p.DirectP2P || hasTCP {
 					direct++
 				} else {
 					relay++
@@ -2165,6 +2188,7 @@ func (s *Server) handleTelemetry(w http.ResponseWriter, r *http.Request) {
 		MTU:               mtu,
 		TotalPeers:        total,
 		DirectP2PCount:    direct,
+		DirectTCPCount:    directTCP,
 		RelayCount:        relay,
 		StandbyReadyCount: standby,
 	}

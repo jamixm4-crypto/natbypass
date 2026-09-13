@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta25"
+	Version = "1.9.226-beta26"
 	Commit  = "release"
 )
 
@@ -3583,8 +3583,16 @@ func connectPeerTCPDirect(targetPeer *peer.Peer) {
 						},
 						Timestamp: time.Now(),
 					}
+					toSend := tcpSigPl
+					if cfg != nil {
+						if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+							if enc, err := signaling.EncryptPayloadWithKey(tcpSigPl, activeProf.NetworkKey); err == nil && enc != nil {
+								toSend = enc
+							}
+						}
+					}
 					for _, sc := range sigChannels {
-						_ = sc.Send(context.Background(), tcpSigPl)
+						_ = sc.Send(context.Background(), toSend)
 					}
 				}(targetPeer.DeviceID, myTCPAddr)
 			}
@@ -6845,6 +6853,9 @@ func updateData() {
 
 	if hLblChannels != 0 {
 		chText := fmt.Sprintf("📡 Активный режим: %s", activeChannelStr)
+		if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp" {
+			chText = fmt.Sprintf("📡 Режим: %s • ⚡ Direct TCP (ShadowTLS)", activeChannelStr)
+		}
 		setControlText(hLblChannels, chText)
 	}
 
@@ -6858,11 +6869,16 @@ func updateData() {
 		setControlText(hLblCardSTUN, fmt.Sprintf("STUN Сокет:\r\n%s", stunStr))
 	}
 	if hLblCardSig != 0 {
-		setControlText(hLblCardSig, fmt.Sprintf("Сигнальный канал:\r\n%s", activeChannelStr))
+		sigText := fmt.Sprintf("Сигнальный канал:\r\n%s", activeChannelStr)
+		if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp" {
+			sigText = fmt.Sprintf("Сигнал / Режим:\r\n%s • ⚡ Direct TCP", activeChannelStr)
+		}
+		setControlText(hLblCardSig, sigText)
 	}
 
 	onlineCount := 0
 	directP2PCount := 0
+	directTCPCount := 0
 	var minRTT time.Duration = 0
 
 	if registry != nil {
@@ -6874,7 +6890,11 @@ func updateData() {
 		for _, p := range peers {
 			if p.Online {
 				onlineCount++
-				if p.DirectP2P {
+				hasTCP := (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID)) || p.DirectTCP || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls"
+				if hasTCP {
+					directTCPCount++
+				}
+				if p.DirectP2P || hasTCP {
 					directP2PCount++
 					if minRTT == 0 || (p.Latency > 0 && p.Latency < minRTT) {
 						minRTT = p.Latency
@@ -6990,6 +7010,22 @@ func updateData() {
 			}
 			buttonTypes[ID_BTN_VPN] = "red"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
+		} else if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp" && directTCPCount > 0 {
+			vpnConnected = true
+			pingStr := ""
+			if minRTT > 0 {
+				pingStr = fmt.Sprintf(" (%v)", minRTT.Round(time.Millisecond))
+			}
+			setControlText(hLblStatus, fmt.Sprintf("⚡ DIRECT TCP (ShadowTLS) АКТИВЕН (%d пир(ов)%s)%s", directTCPCount, pingStr, exitSuffix))
+			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("⚡ Direct TCP (TLS)%s • VIP: %s", pingStr, myVirtualIP)
+			buttonTypes[ID_BTN_VPN] = "green"
+			procInvalidateRect.Call(hBtnVpn, 0, 1)
+		} else if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp" && onlineCount > 0 {
+			vpnConnected = true
+			setControlText(hLblStatus, fmt.Sprintf("⚡ РЕЖИМ DIRECT TCP (ShadowTLS) • ПОДКЛЮЧЕНИЕ К ПИРАМ...%s", exitSuffix))
+			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("⚡ Подключение TCP... • VIP: %s", myVirtualIP)
+			buttonTypes[ID_BTN_VPN] = "yellow"
+			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else if directP2PCount > 0 {
 			vpnConnected = true
 			pingStr := ""
@@ -7071,6 +7107,9 @@ func updateData() {
 							} else {
 								statusDisplay = "Прямой ShadowTLS (OK)"
 							}
+						} else if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp" {
+							icon = "[TLS⏳]"
+							statusDisplay = "Установка Direct TCP (ShadowTLS)..."
 						} else if p.DirectP2P {
 							icon = "[P2P]"
 							if p.PingMs > 0 {

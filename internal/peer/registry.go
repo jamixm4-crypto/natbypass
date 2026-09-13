@@ -212,14 +212,23 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 
 	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty, never seen direct, failing UDP probes, or bilateral unconfirmed >15s
 	if newer.Transport != "tcp_tls" && newer.Transport != "tcp_shadowtls" {
-		if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() || (existing.ProbeCount >= 2 && time.Since(newer.LastDirectSeen) > 10*time.Second) || (!newer.LastBilateralSeen.IsZero() && time.Since(newer.LastBilateralSeen) > 15*time.Second) {
+		if existing.Transport == "tcp_tls" || existing.Transport == "tcp_shadowtls" {
+			// If existing peer had an active direct TCP/ShadowTLS stream, preserve it across beacon updates!
+			if newer.Transport == "" {
+				newer.Transport = existing.Transport
+				newer.DirectTCP = true
+				newer.DirectP2P = true
+			}
+		} else if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() || (existing.ProbeCount >= 2 && time.Since(newer.LastDirectSeen) > 10*time.Second) || (!newer.LastBilateralSeen.IsZero() && time.Since(newer.LastBilateralSeen) > 15*time.Second) {
 			newer.DirectP2P = false
 			newer.Transport = "relay_mqtt"
 		}
 	}
 
 	if newer.Transport == "" {
-		if newer.DirectP2P {
+		if existing.Transport != "" {
+			newer.Transport = existing.Transport
+		} else if newer.DirectP2P {
 			newer.Transport = "udp_direct"
 		} else {
 			newer.Transport = "relay_mqtt"
@@ -231,9 +240,13 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.ActiveEndpoint = newer.STUNAddr
 	}
 
-	if newer.Latency == 0 && existing.Latency > 0 && (existing.DirectP2P || existing.DirectTCP || existing.Transport == "tcp_tls" || existing.Transport == "tcp_shadowtls") && (newer.DirectP2P || newer.DirectTCP || newer.Transport == "tcp_tls" || newer.Transport == "tcp_shadowtls") {
-		newer.Latency = existing.Latency
-		newer.PingMs = existing.PingMs
+	if (newer.Latency == 0 || newer.PingMs == 0) && (existing.Latency > 0 || existing.PingMs > 0) && (existing.DirectP2P || existing.DirectTCP || existing.Transport == "tcp_tls" || existing.Transport == "tcp_shadowtls") && (newer.DirectP2P || newer.DirectTCP || newer.Transport == "tcp_tls" || newer.Transport == "tcp_shadowtls") {
+		if newer.Latency == 0 && existing.Latency > 0 {
+			newer.Latency = existing.Latency
+		}
+		if newer.PingMs == 0 && existing.PingMs > 0 {
+			newer.PingMs = existing.PingMs
+		}
 	} else if !newer.DirectP2P && !newer.DirectTCP && newer.Transport != "tcp_tls" && newer.Transport != "tcp_shadowtls" {
 		newer.Latency = 0
 		newer.PingMs = 0

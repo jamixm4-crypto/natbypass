@@ -7,7 +7,7 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.9.226-beta25"
+    DEFAULT_TAG="v1.9.226-beta26"
 
     # Try to resolve latest tag from GitHub API
     LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
@@ -304,6 +304,9 @@ https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
     if [ -z "$HOST_NAME" ]; then
         HOST_NAME=$(uname -n 2>/dev/null || echo "Keenetic")
     fi
+    SHORT_ID=$(echo "${RAND_HEX}" | cut -c1-6)
+    RAND_OCTET=$(( (0x$(echo "${RAND_HEX}" | cut -c7-8) % 240) + 2 ))
+    DEVICE_NAME="${HOST_NAME}-${SHORT_ID}"
     RAND_TOPIC="natbypass/mesh/${RAND_HEX}"
     CONFIG_IS_NEW=0
 
@@ -315,7 +318,7 @@ https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
         cat > "${CONFIG_FILE}" << EOF
 app:
   log_level: "info"
-  device_id: "${HOST_NAME}"
+  device_id: "${DEVICE_NAME}"
   publish_interval: 8
 
 webui:
@@ -338,7 +341,7 @@ profiles:
     name: "Основная сеть"
     mqtt_broker: "ssl://broker.emqx.io:8883"
     mqtt_topic: "${RAND_TOPIC}"
-    virtual_ip: "100.64.200.1/24"
+    virtual_ip: "100.64.200.${RAND_OCTET}/24"
     network_key: "${RAND_NET_KEY}"
     is_active: true
 

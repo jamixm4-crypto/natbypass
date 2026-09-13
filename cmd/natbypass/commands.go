@@ -292,8 +292,18 @@ func buildSignalingChannels(cfg *config.Config) ([]signaling.SignalingChannel, e
 			if brokerURL == "" || topic == "" {
 				continue
 			}
+			netKey := ""
+			if cfg != nil {
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+					netKey = activeProf.NetworkKey
+				}
+			}
+
 			// Основной брокер
 			primaryCh := signaling.NewMQTTChannelNamed("mqtt:"+brokerURL, brokerURL, topic, clientID, username, password)
+			if netKey != "" {
+				primaryCh.SetNetworkKey(netKey)
+			}
 			channels = append(channels, primaryCh)
 
 			// Резервные брокеры для автоматического Failover
@@ -315,6 +325,9 @@ func buildSignalingChannels(cfg *config.Config) ([]signaling.SignalingChannel, e
 			for _, bURL := range backupBrokers {
 				if bURL != "" && bURL != brokerURL {
 					backupCh := signaling.NewMQTTChannelNamed("mqtt:backup:"+bURL, bURL, topic, clientID, username, password)
+					if netKey != "" {
+						backupCh.SetNetworkKey(netKey)
+					}
 					channels = append(channels, backupCh)
 				}
 			}

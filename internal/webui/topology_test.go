@@ -151,3 +151,62 @@ func TestTelemetryEndpoint(t *testing.T) {
 		t.Errorf("Expected 1 standby ready, got %d", telem.StandbyReadyCount)
 	}
 }
+
+func TestHandlePeers_DuplicateDefaultVIPNotSquashed(t *testing.T) {
+	reg := peer.NewRegistry()
+	now := time.Now()
+	reg.Upsert(&peer.Peer{
+		DeviceID:  "peer-1",
+		Nickname:  "Node 1",
+		VirtualIP: "100.64.200.1",
+		Online:    true,
+		LastSeen:  now,
+	})
+	reg.Upsert(&peer.Peer{
+		DeviceID:  "peer-2",
+		Nickname:  "Node 2",
+		VirtualIP: "100.64.200.1",
+		Online:    true,
+		LastSeen:  now,
+	})
+	reg.Upsert(&peer.Peer{
+		DeviceID:  "peer-3",
+		Nickname:  "Node 3",
+		VirtualIP: "100.64.200.5",
+		Online:    true,
+		LastSeen:  now,
+	})
+
+	srv := &Server{
+		registry: reg,
+		version:  "1.9.226-beta26",
+		state: &AppState{
+			DeviceID: "my-self-node",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/peers", nil)
+	w := httptest.NewRecorder()
+
+	srv.handlePeers(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Ok   bool         `json:"ok"`
+		Data []*peer.Peer `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse JSON response: %v", err)
+	}
+
+	if !resp.Ok {
+		t.Fatalf("Expected ok: true")
+	}
+
+	if len(resp.Data) != 3 {
+		t.Fatalf("Expected 3 peers (no duplicate VIP squashing), but got %d", len(resp.Data))
+	}
+}

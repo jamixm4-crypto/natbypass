@@ -492,8 +492,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// Connect immediately to peers if force_tcp is active
 			if tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_tcp" && registry != nil {
 				defTCPPort := 8443
-				if activeProf != nil && activeProf.TCPPort > 0 {
-					defTCPPort = activeProf.TCPPort
+				netKey := ""
+				if activeProf != nil {
+					if activeProf.TCPPort > 0 {
+						defTCPPort = activeProf.TCPPort
+					}
+					netKey = activeProf.NetworkKey
 				}
 				for _, p := range registry.List() {
 					if p == nil || !p.Online || tcpDirectMgr.HasConn(p.DeviceID) {
@@ -521,6 +525,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
 						}(p.DeviceID, tcpTarget, lPort)
 					}
+					// Send coordinated simultaneous open signal so remote peer dials us simultaneously
+					sendTCPConnectSignal(engineCtx, sigMgr, deviceID, p.DeviceID, puncher, tcpDirectMgr, defTCPPort, netKey)
 				}
 			}
 			newVIP := resolveVirtualIP(cfg, deviceID)
@@ -1279,8 +1285,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing or unconfirmed
 						if !isForceUDP && !sentTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && (!p.DirectP2P || !bilateralOK || p.PingMs == 0 || p.ProbeCount >= 1 || isForceTCP) {
 							defaultTCPPort := 8443
-							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
-								defaultTCPPort = activeProf.TCPPort
+							netKey := ""
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+								if activeProf.TCPPort > 0 {
+									defaultTCPPort = activeProf.TCPPort
+								}
+								netKey = activeProf.NetworkKey
 							}
 							tcpTarget := getPeerTCPTarget(p, defaultTCPPort)
 							if tcpTarget != "" {
@@ -1293,32 +1303,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}(p.DeviceID, tcpTarget, lPort)
 
 								// Send bilateral TCPConnect signal over MQTT so the remote peer dials us simultaneously
-								if sigMgr != nil && (!bilateralOK || p.ProbeCount >= 1) {
-									myTCPAddr := ""
-									if puncher != nil && puncher.GetCachedSTUNAddr() != "" {
-										if h, _, err := net.SplitHostPort(puncher.GetCachedSTUNAddr()); err == nil {
-											tcpP := defaultTCPPort
-											if tcpDirectMgr != nil && tcpDirectMgr.Port() > 0 {
-												tcpP = tcpDirectMgr.Port()
-											}
-											myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
-										}
-									}
-									if myTCPAddr != "" {
-										go func(tDev, myAddr string) {
-											tcpSig := &signaling.Payload{
-												DeviceID: deviceID,
-												TCPConnect: &signaling.TCPConnectSignal{
-													SenderDeviceID: deviceID,
-													TargetDeviceID: tDev,
-													SenderTCPAddr:  myAddr,
-													Timestamp:      time.Now().Unix(),
-												},
-												Timestamp: time.Now(),
-											}
-											_ = sigMgr.Send(engineCtx, tcpSig)
-										}(p.DeviceID, myTCPAddr)
-									}
+								if sigMgr != nil && (!bilateralOK || p.ProbeCount >= 1 || isForceTCP) {
+									sendTCPConnectSignal(engineCtx, sigMgr, deviceID, p.DeviceID, puncher, tcpDirectMgr, defaultTCPPort, netKey)
 								}
 							}
 						}
@@ -1599,8 +1585,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						needsTCP := isForceTCP || (!isForceUDP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && (p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (!p.DirectP2P || p.PingMs == 0 || p.ProbeCount >= 1)))
 						if needsTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
 							defaultTCPPort := 8443
-							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
-								defaultTCPPort = activeProf.TCPPort
+							netKey := ""
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+								if activeProf.TCPPort > 0 {
+									defaultTCPPort = activeProf.TCPPort
+								}
+								netKey = activeProf.NetworkKey
 							}
 							tcpTarget := getPeerTCPTarget(p, defaultTCPPort)
 							if tcpTarget != "" {
@@ -1627,6 +1617,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									}(p.DeviceID, localTarget, lPort)
 								}
 							}
+							// Coordinated simultaneous open signal over MQTT
+							sendTCPConnectSignal(engineCtx, sigMgr, deviceID, p.DeviceID, puncher, tcpDirectMgr, defaultTCPPort, netKey)
 						}
 					}
 				}
@@ -1722,8 +1714,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
 								if !isForceUDP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
 									defaultTCPPort := 8443
-									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
-										defaultTCPPort = activeProf.TCPPort
+									netKey := ""
+									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+										if activeProf.TCPPort > 0 {
+											defaultTCPPort = activeProf.TCPPort
+										}
+										netKey = activeProf.NetworkKey
 									}
 									tcpTarget := getPeerTCPTarget(p, defaultTCPPort)
 									if tcpTarget != "" {
@@ -1736,33 +1732,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										}(p.DeviceID, tcpTarget, lPort)
 
 										// Send bilateral TCPConnect signal over MQTT for coordinated simultaneous open
-										if sigMgr != nil {
-											myTCPAddr := ""
-											if puncher != nil && puncher.GetCachedSTUNAddr() != "" {
-												if h, _, err := net.SplitHostPort(puncher.GetCachedSTUNAddr()); err == nil {
-													tcpP := defaultTCPPort
-													if tcpDirectMgr != nil && tcpDirectMgr.Port() > 0 {
-														tcpP = tcpDirectMgr.Port()
-													}
-													myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
-												}
-											}
-											if myTCPAddr != "" {
-												go func(tDev, myAddr string) {
-													tcpSig := &signaling.Payload{
-														DeviceID: deviceID,
-														TCPConnect: &signaling.TCPConnectSignal{
-															SenderDeviceID: deviceID,
-															TargetDeviceID: tDev,
-															SenderTCPAddr:  myAddr,
-															Timestamp:      time.Now().Unix(),
-														},
-														Timestamp: time.Now(),
-													}
-													_ = sigMgr.Send(engineCtx, tcpSig)
-												}(p.DeviceID, myTCPAddr)
-											}
-										}
+										sendTCPConnectSignal(engineCtx, sigMgr, deviceID, p.DeviceID, puncher, tcpDirectMgr, defaultTCPPort, netKey)
 									}
 								}
 							}
@@ -1794,13 +1764,70 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 }
 
 func resolveDeviceID(cfg *config.Config, pubKey [32]byte) string {
+	pubHex := crypto.KeyToHex(pubKey)
+	suffix := pubHex
+	if len(suffix) > 6 {
+		suffix = suffix[:6]
+	}
+
+	isGeneric := func(s string) bool {
+		low := strings.ToLower(strings.TrimSpace(s))
+		return low == "keenetic" || low == "openwrt" || low == "router" ||
+			low == "localhost" || low == "ubuntu" || low == "debian" || low == "linux" ||
+			strings.HasPrefix(low, "keenetic router") || strings.HasPrefix(low, "openwrt router")
+	}
+
 	if cfg.App.DeviceID != "" {
+		if isGeneric(cfg.App.DeviceID) && !strings.Contains(cfg.App.DeviceID, "-") {
+			return fmt.Sprintf("%s-%s", cfg.App.DeviceID, suffix)
+		}
 		return cfg.App.DeviceID
 	}
 	if hn, err := os.Hostname(); err == nil && hn != "" {
-		return hn
+		if isGeneric(hn) {
+			return fmt.Sprintf("%s-%s", hn, suffix)
+		}
+		return fmt.Sprintf("%s-%s", hn, suffix)
 	}
 	return generateDeviceID(pubKey)
+}
+
+func sendTCPConnectSignal(ctx context.Context, sigMgr *signaling.FallbackManager, deviceID, targetDevID string, puncher *network.UDPPuncher, tcpDirectMgr *network.TCPDirectManager, defaultPort int, netKey string) {
+	if sigMgr == nil || targetDevID == "" || targetDevID == deviceID {
+		return
+	}
+	myTCPAddr := ""
+	if puncher != nil && puncher.GetCachedSTUNAddr() != "" {
+		if h, _, err := net.SplitHostPort(puncher.GetCachedSTUNAddr()); err == nil {
+			tcpP := defaultPort
+			if tcpDirectMgr != nil && tcpDirectMgr.Port() > 0 {
+				tcpP = tcpDirectMgr.Port()
+			}
+			myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
+		}
+	}
+	if myTCPAddr == "" {
+		return
+	}
+	go func(tDev, myAddr string) {
+		tcpSig := &signaling.Payload{
+			DeviceID: deviceID,
+			TCPConnect: &signaling.TCPConnectSignal{
+				SenderDeviceID: deviceID,
+				TargetDeviceID: tDev,
+				SenderTCPAddr:  myAddr,
+				Timestamp:      time.Now().Unix(),
+			},
+			Timestamp: time.Now(),
+		}
+		toSend := tcpSig
+		if netKey != "" {
+			if enc, err := signaling.EncryptPayloadWithKey(tcpSig, netKey); err == nil && enc != nil {
+				toSend = enc
+			}
+		}
+		_ = sigMgr.Send(ctx, toSend)
+	}(targetDevID, myTCPAddr)
 }
 
 func resolveVirtualIP(cfg *config.Config, deviceID string) string {
@@ -2582,13 +2609,19 @@ func receiveLoop(
 				return
 			}
 			if len(p.Encrypted) > 0 {
-				activeKey := ""
-				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
-					activeKey = activeProf.NetworkKey
+				keysToTry := make([]string, 0, len(cfg.Profiles)+1)
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+					keysToTry = append(keysToTry, activeProf.NetworkKey)
 				}
-				if activeKey != "" {
-					if dec, decErr := signaling.DecryptPayloadWithKey(p, activeKey); decErr == nil && dec != nil {
+				for _, prof := range cfg.Profiles {
+					if prof.NetworkKey != "" && (len(keysToTry) == 0 || prof.NetworkKey != keysToTry[0]) {
+						keysToTry = append(keysToTry, prof.NetworkKey)
+					}
+				}
+				for _, k := range keysToTry {
+					if dec, decErr := signaling.DecryptPayloadWithKey(p, k); decErr == nil && dec != nil {
 						p = dec
+						break
 					}
 				}
 				if len(p.Encrypted) > 0 {
@@ -2864,6 +2897,8 @@ func receiveLoop(
 			preservedLat := int64(0)
 			lastDirect := time.Time{}
 			lastBilateral := time.Time{}
+			preservedTransport := ""
+			preservedDirectTCP := false
 			if existingPeer != nil {
 				lastDirect = existingPeer.LastDirectSeen
 				lastBilateral = existingPeer.LastBilateralSeen
@@ -2884,6 +2919,14 @@ func receiveLoop(
 					} else {
 						preservedLat = 0
 					}
+				}
+				if existingPeer.Transport == "tcp_tls" || existingPeer.Transport == "tcp_shadowtls" || (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) {
+					preservedTransport = "tcp_tls"
+					preservedDirectTCP = true
+					preservedDirect = true
+				} else {
+					preservedTransport = existingPeer.Transport
+					preservedDirectTCP = existingPeer.DirectTCP
 				}
 			}
 			if preservedEP == "" {
@@ -2916,6 +2959,8 @@ func receiveLoop(
 				LastBilateralSeen: lastBilateral,
 				Online:            true,
 				DirectP2P:         preservedDirect,
+				DirectTCP:         preservedDirectTCP,
+				Transport:         preservedTransport,
 				ActiveEndpoint:    preservedEP,
 				PingMs:            preservedLat,
 				AWG:               p.AWG,
@@ -2930,8 +2975,12 @@ func receiveLoop(
 			isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
 			if tcpDirectMgr != nil && !isForceUDP && !tcpDirectMgr.HasConn(p.DeviceID) {
 				defTCPPort := 8443
-				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
-					defTCPPort = activeProf.TCPPort
+				netKey := ""
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+					if activeProf.TCPPort > 0 {
+						defTCPPort = activeProf.TCPPort
+					}
+					netKey = activeProf.NetworkKey
 				}
 				tcpTarget := getSignalTCPTarget(p, defTCPPort)
 				if tcpTarget != "" {
@@ -2942,6 +2991,8 @@ func receiveLoop(
 					go func(devID, target string, localP int) {
 						_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
 					}(p.DeviceID, tcpTarget, lPort)
+					// Send coordinated simultaneous open signal so remote peer dials us simultaneously
+					sendTCPConnectSignal(ctx, sigMgr, deviceID, p.DeviceID, puncher, tcpDirectMgr, defTCPPort, netKey)
 				}
 			}
 
