@@ -1950,6 +1950,7 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 	uiServer.SetDeviceName(deviceID)
 	uiServer.SetVersion(Version)
 	uiServer.SetVirtualIP(virtualIP)
+	uiServer.SetTUNStatus(tunnel.GetTUNStatus())
 	uiServer.AddEvent("info", "NatBypass запущен", "version="+Version)
 
 

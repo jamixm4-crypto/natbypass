@@ -847,16 +847,17 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 			activePeers = append(activePeers, p)
 		}
 
-		// Дедупликация по уникальному DeviceID (чтобы в WebUI не дублировались фантомы одного устройства,
-		// но при этом не скрывались реальные разные клиенты со схожим/шаблонным Virtual IP!)
+		// Дедупликация по криптографическому PublicKey (первичный идентификатор узла),
+		// затем по уникальному VirtualIP, и затем по DeviceID
 		devMap := make(map[string]*peer.Peer)
 		for _, p := range activePeers {
-			devKey := p.DeviceID
-			if devKey == "" {
-				devKey = p.PublicKey
-			}
-			if devKey == "" {
-				devKey = p.VirtualIP
+			devKey := ""
+			if p.PublicKey != "" {
+				devKey = "pk:" + p.PublicKey
+			} else if p.VirtualIP != "" && !strings.HasSuffix(p.VirtualIP, ".1") && !strings.HasSuffix(p.VirtualIP, ".0") {
+				devKey = "vip:" + strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			} else {
+				devKey = "id:" + p.DeviceID
 			}
 			if devKey == "" {
 				continue
@@ -945,7 +946,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta28"
+		ver = "1.9.226-beta29"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -983,7 +984,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"gateway_ip":           s.state.GatewayIP,
 		"mtu":                  s.state.MTU,
 		"internet_live":        s.state.InternetLive,
-		"tun_status":           tunnel.GetTUNStatus(),
+		"tun_status":           s.getEffectiveTUNStatus(),
 		"transport_mode":       func() string {
 			if cfg != nil {
 				if prof := cfg.EnsureActiveProfile(); prof != nil && prof.TransportMode != "" {
@@ -1014,6 +1015,15 @@ func (s *Server) SetTUNStatus(ts tunnel.TUNStatus) {
 	if s.state != nil {
 		s.state.TUNStatus = &ts
 	}
+}
+
+// getEffectiveTUNStatus returns the active TUN status from either AppState or global tunnel status.
+func (s *Server) getEffectiveTUNStatus() tunnel.TUNStatus {
+	st := tunnel.GetTUNStatus()
+	if !st.Active && s.state != nil && s.state.TUNStatus != nil && s.state.TUNStatus.Active {
+		return *s.state.TUNStatus
+	}
+	return st
 }
 
 // handleRefreshIP — POST /api/refresh-ip — принудительное обновление IP
@@ -1901,7 +1911,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta28"
+		ver = "1.9.226-beta29"
 	}
 
 	vip := s.state.VirtualIP
@@ -1985,6 +1995,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			activeProf := cfg.EnsureActiveProfile()
 			return activeProf != nil && activeProf.NetworkKey != ""
 		}(),
+		"tun_status": s.getEffectiveTUNStatus(),
 	}
 
 	s.jsonResponse(w, http.StatusOK, data, "")

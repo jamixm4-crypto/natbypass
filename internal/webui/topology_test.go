@@ -179,7 +179,7 @@ func TestHandlePeers_DuplicateDefaultVIPNotSquashed(t *testing.T) {
 
 	srv := &Server{
 		registry: reg,
-		version:  "1.9.226-beta28",
+		version:  "1.9.226-beta29",
 		state: &AppState{
 			DeviceID: "my-self-node",
 		},
@@ -210,3 +210,95 @@ func TestHandlePeers_DuplicateDefaultVIPNotSquashed(t *testing.T) {
 		t.Fatalf("Expected 3 peers (no duplicate VIP squashing), but got %d", len(resp.Data))
 	}
 }
+
+func TestHandleDashboard_TUNStatusPresent(t *testing.T) {
+	reg := peer.NewRegistry()
+	srv := &Server{
+		registry: reg,
+		version:  "1.9.226-beta29",
+		state: &AppState{
+			DeviceID:  "self-node",
+			VirtualIP: "10.1.1.1/24",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleDashboard(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Ok   bool                   `json:"ok"`
+		Data map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse JSON response: %v", err)
+	}
+
+	tunSt, exists := resp.Data["tun_status"]
+	if !exists || tunSt == nil {
+		t.Fatalf("Expected 'tun_status' field in /api/dashboard response data, but got none")
+	}
+}
+
+func TestHandlePeers_SamePublicKeyDeduplicated(t *testing.T) {
+	reg := peer.NewRegistry()
+	now := time.Now()
+
+	// Older phantom record from before update
+	reg.Upsert(&peer.Peer{
+		DeviceID:  "Keenetic-old123",
+		Nickname:  "Keenetic Ultra",
+		PublicKey: "shared-pubkey-xyz987",
+		VirtualIP: "10.1.1.5",
+		Online:    false,
+		LastSeen:  now.Add(-20 * time.Second),
+	})
+
+	// Newer active record after update
+	reg.Upsert(&peer.Peer{
+		DeviceID:  "Keenetic-new456",
+		Nickname:  "Keenetic Ultra",
+		PublicKey: "shared-pubkey-xyz987",
+		VirtualIP: "10.1.1.5",
+		Online:    true,
+		LastSeen:  now,
+	})
+
+	srv := &Server{
+		registry: reg,
+		version:  "1.9.226-beta29",
+		state: &AppState{
+			DeviceID: "my-self-node",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/peers", nil)
+	w := httptest.NewRecorder()
+
+	srv.handlePeers(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Ok   bool         `json:"ok"`
+		Data []*peer.Peer `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse JSON response: %v", err)
+	}
+
+	if len(resp.Data) != 1 {
+		t.Fatalf("Expected exactly 1 peer after deduplicating same PublicKey, but got %d", len(resp.Data))
+	}
+	if resp.Data[0].DeviceID != "Keenetic-new456" {
+		t.Errorf("Expected active peer Keenetic-new456, got %s", resp.Data[0].DeviceID)
+	}
+}
+

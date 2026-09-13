@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta28"
+const Version = "1.9.226-beta29"
 
 
 
@@ -396,6 +396,9 @@ func StartEngine(configYAML string, tunFd int) string {
 	// UDPPort=0 (по умолчанию) → OS выделяет случайный порт (не конфликтует с AWG/WG)
 	var puncher *network.UDPPuncher
 	puncher, _ = network.NewUDPPuncher(cfg.Network.UDPPort, devID, cfg.Network.StunServers, func(remoteDevID string, rtt time.Duration, fromAddr string) {
+		if globalRegistry == nil {
+			return
+		}
 		if p, ok := globalRegistry.Get(remoteDevID); ok {
 			var myPubIP string
 			if puncher != nil {
@@ -1185,7 +1188,7 @@ func attachTUNLocked(tunFd int) {
 			}
 
 			// Прямой UDP пакет от пира подтверждает P2P доступность
-			if len(payload) >= 20 && (payload[0]>>4) == 4 {
+			if len(payload) >= 20 && (payload[0]>>4) == 4 && globalRegistry != nil {
 				srcVIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
 				if p, ok := globalRegistry.GetByVirtualIP(srcVIP); ok {
 					p.DirectP2P = true
@@ -2476,11 +2479,11 @@ func parseConfigFromString(data string) (*config.Config, error) {
 	}
 
 	activeProf := cfg.EnsureActiveProfile()
-	if activeProf.MQTTTopic == "" || activeProf.MQTTTopic == "natbypass/mynet/peers" || strings.HasPrefix(activeProf.MQTTTopic, "natbypass/mesh/") {
+	if activeProf.MQTTTopic == "" || activeProf.MQTTTopic == "natbypass/mynet/peers" {
 		if activeProf.NetworkKey != "" {
 			activeProf.MQTTTopic = crypto.DeriveBaseTopic(activeProf.NetworkKey, "")
 		} else {
-			activeProf.MQTTTopic = "v2/" + config.GenerateRandomHex(12)
+			activeProf.MQTTTopic = "v2/default"
 		}
 		cfg.SyncSignalingWithProfile(activeProf)
 	}

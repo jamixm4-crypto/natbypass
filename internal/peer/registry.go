@@ -500,6 +500,32 @@ func (r *Registry) Upsert(p *Peer) {
 
 		// 1. Конфликт одного и того же Virtual IP:
 		if cleanPVIP != "" && cleanExistingVIP != "" && cleanPVIP == cleanExistingVIP {
+			// А. Тот же криптографический узел перезапустился с новым DeviceID: вытеснение разрешено и необходимо
+			if p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey {
+				p.MergeFrom(existing)
+				staleConflictingIDs = append(staleConflictingIDs, id)
+				log.Info().
+					Str("old_id", id).
+					Str("new_id", p.DeviceID).
+					Str("vip", cleanPVIP).
+					Msg("🔄 Peer reconnected with same VirtualIP & PublicKey: seamlessly migrated and evicted old ghost ID")
+				continue
+			}
+
+			// Б. Переподключающийся Android или узел с идентичным DeviceName (после переустановки/перезапуска):
+			isSameDeviceType := (strings.HasPrefix(p.DeviceID, "Android-") && strings.HasPrefix(id, "Android-")) ||
+				(p.DeviceName != "" && existing.DeviceName != "" && strings.EqualFold(p.DeviceName, existing.DeviceName))
+			if isSameDeviceType {
+				p.MergeFrom(existing)
+				staleConflictingIDs = append(staleConflictingIDs, id)
+				log.Info().
+					Str("old_id", id).
+					Str("new_id", p.DeviceID).
+					Str("vip", cleanPVIP).
+					Msg("🔄 Peer reconnected with matching name/type: migrated and evicted old ghost ID")
+				continue
+			}
+
 			existingIsActive := existing.Online && now.Sub(existing.LastSeen) < constants.PeerOfflineThreshold
 
 			if existingIsActive {
@@ -526,7 +552,7 @@ func (r *Registry) Upsert(p *Peer) {
 					continue
 				}
 
-				// 🛡️ Защита от Peer Displacement: активный узел НЕЛЬЗЯ вытеснить, даже при совпадении ключа или времени!
+				// 🛡️ Защита от Peer Displacement: неизвестный чужой узел с другим ключом НЕ МОЖЕТ вытеснить активный узел!
 				p.IPConflict = true
 				existing.IPConflict = true
 				p.VirtualIP = ""
@@ -548,8 +574,24 @@ func (r *Registry) Upsert(p *Peer) {
 			continue
 		}
 
-		// 2. Совпадение Public Key (перезапуск узла с новым DeviceID или попытка подделки):
+		// 2. Совпадение Public Key (тот же криптографический узел обновился или перезапустился с новым DeviceID):
 		if p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey {
+			// Если совпадает VirtualIP или DeviceName/Nickname: это гарантированно легитимный перезапуск одного узла
+			sameIdentity := (cleanPVIP != "" && cleanExistingVIP != "" && cleanPVIP == cleanExistingVIP) ||
+				(p.DeviceName != "" && existing.DeviceName != "" && strings.EqualFold(p.DeviceName, existing.DeviceName)) ||
+				(p.Nickname != "" && existing.Nickname != "" && strings.EqualFold(p.Nickname, existing.Nickname))
+
+			if sameIdentity {
+				p.MergeFrom(existing)
+				staleConflictingIDs = append(staleConflictingIDs, id)
+				log.Info().
+					Str("old_id", id).
+					Str("new_id", p.DeviceID).
+					Str("public_key", p.PublicKey).
+					Msg("🔄 Peer reconnected with matching identity: seamlessly migrated state and evicted old ghost ID")
+				continue
+			}
+
 			existingIsActive := existing.Online && now.Sub(existing.LastSeen) < constants.PeerOfflineThreshold
 			if existingIsActive {
 				log.Warn().
@@ -565,17 +607,6 @@ func (r *Registry) Upsert(p *Peer) {
 				staleConflictingIDs = append(staleConflictingIDs, id)
 			}
 			continue
-		}
-
-		// 3. Переподключающийся Android с меняющимся DeviceID:
-		if strings.HasPrefix(p.DeviceID, "Android-") && strings.HasPrefix(id, "Android-") {
-			if cleanPVIP != "" && cleanExistingVIP == cleanPVIP {
-				existingIsStale := existing.LastSeen.IsZero() || !existing.Online || now.Sub(existing.LastSeen) > constants.PeerOfflineThreshold
-				if existingIsStale {
-					staleConflictingIDs = append(staleConflictingIDs, id)
-				}
-				continue
-			}
 		}
 	}
 	for _, staleID := range staleConflictingIDs {
@@ -638,13 +669,40 @@ func (r *Registry) Upsert(p *Peer) {
 	}
 }
 
-// List returns a list of all peers, sorted by DeviceID.
+// List returns a list of all peers, deduplicated and sorted by DeviceID.
 func (r *Registry) List() []*Peer {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var list []*Peer
+	devMap := make(map[string]*Peer, len(r.peers))
 	for _, p := range r.peers {
+		if p == nil {
+			continue
+		}
+		key := ""
+		if p.PublicKey != "" {
+			key = "pk:" + p.PublicKey
+		} else if p.VirtualIP != "" && !strings.HasSuffix(p.VirtualIP, ".1") && !strings.HasSuffix(p.VirtualIP, ".0") {
+			key = "vip:" + strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		} else {
+			key = "id:" + p.DeviceID
+		}
+
+		existing, exists := devMap[key]
+		if !exists {
+			devMap[key] = p
+			continue
+		}
+		// Pick the more active or fresher peer record
+		if (!existing.Online && p.Online) ||
+			(!existing.DirectP2P && p.DirectP2P) ||
+			p.LastSeen.After(existing.LastSeen) {
+			devMap[key] = p
+		}
+	}
+
+	list := make([]*Peer, 0, len(devMap))
+	for _, p := range devMap {
 		list = append(list, p)
 	}
 
