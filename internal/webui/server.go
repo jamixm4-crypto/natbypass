@@ -947,7 +947,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta34"
+		ver = "1.9.226-beta35"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1110,6 +1110,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			cfg = &config.Config{}
 			cfg.WebUI.Port = s.port
 			cfg.WebUI.Enabled = true
+		}
+		if runtime.GOOS == "windows" {
+			cfg.App.AutoStart = autostart.IsAutoStartEnabled("NatBypass")
 		}
 		s.jsonResponse(w, http.StatusOK, cfg, "")
 
@@ -1912,7 +1915,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta34"
+		ver = "1.9.226-beta35"
 	}
 
 	vip := s.state.VirtualIP
@@ -2568,6 +2571,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	cfg.App.SaveLogsToDisk = req.SaveLogsToDisk
 	cfg.App.ShowDiagnostics = req.ShowDiagnostics
 	cfg.App.BetaChannel = req.BetaChannel
+	cfg.App.AutoStart = req.AutoStart
 	if req.AutoOpenBrowser != nil {
 		cfg.WebUI.AutoOpenBrowser = req.AutoOpenBrowser
 	}

@@ -4884,71 +4884,101 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         const json = await res.json();
         if (json.ok && json.data) {
           const c = json.data;
-          const app = c.app || {};
-          const webui = c.webui || {};
-          if (c.app) {
-            if (document.getElementById('cfgNick')) document.getElementById('cfgNick').value = c.app.device_name || '';
-            if (document.getElementById('cfgInterval')) document.getElementById('cfgInterval').value = c.app.publish_interval || 8;
-            const saveLogs = (app.save_logs_to_disk !== undefined) ? app.save_logs_to_disk : (app.save_logs ?? app.SaveLogsToDisk ?? false);
-            if (document.getElementById('chkSaveLogs')) document.getElementById('chkSaveLogs').checked = !!saveLogs;
-            const showDiag = (webui.show_diagnostics !== undefined) ? webui.show_diagnostics : 
-              ((app.show_diagnostics !== undefined) ? app.show_diagnostics : (app.ShowDiagnostics ?? false));
-            if (document.getElementById('chkShowDiag')) document.getElementById('chkShowDiag').checked = !!showDiag;
-            toggleDiagVisibility(showDiag);
-            const autoOpen = (webui.auto_open_browser !== undefined) ? webui.auto_open_browser : true;
-            if (document.getElementById('chkAutoOpenBrowser')) {
-              document.getElementById('chkAutoOpenBrowser').checked = !!autoOpen;
-            }
-          }
-          if (c.network) {
-            if (document.getElementById('cfgVirtualIP')) {
-              document.getElementById('cfgVirtualIP').value = c.network.address || '';
-            }
-            if (document.getElementById('chkUpnp')) {
-              document.getElementById('chkUpnp').checked = c.network.upnp_enabled || false;
-            }
-            if (document.getElementById('chkDoH')) {
-              document.getElementById('chkDoH').checked = c.network.doh_enabled || false;
-            }
-            if (document.getElementById('cfgTcpPort')) {
-              document.getElementById('cfgTcpPort').value = c.network.tcp_port || 8443;
-            }
-            if (document.getElementById('cfgTransportMode')) {
-              document.getElementById('cfgTransportMode').value = c.network.transport_mode || 'auto';
-            }
-            if (document.getElementById('cfgTLSMode')) {
-              document.getElementById('cfgTLSMode').value = c.network.tls_mode || 'shadowtls';
-            }
-            const chkExit = document.getElementById('cfgAllowExitNode') || document.getElementById('chkAllowExitNode');
-            if (chkExit) chkExit.checked = c.network.allow_exit_node || false;
-            currentSelectedExitNode = c.network.selected_exit_node || '';
-            const inpSub = document.getElementById('cfgAdvertisedSubnets') || document.getElementById('txtAdvSubnets');
-            if (inpSub && c.network.advertised_subnets && c.network.advertised_subnets.length > 0) {
-              inpSub.value = c.network.advertised_subnets.join(', ');
-            }
-          }
-          if (c.wireguard) {
-            if (document.getElementById('cfgWgPort')) {
-              document.getElementById('cfgWgPort').value = c.wireguard.listen_port || 51820;
-            }
-            if (document.getElementById('cfgMTU')) {
-              document.getElementById('cfgMTU').value = c.wireguard.mtu || 1420;
-            }
-          }
-          if (c.signaling && c.signaling.channels) {
-            c.signaling.channels.forEach(ch => {
-              if (ch.type === 'telegram' && ch.params) {
-                if (document.getElementById('cfgTgToken')) document.getElementById('cfgTgToken').value = ch.params.token || '';
-                if (document.getElementById('cfgTgChat')) document.getElementById('cfgTgChat').value = ch.params.chat_id || '';
-                if (document.getElementById('cfgTgProxy')) document.getElementById('cfgTgProxy').value = ch.params.proxy || '';
-              }
-              if (ch.type === 'mqtt' && ch.params) {
-                if (document.getElementById('cfgMqttBroker')) document.getElementById('cfgMqttBroker').value = ch.params.broker_url || '';
-                if (document.getElementById('cfgMqttTopic')) document.getElementById('cfgMqttTopic').value = ch.params.topic || '';
-                if (document.getElementById('cfgMqttUser')) document.getElementById('cfgMqttUser').value = ch.params.username || '';
-                if (document.getElementById('cfgMqttPass')) document.getElementById('cfgMqttPass').value = ch.params.password || '';
+          const app = c.app || c.App || {};
+          const webui = c.webui || c.WebUI || {};
+          const network = c.network || c.Network || {};
+          const wireguard = c.wireguard || c.WireGuard || {};
+          const signaling = c.signaling || c.Signaling || {};
 
-                const curBr = ch.params.broker_url || 'tcp://broker.emqx.io:1883';
+          // App / System Settings
+          if (document.getElementById('cfgNick')) {
+            document.getElementById('cfgNick').value = app.device_name || app.DeviceName || '';
+          }
+          if (document.getElementById('cfgInterval')) {
+            document.getElementById('cfgInterval').value = app.publish_interval || app.PublishInterval || 8;
+          }
+          const saveLogs = (app.save_logs_to_disk !== undefined) ? app.save_logs_to_disk : 
+            ((app.save_logs !== undefined) ? app.save_logs : (app.SaveLogsToDisk ?? app.SaveLogs ?? false));
+          if (document.getElementById('chkSaveLogs')) {
+            document.getElementById('chkSaveLogs').checked = !!saveLogs;
+          }
+          const showDiag = (webui.show_diagnostics !== undefined) ? webui.show_diagnostics : 
+            ((app.show_diagnostics !== undefined) ? app.show_diagnostics : 
+            (app.ShowDiagnostics ?? webui.ShowDiagnostics ?? false));
+          if (document.getElementById('chkShowDiag')) {
+            document.getElementById('chkShowDiag').checked = !!showDiag;
+          }
+          toggleDiagVisibility(showDiag);
+
+          const autoOpen = (webui.auto_open_browser !== undefined) ? webui.auto_open_browser : 
+            (webui.AutoOpenBrowser ?? true);
+          if (document.getElementById('chkAutoOpenBrowser')) {
+            document.getElementById('chkAutoOpenBrowser').checked = !!autoOpen;
+          }
+
+          if (document.getElementById('chkAutoStart')) {
+            const autoStartVal = (app.autostart !== undefined) ? app.autostart : 
+              (app.AutoStart ?? false);
+            document.getElementById('chkAutoStart').checked = !!autoStartVal;
+          }
+
+          // Network Settings
+          if (document.getElementById('cfgVirtualIP')) {
+            document.getElementById('cfgVirtualIP').value = network.address || network.Address || '';
+          }
+          if (document.getElementById('chkUpnp')) {
+            document.getElementById('chkUpnp').checked = (network.upnp_enabled !== undefined) ? network.upnp_enabled : (network.UpnpEnabled || false);
+          }
+          if (document.getElementById('chkDoH')) {
+            document.getElementById('chkDoH').checked = (network.doh_enabled !== undefined) ? network.doh_enabled : (network.DoHEnabled || false);
+          }
+          if (document.getElementById('cfgTcpPort')) {
+            document.getElementById('cfgTcpPort').value = network.tcp_port || network.TCPPort || 8443;
+          }
+          if (document.getElementById('cfgTransportMode')) {
+            document.getElementById('cfgTransportMode').value = network.transport_mode || network.TransportMode || 'auto';
+          }
+          if (document.getElementById('cfgTLSMode')) {
+            document.getElementById('cfgTLSMode').value = network.tls_mode || network.TLSMode || 'shadowtls';
+          }
+          const chkExit = document.getElementById('cfgAllowExitNode') || document.getElementById('chkAllowExitNode');
+          if (chkExit) {
+            chkExit.checked = (network.allow_exit_node !== undefined) ? network.allow_exit_node : (network.AllowExitNode || false);
+          }
+          currentSelectedExitNode = network.selected_exit_node || network.SelectedExitNode || '';
+          const inpSub = document.getElementById('cfgAdvertisedSubnets') || document.getElementById('txtAdvSubnets');
+          const advSubnets = network.advertised_subnets || network.AdvertisedSubnets || [];
+          if (inpSub && advSubnets.length > 0) {
+            inpSub.value = advSubnets.join(', ');
+          }
+
+          // WireGuard Settings
+          if (document.getElementById('cfgWgPort')) {
+            document.getElementById('cfgWgPort').value = wireguard.listen_port || wireguard.ListenPort || 51820;
+          }
+          if (document.getElementById('cfgMTU')) {
+            document.getElementById('cfgMTU').value = wireguard.mtu || wireguard.MTU || 1420;
+          }
+
+          // Signaling Channels
+          const channels = signaling.channels || signaling.Channels || [];
+          if (channels && channels.length > 0) {
+            channels.forEach(ch => {
+              const chType = ch.type || ch.Type;
+              const chParams = ch.params || ch.Params || {};
+              if (chType === 'telegram') {
+                if (document.getElementById('cfgTgToken')) document.getElementById('cfgTgToken').value = chParams.token || chParams.Token || '';
+                if (document.getElementById('cfgTgChat')) document.getElementById('cfgTgChat').value = chParams.chat_id || chParams.ChatID || chParams.ChatId || '';
+                if (document.getElementById('cfgTgProxy')) document.getElementById('cfgTgProxy').value = chParams.proxy || chParams.Proxy || '';
+              }
+              if (chType === 'mqtt') {
+                const brUrl = chParams.broker_url || chParams.BrokerURL || chParams.BrokerUrl || '';
+                if (document.getElementById('cfgMqttBroker')) document.getElementById('cfgMqttBroker').value = brUrl;
+                if (document.getElementById('cfgMqttTopic')) document.getElementById('cfgMqttTopic').value = chParams.topic || chParams.Topic || '';
+                if (document.getElementById('cfgMqttUser')) document.getElementById('cfgMqttUser').value = chParams.username || chParams.Username || '';
+                if (document.getElementById('cfgMqttPass')) document.getElementById('cfgMqttPass').value = chParams.password || chParams.Password || '';
+
+                const curBr = brUrl || 'tcp://broker.emqx.io:1883';
                 const selPreset = document.getElementById('selMqttPreset');
                 if (selPreset) {
                   let matched = false;
@@ -4967,7 +4997,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           updateChannelUI(currentChannelMode || 'parallel');
 
           // Sync Beta switch in Settings tab
-          const isBeta = (c.app && c.app.beta_channel !== undefined) ? !!c.app.beta_channel : (localStorage.getItem('natbypass_beta_channel') === '1');
+          const isBeta = (app.beta_channel !== undefined) ? !!app.beta_channel : 
+            ((app.BetaChannel !== undefined) ? !!app.BetaChannel : (localStorage.getItem('natbypass_beta_channel') === '1'));
           localStorage.setItem('natbypass_beta_channel', isBeta ? '1' : '0');
           const sToggle = document.getElementById('toggleBetaSettings');
           if (sToggle) sToggle.checked = isBeta;
@@ -4977,7 +5008,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           if (sWarn) sWarn.style.display = isBeta ? 'block' : 'none';
           loadSignalingBrokers();
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error('loadConfig error', e);
+      }
     }
 
     function onMqttPresetChange(val) {

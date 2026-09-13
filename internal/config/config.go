@@ -26,84 +26,85 @@ const HeaderEncryptedConfig = "# NATBYPASS_ENCRYPTED_CONFIG:v1"
 
 // AppConfig — базовые настройки приложения
 type AppConfig struct {
-	Name            string            `mapstructure:"name" yaml:"name"`
-	Version         string            `mapstructure:"version" yaml:"version,omitempty"`
-	LogLevel        string            `mapstructure:"log_level" yaml:"log_level"`
-	LogFile         string            `mapstructure:"log_file" yaml:"log_file,omitempty"`
-	DeviceID        string            `mapstructure:"device_id" yaml:"device_id,omitempty"`
-	DeviceName      string            `mapstructure:"device_name" yaml:"device_name"`
+	Name            string            `mapstructure:"name" yaml:"name" json:"name"`
+	Version         string            `mapstructure:"version" yaml:"version,omitempty" json:"version,omitempty"`
+	LogLevel        string            `mapstructure:"log_level" yaml:"log_level" json:"log_level"`
+	LogFile         string            `mapstructure:"log_file" yaml:"log_file,omitempty" json:"log_file,omitempty"`
+	DeviceID        string            `mapstructure:"device_id" yaml:"device_id,omitempty" json:"device_id,omitempty"`
+	DeviceName      string            `mapstructure:"device_name" yaml:"device_name" json:"device_name"`
 	SaveLogsToDisk  bool              `mapstructure:"save_logs" yaml:"save_logs" json:"save_logs_to_disk"`
 	ShowDiagnostics bool              `mapstructure:"show_diagnostics" yaml:"show_diagnostics" json:"show_diagnostics"`
 	BetaChannel     bool              `mapstructure:"beta_channel" yaml:"beta_channel,omitempty" json:"beta_channel"`
-	AddressBook     map[string]string `mapstructure:"address_book" yaml:"address_book,omitempty"`
-	PublishInterval int               `mapstructure:"publish_interval" yaml:"publish_interval"`
+	AutoStart       bool              `mapstructure:"autostart" yaml:"autostart,omitempty" json:"autostart"`
+	AddressBook     map[string]string `mapstructure:"address_book" yaml:"address_book,omitempty" json:"address_book,omitempty"`
+	PublishInterval int               `mapstructure:"publish_interval" yaml:"publish_interval" json:"publish_interval"`
 }
 
 // WebUIConfig — настройки встроенного Web UI
 type WebUIConfig struct {
-	Enabled         bool     `mapstructure:"enabled" yaml:"enabled"`
-	Port            int      `mapstructure:"port" yaml:"port"`
-	Username        string   `mapstructure:"username" yaml:"username,omitempty"`
-	Password        string   `mapstructure:"password" yaml:"password,omitempty"`
-	AllowedIPs      []string `mapstructure:"allowed_ips" yaml:"allowed_ips,omitempty"`
+	Enabled         bool     `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	Port            int      `mapstructure:"port" yaml:"port" json:"port"`
+	Username        string   `mapstructure:"username" yaml:"username,omitempty" json:"username,omitempty"`
+	Password        string   `mapstructure:"password" yaml:"password,omitempty" json:"password,omitempty"`
+	AllowedIPs      []string `mapstructure:"allowed_ips" yaml:"allowed_ips,omitempty" json:"allowed_ips,omitempty"`
 	AutoOpenBrowser *bool    `mapstructure:"auto_open_browser" json:"auto_open_browser,omitempty" yaml:"auto_open_browser,omitempty"`
 }
 
 // NetworkConfig — сетевые настройки
 type NetworkConfig struct {
-	Address            string   `mapstructure:"address" yaml:"address,omitempty"`
-	StunServers        []string `mapstructure:"stun_servers" yaml:"stun_servers,omitempty"`
+	Address            string   `mapstructure:"address" yaml:"address,omitempty" json:"address,omitempty"`
+	StunServers        []string `mapstructure:"stun_servers" yaml:"stun_servers,omitempty" json:"stun_servers,omitempty"`
 
-	UpnpEnabled        bool     `mapstructure:"upnp_enabled" yaml:"upnp_enabled"`
-	IPApis             []string `mapstructure:"ip_apis" yaml:"ip_apis,omitempty"`
-	IPTimeout          int      `mapstructure:"ip_timeout" yaml:"ip_timeout,omitempty"`
-	DoHEnabled         bool     `mapstructure:"doh_enabled" yaml:"doh_enabled,omitempty"`
-	DoHProvider        string   `mapstructure:"doh_provider" yaml:"doh_provider,omitempty"`
-	Socks5Proxy        string   `mapstructure:"socks5_proxy" yaml:"socks5_proxy,omitempty"`
-	AllowExitNode      bool     `mapstructure:"allow_exit_node" yaml:"allow_exit_node"`
-	AdvertisedSubnets  []string `mapstructure:"advertised_subnets" yaml:"advertised_subnets,omitempty"`
-	SelectedExitNode   string   `mapstructure:"selected_exit_node" yaml:"selected_exit_node,omitempty"`
-	ActiveSubnetRoutes []string `mapstructure:"active_subnet_routes" yaml:"active_subnet_routes,omitempty"`
+	UpnpEnabled        bool     `mapstructure:"upnp_enabled" yaml:"upnp_enabled" json:"upnp_enabled"`
+	IPApis             []string `mapstructure:"ip_apis" yaml:"ip_apis,omitempty" json:"ip_apis,omitempty"`
+	IPTimeout          int      `mapstructure:"ip_timeout" yaml:"ip_timeout,omitempty" json:"ip_timeout,omitempty"`
+	DoHEnabled         bool     `mapstructure:"doh_enabled" yaml:"doh_enabled,omitempty" json:"doh_enabled,omitempty"`
+	DoHProvider        string   `mapstructure:"doh_provider" yaml:"doh_provider,omitempty" json:"doh_provider,omitempty"`
+	Socks5Proxy        string   `mapstructure:"socks5_proxy" yaml:"socks5_proxy,omitempty" json:"socks5_proxy,omitempty"`
+	AllowExitNode      bool     `mapstructure:"allow_exit_node" yaml:"allow_exit_node" json:"allow_exit_node"`
+	AdvertisedSubnets  []string `mapstructure:"advertised_subnets" yaml:"advertised_subnets,omitempty" json:"advertised_subnets,omitempty"`
+	SelectedExitNode   string   `mapstructure:"selected_exit_node" yaml:"selected_exit_node,omitempty" json:"selected_exit_node,omitempty"`
+	ActiveSubnetRoutes []string `mapstructure:"active_subnet_routes" yaml:"active_subnet_routes,omitempty" json:"active_subnet_routes,omitempty"`
 	// UDPPort — локальный порт UDP Hole Punch сокета.
 	// 0 (по умолчанию) = OS назначает случайный порт.
 	// Задайте явно (например, 47832) если нужен фиксированный порт для firewall-правил.
 	// НЕ используйте 51820 если на этой машине работает локальный WireGuard/AmneziaWG!
-	UDPPort int `mapstructure:"udp_port" yaml:"udp_port,omitempty"`
+	UDPPort int `mapstructure:"udp_port" yaml:"udp_port,omitempty" json:"udp_port,omitempty"`
 	// TCPPort — локальный порт TCP слушателя (ShadowTLS / mTLS).
 	// По умолчанию 8443 (альтернативные порты: 4443, 47832).
-	TCPPort int `mapstructure:"tcp_port" yaml:"tcp_port,omitempty"`
+	TCPPort int `mapstructure:"tcp_port" yaml:"tcp_port,omitempty" json:"tcp_port,omitempty"`
 	// TransportMode определяет стратегию выбора транспорта: "auto" (по умолчанию), "force_tcp", "force_udp"
-	TransportMode string `mapstructure:"transport_mode" yaml:"transport_mode,omitempty"`
+	TransportMode string `mapstructure:"transport_mode" yaml:"transport_mode,omitempty" json:"transport_mode,omitempty"`
 	// TLSMode определяет режим TLS: "shadowtls" (по умолчанию, стелс-маскировка DPI) или "standard_mtls" (взаимные сертификаты)
-	TLSMode string `mapstructure:"tls_mode" yaml:"tls_mode,omitempty"`
+	TLSMode string `mapstructure:"tls_mode" yaml:"tls_mode,omitempty" json:"tls_mode,omitempty"`
 	// EnableTCPFallback включает обфусцированный TCP P2P фэлбэк (ShadowTLS v3) при блокировке UDP
-	EnableTCPFallback bool `mapstructure:"enable_tcp_fallback" yaml:"enable_tcp_fallback"`
+	EnableTCPFallback bool `mapstructure:"enable_tcp_fallback" yaml:"enable_tcp_fallback" json:"enable_tcp_fallback"`
 	// ObfuscationSNI — домен маскировки TLS 1.3 ClientHello (по умолчанию gateway.icloud.com)
-	ObfuscationSNI string `mapstructure:"obfuscation_sni" yaml:"obfuscation_sni,omitempty"`
+	ObfuscationSNI string `mapstructure:"obfuscation_sni" yaml:"obfuscation_sni,omitempty" json:"obfuscation_sni,omitempty"`
 }
 
 // ChannelConfig — настройки одного сигнального канала
 type ChannelConfig struct {
-	Type     string            `mapstructure:"type" yaml:"type"`
-	Priority int               `mapstructure:"priority" yaml:"priority"`
-	Enabled  bool              `mapstructure:"enabled" yaml:"enabled"`
-	Params   map[string]string `mapstructure:"params" yaml:"params,omitempty"`
+	Type     string            `mapstructure:"type" yaml:"type" json:"type"`
+	Priority int               `mapstructure:"priority" yaml:"priority" json:"priority"`
+	Enabled  bool              `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	Params   map[string]string `mapstructure:"params" yaml:"params,omitempty" json:"params,omitempty"`
 }
 
 // SignalingConfig — конфигурация всех сигнальных каналов
 type SignalingConfig struct {
-	DefaultChannel string          `mapstructure:"default_channel" yaml:"default_channel,omitempty"`
-	MQTTBroker     string          `mapstructure:"mqtt_broker" yaml:"mqtt_broker,omitempty"`
-	MQTTTopic      string          `mapstructure:"mqtt_topic" yaml:"mqtt_topic,omitempty"`
-	Channels       []ChannelConfig `mapstructure:"channels" yaml:"channels,omitempty"`
+	DefaultChannel string          `mapstructure:"default_channel" yaml:"default_channel,omitempty" json:"default_channel,omitempty"`
+	MQTTBroker     string          `mapstructure:"mqtt_broker" yaml:"mqtt_broker,omitempty" json:"mqtt_broker,omitempty"`
+	MQTTTopic      string          `mapstructure:"mqtt_topic" yaml:"mqtt_topic,omitempty" json:"mqtt_topic,omitempty"`
+	Channels       []ChannelConfig `mapstructure:"channels" yaml:"channels,omitempty" json:"channels,omitempty"`
 }
 
 
 // WGPeerConfig — настройки одного WG пира
 type WGPeerConfig struct {
-	PublicKey string   `mapstructure:"public_key" yaml:"public_key"`
-	Endpoint  string   `mapstructure:"endpoint" yaml:"endpoint,omitempty"`
-	AllowedIP []string `mapstructure:"allowed_ips" yaml:"allowed_ips,omitempty"`
+	PublicKey string   `mapstructure:"public_key" yaml:"public_key" json:"public_key"`
+	Endpoint  string   `mapstructure:"endpoint" yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+	AllowedIP []string `mapstructure:"allowed_ips" yaml:"allowed_ips,omitempty" json:"allowed_ips,omitempty"`
 }
 
 // AWGConfig — параметры обфускации AmneziaWG 2.0 / 3.1
@@ -130,18 +131,18 @@ type AWGConfig struct {
 
 // WireGuardConfig — настройки WireGuard и AmneziaWG 2.0 / 3.1
 type WireGuardConfig struct {
-	Enabled             bool           `mapstructure:"enabled" yaml:"enabled"`
-	Interface           string         `mapstructure:"interface" yaml:"interface,omitempty"`
-	ListenPort          int            `mapstructure:"listen_port" yaml:"listen_port,omitempty"`
-	PrivateKeyFile      string         `mapstructure:"private_key_file" yaml:"private_key_file,omitempty"`
-	Address             string         `mapstructure:"address" yaml:"address,omitempty"`
-	DNS                 string         `mapstructure:"dns" yaml:"dns,omitempty"`
-	MTU                 int            `mapstructure:"mtu" yaml:"mtu,omitempty"`
-	AWGVersion          string         `mapstructure:"awg_version" yaml:"awg_version,omitempty"` // "2.0" | "3.1"
-	AWGPreset           string         `mapstructure:"awg_preset" yaml:"awg_preset,omitempty"`   // "awg20_legacy" | "awg31_balanced" | "awg31_strict" | "anti_tspu"
-	HeaderProtectionKey string         `mapstructure:"header_protection_key" yaml:"header_protection_key,omitempty"`
-	AWG                 AWGConfig      `mapstructure:"awg" yaml:"awg,omitempty"`
-	Peers               []WGPeerConfig `mapstructure:"peers" yaml:"peers,omitempty"`
+	Enabled             bool           `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	Interface           string         `mapstructure:"interface" yaml:"interface,omitempty" json:"interface,omitempty"`
+	ListenPort          int            `mapstructure:"listen_port" yaml:"listen_port,omitempty" json:"listen_port,omitempty"`
+	PrivateKeyFile      string         `mapstructure:"private_key_file" yaml:"private_key_file,omitempty" json:"private_key_file,omitempty"`
+	Address             string         `mapstructure:"address" yaml:"address,omitempty" json:"address,omitempty"`
+	DNS                 string         `mapstructure:"dns" yaml:"dns,omitempty" json:"dns,omitempty"`
+	MTU                 int            `mapstructure:"mtu" yaml:"mtu,omitempty" json:"mtu,omitempty"`
+	AWGVersion          string         `mapstructure:"awg_version" yaml:"awg_version,omitempty" json:"awg_version,omitempty"` // "2.0" | "3.1"
+	AWGPreset           string         `mapstructure:"awg_preset" yaml:"awg_preset,omitempty" json:"awg_preset,omitempty"`   // "awg20_legacy" | "awg31_balanced" | "awg31_strict" | "anti_tspu"
+	HeaderProtectionKey string         `mapstructure:"header_protection_key" yaml:"header_protection_key,omitempty" json:"header_protection_key,omitempty"`
+	AWG                 AWGConfig      `mapstructure:"awg" yaml:"awg,omitempty" json:"awg,omitempty"`
+	Peers               []WGPeerConfig `mapstructure:"peers" yaml:"peers,omitempty" json:"peers,omitempty"`
 }
 
 // GetAWGParams возвращает параметры на основе конфигурации AmneziaWG
@@ -312,42 +313,42 @@ func (c *Config) GetEffectiveMTU() int {
 
 // CryptoConfig — настройки шифрования NaCl и WireGuard
 type CryptoConfig struct {
-	PublicKey    string   `mapstructure:"public_key" yaml:"public_key,omitempty"`
-	PrivateKey   string   `mapstructure:"private_key" yaml:"private_key,omitempty"`
-	WGPublicKey  string   `mapstructure:"wg_public_key" yaml:"wg_public_key,omitempty"`
-	WGPrivateKey string   `mapstructure:"wg_private_key" yaml:"wg_private_key,omitempty"`
-	KeysFile     string   `mapstructure:"keys_file" yaml:"keys_file,omitempty"`
-	TrustedKeys  []string `mapstructure:"trusted_keys" yaml:"trusted_keys,omitempty"`
+	PublicKey    string   `mapstructure:"public_key" yaml:"public_key,omitempty" json:"public_key,omitempty"`
+	PrivateKey   string   `mapstructure:"private_key" yaml:"private_key,omitempty" json:"private_key,omitempty"`
+	WGPublicKey  string   `mapstructure:"wg_public_key" yaml:"wg_public_key,omitempty" json:"wg_public_key,omitempty"`
+	WGPrivateKey string   `mapstructure:"wg_private_key" yaml:"wg_private_key,omitempty" json:"wg_private_key,omitempty"`
+	KeysFile     string   `mapstructure:"keys_file" yaml:"keys_file,omitempty" json:"keys_file,omitempty"`
+	TrustedKeys  []string `mapstructure:"trusted_keys" yaml:"trusted_keys,omitempty" json:"trusted_keys,omitempty"`
 }
 
 // DaemonConfig — настройки демона
 // RelayConfig — настройки резервного WSS / HTTPS релея (порт 443) и быстрого UDP-релея.
 type RelayConfig struct {
-	Enabled    bool   `mapstructure:"enabled" yaml:"enabled"`
-	Server     string `mapstructure:"server" yaml:"server,omitempty"`
-	WSSServer  string `mapstructure:"wss_server" yaml:"wss_server,omitempty"`
-	UDPServer  string `mapstructure:"udp_server" yaml:"udp_server,omitempty"`
-	SessionKey string `mapstructure:"session_key" yaml:"session_key,omitempty"`
+	Enabled    bool   `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	Server     string `mapstructure:"server" yaml:"server,omitempty" json:"server,omitempty"`
+	WSSServer  string `mapstructure:"wss_server" yaml:"wss_server,omitempty" json:"wss_server,omitempty"`
+	UDPServer  string `mapstructure:"udp_server" yaml:"udp_server,omitempty" json:"udp_server,omitempty"`
+	SessionKey string `mapstructure:"session_key" yaml:"session_key,omitempty" json:"session_key,omitempty"`
 }
 
 type DaemonConfig struct {
-	PidFile       string `mapstructure:"pid_file" yaml:"pid_file,omitempty"`
-	SyslogEnabled bool   `mapstructure:"syslog_enabled" yaml:"syslog_enabled,omitempty"`
-	RestartDelay  int    `mapstructure:"restart_delay" yaml:"restart_delay,omitempty"`
+	PidFile       string `mapstructure:"pid_file" yaml:"pid_file,omitempty" json:"pid_file,omitempty"`
+	SyslogEnabled bool   `mapstructure:"syslog_enabled" yaml:"syslog_enabled,omitempty" json:"syslog_enabled,omitempty"`
+	RestartDelay  int    `mapstructure:"restart_delay" yaml:"restart_delay,omitempty" json:"restart_delay,omitempty"`
 }
 
 // Config — корневая структура конфигурации
 type Config struct {
-	App             AppConfig       `mapstructure:"app" yaml:"app"`
-	WebUI           WebUIConfig     `mapstructure:"web_ui" yaml:"web_ui"`
-	Network         NetworkConfig   `mapstructure:"network" yaml:"network"`
-	Signaling       SignalingConfig `mapstructure:"signaling" yaml:"signaling"`
-	WireGuard       WireGuardConfig `mapstructure:"wireguard" yaml:"wireguard"`
-	Crypto          CryptoConfig    `mapstructure:"crypto" yaml:"crypto"`
-	Relay           RelayConfig     `mapstructure:"relay" yaml:"relay,omitempty"`
-	Daemon          DaemonConfig    `mapstructure:"daemon" yaml:"daemon"`
-	Profiles        []Profile       `mapstructure:"profiles" yaml:"profiles,omitempty"`
-	ActiveProfileID string          `mapstructure:"active_profile_id" yaml:"active_profile_id,omitempty"`
+	App             AppConfig       `mapstructure:"app" yaml:"app" json:"app"`
+	WebUI           WebUIConfig     `mapstructure:"web_ui" yaml:"web_ui" json:"web_ui"`
+	Network         NetworkConfig   `mapstructure:"network" yaml:"network" json:"network"`
+	Signaling       SignalingConfig `mapstructure:"signaling" yaml:"signaling" json:"signaling"`
+	WireGuard       WireGuardConfig `mapstructure:"wireguard" yaml:"wireguard" json:"wireguard"`
+	Crypto          CryptoConfig    `mapstructure:"crypto" yaml:"crypto" json:"crypto"`
+	Relay           RelayConfig     `mapstructure:"relay" yaml:"relay,omitempty" json:"relay,omitempty"`
+	Daemon          DaemonConfig    `mapstructure:"daemon" yaml:"daemon" json:"daemon"`
+	Profiles        []Profile       `mapstructure:"profiles" yaml:"profiles,omitempty" json:"profiles,omitempty"`
+	ActiveProfileID string          `mapstructure:"active_profile_id" yaml:"active_profile_id,omitempty" json:"active_profile_id,omitempty"`
 }
 
 // setDefaults устанавливает значения по умолчанию
