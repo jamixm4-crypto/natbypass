@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta39"
+	Version = "1.9.226-beta40"
 	Commit  = "release"
 )
 
@@ -5331,7 +5331,7 @@ func startEngineFromConfig(c *config.Config) {
 						} else {
 							if !isForceTCP && udpPuncher != nil {
 								if p.ActiveEndpoint != "" {
-									_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
+									_ = udpPuncher.SendHolePunchProbeWithDelta(p.ActiveEndpoint, p.NATDelta)
 								}
 								if p.STUNAddr != "" {
 									_ = udpPuncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
@@ -5344,7 +5344,7 @@ func startEngineFromConfig(c *config.Config) {
 								}
 								for _, cand := range p.Candidates {
 									if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
-										_ = udpPuncher.SendHolePunchProbe(cand)
+										_ = udpPuncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 									}
 								}
 
@@ -6350,7 +6350,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				// Немедленно посылаем прямой UDP-пакет для пробития сокета по всем кандидатам
 				if udpPuncher != nil {
 					if p.ActiveEndpoint != "" {
-						_ = udpPuncher.SendHolePunchProbe(p.ActiveEndpoint)
+						_ = udpPuncher.SendHolePunchProbeWithDelta(p.ActiveEndpoint, p.NATDelta)
 					}
 					if p.STUNAddr != "" {
 						_ = udpPuncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
@@ -6363,7 +6363,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					}
 					for _, cand := range p.Candidates {
 						if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
-							_ = udpPuncher.SendHolePunchProbe(cand)
+							_ = udpPuncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 						}
 					}
 					if p.PublicIP != "" {
@@ -6371,7 +6371,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						if port <= 0 {
 							port = 47832
 						}
-						_ = udpPuncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, port))
+						_ = udpPuncher.SendHolePunchProbeWithDelta(fmt.Sprintf("%s:%d", p.PublicIP, port), p.NATDelta)
 					}
 				}
 

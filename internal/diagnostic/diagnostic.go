@@ -447,9 +447,9 @@ func CheckRoutingTable() DiagnosticItem {
 			has100 := false
 			for _, line := range lines {
 				trimmed := strings.TrimSpace(line)
-				if strings.Contains(trimmed, "10.1.1.") || strings.Contains(trimmed, "100.64.200.") || strings.Contains(trimmed, "nb0") {
+				if strings.Contains(trimmed, "10.1.") || strings.Contains(trimmed, "100.64.200.") || strings.Contains(trimmed, "nb0") {
 					filtered = append(filtered, "  "+trimmed)
-					if strings.Contains(trimmed, "10.1.1.") {
+					if strings.Contains(trimmed, "10.1.") {
 						has10 = true
 					}
 					if strings.Contains(trimmed, "100.64.200.") {
@@ -467,10 +467,10 @@ func CheckRoutingTable() DiagnosticItem {
 	elapsed := time.Since(start)
 	msg := "✓ Маршруты mesh-сети активны в таблице ядра"
 	if hasConflict {
-		msg = "⚠️ Обнаружен конфликт подсетей (одновременно присутствуют 10.1.1.0/24 и 100.64.200.0/24)"
+		msg = "⚠️ Обнаружен конфликт подсетей (одновременно присутствуют 10.1.x.x и 100.64.200.0/24)"
 	}
 	if routesStr == "" {
-		routesStr = "  Маршруты mesh-подсетей 10.1.1.0/24 не найдены"
+		routesStr = "  Маршруты mesh-подсетей (10.1.0.0/16 или 100.64.200.0/24) не найдены"
 	}
 
 	return DiagnosticItem{

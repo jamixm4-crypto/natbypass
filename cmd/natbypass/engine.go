@@ -1515,11 +1515,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 								for _, cand := range p.Candidates {
 									if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
-										_ = puncher.SendHolePunchProbe(cand)
+										_ = puncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 									}
 								}
 								if p.PublicIP != "" && p.WGPort > 0 {
-									_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+									_ = puncher.SendHolePunchProbeWithDelta(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort), p.NATDelta)
 								}
 
 								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT for unconnected / relay-only peers
@@ -2482,7 +2482,7 @@ func publishLoop(
 					// Probe all extra candidates
 					for _, cand := range p.Candidates {
 						if cand != p.STUNAddr && cand != "" {
-							_ = puncher.SendHolePunchProbe(cand)
+							_ = puncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 							p.ProbeCount++
 						}
 					}
@@ -2978,19 +2978,19 @@ func receiveLoop(
 				}
 				for _, cand := range p.Candidates {
 					if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr && cand != p.ActiveEndpoint {
-						_ = puncher.SendHolePunchProbe(cand)
+						_ = puncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 					}
 				}
 				for _, ep := range p.Endpoints {
 					if ep.IP != "" && ep.Port > 0 {
 						epStr := fmt.Sprintf("%s:%d", ep.IP, ep.Port)
 						if epStr != p.ActiveEndpoint && epStr != p.STUNAddr && epStr != p.LocalAddr {
-							_ = puncher.SendHolePunchProbe(epStr)
+							_ = puncher.SendHolePunchProbeWithDelta(epStr, p.NATDelta)
 						}
 					}
 				}
 				if p.PublicIP != "" && p.WGPort > 0 {
-					_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+					_ = puncher.SendHolePunchProbeWithDelta(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort), p.NATDelta)
 				}
 			}
 			if magicSock != nil {
@@ -3022,8 +3022,8 @@ func receiveLoop(
 			if existingPeer != nil {
 				lastDirect = existingPeer.LastDirectSeen
 				lastBilateral = existingPeer.LastBilateralSeen
-				// If peer's STUNAddr changed, the old ActiveEndpoint is dead and must be refreshed!
-				if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
+				// If peer's STUNAddr changed, or if direct P2P is lost for >30s, the old ActiveEndpoint is dead and must be refreshed!
+				if p.STUNAddr != "" && (existingPeer.STUNAddr == "" || p.STUNAddr != existingPeer.STUNAddr || (time.Since(existingPeer.LastDirectSeen) > 30*time.Second && !existingPeer.DirectTCP)) {
 					preservedEP = p.STUNAddr
 					preservedDirect = false
 					preservedLat = 0
