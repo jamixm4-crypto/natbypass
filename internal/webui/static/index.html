@@ -989,8 +989,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 </script>
 </head>
 
-<body>
   <div id="offlineBanner" style="display:none; position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:99999; background:rgba(239, 68, 68, 0.92); color:#fff; padding:8px 20px; border-radius:30px; font-weight:700; font-size:0.82rem; backdrop-filter:blur(8px); box-shadow:0 4px 20px rgba(239,68,68,0.4); text-align:center;">⚠️ Связь с узлом NatBypass потеряна. Переподключение...</div>
+  <div id="tunErrorBanner" style="display:none; position:fixed; top:52px; left:50%; transform:translateX(-50%); z-index:99998; background:rgba(185, 28, 28, 0.96); color:#fff; padding:12px 24px; border-radius:12px; font-weight:600; font-size:0.85rem; backdrop-filter:blur(10px); box-shadow:0 6px 24px rgba(185,28,28,0.5); text-align:left; max-width:850px; width:92%; border:1px solid rgba(255,255,255,0.25);">
+    <div style="font-weight:800; font-size:0.95rem; margin-bottom:4px; display:flex; align-items:center; gap:8px;"><span>🔴</span> <span id="tunErrorTitle">Сбой виртуального сетевого адаптера TUN</span></div>
+    <div id="tunErrorCause" style="opacity:0.95; font-size:0.83rem; margin-bottom:4px; line-height:1.4;"></div>
+    <div id="tunErrorRemedy" style="color:#fef08a; font-size:0.83rem; font-weight:700; line-height:1.4;"></div>
+  </div>
 
   <!-- Fullscreen Login & Authorization Screen -->
   <div id="authScreen" style="display:none;">
@@ -1244,8 +1248,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <canvas id="canvasLatency" style="width:100%; height:100%; display:block;"></canvas>
           </div>
 
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-size:0.8rem; color:var(--text-muted);" id="lblNatStatus">P2P пробитие NAT: <b style="color:#34d399;" id="txtNatType">Определяется...</b></span>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+              <span style="font-size:0.8rem; color:var(--text-muted);" id="lblNatStatus">P2P пробитие NAT: <b style="color:#34d399;" id="txtNatType">Определяется...</b></span>
+              <span style="font-size:0.8rem; color:var(--text-muted);" id="lblTunStatus">TUN адаптер: <b style="color:#34d399;" id="txtTunStatus">Определяется...</b></span>
+            </div>
             <button onclick="switchTab('devices')" class="btn btn-glass" style="padding:6px 12px; font-size:0.78rem;">Все узлы ➔</button>
           </div>
         </div>
@@ -3493,6 +3500,28 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               txtNat.innerText = '📡 Relay mode (Порт закрыт)';
             } else {
               txtNat.innerText = 'Определение...';
+            }
+          }
+
+          if (d.tun_status) {
+            const txtTun = document.getElementById('txtTunStatus');
+            const errBanner = document.getElementById('tunErrorBanner');
+            if (d.tun_status.active) {
+              if (txtTun) {
+                txtTun.innerHTML = `<span style="color:#34d399;">🟢 ${d.tun_status.device_name || 'nb0'} (${d.tun_status.virtual_ip || 'Активен'})</span>`;
+              }
+              if (errBanner) errBanner.style.display = 'none';
+            } else {
+              if (txtTun) {
+                txtTun.innerHTML = `<span style="color:#ef4444;" title="${d.tun_status.error_cause || 'Ошибка'}">🔴 Сбой интерфейса</span>`;
+              }
+              if (errBanner) {
+                errBanner.style.display = 'block';
+                const cEl = document.getElementById('tunErrorCause');
+                const rEl = document.getElementById('tunErrorRemedy');
+                if (cEl) cEl.innerText = d.tun_status.error_cause || 'Не удалось создать или инициализировать виртуальный сетевой адаптер TUN.';
+                if (rEl) rEl.innerText = '💡 ' + (d.tun_status.error_remedy || 'Запустите приложение с правами Администратора (root).');
+              }
             }
           }
 

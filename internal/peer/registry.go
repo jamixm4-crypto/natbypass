@@ -59,6 +59,7 @@ type Peer struct {
 	AdvertisedRoutes []string             `json:"advertised_routes,omitempty"`
 	LastSeen         time.Time            `json:"last_seen"`
 	LastDirectSeen   time.Time            `json:"last_direct_seen,omitempty"`
+	LastBilateralSeen time.Time           `json:"last_bilateral_seen,omitempty"` // Timestamp of verified bilateral RTT / PONG
 	Online           bool                 `json:"online"`
 	Latency          time.Duration        `json:"latency"`
 	Channel          string               `json:"channel,omitempty"`
@@ -115,6 +116,29 @@ func (p *Peer) RecordProbeResult(success bool) {
 	p.LossPercent = 100 - (popcount * 100 / 32)
 }
 
+// IsBilateralP2P returns true if direct P2P connection was verified bilaterally within maxAge.
+// Direct TCP (ShadowTLS) is intrinsically bilateral once connected.
+// UDP P2P requires DirectP2P=true AND verified bilateral communication within maxAge.
+func (p *Peer) IsBilateralP2P(maxAge time.Duration) bool {
+	if p == nil {
+		return false
+	}
+	if p.DirectTCP || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" {
+		return true
+	}
+	if !p.DirectP2P {
+		return false
+	}
+	if p.LastBilateralSeen.IsZero() {
+		// Grace period: if LastBilateralSeen is zero but LastDirectSeen is very fresh (<5s) and PingMs > 0
+		return p.PingMs > 0 && !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) <= 5*time.Second
+	}
+	if maxAge > 0 && time.Since(p.LastBilateralSeen) > maxAge {
+		return false
+	}
+	return true
+}
+
 // MergeFrom merges discovery details into an existing peer while preserving established connections.
 func (existing *Peer) MergeFrom(newer *Peer) {
 	now := time.Now()
@@ -134,6 +158,9 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	if newer.LastDirectSeen.IsZero() {
 		newer.LastDirectSeen = existing.LastDirectSeen
 	}
+	if newer.LastBilateralSeen.IsZero() {
+		newer.LastBilateralSeen = existing.LastBilateralSeen
+	}
 
 	if newer.Transport == "" {
 		newer.Transport = existing.Transport
@@ -141,7 +168,7 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 
 	// Dynamic P2P health check:
 	// If transport is TCP ShadowTLS, DirectP2P is backed by an active TCP stream, not UDP hole-punch probes.
-	// For UDP, demote to relay only if no direct inbound packets seen for 30 seconds.
+	// For UDP, demote to relay only if no direct inbound packets seen for 15 seconds or bilateral confirmation expired.
 	// ProbeCount is an outbound metric (probes sent), NOT an indicator of P2P health —
 	// it must NOT trigger demotion, or it creates a feedback loop where probing itself kills P2P.
 	directP2PExpired := false
@@ -151,7 +178,7 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 				directP2PExpired = true
 			}
 		} else {
-			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 15*time.Second {
+			if existing.LastDirectSeen.IsZero() || time.Since(existing.LastDirectSeen) > 15*time.Second || (!existing.LastBilateralSeen.IsZero() && time.Since(existing.LastBilateralSeen) > 15*time.Second) {
 				directP2PExpired = true
 			}
 		}
@@ -183,9 +210,9 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		}
 	}
 
-	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty, never seen direct, or failing UDP probes
+	// Absolute safety guarantee: A peer CANNOT have DirectP2P = true if ActiveEndpoint is empty, never seen direct, failing UDP probes, or bilateral unconfirmed >15s
 	if newer.Transport != "tcp_tls" && newer.Transport != "tcp_shadowtls" {
-		if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() || (existing.ProbeCount >= 2 && time.Since(newer.LastDirectSeen) > 10*time.Second) {
+		if newer.ActiveEndpoint == "" || newer.LastDirectSeen.IsZero() || (existing.ProbeCount >= 2 && time.Since(newer.LastDirectSeen) > 10*time.Second) || (!newer.LastBilateralSeen.IsZero() && time.Since(newer.LastBilateralSeen) > 15*time.Second) {
 			newer.DirectP2P = false
 			newer.Transport = "relay_mqtt"
 		}
@@ -676,9 +703,13 @@ func (r *Registry) MarkOffline(maxAge time.Duration) {
 
 	threshold := time.Now().Add(-maxAge)
 	for _, p := range r.peers {
-		if p.Online && p.LastSeen.Before(threshold) {
+		if (p.Online || p.Transport != "offline") && (!p.LastSeen.IsZero() && p.LastSeen.Before(threshold)) {
 			p.Online = false
 			p.DirectP2P = false
+			p.DirectTCP = false
+			p.Transport = "offline"
+			p.PingMs = 0
+			p.Latency = 0
 		}
 	}
 }

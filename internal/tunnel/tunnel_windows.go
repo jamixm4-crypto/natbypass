@@ -278,6 +278,18 @@ type Device struct {
 // CreateAdapter создает адаптер Wintun и настраивает IP адрес в Windows
 func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 	if err := initWintun(); err != nil {
+		cause, remedy := DiagnoseTUNError(err)
+		SetTUNStatus(&TUNStatus{
+			Active:       false,
+			DeviceName:   adapterName,
+			VirtualIP:    virtualIP,
+			MTU:          1280,
+			LastError:    err.Error(),
+			ErrorCause:   cause,
+			ErrorRemedy:  remedy,
+			IsAdmin:      checkIsAdmin(),
+			DriverLoaded: false,
+		})
 		return nil, fmt.Errorf("ошибка инициализации wintun: %w", err)
 	}
 
@@ -313,7 +325,20 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		if hAdapter != 0 {
 			procWintunCloseAdapter.Call(hAdapter)
 		}
-		return nil, fmt.Errorf("не удалось инициализировать Wintun адаптер и сессию (требуются права Администратора)")
+		err := fmt.Errorf("не удалось инициализировать Wintun адаптер и сессию (требуются права Администратора)")
+		cause, remedy := DiagnoseTUNError(err)
+		SetTUNStatus(&TUNStatus{
+			Active:       false,
+			DeviceName:   adapterName,
+			VirtualIP:    virtualIP,
+			MTU:          1280,
+			LastError:    err.Error(),
+			ErrorCause:   cause,
+			ErrorRemedy:  remedy,
+			IsAdmin:      checkIsAdmin(),
+			DriverLoaded: false,
+		})
+		return nil, err
 	}
 
 	hEvent, _, _ := procWintunGetReadWaitEvent.Call(hSession)
@@ -358,6 +383,15 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 		psFw := psExeFw + `if (-not (Get-NetFirewallRule -Name "NatBypass-In-All" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name "NatBypass-In-All" -DisplayName "NatBypass Mesh Inbound All" -Direction Inbound -Action Allow -Profile Any -InterfaceAlias "NatBypass" -ErrorAction SilentlyContinue }; if (-not (Get-NetFirewallRule -Name "NatBypass-ICMP-In" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name "NatBypass-ICMP-In" -DisplayName "NatBypass ICMPv4 Inbound" -Direction Inbound -Action Allow -Protocol ICMPv4 -Profile Any -InterfaceAlias "NatBypass" -ErrorAction SilentlyContinue }; if (-not (Get-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -Name "NatBypass ICMPv4 In" -Direction Inbound -Action Allow -Protocol ICMPv4 -Profile Any -ErrorAction SilentlyContinue }; Set-NetFirewallRule -DisplayName "NatBypass ICMPv4 In" -Profile Any -Enabled True -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayName "*ICMPv4*" -ErrorAction SilentlyContinue`
 		_ = runHiddenPS(psFw)
 	}()
+
+	SetTUNStatus(&TUNStatus{
+		Active:       true,
+		DeviceName:   adapterName,
+		VirtualIP:    cleanVIP,
+		MTU:          1280,
+		IsAdmin:      checkIsAdmin(),
+		DriverLoaded: true,
+	})
 
 	return dev, nil
 }
@@ -513,6 +547,15 @@ func (d *Device) Close() error {
 	if hAdapter != 0 {
 		procWintunCloseAdapter.Call(hAdapter)
 	}
+
+	SetTUNStatus(&TUNStatus{
+		Active:       false,
+		DeviceName:   d.AdapterName,
+		VirtualIP:    d.VirtualIP,
+		MTU:          1280,
+		IsAdmin:      checkIsAdmin(),
+		DriverLoaded: false,
+	})
 
 	return nil
 }

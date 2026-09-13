@@ -176,16 +176,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          Write-Host "Pruning completed workflow runs (keeping latest 5)..."
-          $runsJson = gh run list --workflow=release.yml --limit 30 --json databaseId,status
+          Write-Host "Pruning completed workflow runs across all workflows (keeping latest 3 per workflow)..."
+          $runsJson = gh run list --limit 100 --json databaseId,status,workflowName
           if ($runsJson) {
             $runs = $runsJson | ConvertFrom-Json
-            $completedRuns = $runs | Where-Object { $_.status -eq "completed" }
-            if ($completedRuns.Count -gt 5) {
-              $toDelete = $completedRuns | Select-Object -Skip 5
-              foreach ($r in $toDelete) {
-                Write-Host "Deleting old workflow run: $($r.databaseId)"
-                gh run delete $($r.databaseId) 2>$null
+            $grouped = $runs | Group-Object workflowName
+            foreach ($g in $grouped) {
+              $completedRuns = $g.Group | Where-Object { $_.status -eq "completed" }
+              if ($completedRuns.Count -gt 3) {
+                $toDelete = $completedRuns | Select-Object -Skip 3
+                foreach ($r in $toDelete) {
+                  Write-Host "Deleting old run: $($r.databaseId) ($($g.Name))"
+                  gh run delete $($r.databaseId) 2>$null
+                }
               }
             }
           }

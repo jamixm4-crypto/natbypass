@@ -16,8 +16,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/peer"
+	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -59,6 +61,36 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 		fmt.Println("  \033[1;32m[✓]\033[0m Права: Администратор / Root")
 	} else {
 		fmt.Println("  \033[1;33m[!]\033[0m Права: Обычный пользователь (рекомендуется запуск под root / Administrator)")
+	}
+
+	// 1b. TUN Adapter & Driver Status
+	tunSt := tunnel.GetTUNStatus()
+	fmt.Printf("\n\033[1;34m▶ 1b. СТАТУС TUN АДАПТЕРА И СЕТЕВОГО ДРАЙВЕРА\033[0m\n")
+	if tunSt.Active {
+		fmt.Printf("  \033[1;32m[✓]\033[0m Адаптер '%s' активен (IP: %s, MTU: %d)\n", tunSt.DeviceName, tunSt.VirtualIP, tunSt.MTU)
+	} else {
+		fmt.Printf("  \033[1;31m[✗]\033[0m Адаптер '%s' НЕ АКТИВЕН\n", tunSt.DeviceName)
+		if tunSt.ErrorCause != "" {
+			fmt.Printf("      \033[1;33mПричина:\033[0m %s\n", tunSt.ErrorCause)
+		}
+		if tunSt.ErrorRemedy != "" {
+			fmt.Printf("      \033[1;32mРешение:\033[0m %s\n", tunSt.ErrorRemedy)
+		}
+		if !tunSt.IsAdmin {
+			fmt.Printf("      \033[1;31m[!] ВНИМАНИЕ: Процесс запущен БЕЗ прав Администратора! Для создания адаптера требуются повышенные привилегии.\033[0m\n")
+		}
+	}
+	for _, item := range report.Items {
+		if strings.Contains(item.Name, "Wintun") || strings.Contains(item.Name, "TUN") || strings.Contains(item.Name, "Адаптер") {
+			if item.Passed {
+				fmt.Printf("  \033[1;32m[✓]\033[0m %s: %s\n", item.Name, item.Message)
+			} else {
+				fmt.Printf("  \033[1;31m[✗]\033[0m %s: %s\n", item.Name, item.Message)
+				if item.Details != "" {
+					fmt.Printf("      %s\n", item.Details)
+				}
+			}
+		}
 	}
 
 	// 2. NAT & STUN
@@ -130,7 +162,9 @@ func runDiagnostics(cfgPath, targetIP string, jsonOut bool) error {
 	if len(peers) > 0 {
 		for _, p := range peers {
 			p2pStatus := "📡 Relay [MQTT]"
-			if p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" {
+			if !p.Online || (!p.LastSeen.IsZero() && time.Since(p.LastSeen) > constants.PeerOfflineThreshold) {
+				p2pStatus = "⚫ Офлайн"
+			} else if p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" {
 				p2pStatus = "🟢 Прямой P2P [TCP ShadowTLS 1.3]"
 			} else if p.DirectP2P {
 				p2pStatus = "🟢 Прямой P2P [UDP AWG]"

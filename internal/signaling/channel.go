@@ -237,6 +237,17 @@ type Payload struct {
 
 	// Rendezvous: on-demand synchronized bilateral hole-punch coordination
 	Rendezvous *RendezvousSignal `json:"rendezvous,omitempty"`
+
+	// TCPConnect: on-demand direct TCP (ShadowTLS) connection coordination
+	TCPConnect *TCPConnectSignal `json:"tcp_connect,omitempty"`
+}
+
+// TCPConnectSignal coordinates on-demand direct TCP (ShadowTLS) connection / simultaneous open between peers.
+type TCPConnectSignal struct {
+	SenderDeviceID string `json:"sender"`
+	TargetDeviceID string `json:"target"`
+	SenderTCPAddr  string `json:"sender_tcp_addr"`
+	Timestamp      int64  `json:"timestamp"`
 }
 
 
@@ -284,12 +295,21 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		CamelRemoteDiag       *RemoteDiagSignal        `json:"remoteDiag"`
 		UpperRendezvous       *RendezvousSignal        `json:"Rendezvous"`
 		CamelRendezvous       *RendezvousSignal        `json:"rendezvous"`
+		UpperTCPConnect       *TCPConnectSignal        `json:"TCPConnect"`
+		CamelTCPConnect       *TCPConnectSignal        `json:"tcpConnect"`
 		*Alias
 	}{
 		Alias: (*Alias)(p),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
+	}
+	if p.TCPConnect == nil {
+		if aux.UpperTCPConnect != nil {
+			p.TCPConnect = aux.UpperTCPConnect
+		} else if aux.CamelTCPConnect != nil {
+			p.TCPConnect = aux.CamelTCPConnect
+		}
 	}
 	if len(p.Endpoints) == 0 {
 		if len(aux.UpperEndpoints) > 0 {

@@ -130,3 +130,18 @@ func TestTransportSelector_MeshRelayFallback(t *testing.T) {
 	}
 }
 
+func TestTransportSelector_SevereUDPLossWithDirectTCPSwitchesToShadowTLS(t *testing.T) {
+	sel := NewTransportSelector(100 * time.Millisecond)
+	m := LinkMetrics{
+		DirectUDP:   true,
+		DirectTCP:   true,
+		LossPercent: 40,
+		ConsecDrops: 3,
+	}
+
+	chosen := sel.SelectTransport("peer-tcp-fallback", m)
+	if chosen != "shadowtls" {
+		t.Fatalf("Expected 'shadowtls' when UDP has 40%% loss and DirectTCP is available, got %s", chosen)
+	}
+}
+

@@ -65,7 +65,9 @@ func (s *TransportSelector) SelectTransport(peerID string, metrics LinkMetrics) 
 	// Tier 3: Direct WebRTC (Pion Data Channels)
 	// Tier 4: P2P Multi-Hop Mesh Relay
 	// Tier 5: Central Relay (WSS or MQTT)
-	if metrics.DirectUDP && metrics.LossPercent < 50 && metrics.ConsecDrops < 5 {
+	if metrics.DirectTCP && (metrics.LossPercent >= 30 || metrics.ConsecDrops >= 3 || !metrics.DirectUDP) {
+		target = "shadowtls"
+	} else if metrics.DirectUDP && metrics.LossPercent < 50 && metrics.ConsecDrops < 5 {
 		if metrics.LossPercent >= 10 || metrics.ConsecDrops >= 2 || metrics.Jitter > 50*time.Millisecond {
 			target = "quic"
 		} else {

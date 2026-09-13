@@ -82,7 +82,20 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 	}
 
 	if file == nil {
-		return nil, fmt.Errorf("не удалось открыть /dev/net/tun: %w (требуется modprobe tun или права root)", err)
+		errRet := fmt.Errorf("не удалось открыть /dev/net/tun: %w (требуется modprobe tun или права root)", err)
+		cause, remedy := DiagnoseTUNError(errRet)
+		SetTUNStatus(&TUNStatus{
+			Active:       false,
+			DeviceName:   adapterName,
+			VirtualIP:    virtualIP,
+			MTU:          1280,
+			LastError:    errRet.Error(),
+			ErrorCause:   cause,
+			ErrorRemedy:  remedy,
+			IsAdmin:      checkIsAdmin(),
+			DriverLoaded: false,
+		})
+		return nil, errRet
 	}
 
 	// 2. Регистрация TUN устройства через ioctl с поддержкой x86_64, arm64, mips, mipsle
@@ -108,7 +121,20 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 
 	if !ioctlSuccess {
 		file.Close()
-		return nil, fmt.Errorf("ioctl TUNSETIFF error: %v", errno)
+		errRet := fmt.Errorf("ioctl TUNSETIFF error: %v", errno)
+		cause, remedy := DiagnoseTUNError(errRet)
+		SetTUNStatus(&TUNStatus{
+			Active:       false,
+			DeviceName:   adapterName,
+			VirtualIP:    virtualIP,
+			MTU:          1280,
+			LastError:    errRet.Error(),
+			ErrorCause:   cause,
+			ErrorRemedy:  remedy,
+			IsAdmin:      checkIsAdmin(),
+			DriverLoaded: false,
+		})
+		return nil, errRet
 	}
 
 	// Ensure pure blocking I/O so file.Read() blocks in kernel queue without spinning CPU on Linux/MIPS
@@ -142,6 +168,15 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 	_ = os.WriteFile("/proc/sys/net/core/wmem_max", []byte("4194304\n"), 0644)
 	_ = os.WriteFile("/proc/sys/net/core/rmem_default", []byte("2097152\n"), 0644)
 	_ = os.WriteFile("/proc/sys/net/core/wmem_default", []byte("2097152\n"), 0644)
+
+	SetTUNStatus(&TUNStatus{
+		Active:       true,
+		DeviceName:   adapterName,
+		VirtualIP:    virtualIP,
+		MTU:          1280,
+		IsAdmin:      checkIsAdmin(),
+		DriverLoaded: true,
+	})
 
 	return dev, nil
 }
@@ -508,8 +543,17 @@ func (d *Device) Close() error {
 			}
 		})
 		if d.file != nil {
-			return d.file.Close()
+			_ = d.file.Close()
 		}
+		SetTUNStatus(&TUNStatus{
+			Active:       false,
+			DeviceName:   d.AdapterName,
+			VirtualIP:    d.VirtualIP,
+			MTU:          1280,
+			IsAdmin:      checkIsAdmin(),
+			DriverLoaded: false,
+		})
+		return nil
 	}
 	return nil
 }

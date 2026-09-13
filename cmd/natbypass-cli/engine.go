@@ -365,6 +365,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		adapterName = "NatBypass"
 	}
 	tunDev, tunErr := tunnel.CreateAdapter(adapterName, myVirtualIP)
+	if tunErr != nil {
+		cause, remedy := tunnel.DiagnoseTUNError(tunErr)
+		log.Error().
+			Err(tunErr).
+			Str("cause", cause).
+			Str("remedy", remedy).
+			Msg("❌ [TUN] СБОЙ ВИРТУАЛЬНОГО АДАПТЕРА! Сетевой туннель L3 не активен")
+	} else {
+		log.Info().
+			Str("adapter", adapterName).
+			Str("vip", myVirtualIP).
+			Msg("✅ [TUN] Виртуальный адаптер успешно инициализирован и активен")
+	}
 	if runtime.GOOS == "linux" && registry != nil {
 		for _, p := range registry.List() {
 			if p.VirtualIP != "" {
@@ -821,13 +834,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 					}
-					// BUG-01 FIX: targetPeer is already a copy (set above), safe to mutate
 					oldEP := targetPeer.ActiveEndpoint
-					targetPeer.DirectP2P = true
 					if isTCP {
+						targetPeer.DirectP2P = true
 						targetPeer.Transport = "tcp_tls"
+						targetPeer.LastBilateralSeen = time.Now()
 					} else {
-						targetPeer.Transport = "udp_direct"
+						// For UDP: an inbound packet only confirms one-way reception (remote -> local).
+						// Strictly DO NOT promote to DirectP2P or switch Transport to udp_direct here!
+						// DirectP2P is ONLY activated upon verified bilateral delivery (RTT > 0 via PONG).
 					}
 					if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
 						targetPeer.ActiveEndpoint = fromAddrStr
@@ -851,6 +866,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							puncher.RemoveKeepAliveTarget(oldEP)
 						}
 						puncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
+						// If bilateral connection is not verified within 12s, fire a reverse probe to test return path
+						if !targetPeer.IsBilateralP2P(12 * time.Second) {
+							_ = puncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
+						}
 					}
 				}
 			}
@@ -1226,8 +1245,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
 							}
 						}
+						bilateralOK := p.IsBilateralP2P(12 * time.Second)
+
 						// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
-						if !isForceTCP && !sentTCP && !p.DirectP2P && puncher != nil && p.STUNAddr != "" && p.STUNAddr != targetEP {
+						if !isForceTCP && !sentTCP && (!p.DirectP2P || !bilateralOK) && puncher != nil && p.STUNAddr != "" && p.STUNAddr != targetEP {
 							if p.Transport == "quic" {
 								_ = puncher.SendQUICPacket(p.STUNAddr, pkt)
 							} else {
@@ -1235,7 +1256,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 						// 1c. Reactive instant hole punching if direct P2P is not yet confirmed or packet wasn't sent
-						if !isForceTCP && (!sentDirect || !p.DirectP2P) && puncher != nil {
+						if !isForceTCP && (!sentDirect || !p.DirectP2P || !bilateralOK) && puncher != nil {
 							if targetEP != "" {
 								_ = puncher.SendHolePunchProbe(targetEP)
 							}
@@ -1249,7 +1270,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 						// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing or unconfirmed
-						if !isForceUDP && !sentTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && (!p.DirectP2P || p.PingMs == 0 || p.ProbeCount >= 1 || isForceTCP) {
+						if !isForceUDP && !sentTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && (!p.DirectP2P || !bilateralOK || p.PingMs == 0 || p.ProbeCount >= 1 || isForceTCP) {
 							defaultTCPPort := 8443
 							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
 								defaultTCPPort = activeProf.TCPPort
@@ -1263,11 +1284,45 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								go func(devID, target string, localP int) {
 									_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
 								}(p.DeviceID, tcpTarget, lPort)
+
+								// Send bilateral TCPConnect signal over MQTT so the remote peer dials us simultaneously
+								if sigMgr != nil && (!bilateralOK || p.ProbeCount >= 1) {
+									myTCPAddr := ""
+									if puncher != nil && puncher.GetCachedSTUNAddr() != "" {
+										if h, _, err := net.SplitHostPort(puncher.GetCachedSTUNAddr()); err == nil {
+											tcpP := defaultTCPPort
+											if tcpDirectMgr != nil && tcpDirectMgr.Port() > 0 {
+												tcpP = tcpDirectMgr.Port()
+											}
+											myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
+										}
+									}
+									if myTCPAddr != "" {
+										go func(tDev, myAddr string) {
+											tcpSig := &signaling.Payload{
+												DeviceID: deviceID,
+												TCPConnect: &signaling.TCPConnectSignal{
+													SenderDeviceID: deviceID,
+													TargetDeviceID: tDev,
+													SenderTCPAddr:  myAddr,
+													Timestamp:      time.Now().Unix(),
+												},
+												Timestamp: time.Now(),
+											}
+											_ = sigMgr.Send(engineCtx, tcpSig)
+										}(p.DeviceID, myTCPAddr)
+									}
+								}
 							}
 						}
+
+						// Dual-Path Shadow Relay Rule:
+						// If direct TCP is not active AND (direct UDP is unconfirmed bilaterally within 12s, or lossy >30%),
+						// immediately forward via Relay so network traffic is never blackholed!
+						needsRelay := !sentTCP && (!sentDirect || !p.DirectP2P || !bilateralOK || p.LossPercent > 30)
+
 						// 1e. Mesh Userspace Multi-Hop Relay Fallback:
-						// If neither direct TCP nor confirmed direct UDP succeeded, forward encapsulated in MultiHopPacket
-						if !sentTCP && (!sentDirect || !p.DirectP2P || p.LossPercent > 30) && !isForceUDP {
+						if needsRelay && !isForceUDP {
 							if relayPeer := findMeshRelayPeer(registry, tcpDirectMgr, p.DeviceID); relayPeer != nil {
 								mhPkt, mhErr := network.EncodeMultiHopPacket(deviceID, p.DeviceID, network.DefaultMaxTTL, 0x00, pkt)
 								if mhErr == nil {
@@ -1288,7 +1343,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 						// Task 3.4: Multi-Path Hot-Standby Heartbeat & Sub-50ms Failover
 						// When direct P2P is active, maintain standby relay path every 15s to guarantee hitless switchover
-						if sentDirect && p.DirectP2P {
+						if sentDirect && p.DirectP2P && bilateralOK {
 							now := time.Now()
 							if p.LastRelayPing.IsZero() || now.Sub(p.LastRelayPing) > 15*time.Second {
 								p.LastRelayPing = now
@@ -1297,8 +1352,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 						// 1f. Encrypted Central Relay Fallback (WSS or MQTT):
-						// Triggered if direct TCP and direct confirmed UDP failed or have severe packet loss (>30%):
-						if !sentTCP && (!sentDirect || !p.DirectP2P || p.LossPercent > 30) {
+						// Triggered if direct TCP not connected AND direct bilateral UDP is unconfirmed or failing:
+						if needsRelay {
 							if wssClient != nil && wssClient.IsConnected() {
 								_ = wssClient.SendPacket(p.DeviceID, pkt)
 							} else if sigMgr != nil {
@@ -1611,12 +1666,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								} else {
 									p.Latency = rtt
 								}
+								p.PingMs = p.Latency.Milliseconds()
 								// Note: ICMP ping to VirtualIP may succeed over MQTT relay,
 								// not just direct UDP. Do NOT promote to DirectP2P here —
 								// that must only happen in onPingResult/onInboundPacket
 								// when a real UDP hole-punch pong or data packet arrives.
 								// Otherwise we create a "ghost P2P" that stops probes forever.
 								p.LastDirectSeen = time.Now()
+								if p.DirectP2P || p.Transport == "udp_direct" {
+									p.LastBilateralSeen = time.Now()
+								}
 								if transSelector != nil {
 									metrics := transport.LinkMetrics{
 										RTT:         p.Latency,
@@ -1637,7 +1696,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								p.RecordProbeResult(false)
 								p.Latency = 0
 								p.PingMs = 0
-								if p.ProbeCount >= 15 || p.LossPercent > 30 || p.ConsecutiveDrops >= 5 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 45*time.Second) {
+								if p.ProbeCount >= 10 || p.LossPercent > 30 || p.ConsecutiveDrops >= 3 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 20*time.Second) || (!p.LastBilateralSeen.IsZero() && time.Since(p.LastBilateralSeen) > 15*time.Second) {
 									if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (tcpDirectMgr == nil || !tcpDirectMgr.HasConn(p.DeviceID)) {
 										if p.DirectP2P {
 											log.Warn().Str("peer", p.DeviceID).Int("loss", p.LossPercent).Int("drops", p.ConsecutiveDrops).Msg("🔀 UDP packet loss > 30% or drops >= 3: automatic fallback to Relay")
@@ -1668,6 +1727,35 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										go func(devID, target string, localP int) {
 											_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
 										}(p.DeviceID, tcpTarget, lPort)
+
+										// Send bilateral TCPConnect signal over MQTT for coordinated simultaneous open
+										if sigMgr != nil {
+											myTCPAddr := ""
+											if puncher != nil && puncher.GetCachedSTUNAddr() != "" {
+												if h, _, err := net.SplitHostPort(puncher.GetCachedSTUNAddr()); err == nil {
+													tcpP := defaultTCPPort
+													if tcpDirectMgr != nil && tcpDirectMgr.Port() > 0 {
+														tcpP = tcpDirectMgr.Port()
+													}
+													myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
+												}
+											}
+											if myTCPAddr != "" {
+												go func(tDev, myAddr string) {
+													tcpSig := &signaling.Payload{
+														DeviceID: deviceID,
+														TCPConnect: &signaling.TCPConnectSignal{
+															SenderDeviceID: deviceID,
+															TargetDeviceID: tDev,
+															SenderTCPAddr:  myAddr,
+															Timestamp:      time.Now().Unix(),
+														},
+														Timestamp: time.Now(),
+													}
+													_ = sigMgr.Send(engineCtx, tcpSig)
+												}(p.DeviceID, myTCPAddr)
+											}
+										}
 									}
 								}
 							}
@@ -1883,8 +1971,11 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			p.LastDirectSeen = time.Now()
 			if rtt > 0 {
 				p.DirectP2P = true
+				p.Transport = "udp_direct"
 				p.Latency = rtt
 				p.PingMs = rtt.Milliseconds()
+				p.LastBilateralSeen = time.Now()
+				p.ConsecutiveDrops = 0
 			}
 			targetEP := fromAddr
 			if magicSock != nil {
@@ -2541,6 +2632,27 @@ func receiveLoop(
 				}
 			}
 
+			// Handle on-demand TCP (ShadowTLS) connection request from remote peer
+			if p.TCPConnect != nil && tcpDirectMgr != nil {
+				tcpSig := p.TCPConnect
+				if (tcpSig.TargetDeviceID == "" || tcpSig.TargetDeviceID == deviceID) && tcpSig.SenderDeviceID != "" && tcpSig.SenderDeviceID != deviceID {
+					if !tcpDirectMgr.HasConn(tcpSig.SenderDeviceID) {
+						log.Info().Str("sender", tcpSig.SenderDeviceID).Str("sender_tcp", tcpSig.SenderTCPAddr).
+							Msg("⚡ [TCPConnect] Received on-demand TCP ShadowTLS connection request from peer")
+						lPort := tcpDirectMgr.Port()
+						if lPort <= 0 && puncher != nil {
+							lPort = puncher.LocalPort()
+						}
+						go func(devID, target string, localP int) {
+							_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
+						}(tcpSig.SenderDeviceID, tcpSig.SenderTCPAddr, lPort)
+					}
+				}
+				if p.VirtualIP == "" || p.PublicKey == "" {
+					continue
+				}
+			}
+
 			// Task 1.2: Handle Synchronized Simultaneous Open Coordination signal
 			if p.Coordination != nil && puncher != nil {
 				coord := p.Coordination
@@ -2731,8 +2843,10 @@ func receiveLoop(
 			preservedDirect := false
 			preservedLat := int64(0)
 			lastDirect := time.Time{}
+			lastBilateral := time.Time{}
 			if existingPeer != nil {
 				lastDirect = existingPeer.LastDirectSeen
+				lastBilateral = existingPeer.LastBilateralSeen
 				// If peer's STUNAddr changed, the old ActiveEndpoint is dead and must be refreshed!
 				if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
 					preservedEP = p.STUNAddr
@@ -2740,7 +2854,7 @@ func receiveLoop(
 					preservedLat = 0
 				} else {
 					preservedEP = existingPeer.ActiveEndpoint
-					if existingPeer.DirectP2P && !existingPeer.LastDirectSeen.IsZero() && time.Since(existingPeer.LastDirectSeen) < 15*time.Second {
+					if existingPeer.DirectP2P && existingPeer.IsBilateralP2P(15*time.Second) {
 						preservedDirect = true
 					} else {
 						preservedDirect = false
@@ -2761,34 +2875,35 @@ func receiveLoop(
 			}
 
 			registry.Upsert(&peer.Peer{
-				DeviceID:         p.DeviceID,
-				Nickname:         p.Nickname,
-				DeviceName:       p.DeviceName,
-				PublicKey:        p.PublicKey,
-				PublicIP:         p.PublicIP,
-				STUNAddr:         p.STUNAddr,
-				TCPAddr:          p.TCPAddr,
-				Candidates:       p.Candidates,
-				Endpoints:        p.Endpoints,
-				NATType:          p.NATType,
-				NATDelta:         p.NATDelta,
-				WGPubKey:         p.WGPubKey,
-				WGPort:           p.WGPort,
-				VirtualIP:        p.VirtualIP,
-				IsExitNode:       p.IsExitNode,
-				AdvertisedRoutes: p.AdvertisedRoutes,
-				LastSeen:         time.Now(),
-				LastDirectSeen:   lastDirect,
-				Online:           true,
-				DirectP2P:        preservedDirect,
-				ActiveEndpoint:   preservedEP,
-				PingMs:           preservedLat,
-				AWG:              p.AWG,
-				OS:               p.OS,
-				Platform:         p.Platform,
-				Arch:             p.Arch,
-				Version:          p.Version,
-				IsKeenetic:       p.IsKeenetic,
+				DeviceID:          p.DeviceID,
+				Nickname:          p.Nickname,
+				DeviceName:        p.DeviceName,
+				PublicKey:         p.PublicKey,
+				PublicIP:          p.PublicIP,
+				STUNAddr:          p.STUNAddr,
+				TCPAddr:           p.TCPAddr,
+				Candidates:        p.Candidates,
+				Endpoints:         p.Endpoints,
+				NATType:           p.NATType,
+				NATDelta:          p.NATDelta,
+				WGPubKey:          p.WGPubKey,
+				WGPort:            p.WGPort,
+				VirtualIP:         p.VirtualIP,
+				IsExitNode:        p.IsExitNode,
+				AdvertisedRoutes:  p.AdvertisedRoutes,
+				LastSeen:          time.Now(),
+				LastDirectSeen:    lastDirect,
+				LastBilateralSeen: lastBilateral,
+				Online:            true,
+				DirectP2P:         preservedDirect,
+				ActiveEndpoint:    preservedEP,
+				PingMs:            preservedLat,
+				AWG:               p.AWG,
+				OS:                p.OS,
+				Platform:          p.Platform,
+				Arch:              p.Arch,
+				Version:           p.Version,
+				IsKeenetic:        p.IsKeenetic,
 			})
 
 			// Мгновенная попытка Direct TCP соединения при обнаружении узла

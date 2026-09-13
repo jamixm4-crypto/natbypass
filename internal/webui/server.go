@@ -69,8 +69,9 @@ type AppState struct {
 	StartedAt      time.Time `json:"started_at"`
 	InterfaceName  string    `json:"interface_name,omitempty"`
 	GatewayIP      string    `json:"gateway_ip,omitempty"`
-	MTU            int       `json:"mtu,omitempty"`
-	InternetLive   bool      `json:"internet_live"`
+	MTU            int               `json:"mtu,omitempty"`
+	InternetLive   bool              `json:"internet_live"`
+	TUNStatus      *tunnel.TUNStatus `json:"tun_status,omitempty"`
 }
 
 // EventEntry — запись в журнале событий NatBypass
@@ -788,6 +789,13 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 			if time.Since(p.LastSeen) > constants.PeerOfflineThreshold {
 				p.Online = false
 			}
+			if !p.Online {
+				p.DirectP2P = false
+				p.DirectTCP = false
+				p.Transport = "offline"
+				p.PingMs = 0
+				p.Latency = 0
+			}
 
 			curCfg, _ := config.Load(s.configPath)
 			if p.VirtualIP == "" {
@@ -930,7 +938,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta24"
+		ver = "1.9.226-beta25"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -968,6 +976,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"gateway_ip":           s.state.GatewayIP,
 		"mtu":                  s.state.MTU,
 		"internet_live":        s.state.InternetLive,
+		"tun_status":           tunnel.GetTUNStatus(),
 	}
 
 	awgEnabled := false
@@ -980,6 +989,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status["awg_enabled"] = awgEnabled
 
 	s.jsonResponse(w, http.StatusOK, status, "")
+}
+
+// SetTUNStatus sets the TUN adapter status in AppState.
+func (s *Server) SetTUNStatus(ts tunnel.TUNStatus) {
+	if s.state != nil {
+		s.state.TUNStatus = &ts
+	}
 }
 
 // handleRefreshIP — POST /api/refresh-ip — принудительное обновление IP
@@ -1853,7 +1869,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta24"
+		ver = "1.9.226-beta25"
 	}
 
 	vip := s.state.VirtualIP

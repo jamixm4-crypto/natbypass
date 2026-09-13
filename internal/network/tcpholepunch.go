@@ -236,8 +236,8 @@ func (m *TCPDirectManager) StartListener(preferredPort int) (int, error) {
 	candidatePorts := []int{}
 	if preferredPort > 0 {
 		candidatePorts = append(candidatePorts, preferredPort)
-		// Fallback ports cascade: 8443 (default HTTPS alternate), 4443, 47832 (P2P default)
-		for _, fallbackP := range []int{8443, 4443, 47832} {
+		// Fallback stealth ports cascade: 8443, 443 (HTTPS), Cloudflare TLS (2053, 2083, 2087, 2096), 4443, 8080, 47832
+		for _, fallbackP := range []int{8443, 443, 2053, 2083, 2087, 2096, 4443, 8080, 47832} {
 			alreadyPresent := false
 			for _, cp := range candidatePorts {
 				if cp == fallbackP {
@@ -438,6 +438,29 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 		sCtx, sCancel := context.WithTimeout(m.ctx, 3600*time.Millisecond)
 		defer sCancel()
 		conn, err = AttemptTCPSimultaneousOpen(sCtx, localPort, targetAddr)
+	}
+
+	// 4. Stealth Port Hunting: if initial targetAddr (e.g. host:8443) failed/closed, hunt across fallback stealth ports on the same host
+	if (err != nil || conn == nil) && !m.HasConn(peerID) {
+		if host, origPort, splitErr := net.SplitHostPort(targetAddr); splitErr == nil && host != "" {
+			fallbackPorts := []int{8443, 443, 2053, 2083, 2087, 2096, 4443, 8080}
+			for _, fbPort := range fallbackPorts {
+				fbAddr := fmt.Sprintf("%s:%d", host, fbPort)
+				if fbAddr == targetAddr || fmt.Sprintf("%d", fbPort) == origPort {
+					continue
+				}
+				if m.HasConn(peerID) {
+					return nil
+				}
+				fbDialer := net.Dialer{Timeout: 2 * time.Second}
+				fbConn, fbErr := fbDialer.DialContext(m.ctx, "tcp4", fbAddr)
+				if fbErr == nil && fbConn != nil {
+					conn = fbConn
+					err = nil
+					break
+				}
+			}
+		}
 	}
 
 	if err != nil || conn == nil {

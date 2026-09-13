@@ -23,7 +23,7 @@ const (
 	DefaultVirtualIPSubnet = "100.64.200.0/24"
 
 	// Peer registry lifecycle and timeouts
-	PeerOfflineThreshold = 90 * time.Second
+	PeerOfflineThreshold = 25 * time.Second
 	PeerCleanupInterval  = 4 * time.Minute
 	PeerMonitorInterval  = 10 * time.Second
 

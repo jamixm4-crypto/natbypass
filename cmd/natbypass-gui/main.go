@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta24"
+	Version = "1.9.226-beta25"
 	Commit  = "release"
 )
 
@@ -187,6 +187,7 @@ var (
 	procDragAcceptFiles   = modshell32.NewProc("DragAcceptFiles")
 	procDragQueryFileW    = modshell32.NewProc("DragQueryFileW")
 	procDragFinish        = modshell32.NewProc("DragFinish")
+	procShellExecuteExW   = modshell32.NewProc("ShellExecuteExW")
 )
 
 
@@ -393,6 +394,7 @@ var (
 
 	// Вкладка 0: Обзор (Dashboard)
 	hLblStatus            uintptr
+	hLblTunStatus         uintptr
 	hLblIpInfo            uintptr
 	hLblChannels          uintptr
 	hLblCardVIP           uintptr
@@ -486,9 +488,10 @@ var (
 	hBtnClearSubnets   uintptr
 
 	// Вкладка 6: Диагностика и Журнал
-	hBtnRunDiag    uintptr
-	hBtnDumpStack  uintptr
-	hEditDiagLog   uintptr
+	hBtnRunDiag       uintptr
+	hBtnDumpStack     uintptr
+	hBtnRelaunchAdmin uintptr
+	hEditDiagLog      uintptr
 	hEditLogs      uintptr
 	hBtnClrLogs    uintptr
 	hBtnSaveLogs   uintptr
@@ -634,6 +637,7 @@ const (
 	ID_BTN_TOGGLE_BETA       = 4057
 	ID_BTN_APPLY_SUBNETS     = 4058
 	ID_BTN_CLEAR_SUBNETS     = 4059
+	ID_BTN_RELAUNCH_ADMIN    = 4075
 	WM_CHECK_UPDATE_DONE     = 0x8000 + 105
 
 	// Профили
@@ -1904,6 +1908,14 @@ func handleCommand(id uint16) {
 
 	case ID_BTN_SAVE_LOGS:
 		saveLogsToFile()
+
+	case ID_BTN_RELAUNCH_ADMIN:
+		addLog("🛡️ Запрос перезапуска программы с правами Администратора (UAC elevation)...")
+		if relaunchAsAdmin() {
+			os.Exit(0)
+		} else {
+			addLog("❌ Запрос прав Администратора отклонен пользователем")
+		}
 
 	case ID_BTN_ALLOW_EXIT:
 		allowExitNode = !allowExitNode
@@ -3546,6 +3558,37 @@ func connectPeerTCPDirect(targetPeer *peer.Peer) {
 				addLog(fmt.Sprintf("⚠️ Direct TCP ошибка с %s: %v", devID, err))
 			}
 		}(targetPeer.DeviceID, tcpTarget, lPort)
+
+		// Send bilateral TCPConnect signal over MQTT for coordinated simultaneous open
+		if len(sigChannels) > 0 {
+			myTCPAddr := ""
+			if udpPuncher != nil && udpPuncher.GetCachedSTUNAddr() != "" {
+				if h, _, err := net.SplitHostPort(udpPuncher.GetCachedSTUNAddr()); err == nil {
+					tcpP := defaultTCPPort
+					if guiTCPDirectMgr != nil && guiTCPDirectMgr.Port() > 0 {
+						tcpP = guiTCPDirectMgr.Port()
+					}
+					myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
+				}
+			}
+			if myTCPAddr != "" {
+				go func(tDev, myAddr string) {
+					tcpSigPl := &signaling.Payload{
+						DeviceID: myDevID,
+						TCPConnect: &signaling.TCPConnectSignal{
+							SenderDeviceID: myDevID,
+							TargetDeviceID: tDev,
+							SenderTCPAddr:  myAddr,
+							Timestamp:      time.Now().Unix(),
+						},
+						Timestamp: time.Now(),
+					}
+					for _, sc := range sigChannels {
+						_ = sc.Send(context.Background(), tcpSigPl)
+					}
+				}(targetPeer.DeviceID, myTCPAddr)
+			}
+		}
 	} else {
 		addLog("⚠️ У узла нет известного TCP/STUN адреса для подключения")
 	}
@@ -3893,13 +3936,14 @@ func buildModernUI(hInstance uintptr) {
 	hBtnExitNodeDisable = createOwnerDrawButton(hInstance, "🔴 Отключить шлюз", cx+318, 170, 160, 36, ID_BTN_EXIT_NODE_DISABLE, "red")
 	hBtnToggleSubnetRoute = createOwnerDrawButton(hInstance, "🏠 Подключить подсеть пира", cx+486, 170, 354, 36, ID_BTN_TOGGLE_SUBNET, "normal")
 
-	lblSummaryTitle := createLabel(hInstance, "👥 Активные участники сети (P2P статус и задержки):", cx, 214, cw, 22, hFontHeader)
+	lblSummaryTitle := createLabel(hInstance, "👥 Активные участники сети (P2P статус и задержки):", cx, 214, 430, 22, hFontHeader)
+	hLblTunStatus = createLabel(hInstance, "🟢 TUN Адаптер: NatBypass (Активен)", cx+440, 214, 400, 22, hFontNormal)
 	hListSummaryPeers = createListBox(hInstance, cx, 238, cw, 470, hFontNormal)
 
 	tabPages[0] = []uintptr{
 		lblDashTitle, hLblStatus, hBtnVpn, hBtnRefresh, hBtnManageProfiles,
 		hLblCardVIP, hLblCardPubIP, hLblCardSTUN, hLblCardSig,
-		hBtnExitNodeSelect, hBtnExitNodeDisable, hBtnToggleSubnetRoute, lblSummaryTitle, hListSummaryPeers,
+		hBtnExitNodeSelect, hBtnExitNodeDisable, hBtnToggleSubnetRoute, lblSummaryTitle, hLblTunStatus, hListSummaryPeers,
 	}
 
 	// СТРАНИЦА 1: УСТРОЙСТВА (PEERS)
@@ -4112,13 +4156,14 @@ func buildModernUI(hInstance uintptr) {
 
 	// СТРАНИЦА 6: ДИАГНОСТИКА И ЖУРНАЛ
 	lblDiagTitle := createLabel(hInstance, "🩺 Диагностика связности & Журнал событий", cx, 16, cw, 28, hFontTitle)
-	hBtnRunDiag = createOwnerDrawButton(hInstance, "🔄 Комплексный тест сети", cx, 48, 230, 36, ID_BTN_RUN_DIAG, "primary")
-	hBtnDumpStack = createOwnerDrawButton(hInstance, "⚡ Снимок памяти", cx+240, 48, 210, 36, ID_BTN_DUMP_STACK, "normal")
-	hBtnSaveLogs = createOwnerDrawButton(hInstance, "💾 Экспорт лога", cx+460, 48, 185, 36, ID_BTN_SAVE_LOGS, "normal")
+	hBtnRunDiag = createOwnerDrawButton(hInstance, "🔄 Комплексный тест", cx, 48, 195, 36, ID_BTN_RUN_DIAG, "primary")
+	hBtnDumpStack = createOwnerDrawButton(hInstance, "⚡ Снимок памяти", cx+205, 48, 175, 36, ID_BTN_DUMP_STACK, "normal")
+	hBtnSaveLogs = createOwnerDrawButton(hInstance, "💾 Экспорт лога", cx+390, 48, 160, 36, ID_BTN_SAVE_LOGS, "normal")
+	hBtnRelaunchAdmin = createOwnerDrawButton(hInstance, "🛡️ Запуск от Администратора (UAC)", cx+560, 48, 280, 36, ID_BTN_RELAUNCH_ADMIN, "yellow")
 	hEditLogs = createEdit(hInstance, "", cx, 92, cw, 610, true, true, hFontMono)
 	hEditDiagLog = hEditLogs
 
-	tabPages[6] = []uintptr{lblDiagTitle, hBtnRunDiag, hBtnDumpStack, hBtnSaveLogs, hBtnClrLogs, hEditLogs}
+	tabPages[6] = []uintptr{lblDiagTitle, hBtnRunDiag, hBtnDumpStack, hBtnSaveLogs, hBtnRelaunchAdmin, hBtnClrLogs, hEditLogs}
 
 	// СТРАНИЦА 7: НАСТРОЙКИ (SETTINGS)
 	lblSetTitle := createLabel(hInstance, "⚙️ Настройки приложения NatBypass", cx, 16, cw, 28, hFontTitle)
@@ -4303,7 +4348,57 @@ func selectTab(index int) {
 	procInvalidateRect.Call(hMainWnd, 0, 1)
 }
 
+// relaunchAsAdmin перезапускает приложение с правами Администратора через ShellExecuteEx (UAC elevation)
+func relaunchAsAdmin() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+
+	verb, _ := syscall.UTF16PtrFromString("runas")
+	exePtr, _ := syscall.UTF16PtrFromString(exe)
+
+	type SHELLEXECUTEINFO struct {
+		cbSize         uint32
+		fMask          uint32
+		hwnd           uintptr
+		lpVerb         *uint16
+		lpFile         *uint16
+		lpParameters   *uint16
+		lpDirectory    *uint16
+		nShow          int32
+		hInstApp       uintptr
+		lpIDList       uintptr
+		lpClass        *uint16
+		hkeyClass      uintptr
+		dwHotKey       uint32
+		hIconOrMonitor uintptr
+		hProcess       uintptr
+	}
+
+	sei := &SHELLEXECUTEINFO{
+		fMask:  0x00000040, // SEE_MASK_NOCLOSEPROCESS
+		lpVerb: verb,
+		lpFile: exePtr,
+		nShow:  1,
+	}
+	sei.cbSize = uint32(unsafe.Sizeof(*sei))
+
+	ret, _, _ := procShellExecuteExW.Call(uintptr(unsafe.Pointer(sei)))
+	return ret != 0
+}
+
 func toggleVPNManual() {
+	tunSt := tunnel.GetTUNStatus()
+	if !tunSt.Active && !tunSt.IsAdmin {
+		addLog("🛡️ Запрос повышения прав UAC для создания сетевого адаптера Wintun...")
+		if relaunchAsAdmin() {
+			os.Exit(0)
+		} else {
+			addLog("❌ Запрос прав Администратора отклонен пользователем")
+		}
+		return
+	}
 	vpnConnected = !vpnConnected
 	if vpnConnected {
 		buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 ПОДКЛЮЧЕНО (Ваш IP: %s)", myVirtualIP)
@@ -4468,6 +4563,9 @@ func startEngineFromConfig(c *config.Config) {
 			p.LastDirectSeen = time.Now()
 			if rtt > 0 && rtt <= 1500*time.Millisecond {
 				p.DirectP2P = true
+				p.Transport = "udp_direct"
+				p.LastBilateralSeen = time.Now()
+				p.ConsecutiveDrops = 0
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.70 + float64(rtt)*0.30)
 				} else {
@@ -4554,6 +4652,7 @@ func startEngineFromConfig(c *config.Config) {
 				regPeer.Transport = "tcp_tls"
 				regPeer.ActiveEndpoint = remoteAddr
 				regPeer.LastDirectSeen = time.Now()
+				regPeer.LastBilateralSeen = time.Now()
 				regPeer.ProbeCount = 0
 				registry.Upsert(regPeer)
 			}
@@ -4688,11 +4787,14 @@ func startEngineFromConfig(c *config.Config) {
 							}
 						}
 					}
-					targetPeer.DirectP2P = true
 					if isTCP {
+						targetPeer.DirectP2P = true
 						targetPeer.Transport = "tcp_tls"
+						targetPeer.LastBilateralSeen = time.Now()
 					} else {
-						targetPeer.Transport = "udp_direct"
+						// For UDP: an inbound packet only confirms one-way reception (remote -> local).
+						// Strictly DO NOT promote to DirectP2P or switch Transport to udp_direct here!
+						// DirectP2P is ONLY activated upon verified bilateral delivery (RTT > 0 via PONG).
 					}
 					if srcAddr != nil {
 						fromAddrStr := srcAddr.String()
@@ -4716,6 +4818,9 @@ func startEngineFromConfig(c *config.Config) {
 					}
 					if udpPuncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
 						udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
+						if !targetPeer.IsBilateralP2P(12 * time.Second) {
+							_ = udpPuncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
+						}
 					}
 				}
 			}
@@ -4956,6 +5061,8 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 
+								bilateralOK := targetPeer.IsBilateralP2P(12 * time.Second)
+
 								// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
 								if !isForceTCP && !sentTCP && udpPuncher != nil && targetEP != "" {
 									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
@@ -4963,11 +5070,11 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 								// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
-								if !isForceTCP && !sentTCP && !targetPeer.DirectP2P && udpPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+								if !isForceTCP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && udpPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 									_ = udpPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, packet, pmin, pmax)
 								}
 								// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
-								if !isForceTCP && (!sentDirect || !targetPeer.DirectP2P) && udpPuncher != nil {
+								if !isForceTCP && (!sentDirect || !targetPeer.DirectP2P || !bilateralOK) && udpPuncher != nil {
 									if targetEP != "" {
 										_ = udpPuncher.SendHolePunchProbe(targetEP)
 									}
@@ -4981,11 +5088,17 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 								// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing or unconfirmed
-								if !isForceUDP && !sentTCP && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(targetPeer.DeviceID) && (!targetPeer.DirectP2P || targetPeer.PingMs == 0 || targetPeer.ProbeCount >= 1 || isForceTCP) {
+								if !isForceUDP && !sentTCP && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(targetPeer.DeviceID) && (!targetPeer.DirectP2P || !bilateralOK || targetPeer.PingMs == 0 || targetPeer.ProbeCount >= 1 || isForceTCP) {
 									go connectPeerTCPDirect(targetPeer)
 								}
+
+								// Dual-Path Shadow Relay Rule:
+								// If direct TCP is not active AND (direct UDP is unconfirmed bilaterally within 12s, or lossy >30%),
+								// immediately forward via Relay so network traffic is never blackholed!
+								needsRelay := !sentTCP && (!sentDirect || !targetPeer.DirectP2P || !bilateralOK || targetPeer.LossPercent > 30)
+
 								// 1e. Mesh Userspace TCP Relay Fallback:
-								if !sentTCP && (!sentDirect || !targetPeer.DirectP2P || targetPeer.LossPercent > 30) && !isForceUDP && guiTCPDirectMgr != nil {
+								if needsRelay && !isForceUDP && guiTCPDirectMgr != nil {
 									if relayPeer := findMeshRelayPeerGUI(registry, guiTCPDirectMgr, targetPeer.DeviceID); relayPeer != nil {
 										if mhPkt, mhErr := network.EncodeMultiHopPacket(myDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, packet); mhErr == nil {
 											if err := guiTCPDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
@@ -4996,7 +5109,7 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 								// 1f. Parallel/Fallback MQTT relay transmission when direct P2P and Direct TCP are not active or high loss:
-								if (!sentDirect || !targetPeer.DirectP2P || targetPeer.LossPercent > 30) && len(sigChannels) > 0 {
+								if needsRelay && len(sigChannels) > 0 {
 									dataToSend := packet
 									if cfg != nil {
 										if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
@@ -5222,7 +5335,7 @@ func startEngineFromConfig(c *config.Config) {
 				return
 			case <-monitorTicker.C:
 				if registry != nil {
-					registry.MarkOffline(120 * time.Second)
+					registry.MarkOffline(constants.PeerOfflineThreshold)
 					registry.Cleanup(24 * time.Hour)
 				}
 			}
@@ -5268,17 +5381,20 @@ func startEngineFromConfig(c *config.Config) {
 								p.Latency = rtt
 							}
 							p.PingMs = p.Latency.Milliseconds()
-							p.DirectP2P = true
 							p.LastDirectSeen = time.Now()
+							if p.DirectP2P || p.Transport == "udp_direct" {
+								p.LastBilateralSeen = time.Now()
+							}
 							registry.Upsert(p)
 						} else {
 							// ICMP failure: clear ping and latency
 							p.ProbeCount++
 							p.Latency = 0
 							p.PingMs = 0
-							if p.ProbeCount >= 2 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) {
+							if p.ProbeCount >= 2 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) || (!p.LastBilateralSeen.IsZero() && time.Since(p.LastBilateralSeen) > 15*time.Second) {
 								if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (guiTCPDirectMgr == nil || !guiTCPDirectMgr.HasConn(p.DeviceID)) {
 									p.DirectP2P = false
+									p.Transport = "relay_mqtt"
 								}
 							}
 							registry.Upsert(p)
@@ -5827,6 +5943,26 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					continue
 				}
 
+				// Handle on-demand TCP (ShadowTLS) connection request from remote peer
+				if p.TCPConnect != nil && guiTCPDirectMgr != nil {
+					tcpSig := p.TCPConnect
+					if (tcpSig.TargetDeviceID == "" || tcpSig.TargetDeviceID == myDevID) && tcpSig.SenderDeviceID != "" && tcpSig.SenderDeviceID != myDevID {
+						if !guiTCPDirectMgr.HasConn(tcpSig.SenderDeviceID) {
+							writeDebug(fmt.Sprintf("⚡ [TCPConnect] Received on-demand TCP ShadowTLS connection request from %s (%s)", tcpSig.SenderDeviceID, tcpSig.SenderTCPAddr))
+							lPort := guiTCPDirectMgr.Port()
+							if lPort <= 0 && udpPuncher != nil {
+								lPort = udpPuncher.LocalPort()
+							}
+							go func(devID, target string, localP int) {
+								_ = guiTCPDirectMgr.ConnectPeer(devID, target, localP)
+							}(tcpSig.SenderDeviceID, tcpSig.SenderTCPAddr, lPort)
+						}
+					}
+					if p.VirtualIP == "" || p.PublicKey == "" {
+						continue
+					}
+				}
+
 				// SRHP: Handle Synchronized Rendezvous Hole-Punching
 				if p.Rendezvous != nil && udpPuncher != nil && len(sigChannels) > 0 {
 					rndv := p.Rendezvous
@@ -6002,8 +6138,10 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				preservedLat := time.Duration(0)
 				preservedPingMs := int64(0)
 				lastDirect := time.Time{}
+				lastBilateral := time.Time{}
 				if existingPeer != nil {
 					lastDirect = existingPeer.LastDirectSeen
+					lastBilateral = existingPeer.LastBilateralSeen
 					if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
 						// Peer roamed to a new network/IP (e.g. Wi-Fi -> Cellular)
 						preservedEP = p.STUNAddr
@@ -6012,7 +6150,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						preservedPingMs = 0
 					} else {
 						preservedEP = existingPeer.ActiveEndpoint
-						if existingPeer.DirectP2P && !existingPeer.LastDirectSeen.IsZero() && time.Since(existingPeer.LastDirectSeen) < 15*time.Second {
+						if existingPeer.DirectP2P && existingPeer.IsBilateralP2P(15*time.Second) {
 							preservedDirect = true
 						} else {
 							preservedDirect = false
@@ -6034,39 +6172,49 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					}
 				}
 
+				preservedTransport := "relay_mqtt"
+				if existingPeer != nil {
+					preservedTransport = existingPeer.Transport
+				}
+				if !preservedDirect && preservedTransport == "udp_direct" {
+					preservedTransport = "relay_mqtt"
+				}
+
 				if guiMagicSock != nil && p.TCPAddr != "" {
 					guiMagicSock.RegisterPeerTCPAddr(p.DeviceID, p.TCPAddr)
 				}
 
 				registry.Upsert(&peer.Peer{
-					DeviceID:         p.DeviceID,
-					Nickname:         nick,
-					DeviceName:       nick,
-					VirtualIP:        peerVIP,
-					PublicKey:        p.PublicKey,
-					PublicIP:         p.PublicIP,
-					LocalAddr:        p.LocalAddr,
-					STUNAddr:         p.STUNAddr,
-					TCPAddr:          p.TCPAddr,
-					ActiveEndpoint:   preservedEP,
-					DirectP2P:        preservedDirect,
-					Latency:          preservedLat,
-					PingMs:           preservedPingMs,
-					Candidates:       p.Candidates,
-					WGPubKey:         p.WGPubKey,
-					WGPort:           p.WGPort,
-					LastSeen:         time.Now(),
-					LastDirectSeen:   lastDirect,
-					Online:           true,
-					IsExitNode:       p.IsExitNode,
-					AdvertisedRoutes: p.AdvertisedRoutes,
-					AWG:              p.AWG,
-					OS:               osName,
-					Platform:         plat,
-					CountryFlag:      pFlag,
-					Arch:             p.Arch,
-					Version:          p.Version,
-					IsKeenetic:       p.IsKeenetic,
+					DeviceID:          p.DeviceID,
+					Nickname:          nick,
+					DeviceName:        nick,
+					VirtualIP:         peerVIP,
+					PublicKey:         p.PublicKey,
+					PublicIP:          p.PublicIP,
+					LocalAddr:         p.LocalAddr,
+					STUNAddr:          p.STUNAddr,
+					TCPAddr:           p.TCPAddr,
+					ActiveEndpoint:    preservedEP,
+					DirectP2P:         preservedDirect,
+					Transport:         preservedTransport,
+					Latency:           preservedLat,
+					PingMs:            preservedPingMs,
+					Candidates:        p.Candidates,
+					WGPubKey:          p.WGPubKey,
+					WGPort:            p.WGPort,
+					LastSeen:          time.Now(),
+					LastDirectSeen:    lastDirect,
+					LastBilateralSeen: lastBilateral,
+					Online:            true,
+					IsExitNode:        p.IsExitNode,
+					AdvertisedRoutes:  p.AdvertisedRoutes,
+					AWG:               p.AWG,
+					OS:                osName,
+					Platform:          plat,
+					CountryFlag:       pFlag,
+					Arch:              p.Arch,
+					Version:           p.Version,
+					IsKeenetic:        p.IsKeenetic,
 				})
 
 				// Мгновенная попытка Direct TCP соединения при обнаружении узла
@@ -6537,6 +6685,7 @@ func publishCurrentState(ctx context.Context) {
 		uiServer.SetAppState(myDevID, myPublicIP, mySTUNAddr, myVirtualIP)
 		uiServer.SetVirtualIP(myVirtualIP)
 		uiServer.SetDeviceName(myNick)
+		uiServer.SetTUNStatus(tunnel.GetTUNStatus())
 	}
 
 	// 🔍 Проверяем, есть ли активные подключенные пиры (прямой P2P или свежий маяк < 30 сек)
@@ -6812,8 +6961,36 @@ func updateData() {
 			exitSuffix = fmt.Sprintf(" | 🌐 Шлюз: %s", activeExitVIP)
 		}
 
-		// Реальная верификация статуса mesh-соединения
-		if directP2PCount > 0 {
+		// Обновление состояния TUN адаптера и прав доступа
+		tunSt := tunnel.GetTUNStatus()
+		if hLblTunStatus != 0 {
+			if tunSt.Active {
+				setControlText(hLblTunStatus, fmt.Sprintf("🟢 TUN: %s (MTU %d) — OK", tunSt.DeviceName, tunSt.MTU))
+			} else if !tunSt.IsAdmin {
+				setControlText(hLblTunStatus, "🔴 TUN: ТРЕБУЮТСЯ ПРАВА АДМИНИСТРАТОРА!")
+			} else if tunSt.ErrorCause != "" {
+				setControlText(hLblTunStatus, fmt.Sprintf("🔴 TUN: %s", tunSt.ErrorCause))
+			} else {
+				setControlText(hLblTunStatus, "🔴 TUN: АДАПТЕР НЕ АКТИВЕН")
+			}
+		}
+
+		// Реальная верификация статуса mesh-соединения и адаптера TUN
+		if !tunSt.Active {
+			vpnConnected = false
+			if !tunSt.IsAdmin {
+				setControlText(hLblStatus, "🔴 ТРЕБУЮТСЯ ПРАВА АДМИНИСТРАТОРА (Кликните кнопку ниже для перезапуска с UAC)")
+				buttonLabels[ID_BTN_VPN] = "🔴 ТРЕБУЮТСЯ ПРАВА АДМИНИСТРАТОРА (Клик для перезапуска)"
+			} else if tunSt.ErrorCause != "" {
+				setControlText(hLblStatus, fmt.Sprintf("🔴 СБОЙ АДАПТЕРА TUN: %s", tunSt.ErrorCause))
+				buttonLabels[ID_BTN_VPN] = "🔴 ОШИБКА АДАПТЕРА TUN (Проверьте журнал)"
+			} else {
+				setControlText(hLblStatus, "🔴 ВИРТУАЛЬНЫЙ АДАПТЕР TUN НЕ ИНИЦИАЛИЗИРОВАН")
+				buttonLabels[ID_BTN_VPN] = "🔴 АДАПТЕР НЕ АКТИВЕН"
+			}
+			buttonTypes[ID_BTN_VPN] = "red"
+			procInvalidateRect.Call(hBtnVpn, 0, 1)
+		} else if directP2PCount > 0 {
 			vpnConnected = true
 			pingStr := ""
 			if minRTT > 0 {
@@ -6883,7 +7060,8 @@ func updateData() {
 
 					var icon string
 					var statusDisplay string
-					if p.Online {
+					isOnline := p.Online && !p.LastSeen.IsZero() && time.Since(p.LastSeen) <= constants.PeerOfflineThreshold
+					if isOnline {
 						if p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID)) {
 							icon = "[TLS]"
 							if p.PingMs > 0 {
