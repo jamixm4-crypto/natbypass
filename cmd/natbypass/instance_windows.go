@@ -19,7 +19,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -465,20 +464,7 @@ func openAppWindow(port int) {
 			return
 		}
 
-		// Tier 2: Pure Win32 Native Dark Mode GDI GUI (NatBypass-GUI.exe) - Zero dependencies, 100% native desktop window without browser
-		exeDir, err := os.Executable()
-		if err == nil {
-			guiPath := filepath.Join(filepath.Dir(exeDir), "NatBypass-GUI.exe")
-			if _, statErr := os.Stat(guiPath); statErr == nil {
-				fmt.Println("Launching Pure Win32 Native GUI window (NatBypass-GUI)...")
-				cmd := exec.Command(guiPath, "-port", strconv.Itoa(port))
-				if startErr := cmd.Start(); startErr == nil {
-					return
-				}
-			}
-		}
-
-		// Tier 3: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
+		// Tier 2: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
 		// This runs on Windows 10/11 and Windows Server, opening a dedicated frameless app window without browser tabs or address bar.
 		if browserPath := findChromiumAppBrowser(); browserPath != "" {
 			fmt.Printf("Launching NatBypass in dedicated app window (%s)...\n", filepath.Base(browserPath))
@@ -494,7 +480,7 @@ func openAppWindow(port int) {
 			}
 		}
 
-		// Tier 4: If on Windows Server with Desktop Experience, trigger on-demand WebView2 auto-install
+		// Tier 3: If on Windows Server with Desktop Experience, trigger on-demand WebView2 auto-install
 		if tray.IsDesktopExperienceAvailable() && !tray.IsWebView2RuntimeAvailable() {
 			fmt.Println("Attempting on-demand WebView2 runtime setup...")
 			go func() {
@@ -505,7 +491,7 @@ func openAppWindow(port int) {
 			}()
 		}
 
-		// Tier 5: Fallback to default browser with IE ESC Intranet Zone preconfigured
+		// Tier 4: Fallback to default browser with IE ESC Intranet Zone preconfigured
 		configureLocalIntranetZone()
 		fmt.Printf("Opening WebUI in default browser at %s\n", url)
 		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()

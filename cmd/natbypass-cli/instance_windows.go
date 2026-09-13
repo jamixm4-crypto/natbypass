@@ -19,7 +19,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -334,22 +333,9 @@ func openAppWindow(port int) {
 		return
 	}
 
-	// 4. MULTI-TIER WINDOW LAUNCHER:
+	// 4. MULTI-TIER WINDOW LAUNCHER (Dedicated Chromium App Window or default browser):
 	go func() {
-		// Tier 1: Pure Win32 Native Dark Mode GDI GUI (NatBypass-GUI.exe) - Zero dependencies
-		exeDir, err := os.Executable()
-		if err == nil {
-			guiPath := filepath.Join(filepath.Dir(exeDir), "NatBypass-GUI.exe")
-			if _, statErr := os.Stat(guiPath); statErr == nil {
-				fmt.Println("Launching Pure Win32 Native GUI window (NatBypass-GUI)...")
-				cmd := exec.Command(guiPath, "-port", strconv.Itoa(port))
-				if startErr := cmd.Start(); startErr == nil {
-					return
-				}
-			}
-		}
-
-		// Tier 2: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
+		// Tier 1: Dedicated Chromium App Window (msedge.exe / chrome.exe / brave.exe with --app)
 		if browserPath := findChromiumAppBrowser(); browserPath != "" {
 			fmt.Printf("Launching NatBypass in dedicated app window (%s)...\n", filepath.Base(browserPath))
 			appArgs := []string{
@@ -364,7 +350,7 @@ func openAppWindow(port int) {
 			}
 		}
 
-		// Tier 3: Fallback to default browser
+		// Tier 2: Fallback to default browser
 		configureLocalIntranetZone()
 		fmt.Printf("Opening WebUI in default browser at %s\n", url)
 		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()

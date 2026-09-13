@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta29"
+	Version = "1.9.226-beta30"
 	Commit  = "release"
 )
 
@@ -770,7 +770,7 @@ func cleanStaleInstances() {
 	for {
 		name := windows.UTF16ToString(entry.ExeFile[:])
 		lowerName := strings.ToLower(name)
-		if strings.Contains(lowerName, "natbypass") && !strings.Contains(lowerName, "diag") && entry.ProcessID != myPID {
+		if (strings.EqualFold(lowerName, "natbypass-gui.exe") || strings.HasPrefix(lowerName, "natbypass-gui")) && entry.ProcessID != myPID {
 			stalePIDs = append(stalePIDs, entry.ProcessID)
 		}
 		if err := windows.Process32Next(snapshot, &entry); err != nil {

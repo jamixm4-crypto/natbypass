@@ -276,7 +276,27 @@ type Device struct {
 }
 
 // CreateAdapter создает адаптер Wintun и настраивает IP адрес в Windows
-func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
+func CreateAdapter(adapterName, virtualIP string) (retDev *Device, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("критический сбой драйвера Wintun (panic): %v", r)
+			cause, remedy := DiagnoseTUNError(err)
+			SetTUNStatus(&TUNStatus{
+				Active:       false,
+				DeviceName:   adapterName,
+				VirtualIP:    virtualIP,
+				MTU:          1280,
+				LastError:    err.Error(),
+				ErrorCause:   cause,
+				ErrorRemedy:  remedy,
+				IsAdmin:      checkIsAdmin(),
+				DriverLoaded: false,
+			})
+			retDev = nil
+			retErr = err
+		}
+	}()
+
 	if err := initWintun(); err != nil {
 		cause, remedy := DiagnoseTUNError(err)
 		SetTUNStatus(&TUNStatus{
