@@ -1,4 +1,4 @@
-﻿package org.natbypass.app.ui.compose
+package org.natbypass.app.ui.compose
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -13,6 +13,7 @@ data class NatBypassColors(
     val successContainer: Color,
     val warning: Color,
     val warningContainer: Color,
+    val error: Color = Color(0xFFEF4444),
 )
 
 val LocalNatBypassColors = staticCompositionLocalOf {
@@ -21,6 +22,7 @@ val LocalNatBypassColors = staticCompositionLocalOf {
         successContainer = Color(0xFF16A34A),
         warning        = Color(0xFFFB923C),
         warningContainer = Color(0xFFEA580C),
+        error          = Color(0xFFEF4444),
     )
 }
 
@@ -80,6 +82,7 @@ fun NatBypassTheme(
         successContainer= Color(0xFF16A34A),
         warning         = Color(0xFFFB923C),
         warningContainer= Color(0xFFEA580C),
+        error           = Color(0xFFEF4444),
     )
 
     CompositionLocalProvider(LocalNatBypassColors provides natBypassColors) {
