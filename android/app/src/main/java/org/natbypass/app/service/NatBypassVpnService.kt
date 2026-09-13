@@ -337,8 +337,6 @@ class NatBypassVpnService : VpnService() {
             vpnInterface = null
             Log.i(TAG, "VPN TUN established! detached fd=$fd, tunRawFd=$tunRawFd, VIP=$currentVip")
 
-            val configFile = File(filesDir, "config.yaml")
-            val configYaml = if (configFile.exists()) configFile.readText() else "{}"
             org.natbypass.app.util.MobileBridge.startEngine(configYaml, fd)
             val updatedYaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
             if (updatedYaml.isNotEmpty() && updatedYaml != "{}") {
