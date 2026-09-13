@@ -1222,6 +1222,10 @@ func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta in
 			2 * delta, -2 * delta,
 			3 * delta, -3 * delta,
 			4 * delta, -4 * delta,
+			5 * delta, -5 * delta,
+			6 * delta, -6 * delta,
+			7 * delta, -7 * delta,
+			8 * delta, -8 * delta,
 		}
 		for _, offset := range deltaOffsets {
 			targetPort := rAddr.Port + offset
@@ -1232,9 +1236,9 @@ func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta in
 	}
 
 	// 4. Targeted probing for Symmetric NAT using advanced CGNAT heuristics (Parity, PBA, Delta)
-	if p.GetNATType().IsSymmetric() {
+	if p.GetNATType().IsSymmetric() || peerDelta > 0 {
 		targetIP := rAddr.IP
-		candidates := p.candidatePorts(rAddr.Port)
+		candidates := p.CandidatePortsAdvanced(rAddr.Port, nil, CGNATProfile{}, delta)
 		for _, port := range candidates {
 			if port != rAddr.Port {
 				sendToAddr(&net.UDPAddr{IP: targetIP, Port: port}, false)

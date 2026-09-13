@@ -163,18 +163,28 @@ func getPeerTCPTarget(p *peer.Peer, defaultPort int) string {
 		return ""
 	}
 	if p.TCPAddr != "" {
-		return p.TCPAddr
+		if _, _, err := net.SplitHostPort(p.TCPAddr); err == nil {
+			return p.TCPAddr
+		}
 	}
 	host := p.PublicIP
 	if (host == "" || host == "0.0.0.0" || host == "<nil>") && p.STUNAddr != "" {
-		host = strings.Split(p.STUNAddr, ":")[0]
+		if h, _, err := net.SplitHostPort(p.STUNAddr); err == nil && h != "" {
+			host = h
+		}
 	}
-	if host != "" && host != "0.0.0.0" && host != "<nil>" {
+	if (host == "" || host == "0.0.0.0" || host == "<nil>") && p.ActiveEndpoint != "" {
+		if h, _, err := net.SplitHostPort(p.ActiveEndpoint); err == nil && h != "" {
+			host = h
+		}
+	}
+	if host != "" && host != "0.0.0.0" && host != "<nil>" && net.ParseIP(host) != nil {
 		return fmt.Sprintf("%s:%d", host, defaultPort)
 	}
 	if p.LocalAddr != "" {
-		localHost := strings.Split(p.LocalAddr, ":")[0]
-		return fmt.Sprintf("%s:%d", localHost, defaultPort)
+		if localHost, _, err := net.SplitHostPort(p.LocalAddr); err == nil && localHost != "" && net.ParseIP(localHost) != nil {
+			return fmt.Sprintf("%s:%d", localHost, defaultPort)
+		}
 	}
 	return ""
 }
@@ -185,18 +195,23 @@ func getSignalTCPTarget(p *signaling.Payload, defaultPort int) string {
 		return ""
 	}
 	if p.TCPAddr != "" {
-		return p.TCPAddr
+		if _, _, err := net.SplitHostPort(p.TCPAddr); err == nil {
+			return p.TCPAddr
+		}
 	}
 	host := p.PublicIP
 	if (host == "" || host == "0.0.0.0" || host == "<nil>") && p.STUNAddr != "" {
-		host = strings.Split(p.STUNAddr, ":")[0]
+		if h, _, err := net.SplitHostPort(p.STUNAddr); err == nil && h != "" {
+			host = h
+		}
 	}
-	if host != "" && host != "0.0.0.0" && host != "<nil>" {
+	if host != "" && host != "0.0.0.0" && host != "<nil>" && net.ParseIP(host) != nil {
 		return fmt.Sprintf("%s:%d", host, defaultPort)
 	}
 	if p.LocalAddr != "" {
-		localHost := strings.Split(p.LocalAddr, ":")[0]
-		return fmt.Sprintf("%s:%d", localHost, defaultPort)
+		if localHost, _, err := net.SplitHostPort(p.LocalAddr); err == nil && localHost != "" && net.ParseIP(localHost) != nil {
+			return fmt.Sprintf("%s:%d", localHost, defaultPort)
+		}
 	}
 	return ""
 }
@@ -1439,7 +1454,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							if !isForceTCP && puncher != nil && p.Transport != "tcp_direct" {
 								_ = puncher.SendKeepAlive(p.ActiveEndpoint)
 								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-									_ = puncher.SendHolePunchProbe(p.STUNAddr)
+									_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 								}
 							}
 							// Clear backoff on successful connection
@@ -1487,7 +1502,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 								// Send probes to all known endpoints
 								if p.ActiveEndpoint != "" {
-									_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+									_ = puncher.SendHolePunchProbeWithDelta(p.ActiveEndpoint, p.NATDelta)
 								}
 								if p.STUNAddr != "" {
 									_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
@@ -1549,10 +1564,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								symSessionMu.Lock()
 								alreadyActive := activeSymSessions[p.DeviceID]
 								symSessionMu.Unlock()
-								if (p.NATType == "symmetric" || puncher.GetNATType().IsSymmetric()) && p.ProbeCount >= 8 && !alreadyActive {
+								if (p.NATType == "symmetric" || p.NATDelta > 0 || puncher.GetNATType().IsSymmetric()) && p.ProbeCount >= 8 && !alreadyActive {
 									targetAddr := p.STUNAddr
 									if targetAddr == "" && p.ActiveEndpoint != "" {
 										targetAddr = p.ActiveEndpoint
+									}
+									if targetAddr == "" && p.PublicIP != "" && p.PublicIP != "0.0.0.0" && p.PublicIP != "<nil>" {
+										basePort := p.WGPort
+										if basePort <= 0 {
+											basePort = constants.DefaultUDPPort
+										}
+										targetAddr = fmt.Sprintf("%s:%d", p.PublicIP, basePort)
 									}
 									if targetAddr != "" {
 										host, portStr, err := net.SplitHostPort(targetAddr)
@@ -2116,6 +2138,13 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			log.Info().Str("peer", devID).Str("old", oldPath).Str("new", newPath).Str("type", string(pType)).Msg("🔀 MagicSock: Path switched")
 			if p, ok := registry.Get(devID); ok && p != nil {
 				if pType == network.PathTypeTCP {
+					if tcpDirectMgr == nil || !tcpDirectMgr.HasConn(devID) {
+						log.Warn().Str("peer", devID).Str("attempted_path", newPath).Msg("⚠️ MagicSock TCP switch rejected: no active TCP connection exists")
+						return
+					}
+					if actualTCP := tcpDirectMgr.GetPeerRemoteAddr(devID); actualTCP != "" {
+						newPath = actualTCP
+					}
 					p.TCPAddr = newPath
 					p.DirectTCP = true
 					p.DirectP2P = true
@@ -2226,7 +2255,7 @@ func initialDiscovery(ctx context.Context, puncher *network.UDPPuncher, ipDisc *
 			log.Info().Str("stun_addr", stunAddr).Str("ip", publicIP.String()).Msg("STUN endpoint mapped via UDPPuncher")
 		} else {
 			log.Warn().Err(err).Msg("STUN mapping failed or timed out; setting relay fallback")
-			stunAddr = "Недоступен (Relay / Symmetric NAT)"
+			stunAddr = ""
 		}
 	}
 
@@ -2248,12 +2277,13 @@ func initialDiscovery(ctx context.Context, puncher *network.UDPPuncher, ipDisc *
 			pubIPStr = "Локальная сеть (NAT)"
 		}
 	}
-	if stunAddr == "" {
-		stunAddr = "Недоступен (Relay / Symmetric NAT)"
+	uiStun := stunAddr
+	if uiStun == "" {
+		uiStun = "Недоступен (Relay / Symmetric NAT)"
 	}
 
 	if uiServer != nil {
-		uiServer.SetAppState(deviceID, pubIPStr, stunAddr)
+		uiServer.SetAppState(deviceID, pubIPStr, uiStun)
 		if puncher != nil {
 			uiServer.SetNATType(puncher.GetNATType().String())
 		}
@@ -2371,7 +2401,7 @@ func publishLoop(
 			// internal puncher cache — otherwise stale NAT mappings are broadcast forever.
 			now := time.Now()
 			stunCacheExpired := now.Sub(stunCachedAt) >= stunCacheTTL
-			if stunCacheExpired || stunAddr == "" || stunAddr == "Недоступен (Relay / Symmetric NAT)" {
+			if stunCacheExpired || stunAddr == "" {
 				if extIP, port, err := puncher.ForceDiscoverMappedAddress(ctx); err == nil && extIP != nil {
 					newIPStr := extIP.String()
 					// R4: Если публичный IP изменился — это смена WAN/сети
@@ -2393,9 +2423,6 @@ func publishLoop(
 					candidatesCached = puncher.DiscoverCandidates(ctx, extIP.String())
 				} else {
 					log.Debug().Err(err).Msg("STUN mapping refresh failed, retaining previous mapped address")
-					if stunAddr == "" {
-						stunAddr = "Недоступен (Relay / Symmetric NAT)"
-					}
 					// Restore from cachedIP if available
 					if cachedIP != nil && !cachedIP.IsUnspecified() {
 						ip = cachedIP
@@ -2445,8 +2472,12 @@ func publishLoop(
 					if magicSock != nil {
 						magicSock.RecordProbeAttempt(p.DeviceID)
 					}
+					if p.ActiveEndpoint != "" && p.ActiveEndpoint != p.STUNAddr {
+						_ = puncher.SendHolePunchProbeWithDelta(p.ActiveEndpoint, p.NATDelta)
+						p.ProbeCount++
+					}
 					if p.STUNAddr != "" {
-						_ = puncher.SendHolePunchProbe(p.STUNAddr)
+						_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 						p.ProbeCount++
 					}
 					// Probe all extra candidates
@@ -2921,13 +2952,24 @@ func receiveLoop(
 			existingPeer, peerFound := registry.Get(p.DeviceID)
 			needsFastReply := p.IsBootBurst || !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
 
+			if p.STUNAddr != "" {
+				if _, _, err := net.SplitHostPort(p.STUNAddr); err != nil || strings.Contains(p.STUNAddr, " ") {
+					p.STUNAddr = ""
+				}
+			}
+			if p.ActiveEndpoint != "" {
+				if _, _, err := net.SplitHostPort(p.ActiveEndpoint); err != nil || strings.Contains(p.ActiveEndpoint, " ") {
+					p.ActiveEndpoint = ""
+				}
+			}
+
 			// При наличии стабильного прямого P2P сокета — не сбиваем его зондированием чужих локальных подсетей
 			if puncher != nil {
 				if p.ActiveEndpoint != "" {
-					_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+					_ = puncher.SendHolePunchProbeWithDelta(p.ActiveEndpoint, p.NATDelta)
 				}
 				if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-					_ = puncher.SendHolePunchProbe(p.STUNAddr)
+					_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 				}
 				if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
 					_ = puncher.SendHolePunchProbe(p.LocalAddr)

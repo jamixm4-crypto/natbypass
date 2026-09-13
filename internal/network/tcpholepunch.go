@@ -388,7 +388,7 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 	}
 	if lastAttempt, inProgress := m.connecting[peerID]; inProgress && time.Since(lastAttempt) < 6*time.Second {
 		m.mu.Unlock()
-		return nil // Dial already in-flight
+		return fmt.Errorf("tcp dial to %s already in progress", peerID)
 	}
 	m.connecting[peerID] = time.Now()
 	m.mu.Unlock()
@@ -578,6 +578,18 @@ func (m *TCPDirectManager) HasConn(deviceID string) bool {
 	defer m.mu.RUnlock()
 	_, ok := m.conns[deviceID]
 	return ok
+}
+
+// GetPeerRemoteAddr returns the remote address of an active TCP peer connection, or empty string if not connected.
+func (m *TCPDirectManager) GetPeerRemoteAddr(deviceID string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if c, ok := m.conns[deviceID]; ok && c != nil {
+		if rAddr := c.RemoteAddr(); rAddr != nil {
+			return rAddr.String()
+		}
+	}
+	return ""
 }
 
 // ListConns returns a list of peer device IDs with active TCP connections.

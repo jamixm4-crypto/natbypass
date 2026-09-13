@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta38"
+	Version = "1.9.226-beta39"
 	Commit  = "release"
 )
 
@@ -3534,16 +3534,29 @@ func connectPeerTCPDirect(targetPeer *peer.Peer) {
 		}
 	}
 	tcpTarget := targetPeer.TCPAddr
+	if tcpTarget != "" {
+		if _, _, err := net.SplitHostPort(tcpTarget); err != nil {
+			tcpTarget = ""
+		}
+	}
 	if tcpTarget == "" {
 		host := targetPeer.PublicIP
-		if host == "" && targetPeer.STUNAddr != "" {
-			host = strings.Split(targetPeer.STUNAddr, ":")[0]
+		if (host == "" || host == "0.0.0.0" || host == "<nil>") && targetPeer.STUNAddr != "" {
+			if h, _, err := net.SplitHostPort(targetPeer.STUNAddr); err == nil && h != "" {
+				host = h
+			}
 		}
-		if host != "" && host != "0.0.0.0" {
+		if (host == "" || host == "0.0.0.0" || host == "<nil>") && targetPeer.ActiveEndpoint != "" {
+			if h, _, err := net.SplitHostPort(targetPeer.ActiveEndpoint); err == nil && h != "" {
+				host = h
+			}
+		}
+		if host != "" && host != "0.0.0.0" && host != "<nil>" && net.ParseIP(host) != nil {
 			tcpTarget = fmt.Sprintf("%s:%d", host, defaultTCPPort)
 		} else if targetPeer.LocalAddr != "" {
-			localHost := strings.Split(targetPeer.LocalAddr, ":")[0]
-			tcpTarget = fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
+			if localHost, _, err := net.SplitHostPort(targetPeer.LocalAddr); err == nil && localHost != "" && net.ParseIP(localHost) != nil {
+				tcpTarget = fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
+			}
 		}
 	}
 	if tcpTarget != "" {
@@ -4758,6 +4771,9 @@ func startEngineFromConfig(c *config.Config) {
 
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
 		onInboundPacket := func(srcAddr *net.UDPAddr, payload []byte, isTCP bool, isRelay bool) {
+			if network.IsMultiHopPacket(payload) {
+				return
+			}
 			if len(payload) >= 22 && payload[0]>>4 != 4 {
 				pLen := int(binary.BigEndian.Uint16(payload[:2]))
 				if pLen >= 20 && pLen+2 <= len(payload) && payload[2]>>4 == 4 {

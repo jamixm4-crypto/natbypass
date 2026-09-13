@@ -9,6 +9,7 @@ package network
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -516,12 +517,34 @@ func (ms *MagicSock) triggerTCPFallback(deviceID string) {
 		route.mu.RLock()
 		targetAddr = route.TCPAddr
 		if targetAddr == "" {
-			targetAddr = route.ActiveEndpoint
+			candidateHosts := make([]string, 0)
+			if route.ActiveEndpoint != "" {
+				if h, _, err := net.SplitHostPort(route.ActiveEndpoint); err == nil && h != "" {
+					candidateHosts = append(candidateHosts, h)
+				}
+			}
+			for candAddr := range route.Candidates {
+				if h, _, err := net.SplitHostPort(candAddr); err == nil && h != "" {
+					candidateHosts = append(candidateHosts, h)
+				}
+			}
+			for _, h := range candidateHosts {
+				if ip := net.ParseIP(h); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+					targetAddr = fmt.Sprintf("%s:8443", h)
+					break
+				}
+			}
 		}
 		route.mu.RUnlock()
 	}
 	if targetAddr == "" {
-		targetAddr, _, _ = ms.GetActiveRoute(deviceID)
+		ep, _, _ := ms.GetActiveRoute(deviceID)
+		if h, _, err := net.SplitHostPort(ep); err == nil && h != "" && net.ParseIP(h) != nil {
+			targetAddr = fmt.Sprintf("%s:8443", h)
+		}
+	}
+	if targetAddr == "" {
+		return
 	}
 
 	var localPort int
@@ -544,12 +567,25 @@ func (ms *MagicSock) triggerTCPFallback(deviceID string) {
 			return
 		}
 
+		// Double-check that TCP stream is confirmed and alive before switching route
+		if !mgr.HasConn(deviceID) {
+			ms.probeCountMu.Lock()
+			ms.tcpAttempted[deviceID] = false
+			ms.probeCountMu.Unlock()
+			return
+		}
+
+		actualRemote := mgr.GetPeerRemoteAddr(deviceID)
+		if actualRemote == "" {
+			actualRemote = targetAddr
+		}
+
 		// Register the TCP endpoint for ShadowTLS fallback without polluting UDP Candidates
-		ms.RegisterPeerTCPAddr(deviceID, targetAddr)
+		ms.RegisterPeerTCPAddr(deviceID, actualRemote)
 
 		if ms.onPathSwitch != nil {
 			oldEP, _, _ := ms.GetActiveRoute(deviceID)
-			ms.onPathSwitch(deviceID, oldEP, targetAddr, PathTypeTCP)
+			ms.onPathSwitch(deviceID, oldEP, actualRemote, PathTypeTCP)
 		}
 	}()
 }
