@@ -123,7 +123,13 @@ jobs:
           gradle_status=${PIPESTATUS[0]}
           set -e
           if [ $gradle_status -ne 0 ]; then
-            err_msg=$(tail -n 25 /tmp/gradle_err.log | tr '\r' ' ' | tr '\n' ' ')
+            err_msg=$(grep -A 12 "\* What went wrong:" /tmp/gradle_err.log | tr '\r' ' ' | tr '\n' ' ')
+            if [ -z "$err_msg" ]; then
+              err_msg=$(grep -B 2 -A 8 "Execution failed for task" /tmp/gradle_err.log | tr '\r' ' ' | tr '\n' ' ')
+            fi
+            if [ -z "$err_msg" ]; then
+              err_msg=$(tail -n 40 /tmp/gradle_err.log | tr '\r' ' ' | tr '\n' ' ')
+            fi
             echo "::error title=GradleBuildFailure::$err_msg"
             exit $gradle_status
           fi
