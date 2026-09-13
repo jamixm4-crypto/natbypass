@@ -57,4 +57,15 @@ func TestWindowOpenAPI(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Timeout waiting for onOpenWindow callback")
 	}
+
+	// Test /api/logs/download endpoint
+	logResp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/logs/download", port))
+	if err != nil {
+		t.Fatalf("GET /api/logs/download failed: %v", err)
+	}
+	defer logResp.Body.Close()
+	if logResp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected status 200 for /api/logs/download, got %d", logResp.StatusCode)
+	}
 }
+

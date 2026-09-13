@@ -424,6 +424,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/icon.png", s.handleIconPng)
 	mux.HandleFunc("/manifest.json", s.handleManifest)
 	mux.HandleFunc("/api/settings/save", s.handleSettingsSave)
+	mux.HandleFunc("/api/logs/download", s.handleLogsDownload)
 	// Автоматическое обновление
 	mux.HandleFunc("/api/update/check", s.handleUpdateCheck)
 	mux.HandleFunc("/api/update/apply", s.handleUpdateApply)
@@ -673,8 +674,8 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 0. Разрешить локальный read-only опрос статуса, пиров, дашборда и топологии (localhost 127.0.0.1 / ::1) для diag/CLI/WebUI
-		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck" || r.URL.Path == "/api/signaling/brokers" || r.URL.Path == "/api/signaling/broker/switch") && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
+		// 0. Разрешить локальный read-only опрос статуса, пиров, дашборда, топологии и скачивание логов (localhost 127.0.0.1 / ::1) для diag/CLI/WebUI
+		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck" || r.URL.Path == "/api/signaling/brokers" || r.URL.Path == "/api/signaling/broker/switch" || r.URL.Path == "/api/logs/download") && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
 			if isDirectLoopback(r) {
 				next.ServeHTTP(w, r)
 				return
@@ -946,7 +947,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta30"
+		ver = "1.9.226-beta31"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1911,7 +1912,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta30"
+		ver = "1.9.226-beta31"
 	}
 
 	vip := s.state.VirtualIP
@@ -2719,6 +2720,39 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		s.AddEvent("info", "Конфигурация сохранена", fmt.Sprintf("device=%s file=%s", req.DeviceName, targetPath))
 	}
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": msg}, "")
+}
+
+// handleLogsDownload — GET /api/logs/download — скачивание файла natbypass.log с диска
+func (s *Server) handleLogsDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	candidates := make([]string, 0, 5)
+	if s.configPath != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(s.configPath), "natbypass.log"))
+	}
+	candidates = append(candidates, "natbypass.log")
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "natbypass.log"))
+	}
+	if runtime.GOOS == "linux" {
+		candidates = append(candidates, "/var/log/natbypass.log")
+	}
+
+	for _, p := range candidates {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Disposition", "attachment; filename=\"natbypass.log\"")
+			http.ServeFile(w, r, p)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("Файл natbypass.log пока пуст или сохранение логов на диск ещё не производилось.\nВключите опцию «Сохранять логи на диск» в настройках WebUI и нажмите «Применить настройки».\n"))
 }
 
 // handlePeersClear — POST /api/peers/clear — принудительный сброс кэша устройств

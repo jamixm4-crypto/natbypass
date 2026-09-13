@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -202,15 +203,32 @@ func getSignalTCPTarget(p *signaling.Payload, defaultPort int) string {
 
 
 
+// resolveLogPath returns the absolute path for natbypass.log.
+func resolveLogPath(cfgPath, userLogPath string) string {
+	if userLogPath != "" {
+		if filepath.IsAbs(userLogPath) {
+			return userLogPath
+		}
+		if cfgPath != "" {
+			return filepath.Join(filepath.Dir(cfgPath), userLogPath)
+		}
+		return userLogPath
+	}
+	if cfgPath != "" {
+		return filepath.Join(filepath.Dir(cfgPath), "natbypass.log")
+	}
+	return "natbypass.log"
+}
+
 func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	logTarget := ""
 	if cfg.App.SaveLogsToDisk {
-		logTarget = cfg.App.LogFile
-		if logTarget == "" {
-			logTarget = "natbypass.log"
-		}
+		logTarget = resolveLogPath(configFile, cfg.App.LogFile)
 	}
 	setupLogging(cfg.App.LogLevel, logTarget)
+	if logTarget != "" {
+		log.Info().Str("file", logTarget).Msg("📝 Логирование на диск активно (save_logs)")
+	}
 
 	if cfg.Daemon.PidFile == "" {
 		if runtime.GOOS == "linux" {
@@ -458,6 +476,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if reloaded, rErr := config.Load(configFile); rErr == nil && reloaded != nil {
 					*cfg = *reloaded
 				}
+			}
+			logTarget := ""
+			if cfg.App.SaveLogsToDisk {
+				logTarget = resolveLogPath(configFile, cfg.App.LogFile)
+			}
+			setupLogging(cfg.App.LogLevel, logTarget)
+			if logTarget != "" {
+				log.Info().Str("file", logTarget).Msg("📝 Логирование на диск активировано на лету (save_logs)")
 			}
 			activeProf := cfg.EnsureActiveProfile()
 			if activeProf != nil {

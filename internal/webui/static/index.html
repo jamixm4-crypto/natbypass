@@ -1742,7 +1742,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <span>Открывать окно приложения при запуске (WebUI)</span>
           </label>
           <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
-            <input type="checkbox" id="chkSaveLogs" style="accent-color:#a855f7; width:16px; height:16px;">
+            <input type="checkbox" id="chkSaveLogs" onchange="saveAllSettings()" style="accent-color:#a855f7; width:16px; height:16px;">
             <span>Сохранять логи на диск (natbypass.log)</span>
           </label>
           <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
@@ -1753,6 +1753,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <input type="checkbox" id="chkUpnp" style="accent-color:#a855f7; width:16px; height:16px;">
             <span>UPnP автоматический проброс порта на роутере</span>
           </label>
+        </div>
+
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top: 1px solid rgba(255,255,255,0.06);">
+          <button type="button" onclick="saveAllSettings()" class="btn btn-neon" style="padding: 9px 20px; font-size:0.88rem;">
+            💾 Применить настройки
+          </button>
+          <a href="/api/logs/download" class="btn btn-glass" style="padding: 9px 16px; font-size:0.85rem; color:#38bdf8; border-color:rgba(56,189,248,0.3); text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+            📥 Скачать natbypass.log
+          </a>
+          <span style="font-size:0.75rem; color:var(--text-muted);">Файл лога сохраняется рядом с config.yaml</span>
         </div>
       </div>
 
