@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta23"
+	Version = "1.9.226-beta24"
 	Commit  = "release"
 )
 
@@ -889,6 +889,7 @@ func main() {
 	noWindowFlag := flag.Bool("no-window", false, "Start minimized to system tray")
 	_ = flag.Bool("silent", false, "Start minimized to system tray")
 	_ = flag.Bool("updated", false, "Internal restart flag")
+	_ = flag.Int("port", 0, "WebUI port override")
 
 	flag.Parse()
 	if *noWindowFlag {

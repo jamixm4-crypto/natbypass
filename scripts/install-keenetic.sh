@@ -7,7 +7,7 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.9.226-beta23"
+    DEFAULT_TAG="v1.9.226-beta24"
 
     # Try to resolve latest tag from GitHub API
     LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
@@ -392,6 +392,11 @@ start() {
         return 0
     fi
     mkdir -p /opt/etc/natbypass /opt/var/log /var/run 2>/dev/null || true
+    if [ ! -c /dev/net/tun ]; then
+        modprobe tun 2>/dev/null || insmod /lib/modules/$(uname -r)/tun.ko 2>/dev/null || insmod /lib/modules/tun.ko 2>/dev/null || true
+        mkdir -p /dev/net 2>/dev/null || true
+        [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200 2>/dev/null || true
+    fi
     $BIN start --config "$CONFIG" > "$LOGFILE" 2>&1 &
     echo $! > "$PIDFILE"
     echo "done."

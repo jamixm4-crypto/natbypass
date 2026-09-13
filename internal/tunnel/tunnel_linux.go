@@ -154,8 +154,8 @@ var packetPool = sync.Pool{
 }
 
 func (d *Device) ReadPacket() ([]byte, error) {
-	if atomic.LoadInt32(&d.isClosed) == 1 {
-		return nil, fmt.Errorf("интерфейс закрыт")
+	if d == nil || atomic.LoadInt32(&d.isClosed) == 1 {
+		return nil, fmt.Errorf("интерфейс закрыт или не инициализирован")
 	}
 	bufPtr := packetPool.Get().(*[]byte)
 	buf := *bufPtr
@@ -171,8 +171,8 @@ func (d *Device) ReadPacket() ([]byte, error) {
 }
 
 func (d *Device) ReadPacketPooled() ([]byte, func(), error) {
-	if atomic.LoadInt32(&d.isClosed) == 1 {
-		return nil, nil, fmt.Errorf("интерфейс закрыт")
+	if d == nil || atomic.LoadInt32(&d.isClosed) == 1 {
+		return nil, nil, fmt.Errorf("интерфейс закрыт или не инициализирован")
 	}
 	bufPtr := packetPool.Get().(*[]byte)
 	buf := *bufPtr
@@ -188,8 +188,11 @@ func (d *Device) ReadPacketPooled() ([]byte, func(), error) {
 }
 
 func (d *Device) WritePacket(packet []byte) error {
-	if atomic.LoadInt32(&d.isClosed) == 1 {
-		return fmt.Errorf("интерфейс закрыт")
+	if d == nil || atomic.LoadInt32(&d.isClosed) == 1 || len(packet) == 0 {
+		return nil
+	}
+	if d.file == nil {
+		return fmt.Errorf("файловый дескриптор TUN не инициализирован")
 	}
 	_, err := d.file.Write(packet)
 	return err
@@ -205,6 +208,9 @@ func findIPBinary() string {
 }
 
 func (d *Device) SetVirtualIP(virtualIP string) error {
+	if d == nil {
+		return nil
+	}
 	d.mu.Lock()
 	d.VirtualIP = virtualIP
 	d.mu.Unlock()
@@ -474,6 +480,9 @@ fi
 
 // SetMTU динамически обновляет MTU на интерфейсе Linux/Keenetic
 func (d *Device) SetMTU(mtu int) error {
+	if d == nil {
+		return nil
+	}
 	if mtu < 1280 || mtu > 1500 {
 		return fmt.Errorf("недопустимый MTU: %d (допустимо 1280..1500)", mtu)
 	}
@@ -489,7 +498,9 @@ func (d *Device) SetMTU(mtu int) error {
 }
 
 func (d *Device) Close() error {
-
+	if d == nil {
+		return nil
+	}
 	if atomic.CompareAndSwapInt32(&d.isClosed, 0, 1) {
 		d.stopOnce.Do(func() {
 			if d.stopCh != nil {

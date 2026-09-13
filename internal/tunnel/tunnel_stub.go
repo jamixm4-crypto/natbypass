@@ -29,10 +29,23 @@ func (d *Device) ReadPacket() ([]byte, error) {
 }
 
 func (d *Device) WritePacket(packet []byte) error {
+	if d == nil {
+		return nil
+	}
 	return ErrTunnelNotSupported
 }
 
 func (d *Device) SetVirtualIP(virtualIP string) error {
+	if d == nil {
+		return nil
+	}
+	return ErrTunnelNotSupported
+}
+
+func (d *Device) SetMTU(mtu int) error {
+	if d == nil {
+		return nil
+	}
 	return ErrTunnelNotSupported
 }
 

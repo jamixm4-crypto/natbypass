@@ -538,6 +538,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 	if tunErr != nil {
 		log.Warn().Err(tunErr).Msg("Could not create TUN adapter (ensure running with Administrator rights)")
+		if runtime.GOOS == "windows" && !noWindow && !strings.EqualFold(uiMode, "none") && !strings.EqualFold(uiMode, "silent") {
+			go notifyAdminRightsRequired(tunErr)
+		}
 	} else {
 		log.Info().Str("adapter", adapterName).Str("vip", myVirtualIP).Msg("TUN interface created and configured")
 		defer tunDev.Close()
@@ -985,7 +988,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if runtime.GOOS == "linux" && inSrcIP != "" {
 					tunnel.EnsurePeerHostRoute(inSrcIP)
 				}
-				_ = tunDev.WritePacket(payload)
+				if tunDev != nil {
+					_ = tunDev.WritePacket(payload)
+				}
 			}
 		}
 
@@ -1042,6 +1047,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				case <-engineCtx.Done():
 					return
 				default:
+				}
+				if tunDev == nil {
+					select {
+					case <-engineCtx.Done():
+						return
+					case <-time.After(500 * time.Millisecond):
+						continue
+					}
 				}
 				// Blocking read: tunDev blocks until data arrives — no CPU spin
 				pkt, err := tunDev.ReadPacket()

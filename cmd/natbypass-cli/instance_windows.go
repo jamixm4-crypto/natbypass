@@ -654,3 +654,16 @@ func configureLocalIntranetZone() {
 		k2.Close()
 	}
 }
+
+// notifyAdminRightsRequired displays an informative Windows message box when Wintun creation fails due to non-elevated launch.
+func notifyAdminRightsRequired(err error) {
+	moduser32 := windows.NewLazySystemDLL("user32.dll")
+	procMessageBoxW := moduser32.NewProc("MessageBoxW")
+	if procMessageBoxW.Find() != nil {
+		return
+	}
+	title, _ := windows.UTF16PtrFromString("NatBypass — Требуются права Администратора")
+	text := fmt.Sprintf("Виртуальный сетевой адаптер Wintun не может быть запущен:\n%v\n\nДля создания виртуального сетевого интерфейса и P2P-туннелей запустите NatBypass от имени Администратора (ПКМ -> Запуск от имени администратора).\n\nПрограмма продолжает работу в фоновом режиме (доступен WebUI и ретрансляция).", err)
+	textPtr, _ := windows.UTF16PtrFromString(text)
+	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(textPtr)), uintptr(unsafe.Pointer(title)), 0x00000030 /* MB_ICONWARNING */|0x00040000 /* MB_TOPMOST */)
+}

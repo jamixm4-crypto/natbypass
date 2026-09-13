@@ -30,6 +30,7 @@ import (
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/updater"
+	"github.com/rs/zerolog"
 )
 
 var (
@@ -43,6 +44,7 @@ var (
 	flagOutput  = flag.String("output", "", "Output filename for consolidated cluster report")
 	flagLocal   = flag.Bool("local", false, "Include local host diagnostic report in the consolidated output")
 	flagConfig  = flag.String("config", "config.yaml", "Path to config.yaml (used for defaults)")
+	flagDebug   = flag.Bool("debug", false, "Enable verbose debug log output")
 )
 
 const (
@@ -860,6 +862,10 @@ func main() {
 	initConsole()
 	os.Args = reorderArgs(os.Args)
 	flag.Parse()
+
+	if !*flagDebug {
+		zerolog.SetGlobalLevel(zerolog.Disabled)
+	}
 
 	reader := bufio.NewReader(os.Stdin)
 	isInteractive := !*flagBatch && !*flagUpdate

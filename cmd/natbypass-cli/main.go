@@ -22,7 +22,7 @@ import (
 
 
 var (
-	Version   = "1.9.226-beta23"
+	Version   = "1.9.226-beta24"
 	Commit    = "release"
 	BuildDate = "unknown"
 )
@@ -119,8 +119,9 @@ func main() {
 	}
 
 	rootCmd := &cobra.Command{
-		Use:   "natbypass",
-		Short: "NatBypass — P2P Mesh VPN & NAT Traversal",
+		Use:     "natbypass",
+		Version: Version,
+		Short:   "NatBypass — P2P Mesh VPN & NAT Traversal",
 		Long: fmt.Sprintf(`NatBypass v%s (%s) — High-performance P2P mesh network and NAT traversal tool
 with multi-channel signaling (Telegram, MQTT, HTTP Webhook, DNS TXT) and DPI obfuscation.
 
@@ -149,6 +150,7 @@ Supported platforms: Windows, Linux (amd64/arm64/mips/mipsle), Android, iOS.`, V
 			return runEngine(ctx, cfg, runtime.GOOS == "windows")
 		},
 	}
+	rootCmd.SetVersionTemplate(fmt.Sprintf("NatBypass CLI %s (commit: %s, built with: %s)\n", Version, Commit, runtime.Version()))
 
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", configFile, "Path to configuration file")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level: debug/info/warn/error")

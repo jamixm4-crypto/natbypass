@@ -365,12 +365,12 @@ func CreateAdapter(adapterName, virtualIP string) (*Device, error) {
 
 // ReadPacket считывает один IPv4 пакет из сетевого стека Windows
 func (d *Device) ReadPacket() ([]byte, error) {
-	if atomic.LoadInt32(&d.isClosed) == 1 {
+	if d == nil || atomic.LoadInt32(&d.isClosed) == 1 {
 		return nil, fmt.Errorf("адаптер закрыт")
 	}
 
 	for {
-		if atomic.LoadInt32(&d.isClosed) == 1 {
+		if d == nil || atomic.LoadInt32(&d.isClosed) == 1 {
 			return nil, fmt.Errorf("адаптер закрыт")
 		}
 
@@ -401,7 +401,7 @@ func (d *Device) ReadPacket() ([]byte, error) {
 			time.Sleep(10 * time.Millisecond)
 		}
 
-		if atomic.LoadInt32(&d.isClosed) == 1 {
+		if d == nil || atomic.LoadInt32(&d.isClosed) == 1 {
 			return nil, fmt.Errorf("адаптер закрыт")
 		}
 	}
@@ -409,7 +409,7 @@ func (d *Device) ReadPacket() ([]byte, error) {
 
 // WritePacket отправляет входящий расшифрованный IPv4 пакет в сетевой стек Windows
 func (d *Device) WritePacket(packet []byte) error {
-	if atomic.LoadInt32(&d.isClosed) == 1 || len(packet) == 0 {
+	if d == nil || atomic.LoadInt32(&d.isClosed) == 1 || len(packet) == 0 {
 		return nil
 	}
 
@@ -433,6 +433,9 @@ func (d *Device) WritePacket(packet []byte) error {
 
 // SetVirtualIP обновляет IP адрес интерфейса и маршрут подсети
 func (d *Device) SetVirtualIP(virtualIP string) error {
+	if d == nil {
+		return nil
+	}
 	cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
 	d.VirtualIP = cleanVIP
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -463,6 +466,9 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 
 // SetMTU динамически обновляет MTU на интерфейсе Windows
 func (d *Device) SetMTU(mtu int) error {
+	if d == nil {
+		return nil
+	}
 	if mtu < 1280 || mtu > 1500 {
 		return fmt.Errorf("недопустимый MTU: %d (допустимо 1280..1500)", mtu)
 	}
@@ -482,7 +488,7 @@ func (d *Device) SetMTU(mtu int) error {
 
 // Close корректно завершает работу адаптера
 func (d *Device) Close() error {
-	if !atomic.CompareAndSwapInt32(&d.isClosed, 0, 1) {
+	if d == nil || !atomic.CompareAndSwapInt32(&d.isClosed, 0, 1) {
 		return nil
 	}
 
