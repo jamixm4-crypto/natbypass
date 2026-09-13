@@ -1746,7 +1746,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <span>Сохранять логи на диск (natbypass.log)</span>
           </label>
           <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
-            <input type="checkbox" id="chkShowDiag" onchange="toggleDiagVisibility(this.checked)" style="accent-color:#a855f7; width:16px; height:16px;">
+            <input type="checkbox" id="chkShowDiag" onchange="toggleDiagVisibility(this.checked); saveAllSettings();" style="accent-color:#a855f7; width:16px; height:16px;">
             <span>Включить пункт «Диагностика» в меню</span>
           </label>
           <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
@@ -4887,13 +4887,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const app = c.app || {};
           const webui = c.webui || {};
           if (c.app) {
-            document.getElementById('cfgNick').value = c.app.device_name || '';
-            document.getElementById('cfgInterval').value = c.app.publish_interval || 8;
+            if (document.getElementById('cfgNick')) document.getElementById('cfgNick').value = c.app.device_name || '';
+            if (document.getElementById('cfgInterval')) document.getElementById('cfgInterval').value = c.app.publish_interval || 8;
             const saveLogs = (app.save_logs_to_disk !== undefined) ? app.save_logs_to_disk : (app.save_logs ?? app.SaveLogsToDisk ?? false);
-            document.getElementById('chkSaveLogs').checked = !!saveLogs;
+            if (document.getElementById('chkSaveLogs')) document.getElementById('chkSaveLogs').checked = !!saveLogs;
             const showDiag = (webui.show_diagnostics !== undefined) ? webui.show_diagnostics : 
               ((app.show_diagnostics !== undefined) ? app.show_diagnostics : (app.ShowDiagnostics ?? false));
-            document.getElementById('chkShowDiag').checked = !!showDiag;
+            if (document.getElementById('chkShowDiag')) document.getElementById('chkShowDiag').checked = !!showDiag;
             toggleDiagVisibility(showDiag);
             const autoOpen = (webui.auto_open_browser !== undefined) ? webui.auto_open_browser : true;
             if (document.getElementById('chkAutoOpenBrowser')) {
@@ -4901,9 +4901,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             }
           }
           if (c.network) {
-            document.getElementById('cfgVirtualIP').value = c.network.address || '';
-            document.getElementById('chkUpnp').checked = c.network.upnp_enabled || false;
-            document.getElementById('chkDoH').checked = c.network.doh_enabled || false;
+            if (document.getElementById('cfgVirtualIP')) {
+              document.getElementById('cfgVirtualIP').value = c.network.address || '';
+            }
+            if (document.getElementById('chkUpnp')) {
+              document.getElementById('chkUpnp').checked = c.network.upnp_enabled || false;
+            }
+            if (document.getElementById('chkDoH')) {
+              document.getElementById('chkDoH').checked = c.network.doh_enabled || false;
+            }
             if (document.getElementById('cfgTcpPort')) {
               document.getElementById('cfgTcpPort').value = c.network.tcp_port || 8443;
             }
@@ -4922,21 +4928,25 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             }
           }
           if (c.wireguard) {
-            document.getElementById('cfgWgPort').value = c.wireguard.listen_port || 51820;
-            document.getElementById('cfgMTU').value = c.wireguard.mtu || 1420;
+            if (document.getElementById('cfgWgPort')) {
+              document.getElementById('cfgWgPort').value = c.wireguard.listen_port || 51820;
+            }
+            if (document.getElementById('cfgMTU')) {
+              document.getElementById('cfgMTU').value = c.wireguard.mtu || 1420;
+            }
           }
           if (c.signaling && c.signaling.channels) {
             c.signaling.channels.forEach(ch => {
               if (ch.type === 'telegram' && ch.params) {
-                document.getElementById('cfgTgToken').value = ch.params.token || '';
-                document.getElementById('cfgTgChat').value = ch.params.chat_id || '';
-                document.getElementById('cfgTgProxy').value = ch.params.proxy || '';
+                if (document.getElementById('cfgTgToken')) document.getElementById('cfgTgToken').value = ch.params.token || '';
+                if (document.getElementById('cfgTgChat')) document.getElementById('cfgTgChat').value = ch.params.chat_id || '';
+                if (document.getElementById('cfgTgProxy')) document.getElementById('cfgTgProxy').value = ch.params.proxy || '';
               }
               if (ch.type === 'mqtt' && ch.params) {
-                document.getElementById('cfgMqttBroker').value = ch.params.broker_url || '';
-                document.getElementById('cfgMqttTopic').value = ch.params.topic || '';
-                document.getElementById('cfgMqttUser').value = ch.params.username || '';
-                document.getElementById('cfgMqttPass').value = ch.params.password || '';
+                if (document.getElementById('cfgMqttBroker')) document.getElementById('cfgMqttBroker').value = ch.params.broker_url || '';
+                if (document.getElementById('cfgMqttTopic')) document.getElementById('cfgMqttTopic').value = ch.params.topic || '';
+                if (document.getElementById('cfgMqttUser')) document.getElementById('cfgMqttUser').value = ch.params.username || '';
+                if (document.getElementById('cfgMqttPass')) document.getElementById('cfgMqttPass').value = ch.params.password || '';
 
                 const curBr = ch.params.broker_url || 'tcp://broker.emqx.io:1883';
                 const selPreset = document.getElementById('selMqttPreset');
@@ -5020,7 +5030,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           body: JSON.stringify({ broker: val, save_as_primary: true })
         });
         const json = await res.json();
-        if (json.status === 'ok') {
+        if (json.ok || json.status === 'ok') {
           showToast('✅ Брокер переключен: ' + val);
           await loadSignalingBrokers();
           if (typeof loadConfig === 'function') loadConfig();
@@ -5033,26 +5043,26 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     }
 
     async function saveAllSettings() {
-      const device_name = document.getElementById('cfgNick').value.trim();
-      const virtual_ip = document.getElementById('cfgVirtualIP').value.trim();
-      const publish_interval = parseInt(document.getElementById('cfgInterval').value) || 8;
-      const tg_token = document.getElementById('cfgTgToken').value.trim();
-      const tg_chat = document.getElementById('cfgTgChat').value.trim();
-      const tg_proxy = document.getElementById('cfgTgProxy').value.trim();
-      const mqtt_broker = document.getElementById('cfgMqttBroker').value.trim();
-      const mqtt_topic = document.getElementById('cfgMqttTopic').value.trim();
-      const mqtt_user = document.getElementById('cfgMqttUser').value.trim();
-      const mqtt_pass = document.getElementById('cfgMqttPass').value.trim();
-      const wg_port = parseInt(document.getElementById('cfgWgPort').value) || 51820;
+      const device_name = document.getElementById('cfgNick') ? document.getElementById('cfgNick').value.trim() : '';
+      const virtual_ip = document.getElementById('cfgVirtualIP') ? document.getElementById('cfgVirtualIP').value.trim() : '';
+      const publish_interval = document.getElementById('cfgInterval') ? (parseInt(document.getElementById('cfgInterval').value) || 8) : 8;
+      const tg_token = document.getElementById('cfgTgToken') ? document.getElementById('cfgTgToken').value.trim() : '';
+      const tg_chat = document.getElementById('cfgTgChat') ? document.getElementById('cfgTgChat').value.trim() : '';
+      const tg_proxy = document.getElementById('cfgTgProxy') ? document.getElementById('cfgTgProxy').value.trim() : '';
+      const mqtt_broker = document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value.trim() : '';
+      const mqtt_topic = document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value.trim() : '';
+      const mqtt_user = document.getElementById('cfgMqttUser') ? document.getElementById('cfgMqttUser').value.trim() : '';
+      const mqtt_pass = document.getElementById('cfgMqttPass') ? document.getElementById('cfgMqttPass').value.trim() : '';
+      const wg_port = document.getElementById('cfgWgPort') ? (parseInt(document.getElementById('cfgWgPort').value) || 51820) : 51820;
       const tcp_port = parseInt(document.getElementById('cfgTcpPort') ? document.getElementById('cfgTcpPort').value : '8443') || 8443;
       const transport_mode = document.getElementById('cfgTransportMode') ? document.getElementById('cfgTransportMode').value : 'auto';
       const tls_mode = document.getElementById('cfgTLSMode') ? document.getElementById('cfgTLSMode').value : 'shadowtls';
-      const mtu = parseInt(document.getElementById('cfgMTU').value) || 1420;
-      const upnp_enabled = document.getElementById('chkUpnp').checked;
-      const doh_enabled = document.getElementById('chkDoH').checked;
-      const save_logs_to_disk = document.getElementById('chkSaveLogs').checked;
-      const show_diagnostics = document.getElementById('chkShowDiag').checked;
-      const autostart = document.getElementById('chkAutoStart').checked;
+      const mtu = document.getElementById('cfgMTU') ? (parseInt(document.getElementById('cfgMTU').value) || 1420) : 1420;
+      const upnp_enabled = document.getElementById('chkUpnp') ? document.getElementById('chkUpnp').checked : false;
+      const doh_enabled = document.getElementById('chkDoH') ? document.getElementById('chkDoH').checked : false;
+      const save_logs_to_disk = document.getElementById('chkSaveLogs') ? document.getElementById('chkSaveLogs').checked : false;
+      const show_diagnostics = document.getElementById('chkShowDiag') ? document.getElementById('chkShowDiag').checked : false;
+      const autostart = document.getElementById('chkAutoStart') ? document.getElementById('chkAutoStart').checked : false;
 
       const res = await fetch('/api/settings/save', {
         method: 'POST',

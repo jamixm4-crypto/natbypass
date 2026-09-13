@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta32"
+	Version = "1.9.226-beta33"
 	Commit  = "release"
 )
 
@@ -4235,8 +4235,16 @@ func buildModernUI(hInstance uintptr) {
 		transLabel = "📡 Режим транспорта: Только UDP P2P"
 		transType = "normal"
 	}
-	// Ширина cw (840px) на всю ширину вкладки для режима транспорта
-	hBtnToggleTransportMode = createOwnerDrawButton(hInstance, transLabel, cx, 250, cw, 38, ID_BTN_TOGGLE_TRANSPORT, transType)
+	// Ряд 3: Режим транспорта (слева) и Переключатель вкладки Диагностика (справа)
+	hBtnToggleTransportMode = createOwnerDrawButton(hInstance, transLabel, cx, 250, 415, 38, ID_BTN_TOGGLE_TRANSPORT, transType)
+
+	diagText := "🩺 Вкладка Диагностика: ВЫКЛ"
+	diagType := "normal"
+	if showDiagnostics {
+		diagText = "🩺 Вкладка Диагностика: ВКЛ"
+		diagType = "green"
+	}
+	hBtnToggleDiag = createOwnerDrawButton(hInstance, diagText, cx+425, 250, 415, 38, ID_BTN_TOGGLE_DIAG, diagType)
 
 	// Разносим по вертикали кнопку сохранения, кнопку проверки обновления и метку статуса:
 	hBtnSaveCfg = createOwnerDrawButton(hInstance, "💾 Сохранить настройки в config.yaml", cx, 296, cw, 38, ID_BTN_SAVE_CFG, "primary")
@@ -4246,7 +4254,7 @@ func buildModernUI(hInstance uintptr) {
 	tabPages[7] = []uintptr{
 		lblSetTitle, lblSetDesc, lblNick, hEditMyNick, lblNickHint,
 		lblSysHead, hBtnToggleAutostart, hBtnToggleMinimizeToTray, hBtnToggleLogs,
-		hBtnToggleBetaChannel, hBtnToggleTransportMode,
+		hBtnToggleBetaChannel, hBtnToggleTransportMode, hBtnToggleDiag,
 		hBtnSaveCfg, hBtnCheckUpdate, lblUpdateStatus,
 	}
 
