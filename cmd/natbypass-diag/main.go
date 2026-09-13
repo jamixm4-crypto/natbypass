@@ -1064,9 +1064,12 @@ func main() {
 			printDpiMeshMatrix(discov, nodes)
 
 		case "3":
-			fmt.Print(colorYellow + "Введите DeviceID целевого узла: " + colorReset)
-			tID, _ := reader.ReadString('\n')
-			tID = strings.TrimSpace(tID)
+			tID := *flagTarget
+			if tID == "" {
+				fmt.Print(colorYellow + "Введите DeviceID целевого узла: " + colorReset)
+				line, _ := reader.ReadString('\n')
+				tID = strings.TrimSpace(line)
+			}
 			if tID == "" {
 				fmt.Println(colorRed + "[!] Узел не указан." + colorReset)
 				break

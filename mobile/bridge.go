@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta37"
+const Version = "1.9.226-beta38"
 
 
 
@@ -536,7 +536,7 @@ func StartEngine(configYAML string, tunFd int) string {
 			regPeer.DirectP2P = true
 			regPeer.DirectTCP = true
 			regPeer.Transport = "tcp_shadowtls"
-			regPeer.ActiveEndpoint = remoteAddr
+			regPeer.TCPAddr = remoteAddr
 			regPeer.LastDirectSeen = time.Now()
 			globalRegistry.Upsert(regPeer)
 		}
@@ -879,6 +879,10 @@ func StartEngine(configYAML string, tunFd int) string {
 						} else {
 							directP2P = existingPeer.DirectP2P
 							activeEP = existingPeer.ActiveEndpoint
+							if activeEP != "" && (activeEP == p.TCPAddr || activeEP == existingPeer.TCPAddr || (strings.HasSuffix(activeEP, ":8443") && p.STUNAddr != "" && !strings.HasSuffix(p.STUNAddr, ":8443"))) {
+								activeEP = p.STUNAddr
+								directP2P = false
+							}
 							if existingPeer.DirectP2P || existingPeer.DirectTCP || existingPeer.Transport == "tcp_tls" || existingPeer.Transport == "tcp_shadowtls" || (globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(p.DeviceID)) {
 								latency = existingPeer.Latency
 								if existingPeer.PingMs > 0 {

@@ -927,8 +927,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 
-			if tunDev != nil {
-				// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
+			// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
 				if len(payload) >= 20 && payload[0]>>4 == 4 {
 					ihl := int(payload[0]&0x0F) * 4
 					if ihl >= 20 && ihl <= len(payload) {
@@ -1063,7 +1062,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if tunDev != nil {
 					_ = tunDev.WritePacket(payload)
 				}
-			}
 		}
 
 		if multiHopRouter != nil {
@@ -2117,15 +2115,26 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 		magicSock = network.NewMagicSock(puncher, func(devID, oldPath, newPath string, pType network.PathType) {
 			log.Info().Str("peer", devID).Str("old", oldPath).Str("new", newPath).Str("type", string(pType)).Msg("🔀 MagicSock: Path switched")
 			if p, ok := registry.Get(devID); ok && p != nil {
-				p.ActiveEndpoint = newPath
-				p.DirectP2P = true
-				p.LastDirectSeen = time.Now()
-				registry.Upsert(p)
-				if oldPath != "" && oldPath != newPath && puncher != nil {
-					puncher.RemoveKeepAliveTarget(oldPath)
-				}
-				if puncher != nil && newPath != "" {
-					puncher.AddKeepAliveTarget(newPath)
+				if pType == network.PathTypeTCP {
+					p.TCPAddr = newPath
+					p.DirectTCP = true
+					p.DirectP2P = true
+					p.Transport = "tcp_shadowtls"
+					p.LastDirectSeen = time.Now()
+					p.LastBilateralSeen = time.Now()
+					p.ProbeCount = 0
+					registry.Upsert(p)
+				} else {
+					p.ActiveEndpoint = newPath
+					p.DirectP2P = true
+					p.LastDirectSeen = time.Now()
+					registry.Upsert(p)
+					if oldPath != "" && oldPath != newPath && puncher != nil {
+						puncher.RemoveKeepAliveTarget(oldPath)
+					}
+					if puncher != nil && newPath != "" {
+						puncher.AddKeepAliveTarget(newPath)
+					}
 				}
 			}
 		})
@@ -2167,9 +2176,11 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			log.Info().Str("peer", peerID).Str("addr", remoteAddr).Msg("⚡ Direct P2P TCP (ShadowTLS) ACTIVE")
 			if regPeer, ok := registry.Get(peerID); ok && regPeer != nil {
 				regPeer.DirectP2P = true
-				regPeer.Transport = "tcp_tls"
-				regPeer.ActiveEndpoint = remoteAddr
+				regPeer.DirectTCP = true
+				regPeer.Transport = "tcp_shadowtls"
+				regPeer.TCPAddr = remoteAddr
 				regPeer.LastDirectSeen = time.Now()
+				regPeer.LastBilateralSeen = time.Now()
 				regPeer.ProbeCount = 0
 				registry.Upsert(regPeer)
 			}
@@ -2977,6 +2988,11 @@ func receiveLoop(
 					preservedLat = 0
 				} else {
 					preservedEP = existingPeer.ActiveEndpoint
+					// Sanitize poisoned ActiveEndpoint: if it matches TCPAddr or ends with 8443 while STUN is different, restore from STUN
+					if preservedEP != "" && (preservedEP == p.TCPAddr || preservedEP == existingPeer.TCPAddr || (strings.HasSuffix(preservedEP, ":8443") && p.STUNAddr != "" && !strings.HasSuffix(p.STUNAddr, ":8443"))) {
+						preservedEP = p.STUNAddr
+						preservedDirect = false
+					}
 					if existingPeer.DirectP2P && existingPeer.IsBilateralP2P(15*time.Second) {
 						preservedDirect = true
 					} else {

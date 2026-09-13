@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta37"
+	Version = "1.9.226-beta38"
 	Commit  = "release"
 )
 
@@ -4680,8 +4680,9 @@ func startEngineFromConfig(c *config.Config) {
 			writeDebug(fmt.Sprintf("⚡ Direct P2P TCP (ShadowTLS) активен с %s (%s)", peerID, remoteAddr))
 			if regPeer, ok := registry.Get(peerID); ok && regPeer != nil {
 				regPeer.DirectP2P = true
-				regPeer.Transport = "tcp_tls"
-				regPeer.ActiveEndpoint = remoteAddr
+				regPeer.DirectTCP = true
+				regPeer.Transport = "tcp_shadowtls"
+				regPeer.TCPAddr = remoteAddr
 				regPeer.LastDirectSeen = time.Now()
 				regPeer.LastBilateralSeen = time.Now()
 				regPeer.ProbeCount = 0
@@ -4888,7 +4889,25 @@ func startEngineFromConfig(c *config.Config) {
 							}
 						}
 					}
-					// Relay fallback for TUN data disabled: MQTT channel is strictly control plane / signaling
+					// 3. Fallback: relay via MQTT if direct UDP and TCP are not available
+					if !sent && targetPeer != nil && len(sigChannels) > 0 {
+						dataToSend := reply
+						if cfg != nil {
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+								cKey := crypto.DeriveKey(activeProf.NetworkKey)
+								if enc, encErr := crypto.EncryptSelf(reply, cKey); encErr == nil && len(enc) > 0 {
+									dataToSend = enc
+								}
+							}
+						}
+						for _, ch := range sigChannels {
+							if mq, ok := ch.(*signaling.MQTTChannel); ok && mq != nil && mq.IsConnected() {
+								_ = mq.PublishTunnelData(targetPeer.DeviceID, dataToSend)
+								sent = true
+								break
+							}
+						}
+					}
 				}
 			}
 
@@ -5148,7 +5167,11 @@ func startEngineFromConfig(c *config.Config) {
 									if cfg != nil {
 										if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 											cKey := crypto.DeriveKey(activeProf.NetworkKey)
-											if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
+											epoch := crypto.GetCurrentEpoch()
+											seq := targetPeer.NextOutboundSeq()
+											if enc, encErr := crypto.EncryptWithEpochSeq(packet, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+												dataToSend = enc
+											} else if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
 												dataToSend = enc
 											}
 										}
@@ -5854,7 +5877,10 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 				if cfg != nil {
 					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 						cKey := crypto.DeriveKey(activeProf.NetworkKey)
-						if dec, decErr := crypto.DecryptSelf(pkt, cKey); decErr == nil && len(dec) >= 20 {
+						curEpoch := crypto.GetCurrentEpoch()
+						if dec, _, _, err := crypto.DecryptWithEpochSeq(pkt, cKey[:], curEpoch); err == nil && len(dec) >= 20 {
+							dataToProcess = dec
+						} else if dec, decErr := crypto.DecryptSelf(pkt, cKey); decErr == nil && len(dec) >= 20 {
 							dataToProcess = dec
 						}
 					}
@@ -6190,6 +6216,11 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						preservedPingMs = 0
 					} else {
 						preservedEP = existingPeer.ActiveEndpoint
+						// Sanitize poisoned ActiveEndpoint: if it matches TCPAddr or ends with 8443 while STUN is different, restore from STUN
+						if preservedEP != "" && (preservedEP == p.TCPAddr || preservedEP == existingPeer.TCPAddr || (strings.HasSuffix(preservedEP, ":8443") && p.STUNAddr != "" && !strings.HasSuffix(p.STUNAddr, ":8443"))) {
+							preservedEP = p.STUNAddr
+							preservedDirect = false
+						}
 						if existingPeer.DirectP2P && existingPeer.IsBilateralP2P(15*time.Second) {
 							preservedDirect = true
 						} else {

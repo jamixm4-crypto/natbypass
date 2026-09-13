@@ -544,11 +544,12 @@ func (ms *MagicSock) triggerTCPFallback(deviceID string) {
 			return
 		}
 
-		// Register the TCP endpoint as a successful route so path selection picks it up.
-		ms.RecordProbeSuccess(deviceID, targetAddr, 0)
+		// Register the TCP endpoint for ShadowTLS fallback without polluting UDP Candidates
+		ms.RegisterPeerTCPAddr(deviceID, targetAddr)
 
 		if ms.onPathSwitch != nil {
-			ms.onPathSwitch(deviceID, targetAddr, targetAddr, PathTypeTCP)
+			oldEP, _, _ := ms.GetActiveRoute(deviceID)
+			ms.onPathSwitch(deviceID, oldEP, targetAddr, PathTypeTCP)
 		}
 	}()
 }

@@ -621,19 +621,32 @@ func (m *TCPDirectManager) RegisterConn(deviceID string, conn net.Conn, onPacket
 			remoteUDP = &net.UDPAddr{IP: rTCP.IP, Port: rTCP.Port}
 		}
 
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			_ = tcpConn.SetKeepAlive(true)
+			_ = tcpConn.SetKeepAlivePeriod(15 * time.Second)
+		}
+
 		// If wrapped in ShadowTLSConn, read via ReadPacket (decrypts and removes padding)
 		if sConn, ok := conn.(*shadowtls.ShadowTLSConn); ok {
+			idleTimeouts := 0
 			for {
 				select {
 				case <-m.ctx.Done():
 					return
 				default:
 				}
-				_ = sConn.SetReadDeadline(time.Now().Add(25 * time.Second))
+				_ = sConn.SetReadDeadline(time.Now().Add(35 * time.Second))
 				pkt, err := sConn.ReadPacket()
 				if err != nil {
+					if netErr, isNet := err.(net.Error); isNet && netErr.Timeout() {
+						idleTimeouts++
+						if idleTimeouts < 3 {
+							continue
+						}
+					}
 					return
 				}
+				idleTimeouts = 0
 				if onPacket != nil && len(pkt) > 0 {
 					onPacket(remoteUDP, pkt)
 				}
@@ -642,16 +655,24 @@ func (m *TCPDirectManager) RegisterConn(deviceID string, conn net.Conn, onPacket
 
 		// Fallback for standard length-prefixed raw TCP frames
 		lenBuf := make([]byte, 2)
+		idleTimeoutsRaw := 0
 		for {
 			select {
 			case <-m.ctx.Done():
 				return
 			default:
 			}
-			_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+			_ = conn.SetReadDeadline(time.Now().Add(35 * time.Second))
 			if _, err := io.ReadFull(conn, lenBuf); err != nil {
+				if netErr, isNet := err.(net.Error); isNet && netErr.Timeout() {
+					idleTimeoutsRaw++
+					if idleTimeoutsRaw < 3 {
+						continue
+					}
+				}
 				return
 			}
+			idleTimeoutsRaw = 0
 			pLen := binary.BigEndian.Uint16(lenBuf)
 			if pLen == 0 || pLen > 65535 {
 				return
