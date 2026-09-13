@@ -121,19 +121,58 @@ jobs:
           mkdir -p ../release_apk
 
           echo "=== 1. Building Universal APK ==="
-          ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" --console=plain --no-daemon
-          cp -f app/build/outputs/apk/release/app-release.apk "../release_apk/NatBypass-${TAG}.apk"
-          cp -f app/build/outputs/apk/release/app-release.apk "../release_apk/NatBypass-${TAG}-universal.apk"
+          set +e
+          ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" --console=plain --no-daemon > /tmp/gradle.log 2>&1
+          gstatus=$?
+          set -e
+          if [ $gstatus -ne 0 ]; then
+            cat /tmp/gradle.log | tail -n 80
+            err_line=$(grep -E "What went wrong|Execution failed|Caused by" /tmp/gradle.log | head -n 4 | tr '\r\n' '  ')
+            [ -z "$err_line" ] && err_line=$(tail -n 10 /tmp/gradle.log | tr '\r\n' '  ')
+            echo "::error title=GradleBuildFail::$err_line"
+            exit $gstatus
+          fi
+
+          echo "Files in app/build/outputs:"
+          find app/build/outputs/ -type f
+          
+          apk_file=$(find app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
+          if [ -z "$apk_file" ]; then
+            apk_file=$(find app/build/outputs/apk/ -name "*.apk" | head -n 1)
+          fi
+          echo "Found Universal APK: $apk_file"
+          cp -f "$apk_file" "../release_apk/NatBypass-${TAG}.apk"
+          cp -f "$apk_file" "../release_apk/NatBypass-${TAG}-universal.apk"
 
           echo "=== 2. Building Architecture-Specific APKs ==="
           for abi in arm64-v8a armeabi-v7a x86_64; do
             echo "--- Building APK for $abi ---"
-            ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" -PtargetAbi="$abi" --console=plain --no-daemon
-            cp -f app/build/outputs/apk/release/app-release.apk "../release_apk/NatBypass-${TAG}-${abi}.apk"
+            set +e
+            ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" -PtargetAbi="$abi" --console=plain --no-daemon > /tmp/gradle_${abi}.log 2>&1
+            gstatus=$?
+            set -e
+            if [ $gstatus -ne 0 ]; then
+              cat /tmp/gradle_${abi}.log | tail -n 80
+              err_line=$(grep -E "What went wrong|Execution failed|Caused by" /tmp/gradle_${abi}.log | head -n 4 | tr '\r\n' '  ')
+              [ -z "$err_line" ] && err_line=$(tail -n 10 /tmp/gradle_${abi}.log | tr '\r\n' '  ')
+              echo "::error title=GradleBuildFail_${abi}::$err_line"
+              exit $gstatus
+            fi
+            abi_apk=$(find app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
+            [ -z "$abi_apk" ] && abi_apk=$(find app/build/outputs/apk/ -name "*.apk" | head -n 1)
+            echo "Found $abi APK: $abi_apk"
+            cp -f "$abi_apk" "../release_apk/NatBypass-${TAG}-${abi}.apk"
           done
 
           echo "Final release APKs:"
           ls -lh ../release_apk/
+
+      - name: Upload Build Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: /tmp/gradle*.log
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

@@ -21,11 +21,12 @@ android {
         val targetAbi = (project.findProperty("targetAbi") as? String)?.trim()
         if (!targetAbi.isNullOrEmpty()) {
             ndk {
-                abiFilters.add(targetAbi)
+                abiFilters.clear()
+                abiFilters += targetAbi
             }
         } else {
             ndk {
-                abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
             }
         }
 
