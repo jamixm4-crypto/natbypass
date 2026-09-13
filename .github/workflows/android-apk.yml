@@ -118,46 +118,19 @@ jobs:
           fi
           VERSION_CODE=$((V_MAJOR * 1000000 + V_MINOR * 100000 + V_PATCH * 1000 + V_BUILD))
 
-          set +e
-          ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" --stacktrace --no-daemon 2>&1 | tee /tmp/gradle_err.log
-          gradle_status=${PIPESTATUS[0]}
-          set -e
-          if [ $gradle_status -ne 0 ]; then
-            err_msg=$(grep -A 12 "\* What went wrong:" /tmp/gradle_err.log | tr '\r' ' ' | tr '\n' ' ')
-            if [ -z "$err_msg" ]; then
-              err_msg=$(grep -B 2 -A 8 "Execution failed for task" /tmp/gradle_err.log | tr '\r' ' ' | tr '\n' ' ')
-            fi
-            if [ -z "$err_msg" ]; then
-              err_msg=$(tail -n 40 /tmp/gradle_err.log | tr '\r' ' ' | tr '\n' ' ')
-            fi
-            echo "::error title=GradleBuildFailure::$err_msg"
-            exit $gradle_status
-          fi
-          
           mkdir -p ../release_apk
-          for f in $(find app/build/outputs/apk/ -name "*.apk"); do
-            fname=$(basename "$f")
-            echo "Found APK: $fname at $f"
-            if [[ "$fname" == *"arm64-v8a"* ]]; then
-              cp -f "$f" "../release_apk/NatBypass-${TAG}-arm64-v8a.apk"
-            elif [[ "$fname" == *"armeabi-v7a"* ]]; then
-              cp -f "$f" "../release_apk/NatBypass-${TAG}-armeabi-v7a.apk"
-            elif [[ "$fname" == *"x86_64"* ]]; then
-              cp -f "$f" "../release_apk/NatBypass-${TAG}-x86_64.apk"
-            elif [[ "$fname" == *"universal"* ]]; then
-              cp -f "$f" "../release_apk/NatBypass-${TAG}-universal.apk"
-              cp -f "$f" "../release_apk/NatBypass-${TAG}.apk"
-            else
-              cp -f "$f" "../release_apk/NatBypass-${TAG}.apk"
-            fi
-          done
 
-          if [ ! -f "../release_apk/NatBypass-${TAG}.apk" ]; then
-            first_apk=$(find ../release_apk -maxdepth 1 -name "*.apk" | head -n 1)
-            if [ -n "$first_apk" ]; then
-              cp -f "$first_apk" "../release_apk/NatBypass-${TAG}.apk"
-            fi
-          fi
+          echo "=== 1. Building Universal APK ==="
+          ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" --console=plain --no-daemon
+          cp -f app/build/outputs/apk/release/app-release.apk "../release_apk/NatBypass-${TAG}.apk"
+          cp -f app/build/outputs/apk/release/app-release.apk "../release_apk/NatBypass-${TAG}-universal.apk"
+
+          echo "=== 2. Building Architecture-Specific APKs ==="
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            echo "--- Building APK for $abi ---"
+            ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" -PtargetAbi="$abi" --console=plain --no-daemon
+            cp -f app/build/outputs/apk/release/app-release.apk "../release_apk/NatBypass-${TAG}-${abi}.apk"
+          done
 
           echo "Final release APKs:"
           ls -lh ../release_apk/

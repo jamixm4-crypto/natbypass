@@ -18,6 +18,17 @@ android {
         versionName = vName
 
 
+        val targetAbi = (project.findProperty("targetAbi") as? String)?.trim()
+        if (!targetAbi.isNullOrEmpty()) {
+            ndk {
+                abiFilters.add(targetAbi)
+            }
+        } else {
+            ndk {
+                abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
+            }
+        }
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -40,15 +51,6 @@ android {
         debug {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
-        }
-    }
-
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
-            isUniversalApk = true
         }
     }
 
