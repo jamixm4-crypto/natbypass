@@ -515,6 +515,17 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	}
 	_ = exec.CommandContext(ctx, "route", "add", prefix+".0", "mask", "255.255.255.0", cleanVIP, "metric", "10").Run()
 
+	if err == nil {
+		SetTUNStatus(&TUNStatus{
+			Active:       true,
+			DeviceName:   d.AdapterName,
+			VirtualIP:    cleanVIP,
+			MTU:          1280,
+			IsAdmin:      checkIsAdmin(),
+			DriverLoaded: true,
+		})
+	}
+
 	return err
 }
 

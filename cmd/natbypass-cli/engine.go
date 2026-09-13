@@ -410,6 +410,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			Str("vip", myVirtualIP).
 			Msg("✅ [TUN] Виртуальный адаптер успешно инициализирован и активен")
 	}
+	if uiServer != nil {
+		uiServer.SetTUNStatus(tunnel.GetTUNStatus())
+	}
 	if runtime.GOOS == "linux" && registry != nil {
 		for _, p := range registry.List() {
 			if p.VirtualIP != "" {
@@ -569,6 +572,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					_ = tunDev.SetVirtualIP(newVIP)
 				}
 				uiServer.SetVirtualIP(newVIP)
+				uiServer.SetTUNStatus(tunnel.GetTUNStatus())
 			}
 			if cfg.Network.AllowExitNode {
 				currentVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
@@ -1736,10 +1740,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								p.RecordProbeResult(false)
 								p.Latency = 0
 								p.PingMs = 0
-								if p.ProbeCount >= 10 || p.LossPercent > 40 || p.ConsecutiveDrops >= 4 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > constants.PeerOfflineThreshold) || (!p.LastBilateralSeen.IsZero() && time.Since(p.LastBilateralSeen) > constants.BilateralDemotionThreshold) {
+								isDirectFresh := !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 25*time.Second
+								shouldFallback := !isDirectFresh && (p.ConsecutiveDrops >= 4 ||
+									(p.ProbeCount >= 10 && p.LossPercent > 50) ||
+									(!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > constants.PeerOfflineThreshold) ||
+									(!p.LastBilateralSeen.IsZero() && time.Since(p.LastBilateralSeen) > constants.BilateralDemotionThreshold))
+								if shouldFallback {
 									if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (tcpDirectMgr == nil || !tcpDirectMgr.HasConn(p.DeviceID)) {
 										if p.DirectP2P {
-											log.Warn().Str("peer", p.DeviceID).Int("loss", p.LossPercent).Int("drops", p.ConsecutiveDrops).Msg("🔀 UDP packet loss > 30% or drops >= 3: automatic fallback to Relay")
+											log.Warn().Str("peer", p.DeviceID).Int("loss", p.LossPercent).Int("drops", p.ConsecutiveDrops).Msg("🔀 UDP packet loss > 50% and drops >= 4: automatic fallback to Relay")
 										}
 										p.DirectP2P = false
 										if findMeshRelayPeer(registry, tcpDirectMgr, p.DeviceID) != nil {
@@ -1751,9 +1760,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 								registry.Upsert(p)
 
-								// Immediate reactive TCP ShadowTLS dial on ICMP failure:
+								// Immediate reactive TCP ShadowTLS dial on ICMP failure only if UDP is truly not fresh:
 								isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
-								if !isForceUDP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+								if !isForceUDP && !isDirectFresh && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
 									defaultTCPPort := 8443
 									netKey := ""
 									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
@@ -2996,6 +3005,28 @@ func receiveLoop(
 				}
 			}
 
+			effectiveLastSeen := time.Now()
+			isOnline := true
+			if !p.Timestamp.IsZero() {
+				age := time.Since(p.Timestamp)
+				if age > 0 && age < 365*24*time.Hour {
+					effectiveLastSeen = p.Timestamp
+					if age > constants.PeerOfflineThreshold {
+						isOnline = false
+					}
+					// Устаревший retained-маяк от прошлого сеанса или старого ID (> 4 минут) — игнорируем мертвого фантома
+					if age > constants.PeerCleanupInterval {
+						continue
+					}
+				}
+			}
+
+			if !isOnline {
+				preservedDirect = false
+				preservedDirectTCP = false
+				preservedTransport = "offline"
+			}
+
 			registry.Upsert(&peer.Peer{
 				DeviceID:          p.DeviceID,
 				Nickname:          p.Nickname,
@@ -3013,10 +3044,10 @@ func receiveLoop(
 				VirtualIP:         p.VirtualIP,
 				IsExitNode:        p.IsExitNode,
 				AdvertisedRoutes:  p.AdvertisedRoutes,
-				LastSeen:          time.Now(),
+				LastSeen:          effectiveLastSeen,
 				LastDirectSeen:    lastDirect,
 				LastBilateralSeen: lastBilateral,
-				Online:            true,
+				Online:            isOnline,
 				DirectP2P:         preservedDirect,
 				DirectTCP:         preservedDirectTCP,
 				Transport:         preservedTransport,

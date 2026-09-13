@@ -324,6 +324,14 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	// Финальное подтверждение статуса UP
 	_ = exec.CommandContext(ctx, ipBin, "link", "set", d.AdapterName, "up").Run()
 	_ = EnableMSSClamping(d.AdapterName, mtu)
+	SetTUNStatus(&TUNStatus{
+		Active:       true,
+		DeviceName:   d.AdapterName,
+		VirtualIP:    cleanVIP,
+		MTU:          mtu,
+		IsAdmin:      checkIsAdmin(),
+		DriverLoaded: true,
+	})
 
 	// 5. Маршрутизация подсети через адаптер (используем replace, чтобы маршрут не падал с File exists)
 	prefix := "100.64.200"

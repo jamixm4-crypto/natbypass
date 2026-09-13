@@ -502,6 +502,10 @@ func (r *Registry) Upsert(p *Peer) {
 		if cleanPVIP != "" && cleanExistingVIP != "" && cleanPVIP == cleanExistingVIP {
 			// А. Тот же криптографический узел перезапустился с новым DeviceID: вытеснение разрешено и необходимо
 			if p.PublicKey != "" && existing.PublicKey != "" && p.PublicKey == existing.PublicKey {
+				if !p.LastSeen.IsZero() && !existing.LastSeen.IsZero() && existing.LastSeen.Sub(p.LastSeen) > 3*time.Second {
+					// Входящий маяк старее уже активного узла — игнорируем устаревший маяк
+					return
+				}
 				p.MergeFrom(existing)
 				staleConflictingIDs = append(staleConflictingIDs, id)
 				log.Info().
@@ -516,6 +520,10 @@ func (r *Registry) Upsert(p *Peer) {
 			isSameDeviceType := (strings.HasPrefix(p.DeviceID, "Android-") && strings.HasPrefix(id, "Android-")) ||
 				(p.DeviceName != "" && existing.DeviceName != "" && strings.EqualFold(p.DeviceName, existing.DeviceName))
 			if isSameDeviceType {
+				if !p.LastSeen.IsZero() && !existing.LastSeen.IsZero() && existing.LastSeen.Sub(p.LastSeen) > 3*time.Second {
+					// Входящий маяк старее уже активного узла — игнорируем устаревший маяк
+					return
+				}
 				p.MergeFrom(existing)
 				staleConflictingIDs = append(staleConflictingIDs, id)
 				log.Info().
@@ -529,6 +537,10 @@ func (r *Registry) Upsert(p *Peer) {
 			existingIsActive := existing.Online && now.Sub(existing.LastSeen) < constants.PeerOfflineThreshold
 
 			if existingIsActive {
+				if !p.LastSeen.IsZero() && !existing.LastSeen.IsZero() && existing.LastSeen.After(p.LastSeen) {
+					// Входящий конфликтный маяк старее текущего активного узла — отбрасываем фантом
+					return
+				}
 				// Если конфликт вызван дефолтным адресом подсети (например, 100.64.200.1 или .0):
 				if strings.HasSuffix(cleanPVIP, ".1") || strings.HasSuffix(cleanPVIP, ".0") {
 					prefix := "100.64.200"

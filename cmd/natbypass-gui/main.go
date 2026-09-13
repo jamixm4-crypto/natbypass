@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta31"
+	Version = "1.9.226-beta32"
 	Commit  = "release"
 )
 
@@ -5418,8 +5418,8 @@ func startEngineFromConfig(c *config.Config) {
 							// ICMP failure: clear ping and latency
 							p.ProbeCount++
 							p.Latency = 0
-							p.PingMs = 0
-							if p.ProbeCount >= 2 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 10*time.Second) || (!p.LastBilateralSeen.IsZero() && time.Since(p.LastBilateralSeen) > 15*time.Second) {
+							isDirectFresh := !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 25*time.Second
+							if !isDirectFresh && (p.ProbeCount >= 4 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 30*time.Second)) {
 								if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (guiTCPDirectMgr == nil || !guiTCPDirectMgr.HasConn(p.DeviceID)) {
 									p.DirectP2P = false
 									p.Transport = "relay_mqtt"
@@ -5427,8 +5427,8 @@ func startEngineFromConfig(c *config.Config) {
 							}
 							registry.Upsert(p)
 
-							// Immediate reactive TCP ShadowTLS dial on ICMP failure:
-							if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() != "force_udp" && !guiTCPDirectMgr.HasConn(p.DeviceID) {
+							// Immediate reactive TCP ShadowTLS dial on ICMP failure only if UDP is not fresh:
+							if !isDirectFresh && guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() != "force_udp" && !guiTCPDirectMgr.HasConn(p.DeviceID) {
 								go connectPeerTCPDirect(p)
 							}
 						}
@@ -6216,6 +6216,27 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					guiMagicSock.RegisterPeerTCPAddr(p.DeviceID, p.TCPAddr)
 				}
 
+				effectiveLastSeen := time.Now()
+				isOnline := true
+				if !p.Timestamp.IsZero() {
+					age := time.Since(p.Timestamp)
+					if age > 0 && age < 365*24*time.Hour {
+						effectiveLastSeen = p.Timestamp
+						if age > constants.PeerOfflineThreshold {
+							isOnline = false
+						}
+						// Устаревший retained-маяк от прошлого сеанса или старого ID (> 4 минут) — игнорируем мертвого фантома
+						if age > constants.PeerCleanupInterval {
+							continue
+						}
+					}
+				}
+
+				if !isOnline {
+					preservedDirect = false
+					preservedTransport = "offline"
+				}
+
 				registry.Upsert(&peer.Peer{
 					DeviceID:          p.DeviceID,
 					Nickname:          nick,
@@ -6234,10 +6255,10 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					Candidates:        p.Candidates,
 					WGPubKey:          p.WGPubKey,
 					WGPort:            p.WGPort,
-					LastSeen:          time.Now(),
+					LastSeen:          effectiveLastSeen,
 					LastDirectSeen:    lastDirect,
 					LastBilateralSeen: lastBilateral,
-					Online:            true,
+					Online:            isOnline,
 					IsExitNode:        p.IsExitNode,
 					AdvertisedRoutes:  p.AdvertisedRoutes,
 					AWG:               p.AWG,
