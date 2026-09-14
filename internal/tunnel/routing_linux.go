@@ -590,6 +590,15 @@ func BypassEndpoint(endpoint string) error {
 	linuxBypassedMu.Lock()
 	defer linuxBypassedMu.Unlock()
 	for _, hostIP := range hostIPs {
+		if hostIP == physGW {
+			continue
+		}
+		if ip := net.ParseIP(hostIP); ip != nil {
+			// Do NOT bypass mesh IPs (e.g. 10.1.2.x, 100.64.200.x) to physical gateway
+			if strings.HasPrefix(hostIP, "10.1.") || strings.HasPrefix(hostIP, "100.64.") {
+				continue
+			}
+		}
 		alreadyAdded := false
 		for _, prev := range lastBypassedEndpointIPs {
 			if prev == hostIP {

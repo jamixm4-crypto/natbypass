@@ -203,6 +203,12 @@ func BypassEndpoint(endpoint string) error {
 		if hostIP == physGW {
 			continue
 		}
+		if ip := net.ParseIP(hostIP); ip != nil {
+			// Do NOT bypass mesh IPs (e.g. 10.1.2.x, 10.1.1.x, 100.64.200.x) to physical gateway
+			if strings.HasPrefix(hostIP, "10.1.") || strings.HasPrefix(hostIP, "100.64.") {
+				continue
+			}
+		}
 		alreadyAdded := false
 		for _, prev := range lastBypassedEndpointIPs {
 			if prev == hostIP {
