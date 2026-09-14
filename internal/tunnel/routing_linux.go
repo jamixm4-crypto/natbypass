@@ -217,7 +217,12 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	// 3. NAT MASQUERADE in POSTROUTING:
 	// Inserted at TOP of POSTROUTING (position 1) so it precedes any Docker/UFW/Keenetic NDM chains!
 	forceInsertIptablesRule(ipt, "nat", "POSTROUTING", "-m", "mark", "--mark", "0x4e", "!", "-o", "nb0", "-j", "MASQUERADE")
-	meshSubnets := []string{"10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12"}
+
+	// Clean up any old broad 10.0.0.0/8 MASQUERADE rules that intercepted the local LAN (e.g. 10.11.219.0/24)
+	_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", "10.0.0.0/8", "!", "-o", "nb0", "-j", "MASQUERADE").Run()
+	_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", "172.16.0.0/12", "!", "-o", "nb0", "-j", "MASQUERADE").Run()
+
+	meshSubnets := []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24"}
 	if cleanSubnet != "" && cleanSubnet != "10.0.0.0/8" && cleanSubnet != "100.64.0.0/10" && cleanSubnet != "172.16.0.0/12" {
 		meshSubnets = append(meshSubnets, cleanSubnet)
 	}
@@ -295,18 +300,26 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			}
 		}
 
+		// Clean up overly broad rules from earlier versions that hijacked local LAN (e.g. 10.11.219.0/24)
+		_ = runLinuxCmd("ip", "rule", "del", "from", "10.0.0.0/8")
+		_ = runLinuxCmd("ip", "rule", "del", "to", "10.0.0.0/8", "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "del", "from", "172.16.0.0/12")
+
 		// Priority 55: preserve local LAN and mesh destinations before falling through to WAN
-		for _, s := range []string{"192.168.0.0/16", "10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12"} {
-			_ = runLinuxCmd("ip", "rule", "del", "pref", "55", "to", s, "lookup", "main")
-			_ = runLinuxCmd("ip", "rule", "add", "pref", "55", "to", s, "lookup", "main")
+		for _, s := range []string{"192.168.0.0/16", "10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", cleanSubnet} {
+			if s != "" && s != "10.0.0.0/8" {
+				_ = runLinuxCmd("ip", "rule", "del", "pref", "55", "to", s, "lookup", "main")
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "55", "to", s, "lookup", "main")
+			}
 		}
 
 		// Priority 60: forward mesh internet traffic to real WAN routing table
+		// Packets from mesh enter via nb0 or carry fwmark 0x4e
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", wanTable)
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", wanTable)
-		for _, s := range []string{"10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12", cleanSubnet} {
-			if s != "" {
+		for _, s := range []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", cleanSubnet} {
+			if s != "" && s != "10.0.0.0/8" && s != "172.16.0.0/12" {
 				_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "from", s, "lookup", wanTable)
 			}
 		}

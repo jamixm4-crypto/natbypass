@@ -37,7 +37,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta51"
+const Version          = "1.9.226-beta52"
 
 
 
@@ -1371,6 +1371,17 @@ func attachTUNLocked(tunFd int) {
 
 					if len(pkt) >= 20 && (pkt[0]>>4) == 4 {
 						destIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
+						srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15])
+
+						// Защита от бродкаст-штормов, петель и падения Wi-Fi сети:
+						// Игнорируем мультикаст (224.0.0.0/4, 239.x.x.x), бродкаст (255.255.255.255, *.255),
+						// петли на себя (src == dest, 127.0.0.0/8), link-local и невалидные адреса.
+						if destIP.IsMulticast() || destIP.IsUnspecified() || destIP.IsLoopback() ||
+							destIP.IsLinkLocalMulticast() || destIP.IsLinkLocalUnicast() ||
+							destIP.String() == "255.255.255.255" || strings.HasSuffix(destIP.String(), ".255") ||
+							srcIP.Equal(destIP) {
+							continue
+						}
 
 						var targetPeer *peer.Peer
 						if globalRegistry != nil {
