@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta54"
+	Version = "1.9.226-beta55"
 	Commit  = "release"
 )
 
@@ -4504,6 +4504,29 @@ func loadOrGenerateKeys(cfg *config.Config) ([32]byte, [32]byte, error) {
 	return pub, priv, nil
 }
 
+// isMeshSubnetIP checks if candIP belongs to the same /24 mesh subnet as myVIP (e.g. 10.1.1.x)
+// and is not a loopback, broadcast, or carrier CGNAT (100.64.0.0/10) IP.
+func isMeshSubnetIP(candIP net.IP, myVIP string) bool {
+	if candIP == nil || candIP.IsLoopback() || candIP.IsMulticast() || candIP.IsUnspecified() {
+		return false
+	}
+	clean := strings.TrimSpace(strings.Split(myVIP, "/")[0])
+	baseIP := net.ParseIP(clean)
+	if baseIP == nil {
+		return false
+	}
+	c4 := candIP.To4()
+	b4 := baseIP.To4()
+	if c4 == nil || b4 == nil {
+		return false
+	}
+	// Do not accept carrier-grade NAT 100.64.0.0/10 if local mesh is not 100.64.x
+	if c4[0] == 100 && (c4[1]&0xC0) == 64 && b4[0] != 100 {
+		return false
+	}
+	return c4[0] == b4[0] && c4[1] == b4[1] && c4[2] == b4[2]
+}
+
 func startEngineFromConfig(c *config.Config) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -4784,29 +4807,6 @@ func startEngineFromConfig(c *config.Config) {
 			triggerPublish()
 		})
 
-		// isMeshSubnetIP checks if candIP belongs to the same /24 mesh subnet as myVIP (e.g. 10.1.1.x)
-		// and is not a loopback, broadcast, or carrier CGNAT (100.64.0.0/10) IP.
-		isMeshSubnetIP := func(candIP net.IP, myVIP string) bool {
-			if candIP == nil || candIP.IsLoopback() || candIP.IsMulticast() || candIP.IsUnspecified() {
-				return false
-			}
-			clean := strings.TrimSpace(strings.Split(myVIP, "/")[0])
-			baseIP := net.ParseIP(clean)
-			if baseIP == nil {
-				return false
-			}
-			c4 := candIP.To4()
-			b4 := baseIP.To4()
-			if c4 == nil || b4 == nil {
-				return false
-			}
-			// Do not accept carrier-grade NAT 100.64.0.0/10 if local mesh is not 100.64.x
-			if c4[0] == 100 && (c4[1]&0xC0) == 64 && b4[0] != 100 {
-				return false
-			}
-			return c4[0] == b4[0] && c4[1] == b4[1] && c4[2] == b4[2]
-		}
-
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
 		onInboundPacket := func(srcAddr *net.UDPAddr, payload []byte, isTCP bool, isRelay bool) {
 			if network.IsMultiHopPacket(payload) {
@@ -4911,7 +4911,7 @@ func startEngineFromConfig(c *config.Config) {
 					}
 					if udpPuncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
 						udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
-						if !targetPeer.IsBilateralP2P(12 * time.Second) {
+						if !targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second) {
 							_ = udpPuncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
 						}
 					}
@@ -5059,7 +5059,9 @@ func startEngineFromConfig(c *config.Config) {
 			writeDebug(msg)
 
 			// Буферизированный конвейер отправки исходящих IP-пакетов из сетевого стека Windows
-			pktCh := make(chan []byte, 256)
+			pktCh := make(chan []byte, 2048)
+			lastReactivePunchGUI := make(map[string]time.Time)
+			lastReactiveDialGUI := make(map[string]time.Time)
 			go func() {
 				for {
 					select {
@@ -5213,7 +5215,7 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 
-								bilateralOK := targetPeer.IsBilateralP2P(12 * time.Second)
+								bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 
 								// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
 								if !isForceTCP && !sentTCP && udpPuncher != nil && targetEP != "" {
@@ -5221,13 +5223,17 @@ func startEngineFromConfig(c *config.Config) {
 										sentDirect = true
 									}
 								}
-								// Dual-send to LocalAddr for LAN clients to guarantee delivery across hairpin NAT
-								if !isForceTCP && !sentTCP && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && udpPuncher != nil {
-									_ = udpPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, packet, pmin, pmax)
+								// Dual-send to LocalAddr for LAN clients ONLY if send to targetEP failed or targetEP is empty
+								if !isForceTCP && !sentTCP && !sentDirect && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && udpPuncher != nil {
+									if err := udpPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, packet, pmin, pmax); err == nil {
+										sentDirect = true
+									}
 								}
-								// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
-								if !isForceTCP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && udpPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
-									_ = udpPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, packet, pmin, pmax)
+								// Also try STUNAddr ONLY if direct send hasn't succeeded and different from targetEP
+								if !isForceTCP && !sentTCP && !sentDirect && (!targetPeer.DirectP2P || !bilateralOK) && udpPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+									if err := udpPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, packet, pmin, pmax); err == nil {
+										sentDirect = true
+									}
 								}
 								if len(packet) >= 20 && packet[9] == 1 { // ICMP
 									icmpType := "Unknown"
@@ -5246,29 +5252,35 @@ func startEngineFromConfig(c *config.Config) {
 									}
 									writeDebug(fmt.Sprintf("📤 TUN [ICMP %s] %s -> %s via %s (%s, direct: %v, tcp: %v)", icmpType, srcIP.String(), destStr, targetPeer.DeviceID, targetEP, sentDirect, sentTCP))
 								}
-								// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
-								if !isForceTCP && (!sentDirect || !targetPeer.DirectP2P || !bilateralOK) && udpPuncher != nil {
-									if targetEP != "" {
-										_ = udpPuncher.SendHolePunchProbe(targetEP)
-									}
-									if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
-										_ = udpPuncher.SendHolePunchProbe(targetPeer.STUNAddr)
-									}
-									for _, cand := range targetPeer.Candidates {
-										if cand != "" && cand != targetEP && cand != targetPeer.STUNAddr {
-											_ = udpPuncher.SendHolePunchProbe(cand)
+								// 1c. Троттлированное реактивное пробитие NAT при невозможности прямой отправки (не чаще 1 раза в 3 сек на пир)
+								now := time.Now()
+								if !isForceTCP && !sentDirect && !sentTCP && udpPuncher != nil {
+									if now.Sub(lastReactivePunchGUI[targetPeer.DeviceID]) > 3*time.Second {
+										lastReactivePunchGUI[targetPeer.DeviceID] = now
+										if targetEP != "" {
+											_ = udpPuncher.SendHolePunchProbe(targetEP)
+										}
+										if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+											_ = udpPuncher.SendHolePunchProbe(targetPeer.STUNAddr)
+										}
+										for _, cand := range targetPeer.Candidates {
+											if cand != "" && cand != targetEP && cand != targetPeer.STUNAddr {
+												_ = udpPuncher.SendHolePunchProbe(cand)
+											}
 										}
 									}
 								}
-								// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing or unconfirmed
-								if !isForceUDP && !sentTCP && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(targetPeer.DeviceID) && (!targetPeer.DirectP2P || !bilateralOK || targetPeer.PingMs == 0 || targetPeer.ProbeCount >= 1 || isForceTCP) {
-									go connectPeerTCPDirect(targetPeer)
+								// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (троттлинг 1 раз в 5 сек)
+								if !isForceUDP && !sentTCP && !sentDirect && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+									if now.Sub(lastReactiveDialGUI[targetPeer.DeviceID]) > 5*time.Second {
+										lastReactiveDialGUI[targetPeer.DeviceID] = now
+										go connectPeerTCPDirect(targetPeer)
+									}
 								}
 
-								// Dual-Path Shadow Relay Rule:
-								// If direct TCP is not active AND (direct UDP is unconfirmed bilaterally within 12s, or lossy >30%),
-								// immediately forward via Relay so network traffic is never blackholed!
-								needsRelay := !sentTCP && (!sentDirect || !targetPeer.DirectP2P || !bilateralOK || targetPeer.LossPercent > 30)
+								// Fallback Relay Rule: ONLY if direct transmission completely failed AND NOT Exit Node internet traffic!
+								isExitOrInternet := (exitID != "" && targetPeer.DeviceID == exitID) || !isMeshSubnetIP(destIP, cleanVIP)
+								needsRelay := !sentTCP && !sentDirect && !isExitOrInternet
 
 								// 1e. Mesh Userspace TCP Relay Fallback:
 								if needsRelay && !isForceUDP && guiTCPDirectMgr != nil {
@@ -5281,26 +5293,31 @@ func startEngineFromConfig(c *config.Config) {
 										}
 									}
 								}
-								// 1f. Parallel/Fallback MQTT relay transmission when direct P2P and Direct TCP are not active or high loss:
+								// 1f. Parallel/Fallback MQTT relay transmission when direct P2P and Direct TCP are not active:
 								if needsRelay && len(sigChannels) > 0 {
-									dataToSend := packet
-									if cfg != nil {
-										if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-											cKey := crypto.DeriveKey(activeProf.NetworkKey)
-											epoch := crypto.GetCurrentEpoch()
-											seq := targetPeer.NextOutboundSeq()
-											if enc, encErr := crypto.EncryptWithEpochSeq(packet, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
-												dataToSend = enc
-											} else if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
-												dataToSend = enc
+									pktToRelay := make([]byte, len(packet))
+									copy(pktToRelay, packet)
+									tDevID := targetPeer.DeviceID
+									go func(pID string, rawPkt []byte) {
+										dataToSend := rawPkt
+										if cfg != nil {
+											if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+												cKey := crypto.DeriveKey(activeProf.NetworkKey)
+												epoch := crypto.GetCurrentEpoch()
+												seq := targetPeer.NextOutboundSeq()
+												if enc, encErr := crypto.EncryptWithEpochSeq(rawPkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+													dataToSend = enc
+												} else if enc, encErr := crypto.EncryptSelf(rawPkt, cKey); encErr == nil && len(enc) > 0 {
+													dataToSend = enc
+												}
 											}
 										}
-									}
-									for _, ch := range sigChannels {
-										if mq, ok := ch.(*signaling.MQTTChannel); ok && mq != nil && mq.IsConnected() {
-											_ = mq.PublishTunnelData(targetPeer.DeviceID, dataToSend)
+										for _, ch := range sigChannels {
+											if mq, ok := ch.(*signaling.MQTTChannel); ok && mq != nil && mq.IsConnected() {
+												_ = mq.PublishTunnelData(pID, dataToSend)
+											}
 										}
-									}
+									}(tDevID, pktToRelay)
 								}
 								atomic.AddUint64(&packetsSentCount, 1)
 							}

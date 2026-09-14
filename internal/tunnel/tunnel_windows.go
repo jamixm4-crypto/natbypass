@@ -495,8 +495,12 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
+	realName := getNatBypassAdapterNameWindows()
+	if realName == "" {
+		realName = d.AdapterName
+	}
 	cmd := exec.CommandContext(ctx, "netsh", "interface", "ipv4", "set", "address",
-		fmt.Sprintf("name=%s", d.AdapterName),
+		fmt.Sprintf("name=%s", realName),
 		"source=static",
 		fmt.Sprintf("address=%s", cleanVIP),
 		"mask=255.255.255.0",
