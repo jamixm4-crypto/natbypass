@@ -40,8 +40,9 @@ class NatBypassVpnService : VpnService() {
     private var serviceJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    /** Raw TUN fd сохранённый после detachFd() для явного закрытия в disconnect() (BUG-A1 fix) */
+    /** Raw TUN fd сохранённый после detachFd() */
     private var tunRawFd: Int = -1
+    private val isDisconnecting = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -123,10 +124,8 @@ class NatBypassVpnService : VpnService() {
                 }
             }
             ACTION_DISCONNECT -> {
-                serviceScope.launch(Dispatchers.IO) {
-                    disconnect()
-                    stopSelf()
-                }
+                disconnect()
+                stopSelf()
             }
             else -> {
                 if (!isRunning) {
@@ -152,6 +151,7 @@ class NatBypassVpnService : VpnService() {
 
     private fun connect(forceReconfigure: Boolean = false) {
         if (isRunning && !forceReconfigure) return
+        isDisconnecting.set(false)
 
         try {
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
@@ -264,12 +264,6 @@ class NatBypassVpnService : VpnService() {
                 }
                 // Прямой маршрут к меш-подсети рядом с дефолтным шлюзом
                 try { builder.addRoute(meshSubnet, prefix) } catch (_: Exception) {}
-                if (meshSubnet != "100.64.200.0") {
-                    try { builder.addRoute("100.64.200.0", 24) } catch (_: Exception) {}
-                }
-                if (meshSubnet != "10.1.1.0") {
-                    try { builder.addRoute("10.1.1.0", 24) } catch (_: Exception) {}
-                }
 
                 // Надежные IPv4 DNS (только для полного туннеля через Exit Node)
                 try {
@@ -283,19 +277,13 @@ class NatBypassVpnService : VpnService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to add mesh route: ${e.message}")
                 }
-                if (meshSubnet != "100.64.200.0") {
-                    try { builder.addRoute("100.64.200.0", 24) } catch (_: Exception) {}
-                }
-                if (meshSubnet != "10.1.1.0") {
-                    try { builder.addRoute("10.1.1.0", 24) } catch (_: Exception) {}
-                }
 
                 // ВНИМАНИЕ: В режиме сплит-туннеля (без Exit Node):
-                // 1) НЕ добавляем маршрут 100.64.0.0/10! Это диапазон CGNAT сотовых операторов (LTE/5G),
-                // его добавление перехватывает мобильный интернет и ломает сеть на телефоне.
+                // 1) НЕ добавляем маршруты 10.1.1.0/24 и 100.64.0.0/10! Они могут перехватывать
+                // локальный роутер пользователя (10.1.1.1) или мобильный интернет (CGNAT),
+                // ломая DoT Private DNS (dns.google) и физический доступ в сеть.
                 // 2) НЕ вызываем builder.addDnsServer()! Иначе Android перенаправит ВЕСЬ системный DNS в TUN интерфейс.
             }
-
 
             val advSubnets = prefs.getString("adv_subnets", "") ?: ""
             if (advSubnets.isNotEmpty()) {
@@ -315,6 +303,9 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
+            // 1. Предварительно связываем underlying networks до establish
+            updateUnderlyingNetworks()
+
             val pfd = builder.establish()
             if (pfd == null) {
                 Log.e(TAG, "builder.establish() returned NULL")
@@ -329,18 +320,15 @@ class NatBypassVpnService : VpnService() {
                 return
             }
 
-            // setUnderlyingNetworks ОБЯЗАН вызываться ПОСЛЕ establish()!
+            // 2. setUnderlyingNetworks ОБЯЗАН вызываться и ПОСЛЕ establish()!
             // Это сообщает Android, что VPN работает поверх физического интерфейса (Wi-Fi/LTE)
             // и весь обычный трафик без маршрутов в VPN (включая Private DNS dns.google DoT:853)
             // направляется в физическую сеть без сбоев.
             updateUnderlyingNetworks()
-            // detachFd() передает владение дескриптором файловому объекту Go (os.File).
-            // Сохраняем raw fd отдельно, чтобы disconnect() мог закрыть его через Os.close()
-            // даже после того, как Go взял владение (BUG-A1 fix).
             val fd = pfd.detachFd()
             tunRawFd = fd
             vpnInterface = null
-            Log.i(TAG, "VPN TUN established! detached fd=$fd, tunRawFd=$tunRawFd, VIP=$currentVip")
+            Log.i(TAG, "VPN TUN established! detached fd=$fd, VIP=$currentVip")
 
             val startRes = org.natbypass.app.util.MobileBridge.startEngine(configYaml, fd)
             if (startRes != "OK") {
@@ -429,41 +417,25 @@ class NatBypassVpnService : VpnService() {
         }
     }
 
+    @Synchronized
     private fun disconnect() {
-        if (!isRunning && tunRawFd <= 0 && vpnInterface == null && wakeLock == null && wifiLock == null && networkCallback == null) return
+        if (!isRunning && isDisconnecting.get()) return
+        if (isDisconnecting.getAndSet(true)) return
         isRunning = false
         serviceJob?.cancel()
         serviceJob = null
 
-        // 1. Мгновенно отключаем TUN в Go
+        // 1. Мгновенно отключаем TUN в Go. Go сам закрывает системный fd через globalTunFile.Close().
+        // ВНИМАНИЕ: НЕ вызывать adoptFd(rawFd).close() в Kotlin! В 64-битном рантайме Android (arm64-v8a)
+        // Bionic libc fdsan расценивает повторное закрытие уже закрытого дескриптора как fatal abort (SIGABRT),
+        // что вызывало мгновенный краш приложения при отключении.
         try { org.natbypass.app.util.MobileBridge.detachTUN() } catch (_: Throwable) {}
-
-        // 2. Явно закрываем raw TUN fd через системный ParcelFileDescriptor
-        try {
-            val rawFd = tunRawFd
-            if (rawFd > 0) {
-                try {
-                    android.os.ParcelFileDescriptor.adoptFd(rawFd).close()
-                } catch (_: Throwable) {
-                    try {
-                        val fdObj = java.io.FileDescriptor()
-                        val field = java.io.FileDescriptor::class.java.getDeclaredField("descriptor")
-                        field.isAccessible = true
-                        field.setInt(fdObj, rawFd)
-                        android.system.Os.close(fdObj)
-                    } catch (_: Throwable) {}
-                }
-                Log.i(TAG, "TUN fd=$rawFd closed via adoptFd (BUG-A1 fix)")
-            }
-        } catch (e: Throwable) {
-            Log.w(TAG, "Close tunRawFd failed: ${e.message}")
-        }
         tunRawFd = -1
 
         try { vpnInterface?.close() } catch (_: Throwable) {}
         vpnInterface = null
 
-        // 3. МГНОВЕННО снимаем Foreground и гасим уведомление (значок VPN в шторке исчезает сразу)
+        // 2. МГНОВЕННО снимаем Foreground и гасим уведомление (значок VPN в шторке исчезает сразу)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -479,7 +451,7 @@ class NatBypassVpnService : VpnService() {
             Log.i(TAG, "Notification $NOTIFICATION_ID cancelled immediately")
         } catch (_: Throwable) {}
 
-        // 4. Оповещаем UI
+        // 3. Оповещаем UI
         try {
             sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
                 putExtra("state", "disconnected")
@@ -504,8 +476,8 @@ class NatBypassVpnService : VpnService() {
         screenReceiver = null
         currentPhysicalNetwork = null
 
-        // 5. Отправляем Leave-маяк асинхронно в фоне, чтобы задержки сети не подвешивали UI/отключение
-        serviceScope.launch(Dispatchers.IO) {
+        // 4. Отправляем Leave-маяк асинхронно в независимом скопе, чтобы onDestroy() cancel не убил его
+        CoroutineScope(Dispatchers.IO).launch {
             try { org.natbypass.app.util.MobileBridge.sendOfflineBeacon() } catch (_: Throwable) {}
         }
     }
@@ -516,6 +488,7 @@ class NatBypassVpnService : VpnService() {
     /**
      * Возвращает список активных физических сетей (Wi-Fi, Cellular, Ethernet),
      * исключая VPN. Отсортированы: валидированные с интернетом первыми.
+     * ВАЖНО: Мы НЕ фильтруем по NET_CAPABILITY_INTERNET, чтобы не блокировать Private DNS (dns.google).
      */
     private fun getPhysicalNetworks(): Array<Network> {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -524,9 +497,10 @@ class NatBypassVpnService : VpnService() {
                 val physical = cm.allNetworks.filter { net ->
                     try {
                         val caps = cm.getNetworkCapabilities(net) ?: return@filter false
-                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
-                        !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                        !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                        (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                         caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                         caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
                     } catch (_: Throwable) { false }
                 }
                 if (physical.isNotEmpty()) {
@@ -534,9 +508,10 @@ class NatBypassVpnService : VpnService() {
                         val caps = cm.getNetworkCapabilities(net)
                         var score = 0
                         if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true) score += 20
-                        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true) score += 10
-                        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) score += 8
-                        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true) score += 5
+                        if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true) score += 10
+                        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true) score += 8
+                        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) score += 6
+                        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true) score += 4
                         score
                     }
                     return sorted.toTypedArray()
@@ -562,8 +537,7 @@ class NatBypassVpnService : VpnService() {
                     setUnderlyingNetworks(physical)
                     Log.i(TAG, "setUnderlyingNetworks: applied ${physical.size} physical network(s)")
                 } else {
-                    setUnderlyingNetworks(null)
-                    Log.w(TAG, "setUnderlyingNetworks: no physical networks found, cleared")
+                    Log.w(TAG, "setUnderlyingNetworks: no physical networks currently detected (preserving existing)")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "setUnderlyingNetworks error: ${e.message}")
@@ -572,7 +546,6 @@ class NatBypassVpnService : VpnService() {
     }
 
     private fun handleNetworkChange(network: Network?, forceRebind: Boolean = false) {
-        if (!isRunning) return
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         if (network != null) {
             try {
@@ -592,6 +565,8 @@ class NatBypassVpnService : VpnService() {
         if (activePhysical != null) {
             currentPhysicalNetwork = activePhysical
         }
+
+        if (!isRunning) return
 
         // Only rebind UDP socket if physical network actually changed (e.g. Wi-Fi <-> Cellular)
         if (physicalChanged || forceRebind) {
@@ -644,12 +619,11 @@ class NatBypassVpnService : VpnService() {
         }
         try {
             val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
                 .build()
             cm.registerNetworkCallback(request, cb)
             networkCallback = cb
-            Log.i(TAG, "registerNetworkCallback: registered for physical networks (INTERNET + NOT_VPN)")
+            Log.i(TAG, "registerNetworkCallback: registered for physical networks (NOT_VPN)")
         } catch (e: Exception) { Log.w(TAG, "registerNetworkCallback error: ${e.message}") }
     }
 

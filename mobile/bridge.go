@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta43"
+const Version = "1.9.226-beta44"
 
 
 
@@ -279,6 +279,9 @@ func StartEngine(configYAML string, tunFd int) string {
 
 	cfg, err := parseConfigFromString(configYAML)
 	if err != nil {
+		if tunFd > 0 {
+			_ = syscall.Close(tunFd)
+		}
 		return fmt.Sprintf("ошибка парсинга конфига: %v", err)
 	}
 	globalConfig = cfg
@@ -295,6 +298,9 @@ func StartEngine(configYAML string, tunFd int) string {
 	pubKey, privKey, err := loadOrGenKeys(cfg)
 	if err != nil {
 		cancel()
+		if tunFd > 0 {
+			_ = syscall.Close(tunFd)
+		}
 		return fmt.Sprintf("ошибка генерации ключей: %v", err)
 	}
 	if cfg.Crypto.PublicKey == "" {
