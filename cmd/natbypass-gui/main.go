@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta55"
+	Version = "1.9.226-beta56"
 	Commit  = "release"
 )
 
@@ -5102,11 +5102,13 @@ func startEngineFromConfig(c *config.Config) {
 						}
 						destStr := destIP.String()
 
-						// Игнорируем мультикаст Windows (224.0.0.x, 239.255.x.x, 255.255.255.255), бродкаст и петли
-						cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-						if destIP.IsMulticast() || destIP.IsUnspecified() || destStr == "255.255.255.255" || destStr == cleanVIP || strings.HasSuffix(destStr, ".255") || strings.HasSuffix(destStr, ".0") {
+						// Игнорируем мультикаст Windows, бродкаст, петли и шум локального обнаружения
+						if tunnel.IsParasiticOrBroadcast(packet, myVirtualIP) {
 							continue
 						}
+
+						// Userspace TCP MSS Clamping to prevent PMTU blackholes
+						_ = tunnel.ClampTCPMSS(packet, constants.DefaultClampedMSS)
 
 						if registry != nil {
 							peers := registry.List()
@@ -5279,6 +5281,7 @@ func startEngineFromConfig(c *config.Config) {
 								}
 
 								// Fallback Relay Rule: ONLY if direct transmission completely failed AND NOT Exit Node internet traffic!
+								cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 								isExitOrInternet := (exitID != "" && targetPeer.DeviceID == exitID) || !isMeshSubnetIP(destIP, cleanVIP)
 								needsRelay := !sentTCP && !sentDirect && !isExitOrInternet
 
@@ -5413,66 +5416,134 @@ func startEngineFromConfig(c *config.Config) {
 		triggerPublish()
 	}()
 
-	// Фоновый цикл публикации анонсов (каждые 10 секунд)
+	// Фоновый цикл публикации анонсов (адаптивный: 30с при поиске, 60с при активных P2P)
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
+		lastPeriodicPublish := time.Now()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				go publishCurrentState(ctx)
+			case now := <-ticker.C:
+				hasConnected := false
+				if registry != nil {
+					for _, p := range registry.List() {
+						if p.Online && (p.DirectP2P || time.Since(p.LastSeen) < 30*time.Second) {
+							hasConnected = true
+							break
+						}
+					}
+				}
+				minInterval := constants.DefaultPublishInterval // 30s
+				if hasConnected {
+					minInterval = constants.ConnectedPublishInterval // 60s
+				}
+				if now.Sub(lastPeriodicPublish) >= minInterval {
+					lastPeriodicPublish = now
+					go publishCurrentState(ctx)
+				}
 			case <-triggerPublishCh:
+				lastPeriodicPublish = time.Now()
 				go publishCurrentState(ctx)
 			}
 		}
 	}()
 
-	// Фоновый цикл прямой отправки UDP Hole Punch пакетов (каждые 12 секунд для удержания CGNAT маппингов)
+	// Фоновый цикл прямой отправки UDP Hole Punch пакетов и удержания CGNAT маппингов с экспоненциальным бэкоффом
 	go func() {
 		probeTicker := time.NewTicker(2 * time.Second)
 		defer probeTicker.Stop()
+		probeBackoff := make(map[string]time.Time)
+		lastKeepAliveSent := make(map[string]time.Time)
 		lastRendezvousInit := make(map[string]time.Time)
+		rendezvousAttempts := make(map[string]int)
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-probeTicker.C:
 				if registry != nil {
+					now := time.Now()
 					isForceTCP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp"
 					isForceUDP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_udp"
 					peers := registry.List()
+					myLocal := ""
+					myPub := ""
+					if udpPuncher != nil {
+						myLocal = udpPuncher.LocalAddr()
+						myPub = udpPuncher.MappedIPString()
+					}
 					for _, p := range peers {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
-							if !isForceTCP && udpPuncher != nil && p.Transport != "tcp_tls" {
-								_ = udpPuncher.SendKeepAlive(p.ActiveEndpoint)
+							// Connected peer: send keepalive at most once every KeepAliveInterval (15s).
+							// Skip keepalive if data packet was sent/received recently (< 10 seconds).
+							lastKA := lastKeepAliveSent[p.DeviceID]
+							dataFresh := !p.LastDirectSeen.IsZero() && now.Sub(p.LastDirectSeen) < 10*time.Second
+							if !isForceTCP && udpPuncher != nil && p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" {
+								if !dataFresh && now.Sub(lastKA) >= constants.KeepAliveInterval {
+									lastKeepAliveSent[p.DeviceID] = now
+									_ = udpPuncher.SendKeepAlive(p.ActiveEndpoint)
+								}
 							}
 							delete(lastRendezvousInit, p.DeviceID)
+							delete(probeBackoff, p.DeviceID)
+							delete(rendezvousAttempts, p.DeviceID)
 						} else {
+							// Unconnected peer: Apply exponential backoff based on ProbeCount
+							if p.ProbeCount == 0 {
+								delete(probeBackoff, p.DeviceID)
+							}
+							if until, ok := probeBackoff[p.DeviceID]; ok && now.Before(until) {
+								continue
+							}
+							var nextBackoff time.Duration
+							switch {
+							case p.ProbeCount > 300:
+								nextBackoff = 300 * time.Second
+							case p.ProbeCount > 150:
+								nextBackoff = 120 * time.Second
+							case p.ProbeCount > 50:
+								nextBackoff = 60 * time.Second
+							case p.ProbeCount > 15:
+								nextBackoff = 16 * time.Second
+							default:
+								nextBackoff = 4 * time.Second
+							}
+							probeBackoff[p.DeviceID] = now.Add(nextBackoff)
+							p.ProbeCount++
+
 							if !isForceTCP && udpPuncher != nil {
 								if p.ActiveEndpoint != "" {
 									_ = udpPuncher.SendHolePunchProbeWithDelta(p.ActiveEndpoint, p.NATDelta)
 								}
-								if p.STUNAddr != "" {
+								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
 									_ = udpPuncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 								}
-								if p.LocalAddr != "" {
+								// ONLY probe LocalAddr if peer is genuinely on our local physical LAN
+								if p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, myPub) {
 									_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
 								}
-								if p.IPv6Addr != "" {
+								if p.IPv6Addr != "" && network.GetLocalIPv6() != "" {
 									_ = udpPuncher.SendHolePunchProbe(p.IPv6Addr)
 								}
 								for _, cand := range p.Candidates {
-									if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
+									if cand != "" && cand != p.STUNAddr && cand != p.ActiveEndpoint {
+										// If candidate is a private RFC 1918 address, only probe if in our local subnet
+										if candHost, _, err := net.SplitHostPort(cand); err == nil {
+											if cIP := net.ParseIP(candHost); cIP != nil && cIP.IsPrivate() && !peer.IsSameLANSubnet(cIP) {
+												continue
+											}
+										}
 										_ = udpPuncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 									}
 								}
 
-								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT for unconnected peers
-								now := time.Now()
-								if !p.DirectP2P && len(sigChannels) > 0 && udpPuncher != nil && now.Sub(lastRendezvousInit[p.DeviceID]) > 30*time.Second {
+								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT for unconnected peers (max 3 attempts)
+								if !p.DirectP2P && len(sigChannels) > 0 && udpPuncher != nil && rendezvousAttempts[p.DeviceID] < 3 && now.Sub(lastRendezvousInit[p.DeviceID]) > 30*time.Second {
 									lastRendezvousInit[p.DeviceID] = now
+									rendezvousAttempts[p.DeviceID]++
 									go func(targetPeerID string) {
 										sCtx, sCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
 										defer sCancel()

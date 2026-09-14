@@ -8,6 +8,7 @@
 package tunnel
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"strings"
@@ -71,4 +72,143 @@ func CalculateChecksum(data []byte) uint16 {
 		sum = (sum >> 16) + (sum & 0xffff)
 	}
 	return ^uint16(sum)
+}
+
+// IsParasiticOrBroadcast checks if an outbound packet is multicast, broadcast, loopback, link-local,
+// self-targeted, or local service noise (NetBIOS, LLMNR, SSDP, mDNS, WS-Discovery) that must not
+// be encrypted or routed into the NatBypass mesh.
+func IsParasiticOrBroadcast(packet []byte, myVirtualIP string) bool {
+	if len(packet) < 20 || (packet[0]>>4) != 4 {
+		return true
+	}
+	srcIP := GetSrcIP(packet)
+	destIP := GetDestIP(packet)
+	if srcIP == nil || destIP == nil {
+		return true
+	}
+
+	// Multicast, link-local, unspecified, loopback
+	if destIP.IsMulticast() || destIP.IsUnspecified() || destIP.IsLoopback() ||
+		destIP.IsLinkLocalUnicast() || destIP.IsLinkLocalMulticast() {
+		return true
+	}
+
+	destStr := destIP.String()
+	// Global broadcast or subnet broadcast/network
+	if destStr == "255.255.255.255" || strings.HasSuffix(destStr, ".255") || strings.HasSuffix(destStr, ".0") {
+		return true
+	}
+
+	// Loopback / self reflection
+	cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+	if destStr == cleanVIP || srcIP.Equal(destIP) {
+		return true
+	}
+
+	// Filter common LAN discovery noise: UDP NetBIOS (137, 138), LLMNR (5355), mDNS (5353), SSDP (1900), WS-Discovery (3702)
+	if packet[9] == 17 { // UDP
+		ihl := int(packet[0]&0x0F) * 4
+		if len(packet) >= ihl+8 {
+			dstPort := binary.BigEndian.Uint16(packet[ihl+2 : ihl+4])
+			switch dstPort {
+			case 137, 138, 1900, 3702, 5353, 5355:
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// ClampTCPMSS inspects IPv4 TCP SYN packets and clamps the Maximum Segment Size (MSS) option
+// to maxMSS (e.g. 1240 bytes) to prevent IP fragmentation and Path MTU blackholes.
+// Returns true if the MSS option was found and modified with checksum updated.
+func ClampTCPMSS(packet []byte, maxMSS uint16) bool {
+	if len(packet) < 40 || (packet[0]>>4) != 4 || packet[9] != 6 {
+		return false
+	}
+	ihl := int(packet[0]&0x0F) * 4
+	if len(packet) < ihl+20 {
+		return false
+	}
+
+	totalLen := int(binary.BigEndian.Uint16(packet[2:4]))
+	if totalLen > len(packet) || totalLen < ihl+20 {
+		totalLen = len(packet)
+	}
+
+	flags := packet[ihl+13]
+	if flags&0x02 == 0 { // Not a SYN packet
+		return false
+	}
+
+	dataOffset := int(packet[ihl+12]>>4) * 4
+	if dataOffset <= 20 || ihl+dataOffset > totalLen {
+		return false // No options
+	}
+
+	optIdx := ihl + 20
+	optEnd := ihl + dataOffset
+	modified := false
+
+	for optIdx < optEnd {
+		kind := packet[optIdx]
+		if kind == 0 { // End of Option List
+			break
+		}
+		if kind == 1 { // NOP
+			optIdx++
+			continue
+		}
+		if optIdx+1 >= optEnd {
+			break
+		}
+		length := int(packet[optIdx+1])
+		if length < 2 || optIdx+length > optEnd {
+			break
+		}
+		if kind == 2 && length == 4 { // MSS option
+			curMSS := binary.BigEndian.Uint16(packet[optIdx+2 : optIdx+4])
+			if curMSS > maxMSS {
+				binary.BigEndian.PutUint16(packet[optIdx+2:optIdx+4], maxMSS)
+				modified = true
+			}
+			break
+		}
+		optIdx += length
+	}
+
+	if !modified {
+		return false
+	}
+
+	// Recalculate TCP Checksum over Pseudo-header and TCP segment
+	tcpLen := totalLen - ihl
+	packet[ihl+16] = 0
+	packet[ihl+17] = 0
+
+	var sum uint32
+	// IPv4 Pseudo-header: SrcIP, DstIP, Zero, Protocol(6), TCPLength
+	sum += uint32(binary.BigEndian.Uint16(packet[12:14]))
+	sum += uint32(binary.BigEndian.Uint16(packet[14:16]))
+	sum += uint32(binary.BigEndian.Uint16(packet[16:18]))
+	sum += uint32(binary.BigEndian.Uint16(packet[18:20]))
+	sum += uint32(6)
+	sum += uint32(tcpLen)
+
+	// TCP Segment
+	tcpData := packet[ihl:totalLen]
+	for i := 0; i < len(tcpData)-1; i += 2 {
+		sum += uint32(binary.BigEndian.Uint16(tcpData[i : i+2]))
+	}
+	if len(tcpData)%2 == 1 {
+		sum += uint32(tcpData[len(tcpData)-1]) << 8
+	}
+	for sum > 0xffff {
+		sum = (sum >> 16) + (sum & 0xffff)
+	}
+	csum := ^uint16(sum)
+	binary.BigEndian.PutUint16(packet[ihl+16:ihl+18], csum)
+
+	return true
 }

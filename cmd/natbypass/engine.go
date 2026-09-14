@@ -1218,10 +1218,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						continue
 					}
 
-					// Ignore multicast, broadcast
-					if dstNetIP.IsMulticast() || dstNetIP.IsUnspecified() || dstIP == "255.255.255.255" || strings.HasSuffix(dstIP, ".255") {
+					// Ignore multicast, broadcast, link-local and noise
+					if tunnel.IsParasiticOrBroadcast(pkt, myVirtualIP) {
 						continue
 					}
+
+					// Userspace TCP MSS Clamping to prevent PMTU blackholes
+					_ = tunnel.ClampTCPMSS(pkt, constants.DefaultClampedMSS)
 
 					var p *peer.Peer
 					var found bool
@@ -1507,8 +1510,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
 					for _, p := range registry.List() {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
-							// Connected peer: send keepalive and probe if STUN drifted
-							if !isForceTCP && puncher != nil && p.Transport != "tcp_direct" {
+							// Connected peer: send keepalive only if no recent data flowing (<10s)
+							dataFresh := !p.LastDirectSeen.IsZero() && now.Sub(p.LastDirectSeen) < 10*time.Second
+							if !isForceTCP && puncher != nil && p.Transport != "tcp_direct" && !dataFresh {
 								_ = puncher.SendKeepAlive(p.ActiveEndpoint)
 								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
 									_ = puncher.SendHolePunchProbe(p.STUNAddr)
@@ -1561,17 +1565,26 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								if p.ActiveEndpoint != "" {
 									_ = puncher.SendHolePunchProbeWithDelta(p.ActiveEndpoint, p.NATDelta)
 								}
-								if p.STUNAddr != "" {
+								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
 									_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 								}
-								if p.LocalAddr != "" {
+								// ONLY probe LocalAddr if peer is genuinely on our local physical LAN!
+								myLocal := puncher.LocalAddr()
+								myPub := puncher.MappedIPString()
+								if p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, myPub) {
 									_ = puncher.SendHolePunchProbe(p.LocalAddr)
 								}
-								if p.IPv6Addr != "" {
+								if p.IPv6Addr != "" && network.GetLocalIPv6() != "" {
 									_ = puncher.SendHolePunchProbe(p.IPv6Addr)
 								}
 								for _, cand := range p.Candidates {
-									if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr {
+									if cand != "" && cand != p.STUNAddr && cand != p.LocalAddr && cand != p.ActiveEndpoint {
+										// If candidate is a private RFC 1918 address, only probe if in our local subnet
+										if candHost, _, err := net.SplitHostPort(cand); err == nil {
+											if cIP := net.ParseIP(candHost); cIP != nil && cIP.IsPrivate() && !peer.IsSameLANSubnet(cIP) {
+												continue
+											}
+										}
 										_ = puncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 									}
 								}

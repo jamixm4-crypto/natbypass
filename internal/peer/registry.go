@@ -390,6 +390,7 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	if len(newer.Candidates) == 0 && len(existing.Candidates) > 0 {
 		newer.Candidates = existing.Candidates
 	}
+	newer.Candidates = PruneCandidates(newer.Candidates, newer.STUNAddr, newer.LocalAddr)
 	if existing.NATBlocked && !newer.DirectP2P {
 		newer.NATBlocked = true
 	}
@@ -404,6 +405,34 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 
 	newer.Online = true
 	newer.LastSeen = now
+}
+
+// PruneCandidates deduplicates candidate endpoints, removes primary STUN/Local duplicates,
+// and caps the candidate list to MaxCandidateEndpoints to avoid probe explosion.
+func PruneCandidates(candidates []string, primarySTUN, primaryLocal string) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	if primarySTUN != "" {
+		seen[primarySTUN] = true
+	}
+	if primaryLocal != "" {
+		seen[primaryLocal] = true
+	}
+	var pruned []string
+	for _, c := range candidates {
+		c = strings.TrimSpace(c)
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		pruned = append(pruned, c)
+		if len(pruned) >= constants.MaxCandidateEndpoints {
+			break
+		}
+	}
+	return pruned
 }
 
 
@@ -485,6 +514,8 @@ func (r *Registry) Upsert(p *Peer) {
 	} else if p.DeviceName == "" && p.Nickname != "" {
 		p.DeviceName = p.Nickname
 	}
+
+	p.Candidates = PruneCandidates(p.Candidates, p.STUNAddr, p.LocalAddr)
 
 	// 🛡️ Автоматическое вытеснение зависших пиров (Ghost Peers) с одинаковым Virtual IP или Public Key.
 	// В меш-сети один виртуальный IP (например 10.11.12.225) может принадлежать только одному активному узлу.

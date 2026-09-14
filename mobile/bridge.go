@@ -31,13 +31,14 @@ import (
 	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/wireguard"
 	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v3"
 )
 
 
-const Version          = "1.9.226-beta55"
+const Version          = "1.9.226-beta56"
 
 
 
@@ -143,6 +144,8 @@ var (
 	globalTunCancel context.CancelFunc // controls TUN read goroutine lifecycle
 	globalTxBytes   atomic.Uint64
 	globalRxBytes   atomic.Uint64
+	lastReactivePunchMobile = make(map[string]time.Time)
+	lastReactiveDialMobile  = make(map[string]time.Time)
 	logger          zerolog.Logger
 )
 
@@ -663,10 +666,10 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}
 
-	// Цикл публикации в сигнальный канал (каждые 8 секунд)
+	// Цикл публикации в сигнальный канал (адаптивный: 30с при поиске, 60с при активных P2P)
 	pubInterval := time.Duration(cfg.App.PublishInterval) * time.Second
-	if pubInterval <= 0 || pubInterval > 15*time.Second {
-		pubInterval = 5 * time.Second
+	if pubInterval <= 0 {
+		pubInterval = constants.DefaultPublishInterval
 	}
 	go func() {
 		publishOnce := func() {
@@ -800,14 +803,31 @@ func StartEngine(configYAML string, tunFd int) string {
 			}
 		}()
 
-		ticker := time.NewTicker(pubInterval)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
+		lastPub := time.Now()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				publishOnce()
+			case now := <-ticker.C:
+				hasConnected := false
+				if globalRegistry != nil {
+					for _, p := range globalRegistry.List() {
+						if p.Online && (p.DirectP2P || time.Since(p.LastSeen) < 30*time.Second) {
+							hasConnected = true
+							break
+						}
+					}
+				}
+				minInterval := constants.DefaultPublishInterval // 30s
+				if hasConnected {
+					minInterval = constants.ConnectedPublishInterval // 60s
+				}
+				if now.Sub(lastPub) >= minInterval {
+					lastPub = now
+					publishOnce()
+				}
 			}
 		}
 	}()
@@ -1052,6 +1072,10 @@ func StartEngine(configYAML string, tunFd int) string {
 					now := time.Now()
 					isForceTCP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_tcp"
 					isForceUDP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_udp"
+					myLocal := ""
+					if puncher != nil {
+						myLocal = puncher.LocalAddr()
+					}
 					for _, peerItem := range globalRegistry.List() {
 						if peerItem.Online {
 							if peerItem.DirectP2P {
@@ -1074,16 +1098,22 @@ func StartEngine(configYAML string, tunFd int) string {
 								if nextBackoff > 0 {
 									probeBackoff[peerItem.DeviceID] = now.Add(nextBackoff)
 								}
+								peerItem.ProbeCount++
 							}
 							if !isForceTCP && puncher != nil {
 								if peerItem.STUNAddr != "" {
 									_ = puncher.SendHolePunchProbeWithDelta(peerItem.STUNAddr, peerItem.NATDelta)
 								}
-								if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr {
+								if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr && peer.IsLocalLANPeer(peerItem.LocalAddr, peerItem.PublicIP, myLocal, globalPublicIP) {
 									_ = puncher.SendHolePunchProbeWithDelta(peerItem.LocalAddr, peerItem.NATDelta)
 								}
 								for _, cand := range peerItem.Candidates {
 									if cand != "" && cand != peerItem.STUNAddr && cand != peerItem.LocalAddr {
+										if candHost, _, err := net.SplitHostPort(cand); err == nil {
+											if cIP := net.ParseIP(candHost); cIP != nil && cIP.IsPrivate() && !peer.IsSameLANSubnet(cIP) {
+												continue
+											}
+										}
 										_ = puncher.SendHolePunchProbeWithDelta(cand, peerItem.NATDelta)
 									}
 								}
@@ -1140,35 +1170,23 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	})
 
-	// Goroutine B: Keepalive + fallback probes for peers without direct P2P (every 3 seconds)
+	// Goroutine B: Gentle keepalive for established direct P2P peers (every 15 seconds)
 	go func() {
-		keepAliveTicker := time.NewTicker(3 * time.Second)
+		keepAliveTicker := time.NewTicker(constants.KeepAliveInterval)
 		defer keepAliveTicker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-keepAliveTicker.C:
+			case now := <-keepAliveTicker.C:
 				if puncher != nil && globalRegistry != nil {
 					for _, p := range globalRegistry.List() {
-						go func(peer *peer.Peer) {
-							if peer.DirectP2P && peer.ActiveEndpoint != "" {
-								_ = puncher.SendKeepAlive(peer.ActiveEndpoint)
-							} else {
-								if peer.STUNAddr != "" {
-									_ = puncher.SendHolePunchProbeWithDelta(peer.STUNAddr, peer.NATDelta)
-								}
-								if peer.LocalAddr != "" {
-									_ = puncher.SendHolePunchProbeWithDelta(peer.LocalAddr, peer.NATDelta)
-								}
-								for _, cand := range peer.Candidates {
-									if cand != "" && cand != peer.STUNAddr {
-										_ = puncher.SendHolePunchProbeWithDelta(cand, peer.NATDelta)
-									}
-								}
+						if p.DirectP2P && p.ActiveEndpoint != "" {
+							if p.LastDirectSeen.IsZero() || now.Sub(p.LastDirectSeen) >= 10*time.Second {
+								_ = puncher.SendKeepAlive(p.ActiveEndpoint)
 							}
-						}(p)
+						}
 					}
 				}
 			}
@@ -1373,15 +1391,15 @@ func attachTUNLocked(tunFd int) {
 						destIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
 						srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15])
 
-						// Защита от бродкаст-штормов, петель и падения Wi-Fi сети:
-						// Игнорируем мультикаст (224.0.0.0/4, 239.x.x.x), бродкаст (255.255.255.255, *.255),
-						// петли на себя (src == dest, 127.0.0.0/8), link-local и невалидные адреса.
-						if destIP.IsMulticast() || destIP.IsUnspecified() || destIP.IsLoopback() ||
-							destIP.IsLinkLocalMulticast() || destIP.IsLinkLocalUnicast() ||
-							destIP.String() == "255.255.255.255" || strings.HasSuffix(destIP.String(), ".255") ||
-							srcIP.Equal(destIP) {
+						cleanVIP := strings.TrimSpace(strings.Split(atomicGetVIP(), "/")[0])
+
+						// Защита от бродкаст-штормов, петель и паразитного трафика
+						if tunnel.IsParasiticOrBroadcast(pkt, cleanVIP) {
 							continue
 						}
+
+						// Userspace TCP MSS Clamping to prevent PMTU blackholes
+						_ = tunnel.ClampTCPMSS(pkt, constants.DefaultClampedMSS)
 
 						var targetPeer *peer.Peer
 						if globalRegistry != nil {
@@ -1405,7 +1423,6 @@ func attachTUNLocked(tunFd int) {
 						}
 
 
-						cleanVIP := strings.TrimSpace(strings.Split(atomicGetVIP(), "/")[0])
 						if destIP.String() == cleanVIP {
 							if tf != nil {
 								_, _ = tf.Write(pkt)
@@ -1482,75 +1499,86 @@ func attachTUNLocked(tunFd int) {
 									sentDirect = true
 								}
 							}
-							// Dual-send to LocalAddr for LAN peers (ensures LAN delivery even if STUNAddr was picked)
-							if !isForceTCP && !sentTCP && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && globalPuncher != nil {
-								_ = globalPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, pkt, pmin, pmax)
+							// Dual-send to LocalAddr for LAN peers ONLY if direct send hasn't succeeded and different from targetEP
+							if !isForceTCP && !sentTCP && !sentDirect && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && globalPuncher != nil {
+								if err := globalPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, pkt, pmin, pmax); err == nil {
+									sentDirect = true
+								}
 							}
-							// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
-							if !isForceTCP && !sentTCP && !targetPeer.DirectP2P && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
-								_ = globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax)
-							}
-
-							// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
-							if !isForceTCP && (!sentDirect || !targetPeer.DirectP2P) && globalPuncher != nil {
-								if targetEP != "" {
-									_ = globalPuncher.SendHolePunchProbeWithDelta(targetEP, targetPeer.NATDelta)
-								}
-								if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
-									_ = globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax)
-								}
-								if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP {
-									_ = globalPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, pkt, pmin, pmax)
-								}
-								for _, cand := range targetPeer.Candidates {
-									if cand != "" && cand != targetEP && cand != targetPeer.STUNAddr {
-										_ = globalPuncher.SendDataPacketWithPadding(cand, pkt, pmin, pmax)
-									}
+							bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
+							// Also try STUNAddr ONLY if direct send hasn't succeeded and different from targetEP
+							if !isForceTCP && !sentTCP && !sentDirect && (!targetPeer.DirectP2P || !bilateralOK) && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+								if err := globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax); err == nil {
+									sentDirect = true
 								}
 							}
 
-							// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing or unconfirmed
-							if !isForceUDP && !sentTCP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) && (!targetPeer.DirectP2P || targetPeer.PingMs == 0 || targetPeer.ProbeCount >= 1 || isForceTCP) {
-								defTCPPort := 8443
-								netKey := ""
-								if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil {
-									if activeProf.TCPPort > 0 {
-										defTCPPort = activeProf.TCPPort
+							// 1c. Троттлированное реактивное пробитие NAT при невозможности прямой отправки (не чаще 1 раза в 3 сек на пир)
+							now := time.Now()
+							if !isForceTCP && !sentDirect && !sentTCP && globalPuncher != nil {
+								if now.Sub(lastReactivePunchMobile[targetPeer.DeviceID]) > 3*time.Second {
+									lastReactivePunchMobile[targetPeer.DeviceID] = now
+									if targetEP != "" {
+										_ = globalPuncher.SendHolePunchProbe(targetEP)
 									}
-									netKey = activeProf.NetworkKey
-								}
-								tcpTarget := targetPeer.TCPAddr
-								if tcpTarget == "" {
-									host := targetPeer.PublicIP
-									if host == "" && targetPeer.STUNAddr != "" {
-										host = strings.Split(targetPeer.STUNAddr, ":")[0]
+									if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+										_ = globalPuncher.SendHolePunchProbeWithDelta(targetPeer.STUNAddr, targetPeer.NATDelta)
 									}
-									if host != "" && host != "0.0.0.0" {
-										tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
-									} else if targetPeer.LocalAddr != "" {
-										localHost := strings.Split(targetPeer.LocalAddr, ":")[0]
-										tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
-									}
-								}
-								if tcpTarget != "" {
-									lPort := globalTCPDirectMgr.Port()
-									if lPort <= 0 && globalPuncher != nil {
-										lPort = globalPuncher.LocalPort()
-									}
-									go func(devID, target string, localP int) {
-										_ = globalTCPDirectMgr.ConnectPeer(devID, target, localP)
-									}(targetPeer.DeviceID, tcpTarget, lPort)
-
-									// Send bilateral TCPConnect signal over MQTT for coordinated simultaneous open
-									if globalSigMgr != nil && (!targetPeer.DirectP2P || targetPeer.ProbeCount >= 1 || isForceTCP) {
-										sendTCPConnectSignal(engineCtx, globalSigMgr, globalDevID, targetPeer.DeviceID, globalPuncher, globalTCPDirectMgr, defTCPPort, netKey)
+									for _, cand := range targetPeer.Candidates {
+										if cand != "" && cand != targetEP && cand != targetPeer.STUNAddr {
+											_ = globalPuncher.SendHolePunchProbe(cand)
+										}
 									}
 								}
 							}
+
+							// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (троттлинг 1 раз в 5 сек)
+							if !isForceUDP && !sentTCP && !sentDirect && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+								if now.Sub(lastReactiveDialMobile[targetPeer.DeviceID]) > 5*time.Second {
+									lastReactiveDialMobile[targetPeer.DeviceID] = now
+									defTCPPort := 8443
+									netKey := ""
+									if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil {
+										if activeProf.TCPPort > 0 {
+											defTCPPort = activeProf.TCPPort
+										}
+										netKey = activeProf.NetworkKey
+									}
+									tcpTarget := targetPeer.TCPAddr
+									if tcpTarget == "" {
+										host := targetPeer.PublicIP
+										if host == "" && targetPeer.STUNAddr != "" {
+											host = strings.Split(targetPeer.STUNAddr, ":")[0]
+										}
+										if host != "" && host != "0.0.0.0" {
+											tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+										} else if targetPeer.LocalAddr != "" {
+											localHost := strings.Split(targetPeer.LocalAddr, ":")[0]
+											tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
+										}
+									}
+									if tcpTarget != "" {
+										lPort := globalTCPDirectMgr.Port()
+										if lPort <= 0 && globalPuncher != nil {
+											lPort = globalPuncher.LocalPort()
+										}
+										go func(devID, target string, localP int) {
+											_ = globalTCPDirectMgr.ConnectPeer(devID, target, localP)
+										}(targetPeer.DeviceID, tcpTarget, lPort)
+
+										// Send bilateral TCPConnect signal over MQTT for coordinated simultaneous open
+										if globalSigMgr != nil {
+											sendTCPConnectSignal(engineCtx, globalSigMgr, globalDevID, targetPeer.DeviceID, globalPuncher, globalTCPDirectMgr, defTCPPort, netKey)
+										}
+									}
+								}
+							}
+
+							// Fallback Relay Rule: ONLY if direct transmission completely failed AND NOT Exit Node internet traffic!
+							isExitOrInternet := (globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetPeer.VirtualIP == globalExitNode)) || len(pkt) > 400 || (cleanVIP != "" && srcIP.String() != cleanVIP)
+							needsRelay := !sentTCP && !sentDirect && !isExitOrInternet
+
 							// 1e. Mesh Userspace Relay Fallback (encapsulated in Multi-Hop header)
-							// Dual-Path Shadow Relay Rule: If direct TCP is not active AND (direct UDP is unconfirmed or lossy >30%),
-							// immediately forward via Relay so traffic is never blackholed!
-							needsRelay := !sentTCP && (!sentDirect || !targetPeer.DirectP2P || targetPeer.LossPercent > 30)
 							if needsRelay && !isForceUDP && globalRegistry != nil {
 								relayPkt, mhErr := network.EncodeMultiHopPacket(globalDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, pkt)
 								if mhErr == nil {
@@ -1601,20 +1629,25 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// 1f. Fallback: relay via MQTT/Signaling when direct transmission is unconfirmed or failed
-							if (!sentDirect || !targetPeer.DirectP2P) && globalSigMgr != nil {
-								dataToSend := pkt
-								if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-									cKey := crypto.DeriveKey(activeProf.NetworkKey)
-									seq := targetPeer.NextOutboundSeq()
-									epoch := crypto.GetCurrentEpoch()
-									if enc, encErr := crypto.EncryptWithEpochSeq(pkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
-										dataToSend = enc
-									} else if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
-										dataToSend = enc
+							// 1f. Fallback: relay via MQTT/Signaling when direct transmission is unconfirmed or failed (ASYNCHRONOUS, non-blocking)
+							if needsRelay && globalSigMgr != nil {
+								pktCopy := make([]byte, len(pkt))
+								copy(pktCopy, pkt)
+								tDevID := targetPeer.DeviceID
+								go func(targetID string, rawPkt []byte) {
+									dataToSend := rawPkt
+									if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+										cKey := crypto.DeriveKey(activeProf.NetworkKey)
+										seq := targetPeer.NextOutboundSeq()
+										epoch := crypto.GetCurrentEpoch()
+										if enc, encErr := crypto.EncryptWithEpochSeq(rawPkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+											dataToSend = enc
+										} else if enc, encErr := crypto.EncryptSelf(rawPkt, cKey); encErr == nil && len(enc) > 0 {
+											dataToSend = enc
+										}
 									}
-								}
-								_ = globalSigMgr.PublishTunnelData(targetPeer.DeviceID, dataToSend)
+									_ = globalSigMgr.PublishTunnelData(targetID, dataToSend)
+								}(tDevID, pktCopy)
 							}
 
 							logger.Debug().

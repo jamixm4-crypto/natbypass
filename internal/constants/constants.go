@@ -14,13 +14,16 @@ const (
 	// Network and service defaults
 	DefaultWebUIPort       = 8080
 	DefaultUDPPort         = 47832
-	DefaultPublishInterval = 8 * time.Second
-	DefaultIPTimeout       = 10 * time.Second
-	DefaultWGListenPort    = 51820
-	DefaultWGMTU           = 1280
-	MTUMedium              = 1360
-	MTUMinimum             = 1280
-	DefaultVirtualIPSubnet = "100.64.200.0/24"
+	DefaultPublishInterval   = 30 * time.Second
+	ConnectedPublishInterval = 60 * time.Second
+	DefaultIPTimeout         = 10 * time.Second
+	DefaultWGListenPort      = 51820
+	DefaultWGMTU             = 1280
+	MTUMedium                = 1360
+	MTUMinimum               = 1280
+	DefaultClampedMSS        = 1240
+	MaxCandidateEndpoints    = 3
+	DefaultVirtualIPSubnet   = "100.64.200.0/24"
 
 	// Peer registry lifecycle and timeouts
 	PeerOfflineThreshold       = 45 * time.Second
@@ -52,12 +55,12 @@ const (
 	ProbeBurstCount    = 3
 	MaxProbesPerSecond = 10
 	MinProbeInterval   = 100 * time.Millisecond
-	KeepAliveInterval  = 4 * time.Second
+	KeepAliveInterval  = 15 * time.Second
 
 	// Low-power embedded router constants for MIPS/MIPSLE/ARM (Keenetic, OpenWrt)
 	// These significantly reduce CPU load and syscall frequency on weak single-core devices.
-	LowPowerPublishInterval     = 30 * time.Second
-	LowPowerKeepAliveInterval   = 10 * time.Second
+	LowPowerPublishInterval     = 60 * time.Second
+	LowPowerKeepAliveInterval   = 25 * time.Second
 	LowPowerPeerMonitorInterval = 30 * time.Second
 	LowPowerSTUNCacheInterval   = 60 * time.Second
 	MaxPeersRouter              = 64 // Maximum peers in registry for embedded router builds
