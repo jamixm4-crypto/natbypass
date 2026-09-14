@@ -304,6 +304,7 @@ class NatBypassVpnService : VpnService() {
 
                 // Надежные IPv4 DNS (только для полного туннеля через Exit Node)
                 try {
+                    builder.addDnsServer("77.88.8.8")
                     builder.addDnsServer("1.1.1.1")
                     builder.addDnsServer("8.8.8.8")
                 } catch (e: Exception) { Log.w(TAG, "addDnsServer error: ${e.message}") }

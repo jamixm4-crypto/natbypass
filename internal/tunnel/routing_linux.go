@@ -123,6 +123,34 @@ func ensureIptablesRule(ipt string, table string, chain string, args ...string) 
 	_ = exec.Command(ipt, insertArgs...).Run()
 }
 
+// forceInsertIptablesRule ensures a rule is at the very top (rule 1) of a chain.
+// If the rule already exists anywhere in the chain, it is removed first to avoid duplicates.
+func forceInsertIptablesRule(ipt, table, chain string, args ...string) {
+	checkArgs := []string{"-w", "2"}
+	if table != "" {
+		checkArgs = append(checkArgs, "-t", table)
+	}
+	checkArgs = append(checkArgs, "-C", chain)
+	checkArgs = append(checkArgs, args...)
+	if exec.Command(ipt, checkArgs...).Run() == nil {
+		// Rule exists. Remove it so we can re-insert at top
+		delArgs := []string{"-w", "2"}
+		if table != "" {
+			delArgs = append(delArgs, "-t", table)
+		}
+		delArgs = append(delArgs, "-D", chain)
+		delArgs = append(delArgs, args...)
+		_ = exec.Command(ipt, delArgs...).Run()
+	}
+	insertArgs := []string{"-w", "2"}
+	if table != "" {
+		insertArgs = append(insertArgs, "-t", table)
+	}
+	insertArgs = append(insertArgs, "-I", chain, "1")
+	insertArgs = append(insertArgs, args...)
+	_ = exec.Command(ipt, insertArgs...).Run()
+}
+
 // insertIptablesRule inserts a rule at the TOP of a chain (-I), ensuring it takes priority
 // over any existing rules (e.g. Docker's DROP policies). Idempotent via -C check.
 func insertIptablesRule(ipt, table, chain string, args ...string) {
@@ -146,7 +174,16 @@ func insertIptablesRule(ipt, table, chain string, args ...string) {
 
 // EnableHostIPForwardingSubnet enables kernel IPv4 forwarding and adds iptables NAT masquerading for mesh subnet.
 func EnableHostIPForwardingSubnet(subnet string) error {
+	// 1. Kernel sysctl forwarding and rp_filter
 	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.ip_forward=1")
+	_ = os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1\n"), 0644)
+	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.conf.all.forwarding=1")
+	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.conf.default.forwarding=1")
+	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.conf.nb0.forwarding=1")
+	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.conf.all.rp_filter=0")
+	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.conf.default.rp_filter=0")
+	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.conf.nb0.rp_filter=0")
+
 	if subnet == "" {
 		subnet = "100.64.200.0/24"
 	}
@@ -165,17 +202,39 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 
 	ipt := findIptablesBinary()
 
-	// 1. NAT Masquerading for mesh subnet ONLY when not exiting back to nb0
-	ensureIptablesRule(ipt, "nat", "POSTROUTING", "-s", cleanSubnet, "!", "-o", "nb0", "-j", "MASQUERADE")
+	// 2. MANGLE PREROUTING: Mark ANY packet entering nb0 interface with fwmark 0x4e
+	// This enables universal NAT masquerading regardless of client IP / subnet!
+	ensureIptablesRule(ipt, "mangle", "PREROUTING", "-i", "nb0", "-j", "MARK", "--set-mark", "0x4e")
 
-	// 2. Forwarding and Input rules for nb0
-	// FIX-N2: Use -I (insert at top) for FORWARD/INPUT rules so they take priority over Docker's DROP policies
-	insertIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
-	insertIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
-	insertIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-j", "ACCEPT")
-	insertIptablesRule(ipt, "", "INPUT", "-p", "icmp", "-j", "ACCEPT")
-	insertIptablesRule(ipt, "", "INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
-	insertIptablesRule(ipt, "", "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+	// 3. NAT MASQUERADE in POSTROUTING:
+	// a) By packet mark 0x4e (any packet that entered via nb0 exiting to WAN)
+	ensureIptablesRule(ipt, "nat", "POSTROUTING", "-m", "mark", "--mark", "0x4e", "!", "-o", "nb0", "-j", "MASQUERADE")
+	// b) Fallback for all standard private & CGNAT ranges used by mesh clients
+	meshSubnets := []string{"10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12"}
+	if cleanSubnet != "" && cleanSubnet != "10.0.0.0/8" && cleanSubnet != "100.64.0.0/10" && cleanSubnet != "172.16.0.0/12" {
+		meshSubnets = append(meshSubnets, cleanSubnet)
+	}
+	for _, s := range meshSubnets {
+		ensureIptablesRule(ipt, "nat", "POSTROUTING", "-s", s, "!", "-o", "nb0", "-j", "MASQUERADE")
+	}
+
+	// 4. Forwarding and Input rules for nb0
+	// FIX-N2: Use forceInsertIptablesRule to place rules at TOP of chain (position 1), bypassing Docker/UFW drop policies
+	forceInsertIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
+	forceInsertIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
+	ensureIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-j", "ACCEPT")
+	ensureIptablesRule(ipt, "", "INPUT", "-p", "icmp", "-j", "ACCEPT")
+	ensureIptablesRule(ipt, "", "INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
+	ensureIptablesRule(ipt, "", "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+
+	// Docker compatibility: if DOCKER-USER chain exists, ensure nb0 traffic is accepted
+	if exec.Command(ipt, "-w", "2", "-C", "DOCKER-USER", "-i", "nb0", "-j", "ACCEPT").Run() != nil {
+		if exec.Command(ipt, "-w", "2", "-L", "DOCKER-USER").Run() == nil {
+			_ = exec.Command(ipt, "-w", "2", "-I", "DOCKER-USER", "1", "-i", "nb0", "-j", "ACCEPT").Run()
+			_ = exec.Command(ipt, "-w", "2", "-I", "DOCKER-USER", "1", "-o", "nb0", "-j", "ACCEPT").Run()
+		}
+	}
+
 	// Try conntrack module first; fall back to 'state' module if conntrack not available (MIPS routers)
 	if exec.Command(ipt, "-w", "2", "-C", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run() != nil {
 		if err2 := exec.Command(ipt, "-w", "2", "-A", "FORWARD", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT").Run(); err2 != nil {
@@ -195,13 +254,51 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		ensureIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-p", "icmp", "-j", "ACCEPT")
 	}
 
-	// 3. Bi-directional TCP MSS Clamping
+	// 5. Bi-directional TCP MSS Clamping
 	ensureIptablesRule(ipt, "mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+	ensureIptablesRule(ipt, "mangle", "POSTROUTING", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
 
-	// Keenetic / OpenWrt: ensure forwarded traffic from mesh subnet can lookup default WAN table
+	// 6. nftables fallback (Ubuntu 22.04+, Debian 12+)
+	if nft, err := exec.LookPath("nft"); err == nil {
+		_ = exec.Command(nft, "add", "rule", "inet", "filter", "forward", "iifname", "nb0", "accept").Run()
+		_ = exec.Command(nft, "add", "rule", "inet", "filter", "forward", "oifname", "nb0", "accept").Run()
+	}
+
+	// 7. Ensure direct routes for standard mesh subnets exist on nb0 in table main
+	_ = runLinuxCmd("ip", "route", "replace", "10.1.1.0/24", "dev", "nb0", "table", "main", "onlink")
+	_ = runLinuxCmd("ip", "route", "replace", "100.64.200.0/24", "dev", "nb0", "table", "main", "onlink")
+	if cleanSubnet != "" && cleanSubnet != "10.1.1.0/24" && cleanSubnet != "100.64.200.0/24" {
+		_ = runLinuxCmd("ip", "route", "replace", cleanSubnet, "dev", "nb0", "table", "main", "onlink")
+	}
+
+	// 8. Keenetic / OpenWrt: ensure forwarded traffic from mesh subnet can lookup default WAN table
 	if isKeeneticDevice() {
-		_ = runLinuxCmd("ip", "rule", "del", "from", cleanSubnet, "lookup", "default")
-		_ = runLinuxCmd("ip", "rule", "add", "from", cleanSubnet, "lookup", "default", "priority", "60")
+		// Priority 40: return traffic to mesh subnets always looks up table main
+		for _, s := range []string{"10.1.1.0/24", "100.64.200.0/24", cleanSubnet} {
+			if s != "" {
+				_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", s, "lookup", "main")
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", s, "lookup", "main")
+			}
+		}
+
+		// Priority 55: preserve local LAN and mesh destinations before falling through to WAN
+		for _, s := range []string{"192.168.0.0/16", "10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12"} {
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "55", "to", s, "lookup", "main")
+			_ = runLinuxCmd("ip", "rule", "add", "pref", "55", "to", s, "lookup", "main")
+		}
+
+		// Priority 60: forward mesh internet traffic to WAN default table
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "60", "fwmark", "0x4e", "lookup", "default")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", "default")
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "60", "iif", "nb0", "lookup", "default")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", "default")
+		for _, s := range []string{"10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12", cleanSubnet} {
+			if s != "" {
+				_ = runLinuxCmd("ip", "rule", "del", "pref", "60", "from", s, "lookup", "default")
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "from", s, "lookup", "default")
+			}
+		}
+
 		StartLinuxNATWatchdog(context.Background(), cleanSubnet)
 	}
 
@@ -238,9 +335,13 @@ func StartLinuxNATWatchdog(ctx context.Context, subnet string) {
 			case <-ticker.C:
 				needRestore := false
 
-				// Проверяем MASQUERADE в nat POSTROUTING
+				// Проверяем маркировку и MASQUERADE
+				if err := exec.Command(ipt, "-w", "2", "-t", "mangle", "-C", "PREROUTING",
+					"-i", "nb0", "-j", "MARK", "--set-mark", "0x4e").Run(); err != nil {
+					needRestore = true
+				}
 				if err := exec.Command(ipt, "-w", "2", "-t", "nat", "-C", "POSTROUTING",
-					"-s", subnet, "!", "-o", "nb0", "-j", "MASQUERADE").Run(); err != nil {
+					"-m", "mark", "--mark", "0x4e", "!", "-o", "nb0", "-j", "MASQUERADE").Run(); err != nil {
 					needRestore = true
 				}
 
@@ -529,14 +630,13 @@ func EnsurePeerHostRoute(peerVIP string) {
 	// Ensure watchdog is running so NDM flushes are healed automatically
 	startPeerRouteWatchdog()
 
-	go func(targetVIP string) {
-		_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "table", "main", "onlink")
-		_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "onlink")
-		if isKeeneticDevice() {
-			_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", targetVIP+"/32", "lookup", "main")
-			_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", targetVIP+"/32", "lookup", "main")
-		}
-	}(cleanVIP)
+	// Install immediately and synchronously so initial return packets have a valid kernel route
+	_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "table", "main", "onlink")
+	_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "onlink")
+	if isKeeneticDevice() {
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
+	}
 }
 
 // EnableMSSClamping принудительно снижает MSS для TCP-соединений через TUN.
