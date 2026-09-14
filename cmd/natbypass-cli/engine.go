@@ -715,9 +715,33 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 
 						if !exitRoutingActive || activeExitVIP != exitVIP {
-							bypassIPs := []string{exitPeer.ActiveEndpoint, exitPeer.STUNAddr, exitPeer.PublicIP}
+							bypassIPs := []string{exitPeer.ActiveEndpoint, exitPeer.STUNAddr, exitPeer.PublicIP, exitPeer.LocalAddr}
 							for _, cand := range exitPeer.Candidates {
 								bypassIPs = append(bypassIPs, cand)
+							}
+							if registry != nil {
+								for _, p := range registry.List() {
+									if p.DeviceID == deviceID {
+										continue
+									}
+									if p.ActiveEndpoint != "" {
+										bypassIPs = append(bypassIPs, p.ActiveEndpoint)
+									}
+									if p.STUNAddr != "" {
+										bypassIPs = append(bypassIPs, p.STUNAddr)
+									}
+									if p.PublicIP != "" {
+										bypassIPs = append(bypassIPs, p.PublicIP)
+									}
+									if p.LocalAddr != "" {
+										bypassIPs = append(bypassIPs, p.LocalAddr)
+									}
+									for _, cand := range p.Candidates {
+										if cand != "" {
+											bypassIPs = append(bypassIPs, cand)
+										}
+									}
+								}
 							}
 							for _, stunURL := range cfg.Network.StunServers {
 								bypassIPs = append(bypassIPs, stunURL)

@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta53"
+	Version = "1.9.226-beta54"
 	Commit  = "release"
 )
 
@@ -2110,6 +2110,31 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 		bypassIPs := []string{targetPeer.ActiveEndpoint, targetPeer.STUNAddr, targetPeer.PublicIP, targetPeer.LocalAddr}
 		for _, cand := range targetPeer.Candidates {
 			bypassIPs = append(bypassIPs, cand)
+		}
+		// Also bypass endpoints of ALL peers in mesh so UDP hole-punching / keepalives never leak into exit tunnel!
+		if registry != nil {
+			for _, p := range registry.List() {
+				if p.DeviceID == myDevID {
+					continue
+				}
+				if p.ActiveEndpoint != "" {
+					bypassIPs = append(bypassIPs, p.ActiveEndpoint)
+				}
+				if p.STUNAddr != "" {
+					bypassIPs = append(bypassIPs, p.STUNAddr)
+				}
+				if p.PublicIP != "" {
+					bypassIPs = append(bypassIPs, p.PublicIP)
+				}
+				if p.LocalAddr != "" {
+					bypassIPs = append(bypassIPs, p.LocalAddr)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" {
+						bypassIPs = append(bypassIPs, cand)
+					}
+				}
+			}
 		}
 		if udpPuncher != nil {
 			if targetPeer.LocalAddr != "" {
@@ -4801,6 +4826,10 @@ func startEngineFromConfig(c *config.Config) {
 				payload = payload[:totalLen]
 			}
 			srcIP := tunnel.GetSrcIP(payload)
+			inSrcIP := ""
+			if srcIP != nil {
+				inSrcIP = srcIP.String()
+			}
 			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 			if srcIP != nil && srcIP.String() == cleanVIP {
 				return // Защита от петель
@@ -4989,8 +5018,24 @@ func startEngineFromConfig(c *config.Config) {
 					}
 					binary.BigEndian.PutUint16(payload[10:12], ^uint16(sum))
 				}
-				_ = tunDev.WritePacket(payload)
+				errWrite := tunDev.WritePacket(payload)
 				atomic.AddUint64(&packetsRecvCount, 1)
+				if len(payload) >= 20 && payload[9] == 1 { // ICMP
+					icmpType := "Unknown"
+					if len(payload) >= ihl+1 {
+						switch payload[ihl] {
+						case 0:
+							icmpType = "Echo Reply"
+						case 8:
+							icmpType = "Echo Request"
+						case 11:
+							icmpType = "TTL Exceeded"
+						default:
+							icmpType = fmt.Sprintf("Type %d", payload[ihl])
+						}
+					}
+					writeDebug(fmt.Sprintf("📥 TUN [ICMP %s] %s -> %s (len: %d, err: %v)", icmpType, inSrcIP, inDstIP, len(payload), errWrite))
+				}
 			}
 		}
 		guiInboundPacketHandler = onInboundPacket
@@ -5183,6 +5228,23 @@ func startEngineFromConfig(c *config.Config) {
 								// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
 								if !isForceTCP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && udpPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 									_ = udpPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, packet, pmin, pmax)
+								}
+								if len(packet) >= 20 && packet[9] == 1 { // ICMP
+									icmpType := "Unknown"
+									ihl := int(packet[0]&0x0f) * 4
+									if len(packet) >= ihl+1 {
+										switch packet[ihl] {
+										case 0:
+											icmpType = "Echo Reply"
+										case 8:
+											icmpType = "Echo Request"
+										case 11:
+											icmpType = "TTL Exceeded"
+										default:
+											icmpType = fmt.Sprintf("Type %d", packet[ihl])
+										}
+									}
+									writeDebug(fmt.Sprintf("📤 TUN [ICMP %s] %s -> %s via %s (%s, direct: %v, tcp: %v)", icmpType, srcIP.String(), destStr, targetPeer.DeviceID, targetEP, sentDirect, sentTCP))
 								}
 								// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
 								if !isForceTCP && (!sentDirect || !targetPeer.DirectP2P || !bilateralOK) && udpPuncher != nil {

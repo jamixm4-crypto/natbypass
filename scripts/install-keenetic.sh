@@ -7,7 +7,7 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.9.226-beta37"
+    DEFAULT_TAG="v1.9.226-beta54"
 
     # Try to resolve latest tag from GitHub API
     LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
@@ -464,28 +464,29 @@ EOF
 if [ "$table" = "filter" ]; then
     iptables -C INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i nb0 -j ACCEPT
     iptables -C FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i nb0 -j ACCEPT
+    iptables -C FORWARD -o nb0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o nb0 -j ACCEPT
     iptables -C OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -I OUTPUT 1 -o nb0 -j ACCEPT
     iptables -C _NDM_INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i nb0 -j ACCEPT 2>/dev/null || true
     iptables -C _NDM_FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i nb0 -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_FORWARD -o nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -o nb0 -j ACCEPT 2>/dev/null || true
     iptables -C _NDM_OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_OUTPUT 1 -o nb0 -j ACCEPT 2>/dev/null || true
 fi
 
 if [ "$table" = "mangle" ]; then
-    iptables -t mangle -C PREROUTING -i nb0 -j ACCEPT 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i nb0 -j ACCEPT 2>/dev/null || true
-    iptables -t mangle -C PREROUTING -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || iptables -t mangle -A PREROUTING -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || true
+    iptables -t mangle -C PREROUTING -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || true
     iptables -t mangle -C OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o nb0 -j ACCEPT 2>/dev/null || true
     iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
     iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I POSTROUTING 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 fi
 
 if [ "$table" = "nat" ]; then
-    iptables -t nat -C POSTROUTING -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -C POSTROUTING -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || true
     # Remove broad 10.0.0.0/8 rule that breaks local LAN (e.g. 10.11.219.0/24)
     iptables -t nat -D POSTROUTING -s 10.0.0.0/8 ! -o nb0 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 172.16.0.0/12 ! -o nb0 -j MASQUERADE 2>/dev/null || true
-    iptables -t nat -C POSTROUTING -s 10.1.1.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.1.1.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
-    iptables -t nat -C POSTROUTING -s 10.1.2.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 10.1.2.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
-    iptables -t nat -C POSTROUTING -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -C POSTROUTING -s 10.1.1.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s 10.1.1.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -C POSTROUTING -s 10.1.2.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s 10.1.2.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -C POSTROUTING -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
 fi
 
 ip rule del from 10.0.0.0/8 2>/dev/null || true

@@ -61,15 +61,17 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		}
 	}
 
+	adapterName := getNatBypassAdapterNameWindows()
+
 	// 1. Enable forwarding on NatBypass adapter
-	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "interface", "NatBypass", "forwarding=enabled")
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "interface", adapterName, "forwarding=enabled")
 
 	// 2. Enable IP routing in Windows Registry & NetNat & enable forwarding on all active network adapters
 	psScript := fmt.Sprintf(`
 		Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'IPEnableRouter' -Value 1 -ErrorAction SilentlyContinue
 		Set-Service -Name RemoteAccess -StartupType Automatic -ErrorAction SilentlyContinue
 		Start-Service -Name RemoteAccess -ErrorAction SilentlyContinue
-		netsh interface ipv4 set interface "NatBypass" forwarding=enabled
+		netsh interface ipv4 set interface "%s" forwarding=enabled
 		Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
 			netsh interface ipv4 set interface $_.InterfaceAlias forwarding=enabled
 		}
@@ -87,12 +89,12 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			Remove-NetNat -Name 'NatBypassNAT' -Confirm:$false -ErrorAction SilentlyContinue
 			New-NetNat -Name 'NatBypassNAT' -InternalIPInterfaceAddressPrefix '%s' -ErrorAction SilentlyContinue
 		}
-	`, cleanSubnet, cleanSubnet)
+	`, adapterName, cleanSubnet, cleanSubnet)
 	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 
 	// 3. Add Windows firewall rules for interface forwarding
-	_ = runRouteCmd("netsh", "advfirewall", "firewall", "add", "rule", "name=NatBypass Forward In", "dir=in", "action=allow", "interface=NatBypass")
-	_ = runRouteCmd("netsh", "advfirewall", "firewall", "add", "rule", "name=NatBypass Forward Out", "dir=out", "action=allow", "interface=NatBypass")
+	_ = runRouteCmd("netsh", "advfirewall", "firewall", "add", "rule", "name=NatBypass Forward In", "dir=in", "action=allow", "interface="+adapterName)
+	_ = runRouteCmd("netsh", "advfirewall", "firewall", "add", "rule", "name=NatBypass Forward Out", "dir=out", "action=allow", "interface="+adapterName)
 
 	return nil
 }
@@ -176,6 +178,19 @@ func extractHostIPs(endpoint string) []string {
 	return res
 }
 
+// getNatBypassAdapterNameWindows returns the actual system interface name for the NatBypass Wintun adapter.
+func getNatBypassAdapterNameWindows() string {
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if strings.EqualFold(iface.Name, "NatBypass") || strings.Contains(strings.ToLower(iface.Name), "natbypass") {
+				return iface.Name
+			}
+		}
+	}
+	return "NatBypass Tunnel"
+}
+
 // getNatBypassIfIndexWindows finds the interface index of the NatBypass Wintun adapter.
 func getNatBypassIfIndexWindows() int {
 	ifaces, err := net.Interfaces()
@@ -255,8 +270,9 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	}
 
 	// 3. Configure DoH DNS on NatBypass adapter to prevent DNS leaks and ISP hijacking (127.0.0.1 primary, 1.1.1.1 fallback)
-	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", "name=NatBypass", "static", "127.0.0.1", "register=primary", "validate=no")
-	_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", "name=NatBypass", "address=1.1.1.1", "index=2", "validate=no")
+	adapterName := getNatBypassAdapterNameWindows()
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "127.0.0.1", "register=primary", "validate=no")
+	_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=1.1.1.1", "index=2", "validate=no")
 
 	return nil
 }
@@ -281,7 +297,8 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	bypassedMu.Unlock()
 
 	// Reset DNS on adapter
-	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", "name=NatBypass", "source=dhcp")
+	adapterName := getNatBypassAdapterNameWindows()
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "source=dhcp")
 
 	if len(errs) > 0 {
 		return fmt.Errorf("errors disabling exit node routing: %s", strings.Join(errs, "; "))
@@ -331,6 +348,9 @@ func GetLocalSubnets() []string {
 // on the TUN adapter so the OS derives a correct MSS (MTU - 40 = 1380) automatically.
 // This prevents TCP connection stalls over the VPN tunnel.
 func EnableMSSClamping(tunInterface string, mtu int) error {
+	if tunInterface == "" || strings.EqualFold(tunInterface, "NatBypass") {
+		tunInterface = getNatBypassAdapterNameWindows()
+	}
 	if mtu <= 0 {
 		mtu = 1420
 	}
@@ -341,6 +361,9 @@ func EnableMSSClamping(tunInterface string, mtu int) error {
 
 // DisableMSSClamping restores default MTU (1500) on the NatBypass TUN adapter.
 func DisableMSSClamping(tunInterface string) error {
+	if tunInterface == "" || strings.EqualFold(tunInterface, "NatBypass") {
+		tunInterface = getNatBypassAdapterNameWindows()
+	}
 	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "subinterface",
 		tunInterface, "mtu=1500", "store=persistent")
 	return nil

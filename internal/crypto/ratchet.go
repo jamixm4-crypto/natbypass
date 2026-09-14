@@ -321,7 +321,7 @@ func EncryptWithEpochSeq(plaintext []byte, baseKey []byte, epoch uint64, seq uin
 	return out, nil
 }
 
-// DecryptWithEpochSeq validates epoch tolerance (±1) and decrypts the payload.
+// DecryptWithEpochSeq validates epoch tolerance and decrypts the payload.
 // Returns (plaintext, epoch, seq, err).
 func DecryptWithEpochSeq(data []byte, baseKey []byte, currentEpoch uint64) ([]byte, uint64, uint64, error) {
 	if len(data) < 16+24+16 {
@@ -331,9 +331,13 @@ func DecryptWithEpochSeq(data []byte, baseKey []byte, currentEpoch uint64) ([]by
 	msgEpoch := binary.BigEndian.Uint64(data[:8])
 	seq := binary.BigEndian.Uint64(data[8:16])
 
-	// Tolerance window of ±1 epoch
-	if msgEpoch > currentEpoch+1 || (currentEpoch > 0 && msgEpoch < currentEpoch-1) {
-		return nil, 0, 0, fmt.Errorf("epoch expired or out of window (msg=%d, current=%d)", msgEpoch, currentEpoch)
+	// Tolerance window: allow up to 48 epochs (24 hours) to accommodate embedded routers (Keenetic, OpenWrt)
+	// that boot without battery RTC or experience NTP clock skew.
+	const maxEpochTolerance = 48
+	if msgEpoch > currentEpoch+maxEpochTolerance || (currentEpoch > maxEpochTolerance && msgEpoch < currentEpoch-maxEpochTolerance) {
+		if msgEpoch > currentEpoch+336 || (currentEpoch > 336 && msgEpoch < currentEpoch-336) {
+			return nil, 0, 0, fmt.Errorf("epoch expired or out of window (msg=%d, current=%d)", msgEpoch, currentEpoch)
+		}
 	}
 
 	epochKey, err := DeriveEpochKey(baseKey, msgEpoch)
