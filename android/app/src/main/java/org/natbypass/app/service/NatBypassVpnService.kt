@@ -240,8 +240,11 @@ class NatBypassVpnService : VpnService() {
                 .setMtu(1280)
                 .setBlocking(true)
 
-            if (!useExitNode) {
+            // Всегда разрешаем обход VPN (allowBypass) для прямого трафика физической сети
+            try {
                 builder.allowBypass()
+            } catch (e: Exception) {
+                Log.w(TAG, "builder.allowBypass error: ${e.message}")
             }
 
             try {
@@ -263,6 +266,30 @@ class NatBypassVpnService : VpnService() {
                 try { builder.setMetered(false) } catch (_: Throwable) {}
             }
 
+            // Исключаем локальные физические маршруты (включая Wi-Fi роутер и локальную подсеть) из захвата VPN
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                try {
+                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    val activeNet = cm?.activeNetwork
+                    val linkProps = if (activeNet != null) cm.getLinkProperties(activeNet) else null
+                    if (linkProps != null) {
+                        for (route in linkProps.routes) {
+                            val dest = route.destination
+                            if (dest != null && dest.prefixLength in 8..32 && !dest.address.isAnyLocalAddress && !dest.address.isLoopbackAddress) {
+                                try {
+                                    builder.excludeRoute(dest)
+                                    Log.i(TAG, "excludeRoute applied for local network: $dest")
+                                } catch (e: Throwable) {
+                                    Log.w(TAG, "excludeRoute error: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to exclude local physical routes: ${t.message}")
+                }
+            }
+
             val meshSubnet = calculateSubnet(currentVip, prefix)
 
             if (useExitNode) {
@@ -275,12 +302,13 @@ class NatBypassVpnService : VpnService() {
                 // Прямой маршрут к меш-подсети рядом с дефолтным шлюзом
                 try { builder.addRoute(meshSubnet, prefix) } catch (_: Exception) {}
 
-                // Надежные IPv4 DNS (только для полного туннеля через Exit Node)
-                try {
-                    builder.addDnsServer("77.88.8.8")
-                    builder.addDnsServer("1.1.1.1")
-                    builder.addDnsServer("8.8.8.8")
-                } catch (e: Exception) { Log.w(TAG, "addDnsServer error: ${e.message}") }
+                // ВНИМАНИЕ: НЕ вызываем builder.addDnsServer() даже в режиме Exit Node!
+                // 1) Вызов addDnsServer() перенаправляет системный DNS (netd) в интерфейс tun0,
+                //    создавая циклическую блокировку: MQTT-брокеры не могут разрешиться без DNS,
+                //    а DNS не проходит, пока Exit Node не обнаружен по MQTT.
+                // 2) Android по умолчанию отправляет DNS через физический интерфейс Wi-Fi/LTE
+                //    (к роутеру и провайдеру) и сохраняет работоспособность DoT Private DNS.
+                // 3) Весь пользовательский трафик (HTTP, HTTPS, TCP, UDP) направляется в Exit Node через 0.0.0.0/0.
             } else {
                 try {
                     builder.addRoute(meshSubnet, prefix)
@@ -292,7 +320,7 @@ class NatBypassVpnService : VpnService() {
                 // ВНИМАНИЕ: В режиме сплит-туннеля (без Exit Node):
                 // 1) В туннель заворачивается ИСКЛЮЧИТЕЛЬНО подсеть топика ($meshSubnet/$prefix).
                 // 2) НЕ добавляем маршруты 10.1.1.0/24 и 100.64.0.0/10! Они могут перехватывать
-                // локальный роутер пользователя (10.1.1.1) или мобильный интернет (CGNAT),
+                // локальный роутер пользователя или мобильный интернет (CGNAT),
                 // ломая DoT Private DNS (dns.google) и физический доступ в сеть.
                 // 3) НЕ вызываем builder.addDnsServer()! Иначе Android перенаправит ВЕСЬ системный DNS в TUN интерфейс.
                 // 4) Обычный интернет (Wi-Fi/LTE) и Private DNS (dns.google) работают напрямую через физическую сеть.

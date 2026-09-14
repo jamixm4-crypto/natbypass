@@ -273,10 +273,11 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	}
 
 	// 7. Ensure direct routes for standard mesh subnets exist on nb0 in table main
-	_ = runLinuxCmd("ip", "route", "replace", "10.1.1.0/24", "dev", "nb0", "table", "main", "onlink")
-	_ = runLinuxCmd("ip", "route", "replace", "100.64.200.0/24", "dev", "nb0", "table", "main", "onlink")
-	if cleanSubnet != "" && cleanSubnet != "10.1.1.0/24" && cleanSubnet != "100.64.200.0/24" {
-		_ = runLinuxCmd("ip", "route", "replace", cleanSubnet, "dev", "nb0", "table", "main", "onlink")
+	for _, s := range []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", cleanSubnet} {
+		if s != "" {
+			_ = runLinuxCmd("ip", "route", "replace", s, "dev", "nb0", "table", "main", "onlink")
+			_ = runLinuxCmd("ip", "route", "replace", s, "dev", "nb0", "onlink")
+		}
 	}
 
 	// 8. Keenetic / OpenWrt: ensure forwarded traffic from mesh subnet looks up the actual WAN table
@@ -287,7 +288,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		}
 
 		// Priority 40: return traffic to mesh subnets always looks up table main
-		for _, s := range []string{"10.1.1.0/24", "100.64.200.0/24", cleanSubnet} {
+		for _, s := range []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", cleanSubnet} {
 			if s != "" {
 				_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", s, "lookup", "main")
 				_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", s, "lookup", "main")
