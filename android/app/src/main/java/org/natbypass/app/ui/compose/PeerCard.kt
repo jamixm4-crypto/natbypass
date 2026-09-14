@@ -21,6 +21,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import org.natbypass.app.ui.PeerUiModel
@@ -289,13 +294,20 @@ private fun PeerActionsContent(
             )
         }
 
-        // Показываем подсети ТОЛЬКО если узел анонсировал их
+        // Показываем подсети ТОЛЬКО если узел анонсировал их (информационно, маршрут работает в меш-сети)
         if (peer.advertisedRoutes.isNotEmpty()) {
+            val context = LocalContext.current
             peer.advertisedRoutes.forEach { subnet ->
                 PeerActionItem(
                     icon = Icons.Outlined.Home,
-                    label = "🏠 Доступ к локальной сети ($subnet)",
-                    onClick = onSetExitNode,
+                    label = "🏠 Маршрут к подсети $subnet (Меш)",
+                    onClick = {
+                        try {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Subnet", subnet))
+                            Toast.makeText(context, "Подсеть $subnet скопирована (доступна через меш-сеть)", Toast.LENGTH_SHORT).show()
+                        } catch (_: Throwable) {}
+                    },
                     tint = Color(0xFF38BDF8)
                 )
             }

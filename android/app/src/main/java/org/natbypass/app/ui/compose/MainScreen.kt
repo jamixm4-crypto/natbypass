@@ -64,6 +64,7 @@ fun MainScreen(
     onSync: () -> Unit,
     onClearCache: () -> Unit,
     onCheckUpdate: () -> Unit,
+    onClearExitNode: () -> Unit = {},
 ) {
     var speedDialExpanded by remember { mutableStateOf(false) }
 
@@ -255,6 +256,17 @@ fun MainScreen(
                     onlinePeers = uiState.onlinePeers,
                     totalPeers  = uiState.totalPeers,
                     onChangeProfile = onOpenProfiles,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            // ── Routing Mode Card (Split Tunnel vs Exit Node) ────────────────
+            item {
+                RoutingModeCard(
+                    selectedExitNode = uiState.selectedExitNode,
+                    selectedExitNodeName = uiState.selectedExitNodeName,
+                    virtualIp = uiState.virtualIp,
+                    onClearExitNode = onClearExitNode,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
@@ -765,6 +777,90 @@ private fun NetworkCard(
                 contentDescription = "Сменить профиль",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+// ── Routing mode card (Split Tunnel vs Exit Node) ─────────────────────────────
+@Composable
+private fun RoutingModeCard(
+    selectedExitNode: String,
+    selectedExitNodeName: String,
+    virtualIp: String,
+    onClearExitNode: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isExitActive = selectedExitNode.isNotEmpty()
+    val meshSubnet = if (virtualIp.isNotEmpty() && virtualIp.contains(".")) {
+        val parts = virtualIp.substringBefore("/").split(".")
+        if (parts.size == 4) "${parts[0]}.${parts[1]}.${parts[2]}.0/24" else "10.1.0.0/16"
+    } else "10.1.0.0/16"
+
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = if (isExitActive)
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            else
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = if (isExitActive) Icons.Outlined.Public else Icons.Outlined.CheckCircle,
+                    contentDescription = null,
+                    tint = if (isExitActive) MaterialTheme.colorScheme.primary else MaterialTheme.natColors.success,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (isExitActive) "Шлюз: $selectedExitNodeName" else "Режим: Меш-сеть (Сплит-туннель)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = if (isExitActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = if (isExitActive)
+                    "Весь интернет-трафик телефона (0.0.0.0/0) маршрутизируется через выбранный узел."
+                else
+                    "В туннель направляется только сеть топика ($meshSubnet). Обычный интернет (Wi-Fi/LTE) и Private DNS работают напрямую.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 16.sp
+            )
+            if (isExitActive) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onClearExitNode,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Отключить шлюз / Вернуть локальный интернет",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
     }
 }

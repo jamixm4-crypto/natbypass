@@ -253,6 +253,10 @@ private fun NatBypassApp(
                 Toast.makeText(context, "🧹 Кэш устройств очищен!", Toast.LENGTH_SHORT).show()
             },
             onCheckUpdate = checkUpdate,
+            onClearExitNode = {
+                viewModel.clearExitNode(context)
+                Toast.makeText(context, "Локальный интернет (Exit Node отключен)", Toast.LENGTH_SHORT).show()
+            },
         )
         Screen.Diagnostics -> DiagnosticsScreen(onBack = { currentScreen = Screen.Main })
         Screen.Settings -> SettingsScreen(

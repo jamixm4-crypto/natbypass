@@ -225,8 +225,40 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
-            val selectedExitNode = prefs.getString("selected_exit_node", "") ?: ""
-            val useExitNode = selectedExitNode.isNotEmpty()
+            var selectedExitNode = prefs.getString("selected_exit_node", "")?.trim() ?: ""
+            var useExitNode = selectedExitNode.isNotEmpty()
+
+            // Валидация выбранного Exit Node:
+            // Если узел оффлайн или не найден в списке известных узлов сети, НЕ перехватываем весь трафик!
+            // Автоматически сбрасываем в режим чистого сплит-туннеля чтобы интернет не пропадал.
+            if (useExitNode) {
+                try {
+                    val peersJson = org.natbypass.app.util.MobileBridge.getPeersJSON()
+                    if (peersJson.isNotEmpty() && peersJson != "[]") {
+                        val arr = org.json.JSONArray(peersJson)
+                        var foundExit = false
+                        for (i in 0 until arr.length()) {
+                            val p = arr.getJSONObject(i)
+                            val pid = p.optString("device_id", p.optString("DeviceID", ""))
+                            val pvip = p.optString("virtual_ip", p.optString("VirtualIP", "")).substringBefore("/")
+                            val isExit = p.optBoolean("is_exit_node", false) || p.optBoolean("IsExitNode", false)
+                            val online = p.optBoolean("online", p.optBoolean("Online", true))
+                            if ((pid == selectedExitNode || pvip == selectedExitNode) && isExit && online) {
+                                foundExit = true
+                                break
+                            }
+                        }
+                        if (!foundExit && arr.length() > 0) {
+                            Log.w(TAG, "Exit Node '$selectedExitNode' недоступен или оффлайн — сброс в сплит-туннель")
+                            prefs.edit().putString("selected_exit_node", "").apply()
+                            selectedExitNode = ""
+                            useExitNode = false
+                        }
+                    }
+                } catch (e: Throwable) {
+                    Log.w(TAG, "Ошибка проверки Exit Node: ${e.message}")
+                }
+            }
             org.natbypass.app.util.MobileBridge.selectExitNode(selectedExitNode)
 
             val builder = Builder()
@@ -263,7 +295,7 @@ class NatBypassVpnService : VpnService() {
             if (useExitNode) {
                 try {
                     builder.addRoute("0.0.0.0", 0)
-                    Log.i(TAG, "ExitNode default route 0.0.0.0/0 added")
+                    Log.i(TAG, "ExitNode default route 0.0.0.0/0 added (все приложения через шлюз $selectedExitNode)")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to add default IPv4 route: ${e.message}")
                 }
@@ -278,16 +310,18 @@ class NatBypassVpnService : VpnService() {
             } else {
                 try {
                     builder.addRoute(meshSubnet, prefix)
-                    Log.i(TAG, "Mesh route $meshSubnet/$prefix added")
+                    Log.i(TAG, "Mesh route $meshSubnet/$prefix added (чистый сплит-туннель: только сеть топика)")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to add mesh route: ${e.message}")
                 }
 
                 // ВНИМАНИЕ: В режиме сплит-туннеля (без Exit Node):
-                // 1) НЕ добавляем маршруты 10.1.1.0/24 и 100.64.0.0/10! Они могут перехватывать
+                // 1) В туннель заворачивается ИСКЛЮЧИТЕЛЬНО подсеть топика ($meshSubnet/$prefix).
+                // 2) НЕ добавляем маршруты 10.1.1.0/24 и 100.64.0.0/10! Они могут перехватывать
                 // локальный роутер пользователя (10.1.1.1) или мобильный интернет (CGNAT),
                 // ломая DoT Private DNS (dns.google) и физический доступ в сеть.
-                // 2) НЕ вызываем builder.addDnsServer()! Иначе Android перенаправит ВЕСЬ системный DNS в TUN интерфейс.
+                // 3) НЕ вызываем builder.addDnsServer()! Иначе Android перенаправит ВЕСЬ системный DNS в TUN интерфейс.
+                // 4) Обычный интернет (Wi-Fi/LTE) и Private DNS (dns.google) работают напрямую через физическую сеть.
             }
 
             val advSubnets = prefs.getString("adv_subnets", "") ?: ""
@@ -297,10 +331,15 @@ class NatBypassVpnService : VpnService() {
                     if (s.contains("/")) {
                         val parts = s.split("/")
                         val ip = parts[0]
-                        val prefix = parts[1].toIntOrNull() ?: 24
+                        val pfx = parts[1].toIntOrNull() ?: 24
+                        // Защита: в режиме сплит-туннеля (без Exit Node) НИКОГДА не добавляем дефолтный маршрут /0!
+                        if (!useExitNode && (pfx <= 0 || ip == "0.0.0.0")) {
+                            Log.w(TAG, "Игнорируем default route $subnet в режиме сплит-туннеля")
+                            continue
+                        }
                         try {
-                            builder.addRoute(ip, prefix)
-                            Log.i(TAG, "Route $ip/$prefix added")
+                            builder.addRoute(ip, pfx)
+                            Log.i(TAG, "Route $ip/$pfx added")
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to add route $subnet: ${e.message}")
                         }
@@ -308,16 +347,14 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
-            // 1. Привязываем физическую сеть на уровне Builder (API 33+ Android 13/14/15/16)
-            val defaultNet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork else null
+            // 1. Привязка физической сети на уровне Builder (API 33+ Android 13/14/15/16)
+            // Как и в эталонном WireGuard for Android, передача null сообщает системе,
+            // что VPN использует системную дефолтную сеть без жёсткой привязки дескриптора,
+            // что позволяет системному стеку Android 14/15/16 маршрутизировать трафик не-VPN приложений напрямую.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 try {
-                    if (defaultNet != null) {
-                        builder.setUnderlyingNetworks(arrayOf(defaultNet))
-                    } else {
-                        builder.setUnderlyingNetworks(null)
-                    }
-                    Log.i(TAG, "builder.setUnderlyingNetworks applied: defaultNet=$defaultNet")
+                    builder.setUnderlyingNetworks(null)
+                    Log.i(TAG, "builder.setUnderlyingNetworks(null) applied (system auto-routing)")
                 } catch (t: Throwable) {
                     Log.w(TAG, "builder.setUnderlyingNetworks error: ${t.message}")
                 }
@@ -340,12 +377,8 @@ class NatBypassVpnService : VpnService() {
             // 2. Дублируем привязку physical underlying network после establish()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                 try {
-                    if (defaultNet != null) {
-                        setUnderlyingNetworks(arrayOf(defaultNet))
-                    } else {
-                        setUnderlyingNetworks(null)
-                    }
-                    Log.i(TAG, "VpnService.setUnderlyingNetworks applied: defaultNet=$defaultNet")
+                    setUnderlyingNetworks(null)
+                    Log.i(TAG, "VpnService.setUnderlyingNetworks(null) applied")
                 } catch (t: Throwable) {
                     Log.w(TAG, "VpnService.setUnderlyingNetworks error: ${t.message}")
                 }
@@ -525,17 +558,7 @@ class NatBypassVpnService : VpnService() {
         val activeNet = network ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork else null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
             try {
-                if (activeNet != null) {
-                    val caps = cm.getNetworkCapabilities(activeNet)
-                    if (caps != null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-                        setUnderlyingNetworks(arrayOf(activeNet))
-                        Log.i(TAG, "setUnderlyingNetworks: updated to active network $activeNet")
-                    } else {
-                        setUnderlyingNetworks(null)
-                    }
-                } else {
-                    setUnderlyingNetworks(null)
-                }
+                setUnderlyingNetworks(null)
             } catch (e: Exception) {
                 Log.w(TAG, "setUnderlyingNetworks error: ${e.message}")
             }

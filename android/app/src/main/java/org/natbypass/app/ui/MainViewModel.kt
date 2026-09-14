@@ -79,6 +79,8 @@ data class MainUiState(
     val totalPeers: Int = 0,
     val activeProfileName: String = "",
     val profiles: List<ProfileUiModel> = emptyList(),
+    val selectedExitNode: String = "",
+    val selectedExitNodeName: String = "",
     val errorMessage: String? = null,
     val isRefreshing: Boolean = false,
 )
@@ -195,6 +197,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         var onlineCount = 0
         var totalRtt = 0L
         var rttCount = 0
+        val selectedExit = prefs.getString("selected_exit_node", "") ?: ""
+        var selectedExitName = selectedExit
         try {
             val arr = JSONArray(peersJson)
             for (i in 0 until arr.length()) {
@@ -210,6 +214,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     else -> id
                 }
                 val vip      = obj.optString("virtual_ip", obj.optString("VirtualIP", ""))
+                if (selectedExit.isNotEmpty() && (selectedExit == id || selectedExit == vip)) {
+                    selectedExitName = displayName
+                }
                 val isOnline = obj.optBoolean("online", obj.optBoolean("Online", true))
                 val isExit   = obj.optBoolean("is_exit_node", false) || obj.optBoolean("IsExitNode", false)
                 val pingMs   = obj.optLong("ping_ms", obj.optLong("PingMs", 0L))
@@ -223,7 +230,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         if (rStr.isNotEmpty()) routesList.add(rStr)
                     }
                 }
-                val selectedExit = prefs.getString("selected_exit_node", "") ?: ""
 
                 var plat = obj.optString("platform", obj.optString("Platform", ""))
                 if (plat.isEmpty()) {
@@ -370,8 +376,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 peers             = peers,
                 onlinePeers       = onlineCount,
                 totalPeers        = peers.size,
-                activeProfileName = activeProfileName,
-                profiles          = profilesList,
+                activeProfileName    = activeProfileName,
+                profiles             = profilesList,
+                selectedExitNode     = selectedExit,
+                selectedExitNodeName = selectedExitName,
             )
         }
     }
@@ -483,6 +491,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch { refreshStatus() }
         return newTarget.isNotEmpty()
+    }
+
+    fun clearExitNode(context: Context) {
+        prefs.edit().putString("selected_exit_node", "").apply()
+        MobileBridge.selectExitNode("")
+
+        if (NatBypassVpnService.isRunning) {
+            val intent = Intent(context, NatBypassVpnService::class.java).apply {
+                action = NatBypassVpnService.ACTION_RECONNECT
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        viewModelScope.launch { refreshStatus() }
     }
 
     fun deletePeer(peerId: String) {
