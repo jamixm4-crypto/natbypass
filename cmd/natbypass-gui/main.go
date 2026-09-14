@@ -107,7 +107,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta58"
+	Version = "1.9.226-beta59"
 	Commit  = "release"
 )
 
@@ -5541,8 +5541,20 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 
-								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT for unconnected peers (max 3 attempts)
-								if !p.DirectP2P && len(sigChannels) > 0 && udpPuncher != nil && rendezvousAttempts[p.DeviceID] < 3 && now.Sub(lastRendezvousInit[p.DeviceID]) > 30*time.Second {
+								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT with exponential backoff (never stops retrying!)
+								rndvAtt := rendezvousAttempts[p.DeviceID]
+								var minInterval time.Duration
+								switch {
+								case rndvAtt < 2:
+									minInterval = 30 * time.Second
+								case rndvAtt < 5:
+									minInterval = 60 * time.Second
+								case rndvAtt < 10:
+									minInterval = 120 * time.Second
+								default:
+									minInterval = 300 * time.Second
+								}
+								if !p.DirectP2P && len(sigChannels) > 0 && udpPuncher != nil && now.Sub(lastRendezvousInit[p.DeviceID]) >= minInterval {
 									lastRendezvousInit[p.DeviceID] = now
 									rendezvousAttempts[p.DeviceID]++
 									go func(targetPeerID string) {
@@ -5564,6 +5576,8 @@ func startEngineFromConfig(c *config.Config) {
 												SenderDeviceID:   myDevID,
 												SenderSTUN:       mySTUN,
 												SenderCandidates: myCands,
+												SenderNATType:    udpPuncher.GetNATType().String(),
+												SenderNATDelta:   udpPuncher.GetPortDelta(),
 												Timestamp:        time.Now().Unix(),
 											},
 											Timestamp: time.Now(),
@@ -5576,7 +5590,7 @@ func startEngineFromConfig(c *config.Config) {
 										// Prime local NAT mappings: send immediate burst probes towards peer's known addresses
 										if targetPeer, ok := registry.Get(targetPeerID); ok && targetPeer != nil {
 											primeTargets := append([]string{targetPeer.STUNAddr, targetPeer.ActiveEndpoint, targetPeer.LocalAddr}, targetPeer.Candidates...)
-											udpPuncher.SendHolePunchBurst(primeTargets, 3)
+											udpPuncher.SendHolePunchBurstWithDelta(primeTargets, 3, targetPeer.NATDelta)
 										}
 									}(p.DeviceID)
 								}
@@ -6253,6 +6267,12 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 							if len(rndv.SenderCandidates) > 0 {
 								regPeer.Candidates = rndv.SenderCandidates
 							}
+							if rndv.SenderNATType != "" {
+								regPeer.NATType = rndv.SenderNATType
+							}
+							if rndv.SenderNATDelta > 0 {
+								regPeer.NATDelta = rndv.SenderNATDelta
+							}
 							registry.Upsert(regPeer)
 						}
 						if guiMagicSock != nil && rndv.SenderSTUN != "" {
@@ -6261,7 +6281,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 
 						if rndv.Phase == "init" {
 							writeDebug(fmt.Sprintf("🤝 [SRHP] Received Rendezvous INIT from %s (%s) — responding ACK", rndv.SenderDeviceID, rndv.SenderSTUN))
-							go func(fromDevID, sessionID, remoteSTUN string, remoteCands []string) {
+							go func(fromDevID, sessionID, remoteSTUN string, remoteCands []string, peerDelta int) {
 								sCtx, sCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
 								defer sCancel()
 								_, _, _ = udpPuncher.DiscoverMappedAddress(sCtx)
@@ -6277,6 +6297,8 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 										SenderDeviceID:   myDevID,
 										SenderSTUN:       mySTUN,
 										SenderCandidates: myCands,
+										SenderNATType:    udpPuncher.GetNATType().String(),
+										SenderNATDelta:   udpPuncher.GetPortDelta(),
 										Timestamp:        time.Now().Unix(),
 									},
 									Timestamp: time.Now(),
@@ -6286,14 +6308,14 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 								}
 
 								burstTargets := append([]string{remoteSTUN}, remoteCands...)
-								udpPuncher.SendHolePunchBurst(burstTargets, 4)
-							}(rndv.SenderDeviceID, rndv.SessionID, rndv.SenderSTUN, rndv.SenderCandidates)
+								udpPuncher.SendHolePunchBurstWithDelta(burstTargets, 4, peerDelta)
+							}(rndv.SenderDeviceID, rndv.SessionID, rndv.SenderSTUN, rndv.SenderCandidates, rndv.SenderNATDelta)
 						} else if rndv.Phase == "ack" {
 							writeDebug(fmt.Sprintf("🤝 [SRHP] Received Rendezvous ACK from %s (%s) — firing burst", rndv.SenderDeviceID, rndv.SenderSTUN))
-							go func(fromDevID, remoteSTUN string, remoteCands []string) {
+							go func(fromDevID, remoteSTUN string, remoteCands []string, peerDelta int) {
 								burstTargets := append([]string{remoteSTUN}, remoteCands...)
-								udpPuncher.SendHolePunchBurst(burstTargets, 4)
-							}(rndv.SenderDeviceID, rndv.SenderSTUN, rndv.SenderCandidates)
+								udpPuncher.SendHolePunchBurstWithDelta(burstTargets, 4, peerDelta)
+							}(rndv.SenderDeviceID, rndv.SenderSTUN, rndv.SenderCandidates, rndv.SenderNATDelta)
 						}
 					}
 					if p.VirtualIP == "" || p.PublicKey == "" {

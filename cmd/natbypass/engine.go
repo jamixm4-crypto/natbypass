@@ -1494,6 +1494,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// R3: Per-peer backoff tracker: DeviceID -> when we're allowed to probe next
 			probeBackoff := make(map[string]time.Time)
 			lastRendezvousInit := make(map[string]time.Time)
+			rendezvousAttempts := make(map[string]int)
 			// activeSymSessions guards in-progress Symmetric NAT sessions.
 			// Access MUST be protected by symSessionMu because the cleanup defer runs
 			// in a child goroutine that races with the keepalive ticker goroutine.
@@ -1518,6 +1519,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							// Clear backoff on successful connection
 							delete(probeBackoff, p.DeviceID)
 							delete(lastRendezvousInit, p.DeviceID)
+							delete(rendezvousAttempts, p.DeviceID)
 							delete(activeSymSessions, p.DeviceID)
 						} else {
 							// R3: Backoff logic for unconnected peers (UDP hole punch probes only)
@@ -1589,9 +1591,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									_ = puncher.SendHolePunchProbeWithDelta(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort), p.NATDelta)
 								}
 
-								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT for unconnected / relay-only peers
-								if !p.DirectP2P && sigMgr != nil && puncher != nil && now.Sub(lastRendezvousInit[p.DeviceID]) > 30*time.Second {
+								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT with exponential backoff (never stops retrying)
+								rndvAtt := rendezvousAttempts[p.DeviceID]
+								var rndvInterval time.Duration
+								switch {
+								case rndvAtt < 2:
+									rndvInterval = 30 * time.Second
+								case rndvAtt < 5:
+									rndvInterval = 60 * time.Second
+								case rndvAtt < 10:
+									rndvInterval = 120 * time.Second
+								default:
+									rndvInterval = 300 * time.Second
+								}
+								if !p.DirectP2P && sigMgr != nil && puncher != nil && now.Sub(lastRendezvousInit[p.DeviceID]) >= rndvInterval {
 									lastRendezvousInit[p.DeviceID] = now
+									rendezvousAttempts[p.DeviceID]++
 									go func(targetPeerID string) {
 										sCtx, sCancel := context.WithTimeout(engineCtx, 2500*time.Millisecond)
 										defer sCancel()
@@ -1611,6 +1626,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 												SenderDeviceID:   deviceID,
 												SenderSTUN:       mySTUN,
 												SenderCandidates: myCands,
+												SenderNATType:    puncher.GetNATType().String(),
+												SenderNATDelta:   puncher.GetPortDelta(),
 												Timestamp:        time.Now().Unix(),
 											},
 											Timestamp: time.Now(),
@@ -1621,7 +1638,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										// Prime local NAT mappings: send immediate burst probes towards peer's known addresses
 										if targetPeer, ok := registry.Get(targetPeerID); ok && targetPeer != nil {
 											primeTargets := append([]string{targetPeer.STUNAddr, targetPeer.ActiveEndpoint, targetPeer.LocalAddr}, targetPeer.Candidates...)
-											puncher.SendHolePunchBurst(primeTargets, 3)
+											puncher.SendHolePunchBurstWithDelta(primeTargets, 3, targetPeer.NATDelta)
 										}
 									}(p.DeviceID)
 								}
@@ -2918,6 +2935,12 @@ func receiveLoop(
 						if len(rndv.SenderCandidates) > 0 {
 							regPeer.Candidates = rndv.SenderCandidates
 						}
+						if rndv.SenderNATType != "" {
+							regPeer.NATType = rndv.SenderNATType
+						}
+						if rndv.SenderNATDelta > 0 {
+							regPeer.NATDelta = rndv.SenderNATDelta
+						}
 						registry.Upsert(regPeer)
 					}
 					if magicSock != nil && rndv.SenderSTUN != "" {
@@ -2927,7 +2950,7 @@ func receiveLoop(
 					if rndv.Phase == "init" {
 						log.Info().Str("from", rndv.SenderDeviceID).Str("remote_stun", rndv.SenderSTUN).
 							Msg("🤝 [SRHP] Received Rendezvous INIT — refreshing STUN and responding with ACK")
-						go func(fromDevID, sessionID, remoteSTUN string, remoteCands []string) {
+						go func(fromDevID, sessionID, remoteSTUN string, remoteCands []string, peerDelta int) {
 							// 1. Fast STUN refresh
 							sCtx, sCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
 							defer sCancel()
@@ -2945,23 +2968,25 @@ func receiveLoop(
 									SenderDeviceID:   deviceID,
 									SenderSTUN:       mySTUN,
 									SenderCandidates: myCands,
+									SenderNATType:    puncher.GetNATType().String(),
+									SenderNATDelta:   puncher.GetPortDelta(),
 									Timestamp:        time.Now().Unix(),
 								},
 								Timestamp: time.Now(),
 							}
 							_ = sigMgr.Send(ctx, ackPl)
 
-							// 3. Fire synchronized burst probes towards initiator's candidates
+							// 3. Fire synchronized burst probes towards initiator's candidates with port prediction
 							burstTargets := append([]string{remoteSTUN}, remoteCands...)
-							puncher.SendHolePunchBurst(burstTargets, 4)
-						}(rndv.SenderDeviceID, rndv.SessionID, rndv.SenderSTUN, rndv.SenderCandidates)
+							puncher.SendHolePunchBurstWithDelta(burstTargets, 4, peerDelta)
+						}(rndv.SenderDeviceID, rndv.SessionID, rndv.SenderSTUN, rndv.SenderCandidates, rndv.SenderNATDelta)
 					} else if rndv.Phase == "ack" {
 						log.Info().Str("from", rndv.SenderDeviceID).Str("remote_stun", rndv.SenderSTUN).
 							Msg("🤝 [SRHP] Received Rendezvous ACK — firing synchronized bilateral punch burst")
-						go func(fromDevID, remoteSTUN string, remoteCands []string) {
+						go func(fromDevID, remoteSTUN string, remoteCands []string, peerDelta int) {
 							burstTargets := append([]string{remoteSTUN}, remoteCands...)
-							puncher.SendHolePunchBurst(burstTargets, 4)
-						}(rndv.SenderDeviceID, rndv.SenderSTUN, rndv.SenderCandidates)
+							puncher.SendHolePunchBurstWithDelta(burstTargets, 4, peerDelta)
+						}(rndv.SenderDeviceID, rndv.SenderSTUN, rndv.SenderCandidates, rndv.SenderNATDelta)
 					}
 				}
 				// Rendezvous-only payload: don't update registry / wg config

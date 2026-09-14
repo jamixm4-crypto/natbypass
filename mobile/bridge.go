@@ -39,7 +39,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta58"
+const Version          = "1.9.226-beta59"
 
 
 
@@ -907,6 +907,69 @@ func StartEngine(configYAML string, tunFd int) string {
 						}
 						continue
 					}
+
+					// SRHP: Handle Synchronized Rendezvous Hole-Punching on Android
+					if p.Rendezvous != nil && puncher != nil && globalSigMgr != nil {
+						rndv := p.Rendezvous
+						if (rndv.TargetDeviceID == "" || rndv.TargetDeviceID == devID) && rndv.SenderDeviceID != "" && rndv.SenderDeviceID != devID {
+							if globalRegistry != nil {
+								if regPeer, ok := globalRegistry.Get(rndv.SenderDeviceID); ok && regPeer != nil {
+									if rndv.SenderSTUN != "" {
+										regPeer.STUNAddr = rndv.SenderSTUN
+									}
+									if len(rndv.SenderCandidates) > 0 {
+										regPeer.Candidates = rndv.SenderCandidates
+									}
+									if rndv.SenderNATType != "" {
+										regPeer.NATType = rndv.SenderNATType
+									}
+									if rndv.SenderNATDelta > 0 {
+										regPeer.NATDelta = rndv.SenderNATDelta
+									}
+									globalRegistry.Upsert(regPeer)
+								}
+							}
+							if rndv.Phase == "init" {
+								logger.Info().Str("peer", rndv.SenderDeviceID).Str("stun", rndv.SenderSTUN).
+									Msg("🤝 [SRHP-Mobile] Received Rendezvous INIT from peer — responding with ACK")
+								go func(fromDevID, sessionID, remoteSTUN string, remoteCands []string, peerDelta int) {
+									sCtx, sCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+									defer sCancel()
+									_, _, _ = puncher.DiscoverMappedAddress(sCtx)
+									mySTUN := puncher.GetCachedSTUNAddr()
+									myCands := puncher.DiscoverCandidates(sCtx, mySTUN)
+
+									ackPl := &signaling.Payload{
+										DeviceID: devID,
+										Rendezvous: &signaling.RendezvousSignal{
+											Phase:            "ack",
+											SessionID:        sessionID,
+											TargetDeviceID:   fromDevID,
+											SenderDeviceID:   devID,
+											SenderSTUN:       mySTUN,
+											SenderCandidates: myCands,
+											SenderNATType:    puncher.GetNATType().String(),
+											SenderNATDelta:   puncher.GetPortDelta(),
+											Timestamp:        time.Now().Unix(),
+										},
+										Timestamp: time.Now(),
+									}
+									_ = globalSigMgr.Send(ctx, ackPl)
+									burstTargets := append([]string{remoteSTUN}, remoteCands...)
+									puncher.SendHolePunchBurstWithDelta(burstTargets, 4, peerDelta)
+								}(rndv.SenderDeviceID, rndv.SessionID, rndv.SenderSTUN, rndv.SenderCandidates, rndv.SenderNATDelta)
+							} else if rndv.Phase == "ack" {
+								logger.Info().Str("peer", rndv.SenderDeviceID).Str("stun", rndv.SenderSTUN).
+									Msg("🤝 [SRHP-Mobile] Received Rendezvous ACK from peer — firing bilateral burst")
+								go func(fromDevID, remoteSTUN string, remoteCands []string, peerDelta int) {
+									burstTargets := append([]string{remoteSTUN}, remoteCands...)
+									puncher.SendHolePunchBurstWithDelta(burstTargets, 4, peerDelta)
+								}(rndv.SenderDeviceID, rndv.SenderSTUN, rndv.SenderCandidates, rndv.SenderNATDelta)
+							}
+						}
+						continue
+					}
+
 					if p.Offline || p.Leave {
 						if globalRegistry != nil {
 							globalRegistry.Delete(p.DeviceID)
@@ -1063,6 +1126,8 @@ func StartEngine(configYAML string, tunFd int) string {
 		probeTicker := time.NewTicker(4 * time.Second)
 		defer probeTicker.Stop()
 		probeBackoff := make(map[string]time.Time)
+		lastRendezvousInit := make(map[string]time.Time)
+		rendezvousAttempts := make(map[string]int)
 
 		for {
 			select {
@@ -1081,6 +1146,8 @@ func StartEngine(configYAML string, tunFd int) string {
 						if peerItem.Online {
 							if peerItem.DirectP2P {
 								delete(probeBackoff, peerItem.DeviceID)
+								delete(lastRendezvousInit, peerItem.DeviceID)
+								delete(rendezvousAttempts, peerItem.DeviceID)
 							} else {
 								if nextProbe, ok := probeBackoff[peerItem.DeviceID]; ok && now.Before(nextProbe) {
 									continue
@@ -1117,6 +1184,55 @@ func StartEngine(configYAML string, tunFd int) string {
 										}
 										_ = puncher.SendHolePunchProbeWithDelta(cand, peerItem.NATDelta)
 									}
+								}
+
+								// SRHP: Synchronized Rendezvous Hole-Punching via MQTT with exponential backoff (never stops retrying)
+								rndvAtt := rendezvousAttempts[peerItem.DeviceID]
+								var rndvInterval time.Duration
+								switch {
+								case rndvAtt < 2:
+									rndvInterval = 30 * time.Second
+								case rndvAtt < 5:
+									rndvInterval = 60 * time.Second
+								case rndvAtt < 10:
+									rndvInterval = 120 * time.Second
+								default:
+									rndvInterval = 300 * time.Second
+								}
+								if !peerItem.DirectP2P && globalSigMgr != nil && puncher != nil && now.Sub(lastRendezvousInit[peerItem.DeviceID]) >= rndvInterval {
+									lastRendezvousInit[peerItem.DeviceID] = now
+									rendezvousAttempts[peerItem.DeviceID]++
+									go func(targetPeerID string) {
+										sCtx, sCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+										defer sCancel()
+										_, _, _ = puncher.DiscoverMappedAddress(sCtx)
+										mySTUN := puncher.GetCachedSTUNAddr()
+										if mySTUN == "" {
+											return
+										}
+										myCands := puncher.DiscoverCandidates(sCtx, mySTUN)
+										sessionID := fmt.Sprintf("rndv-%d-%s", time.Now().UnixNano(), devID)
+										rndvPl := &signaling.Payload{
+											DeviceID: devID,
+											Rendezvous: &signaling.RendezvousSignal{
+												Phase:            "init",
+												SessionID:        sessionID,
+												TargetDeviceID:   targetPeerID,
+												SenderDeviceID:   devID,
+												SenderSTUN:       mySTUN,
+												SenderCandidates: myCands,
+												SenderNATType:    puncher.GetNATType().String(),
+												SenderNATDelta:   puncher.GetPortDelta(),
+												Timestamp:        time.Now().Unix(),
+											},
+											Timestamp: time.Now(),
+										}
+										_ = globalSigMgr.Send(ctx, rndvPl)
+										if targetPeer, ok := globalRegistry.Get(targetPeerID); ok && targetPeer != nil {
+											primeTargets := append([]string{targetPeer.STUNAddr, targetPeer.ActiveEndpoint, targetPeer.LocalAddr}, targetPeer.Candidates...)
+											puncher.SendHolePunchBurstWithDelta(primeTargets, 3, targetPeer.NATDelta)
+										}
+									}(peerItem.DeviceID)
 								}
 							}
 							// Trigger Direct TCP ShadowTLS fallback when UDP is not confirmed or failing ICMP

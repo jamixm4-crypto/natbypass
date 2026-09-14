@@ -495,7 +495,13 @@
         border-radius: 8px !important;
       }
       table {
-        min-width: 580px !important;
+        min-width: 100% !important;
+      }
+      .col-desktop-only {
+        display: none !important;
+      }
+      .mobile-subinfo {
+        display: block !important;
       }
       .user-pill {
         max-width: 160px !important;
@@ -1401,13 +1407,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <table>
             <thead>
               <tr>
-                <th style="width: 22%;">Устройство</th>
-                <th style="width: 14%;">Virtual IP</th>
-                <th style="width: 22%;">STUN & IP</th>
-                <th style="width: 15%;">Канал связи</th>
-                <th style="width: 12%;">Связь</th>
-                <th style="width: 8%;">Пинг</th>
-                <th style="width: 7%;">Действия</th>
+                <th style="width: 25%;">Устройство</th>
+                <th style="width: 15%;">Virtual IP</th>
+                <th style="width: 22%;" class="col-desktop-only">STUN & IP</th>
+                <th style="width: 15%;" class="col-desktop-only">Канал связи</th>
+                <th style="width: 13%;">Связь</th>
+                <th style="width: 10%;">Пинг</th>
+                <th style="width: 10%;">Действия</th>
               </tr>
             </thead>
             <tbody id="quickPeersBody"></tbody>
@@ -1436,11 +1442,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               <tr>
                 <th>Имя / Device ID</th>
                 <th>Виртуальный IP</th>
-                <th>STUN & Публичный</th>
-                <th>Канал связи</th>
+                <th class="col-desktop-only">STUN & Публичный</th>
+                <th class="col-desktop-only">Канал связи</th>
                 <th>Direct P2P</th>
                 <th>RTT Пинг</th>
-                <th>Шлюз</th>
+                <th class="col-desktop-only">Шлюз</th>
                 <th>Действия</th>
               </tr>
             </thead>
@@ -3911,10 +3917,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                 <span>${name}</span>
                 ${platBadge}
               </div>
+              <div class="mobile-subinfo" style="display:none; font-size:0.72rem; color:var(--text-muted); margin-top:3px;">
+                ${chanBadge} ${addrStr !== '—' ? `<span class="mono" style="opacity:0.8;">• ${addrStr}</span>` : ''}
+              </div>
             </td>
             <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
-            <td class="mono" style="color:var(--text-muted); cursor:pointer;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
-            <td>${chanBadge}</td>
+            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
+            <td class="col-desktop-only">${chanBadge}</td>
             <td>${p2pBadge}</td>
             <td>${latDisplay}</td>
             <td style="white-space:nowrap;">
@@ -3934,13 +3943,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                 ${platBadge}
               </div>
               <small class="mono" style="color:var(--text-dim); font-weight:400;">${p.device_id}</small>
+              <div class="mobile-subinfo" style="display:none; font-size:0.72rem; color:var(--text-muted); margin-top:3px;">
+                ${chanBadge} ${addrStr !== '—' ? `<span class="mono" style="opacity:0.8;">• ${addrStr}</span>` : ''}
+              </div>
             </td>
             <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
-            <td class="mono" style="color:var(--text-muted); cursor:pointer;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
-            <td>${chanBadge}</td>
+            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
+            <td class="col-desktop-only">${chanBadge}</td>
             <td>${p2pBadge}</td>
             <td>${latDisplay}</td>
-            <td>${exitBadge}</td>
+            <td class="col-desktop-only">${exitBadge}</td>
             <td style="white-space:nowrap;">
               ${exitBtn}
               ${subnetBadges}

@@ -1254,22 +1254,27 @@ func (p *UDPPuncher) SendHolePunchProbe(targetAddr string) error {
 	return p.SendHolePunchProbeWithDelta(targetAddr, 0)
 }
 
-// SendHolePunchBurst sends coordinated burst hole-punch probes to multiple candidate targets
-// with micro-sleeps (15-25ms) between rounds to pierce NAT firewalls on both sides.
+// SendHolePunchBurst sends coordinated burst hole-punch probes to multiple candidate targets.
 func (p *UDPPuncher) SendHolePunchBurst(targets []string, bursts int) {
+	p.SendHolePunchBurstWithDelta(targets, bursts, 0)
+}
+
+// SendHolePunchBurstWithDelta sends coordinated burst hole-punch probes to multiple candidate targets
+// with micro-sleeps (15-25ms) between rounds and port prediction based on remote peer delta.
+func (p *UDPPuncher) SendHolePunchBurstWithDelta(targets []string, bursts int, peerDelta int) {
 	if p == nil || len(targets) == 0 {
 		return
 	}
 	if bursts <= 0 {
 		bursts = 3
 	}
-	if bursts > 8 {
-		bursts = 8
+	if bursts > 6 {
+		bursts = 6
 	}
 	for b := 0; b < bursts; b++ {
 		for _, tgt := range targets {
 			if tgt != "" {
-				_ = p.SendHolePunchProbe(tgt)
+				_ = p.SendHolePunchProbeWithDelta(tgt, peerDelta)
 			}
 		}
 		if b < bursts-1 {

@@ -179,7 +179,7 @@ func TestHandlePeers_DuplicateDefaultVIPNotSquashed(t *testing.T) {
 
 	srv := &Server{
 		registry: reg,
-		version:  "1.9.226-beta58",
+		version:  "1.9.226-beta59",
 		state: &AppState{
 			DeviceID: "my-self-node",
 		},
@@ -215,7 +215,7 @@ func TestHandleDashboard_TUNStatusPresent(t *testing.T) {
 	reg := peer.NewRegistry()
 	srv := &Server{
 		registry: reg,
-		version:  "1.9.226-beta58",
+		version:  "1.9.226-beta59",
 		state: &AppState{
 			DeviceID:  "self-node",
 			VirtualIP: "10.1.1.1/24",
@@ -271,7 +271,7 @@ func TestHandlePeers_SamePublicKeyDeduplicated(t *testing.T) {
 
 	srv := &Server{
 		registry: reg,
-		version:  "1.9.226-beta58",
+		version:  "1.9.226-beta59",
 		state: &AppState{
 			DeviceID: "my-self-node",
 		},

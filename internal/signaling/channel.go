@@ -158,6 +158,8 @@ type RendezvousSignal struct {
 	SenderDeviceID   string   `json:"sender_device_id"`            // initiator / responder DeviceID
 	SenderSTUN       string   `json:"sender_stun"`                 // sender's fresh external STUN address (IP:Port)
 	SenderCandidates []string `json:"sender_candidates,omitempty"` // sender's current socket candidates
+	SenderNATType    string   `json:"sender_nat_type,omitempty"`   // sender's detected NAT type ("symmetric", "cone", etc.)
+	SenderNATDelta   int      `json:"sender_nat_delta,omitempty"`  // sender's measured port delta (e.g. +1, +2)
 	Timestamp        int64    `json:"timestamp"`
 }
 
