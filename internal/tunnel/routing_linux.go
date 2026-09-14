@@ -400,7 +400,7 @@ func EnableHostIPForwarding() error {
 	return EnableHostIPForwardingSubnet("100.64.200.0/24")
 }
 
-// DisableHostIPForwarding removes iptables NAT masquerading rule.
+// DisableHostIPForwarding removes iptables NAT masquerading rule and policy routes.
 func DisableHostIPForwarding(subnets ...string) error {
 	natWatchdogMu.Lock()
 	if natWatchdogCancel != nil {
@@ -414,13 +414,26 @@ func DisableHostIPForwarding(subnets ...string) error {
 		targetSubnet = subnets[0]
 	}
 
-	iptablesPaths := []string{"iptables", "/opt/sbin/iptables", "/usr/sbin/iptables", "/sbin/iptables"}
-	for _, ipt := range iptablesPaths {
-		_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", targetSubnet, "-j", "MASQUERADE")
-		if targetSubnet != "100.64.200.0/24" {
-			_ = runLinuxCmd(ipt, "-t", "nat", "-D", "POSTROUTING", "-s", "100.64.200.0/24", "-j", "MASQUERADE")
+	ipt := findIptablesBinary()
+	// Clean up all masquerade and mark rules
+	_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-m", "mark", "--mark", "0x4e", "!", "-o", "nb0", "-j", "MASQUERADE").Run()
+	_ = exec.Command(ipt, "-w", "2", "-t", "mangle", "-D", "PREROUTING", "-i", "nb0", "-j", "MARK", "--set-mark", "0x4e").Run()
+	_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", "10.0.0.0/8", "!", "-o", "nb0", "-j", "MASQUERADE").Run()
+	_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", "172.16.0.0/12", "!", "-o", "nb0", "-j", "MASQUERADE").Run()
+
+	for _, s := range []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", targetSubnet} {
+		if s != "" {
+			_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", s, "!", "-o", "nb0", "-j", "MASQUERADE").Run()
+			_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", s, "-j", "MASQUERADE").Run()
 		}
 	}
+
+	// Clean up ip rules
+	_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
+	_ = runLinuxCmd("ip", "rule", "del", "fwmark", "0x4e")
+	_ = runLinuxCmd("ip", "rule", "del", "iif", "nb0")
+	_ = runLinuxCmd("ip", "rule", "del", "from", "10.0.0.0/8")
+	_ = runLinuxCmd("ip", "rule", "del", "to", "10.0.0.0/8", "lookup", "main")
 	return nil
 }
 
