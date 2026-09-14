@@ -374,9 +374,13 @@ private fun ConnectSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                val tunColor = if (tunActive) MaterialTheme.natColors.success else MaterialTheme.colorScheme.error
+                val (tunText, tunColor) = when {
+                    state == ConnectionState.CONNECTING -> Pair("TUN: Настройка...", MaterialTheme.colorScheme.primary)
+                    tunActive -> Pair("TUN: nb0 OK", MaterialTheme.natColors.success)
+                    else -> Pair("TUN: Сбой", MaterialTheme.colorScheme.error)
+                }
                 Text(
-                    text = if (tunActive) "TUN: nb0 OK" else "TUN: Сбой",
+                    text = tunText,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
                     color = tunColor,

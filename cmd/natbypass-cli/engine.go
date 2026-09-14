@@ -2912,6 +2912,11 @@ func receiveLoop(
 				}
 			}
 
+			// Diagnostic tools are orchestration tools, never mesh peers
+			if strings.HasPrefix(p.DeviceID, "natbypass-diag-") || p.Nickname == "DiagCollector" {
+				continue
+			}
+
 			// Маяки внутри одной сигнальной комнаты принимаются безусловно
 
 			if p.Offline || p.Leave {

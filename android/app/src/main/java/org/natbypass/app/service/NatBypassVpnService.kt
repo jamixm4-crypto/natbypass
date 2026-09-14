@@ -137,6 +137,19 @@ class NatBypassVpnService : VpnService() {
         return START_NOT_STICKY
     }
 
+    private fun calculateSubnet(ip: String, prefix: Int): String {
+        return try {
+            val parts = ip.split(".").map { it.toInt() }
+            if (parts.size != 4) return "10.1.2.0"
+            val ipInt = (parts[0] shl 24) or (parts[1] shl 16) or (parts[2] shl 8) or parts[3]
+            val mask = if (prefix == 0) 0 else (-1 shl (32 - prefix))
+            val netInt = ipInt and mask
+            "${(netInt ushr 24) and 0xFF}.${(netInt ushr 16) and 0xFF}.${(netInt ushr 8) and 0xFF}.${netInt and 0xFF}"
+        } catch (_: Exception) {
+            "10.1.2.0"
+        }
+    }
+
     private fun connect(forceReconfigure: Boolean = false) {
         if (isRunning && !forceReconfigure) return
 
@@ -188,10 +201,6 @@ class NatBypassVpnService : VpnService() {
             } catch (e: Exception) { Log.w(TAG, "WifiLock error: ${e.message}") }
 
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                try { cm.activeNetwork?.let { setUnderlyingNetworks(arrayOf(it)) } } catch (_: Exception) {}
-            }
-
             registerNetworkCallback()
 
             if (screenReceiver == null) {
@@ -243,8 +252,7 @@ class NatBypassVpnService : VpnService() {
                 try { builder.setMetered(false) } catch (_: Throwable) {}
             }
 
-            val subnetParts = currentVip.split(".")
-            val meshSubnet = if (subnetParts.size == 4) "${subnetParts[0]}.${subnetParts[1]}.${subnetParts[2]}.0" else "100.64.200.0"
+            val meshSubnet = calculateSubnet(currentVip, prefix)
 
             if (useExitNode) {
                 try {
@@ -258,8 +266,9 @@ class NatBypassVpnService : VpnService() {
                 if (meshSubnet != "100.64.200.0") {
                     try { builder.addRoute("100.64.200.0", 24) } catch (_: Exception) {}
                 }
-                try { builder.addRoute("10.1.1.0", 24) } catch (_: Exception) {}
-                try { builder.addRoute("100.64.0.0", 10) } catch (_: Exception) {}
+                if (meshSubnet != "10.1.1.0") {
+                    try { builder.addRoute("10.1.1.0", 24) } catch (_: Exception) {}
+                }
 
                 // Надежные IPv4 DNS (только для полного туннеля через Exit Node)
                 try {
@@ -279,12 +288,11 @@ class NatBypassVpnService : VpnService() {
                 if (meshSubnet != "10.1.1.0") {
                     try { builder.addRoute("10.1.1.0", 24) } catch (_: Exception) {}
                 }
-                try { builder.addRoute("100.64.0.0", 10) } catch (_: Exception) {}
 
-                // ВНИМАНИЕ: В режиме сплит-туннеля (без Exit Node) НЕ вызываем builder.addDnsServer()!
-                // Иначе Android перенаправит ВЕСЬ системный DNS в TUN интерфейс,
-                // где меш-ядро сбросит его, и на телефоне пропадет интернет для всех приложений.
-                // Без addDnsServer() Android сохраняет нативный DNS провайдера/Wi-Fi.
+                // ВНИМАНИЕ: В режиме сплит-туннеля (без Exit Node):
+                // 1) НЕ добавляем маршрут 100.64.0.0/10! Это диапазон CGNAT сотовых операторов (LTE/5G),
+                // его добавление перехватывает мобильный интернет и ломает сеть на телефоне.
+                // 2) НЕ вызываем builder.addDnsServer()! Иначе Android перенаправит ВЕСЬ системный DNS в TUN интерфейс.
             }
 
 
@@ -309,7 +317,14 @@ class NatBypassVpnService : VpnService() {
             val pfd = builder.establish()
             if (pfd == null) {
                 Log.e(TAG, "builder.establish() returned NULL")
+                disconnect()
                 stopSelf()
+                try {
+                    sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
+                        putExtra("state", "error")
+                        putExtra("error", "Не удалось создать VPN TUN-интерфейс")
+                    })
+                } catch (_: Throwable) {}
                 return
             }
 
@@ -320,11 +335,16 @@ class NatBypassVpnService : VpnService() {
                 try {
                     val activeNet = cm.activeNetwork
                     if (activeNet != null) {
-                        setUnderlyingNetworks(arrayOf(activeNet))
+                        val caps = cm.getNetworkCapabilities(activeNet)
+                        if (caps != null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                            setUnderlyingNetworks(arrayOf(activeNet))
+                            Log.i(TAG, "setUnderlyingNetworks successfully applied physical network after establish()")
+                        } else {
+                            setUnderlyingNetworks(null)
+                        }
                     } else {
                         setUnderlyingNetworks(null)
                     }
-                    Log.i(TAG, "setUnderlyingNetworks successfully applied after establish()")
                 } catch (e: Exception) {
                     Log.w(TAG, "setUnderlyingNetworks error: ${e.message}")
                 }
@@ -337,7 +357,19 @@ class NatBypassVpnService : VpnService() {
             vpnInterface = null
             Log.i(TAG, "VPN TUN established! detached fd=$fd, tunRawFd=$tunRawFd, VIP=$currentVip")
 
-            org.natbypass.app.util.MobileBridge.startEngine(configYaml, fd)
+            val startRes = org.natbypass.app.util.MobileBridge.startEngine(configYaml, fd)
+            if (startRes != "OK") {
+                Log.e(TAG, "MobileBridge.startEngine failed: $startRes")
+                disconnect()
+                stopSelf()
+                try {
+                    sendBroadcast(Intent("org.natbypass.app.VPN_STATE_CHANGED").apply {
+                        putExtra("state", "error")
+                        putExtra("error", startRes)
+                    })
+                } catch (_: Throwable) {}
+                return
+            }
             val updatedYaml = org.natbypass.app.util.MobileBridge.getConfigYAML()
             if (updatedYaml.isNotEmpty() && updatedYaml != "{}") {
                 try { configFile.writeText(updatedYaml) } catch (_: Throwable) {}
@@ -413,7 +445,7 @@ class NatBypassVpnService : VpnService() {
     }
 
     private fun disconnect() {
-        if (!isRunning && tunRawFd <= 0 && vpnInterface == null) return
+        if (!isRunning && tunRawFd <= 0 && vpnInterface == null && wakeLock == null && wifiLock == null && networkCallback == null) return
         isRunning = false
         serviceJob?.cancel()
         serviceJob = null
@@ -492,13 +524,25 @@ class NatBypassVpnService : VpnService() {
         }
     }
 
+    private var currentPhysicalNetwork: Network? = null
     private var lastNetworkChangeTs = 0L
 
-    private fun handleNetworkChange(network: Network?) {
+    private fun handleNetworkChange(network: Network?, forceRebind: Boolean = false) {
         if (!isRunning) return
-        val now = System.currentTimeMillis()
-        if (now - lastNetworkChangeTs < 250) return
-        lastNetworkChangeTs = now
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        var isVpn = false
+        if (network != null) {
+            try {
+                val caps = cm.getNetworkCapabilities(network)
+                if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    isVpn = true
+                }
+            } catch (_: Throwable) {}
+        }
+        if (isVpn) return // Never bind or rebind to VPN virtual interface
+
+        val physicalChanged = (network != currentPhysicalNetwork)
+        currentPhysicalNetwork = network
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
             try {
@@ -509,20 +553,28 @@ class NatBypassVpnService : VpnService() {
                 }
             } catch (_: Exception) {}
         }
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                val newFd = org.natbypass.app.util.MobileBridge.rebindSockets()
-                if (newFd > 0) {
-                    val ok = protect(newFd)
-                    Log.i(TAG, "🔄 Роуминг сети: перепривязан и защищен UDP сокет fd=$newFd ($ok)")
-                } else {
-                    val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
-                    if (sockFd > 0) protect(sockFd)
+
+        // Only rebind UDP socket if physical network actually changed (e.g. Wi-Fi <-> Cellular)
+        if (physicalChanged || forceRebind) {
+            val now = System.currentTimeMillis()
+            if (now - lastNetworkChangeTs < 1000) return
+            lastNetworkChangeTs = now
+
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    val newFd = org.natbypass.app.util.MobileBridge.rebindSockets()
+                    if (newFd > 0) {
+                        val ok = protect(newFd)
+                        Log.i(TAG, "🔄 Роуминг сети: перепривязан и защищен UDP сокет fd=$newFd ($ok)")
+                    } else {
+                        val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
+                        if (sockFd > 0) protect(sockFd)
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Ошибка перепривязки сокета при смене сети: ${t.message}")
                 }
-            } catch (t: Throwable) {
-                Log.w(TAG, "Ошибка перепривязки сокета при смене сети: ${t.message}")
+                org.natbypass.app.util.MobileBridge.refreshPublicIP()
             }
-            org.natbypass.app.util.MobileBridge.refreshPublicIP()
         }
     }
 
@@ -531,19 +583,20 @@ class NatBypassVpnService : VpnService() {
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 super.onAvailable(network)
-                handleNetworkChange(network)
+                handleNetworkChange(network, forceRebind = true)
             }
 
             override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
                 super.onCapabilitiesChanged(network, networkCapabilities)
-                handleNetworkChange(network)
+                if (networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return
+                handleNetworkChange(network, forceRebind = false)
             }
 
             override fun onLost(network: Network) {
                 super.onLost(network)
                 serviceScope.launch {
                     delay(300)
-                    handleNetworkChange(null)
+                    handleNetworkChange(null, forceRebind = true)
                 }
             }
         }

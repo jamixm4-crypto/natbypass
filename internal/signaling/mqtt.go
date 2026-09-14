@@ -362,6 +362,24 @@ func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 	if err := json.Unmarshal(payloadBytes, &p); err != nil || p.DeviceID == "" {
 		return
 	}
+
+	// Active Self-Healing Retained Message Purge:
+	// If a retained message delivered from MQTT broker is from a diagnostic run (natbypass-diag-*)
+	// or has a timestamp older than 4 minutes, purge it from the broker permanently!
+	if msg.Retained() {
+		isDiag := strings.HasPrefix(p.DeviceID, "natbypass-diag-") || p.Nickname == "DiagCollector" || p.RemoteDiag != nil || p.IsCoordination
+		isStale := !p.Timestamp.IsZero() && time.Since(p.Timestamp) > 4*time.Minute
+		if isDiag || isStale {
+			if m.client != nil && m.client.IsConnected() {
+				topicToClear := msg.Topic()
+				go func(top string) {
+					_ = m.client.Publish(top, 0, true, []byte{})
+				}(topicToClear)
+			}
+			return // Drop stale or diagnostic retained phantom!
+		}
+	}
+
 	// Скоростная дедупликация: отсекаем повторные маяки за 1000 мс
 	if m.dedup != nil && m.dedup.IsDuplicate(p.DeviceID, 1000) {
 		return
@@ -484,7 +502,7 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 	// Retained peer beacon optimization for instant discovery after restart:
 	// If the payload is a presence beacon (not an ephemeral coordination signal),
 	// publish with retained=true to the dedicated peer subtopic <targetTopic>/p/<blindedID>!
-	isCoordination := payload.Coordination != nil || payload.Rendezvous != nil || payload.TCPConnect != nil || payload.SymPunch != nil || payload.RemoteDiag != nil
+	isCoordination := payload.IsCoordination || payload.Coordination != nil || payload.Rendezvous != nil || payload.TCPConnect != nil || payload.SymPunch != nil || payload.RemoteDiag != nil || strings.HasPrefix(payload.DeviceID, "natbypass-diag-") || payload.Nickname == "DiagCollector"
 	if !isCoordination && payload.DeviceID != "" {
 		m.keyMu.RLock()
 		netKey := m.rawNetKey

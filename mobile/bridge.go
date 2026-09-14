@@ -36,7 +36,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta41"
+const Version = "1.9.226-beta42"
 
 
 
@@ -238,7 +238,9 @@ func negotiateVirtualIP() {
 	if hasConflict && conflictDev != "" {
 		if devID > conflictDev {
 			prefix := "100.64.200"
-			if active := cfg.EnsureActiveProfile(); active != nil && active.Subnet != "" {
+			if cur := atomicGetVIP(); cur != "" && !strings.HasPrefix(cur, "100.64.200.") {
+				prefix = config.ExtractSubnetPrefix(cur)
+			} else if active := cfg.EnsureActiveProfile(); active != nil && active.Subnet != "" {
 				prefix = config.ExtractSubnetPrefix(active.Subnet)
 			}
 			for i := 10; i <= 250; i++ {
@@ -306,7 +308,20 @@ func StartEngine(configYAML string, tunFd int) string {
 		cfg.App.DeviceID = devID
 	}
 	globalDevID = devID
-	atomicSetVIP(config.ResolveVirtualIP(cfg, devID))
+	// Preserve Virtual IP if already assigned by SetVirtualIP or UI
+	resolvedVIP := config.ResolveVirtualIP(cfg, devID)
+	if curVIP := atomicGetVIP(); curVIP != "" && !strings.HasPrefix(curVIP, "100.64.200.") {
+		resolvedVIP = curVIP
+	} else if cfg.Network.Address != "" {
+		resolvedVIP = cfg.Network.Address
+	}
+	atomicSetVIP(resolvedVIP)
+	if cfg.Network.Address == "" {
+		cfg.Network.Address = resolvedVIP
+	}
+	if p := cfg.EnsureActiveProfile(); p != nil && p.VirtualIP == "" {
+		p.VirtualIP = resolvedVIP
+	}
 	if cfg.App.DeviceName != "" {
 		globalDevName = cfg.App.DeviceName
 	} else if globalDevName == "" {
@@ -827,6 +842,22 @@ func StartEngine(configYAML string, tunFd int) string {
 					continue
 				}
 				if p != nil && p.DeviceID != devID {
+					// Drop diagnostic orchestration tools - they are not mesh peers
+					if strings.HasPrefix(p.DeviceID, "natbypass-diag-") || p.Nickname == "DiagCollector" || p.RemoteDiag != nil {
+						continue
+					}
+					// Drop payloads without identity (valid VIP and PublicKey)
+					if p.VirtualIP == "" || p.PublicKey == "" {
+						continue
+					}
+					// Discard stale retained beacons older than 4 minutes
+					if !p.Timestamp.IsZero() {
+						age := time.Since(p.Timestamp)
+						if age > 4*time.Minute {
+							continue
+						}
+					}
+
 					if p.TCPConnect != nil && globalTCPDirectMgr != nil {
 						tcpSig := p.TCPConnect
 						if tcpSig.TargetDeviceID == devID && tcpSig.SenderDeviceID != "" && tcpSig.SenderTCPAddr != "" {
@@ -871,7 +902,8 @@ func StartEngine(configYAML string, tunFd int) string {
 					latency := time.Duration(0)
 					pingMs := p.PingMs
 					if hasExisting && existingPeer != nil {
-						if p.STUNAddr != "" && existingPeer.STUNAddr != "" && p.STUNAddr != existingPeer.STUNAddr {
+						// Auto-refresh stale ActiveEndpoint if direct P2P traffic hasn't been received for >30s
+						if p.STUNAddr != "" && (existingPeer.STUNAddr == "" || p.STUNAddr != existingPeer.STUNAddr || (time.Since(existingPeer.LastDirectSeen) > 30*time.Second && !existingPeer.DirectTCP)) {
 							activeEP = p.STUNAddr
 							directP2P = false
 							latency = 0
@@ -926,7 +958,11 @@ func StartEngine(configYAML string, tunFd int) string {
 						PublicIP:         p.PublicIP,
 						LocalAddr:        p.LocalAddr,
 						STUNAddr:         p.STUNAddr,
+						TCPAddr:          p.TCPAddr,
 						Candidates:       p.Candidates,
+						Endpoints:        p.Endpoints,
+						NATType:          p.NATType,
+						NATDelta:         p.NATDelta,
 						IPv6Addr:         p.IPv6Addr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
@@ -972,7 +1008,7 @@ func StartEngine(configYAML string, tunFd int) string {
 							for b := 0; b < 5; b++ {
 								for _, addr := range addrs {
 									if addr != "" {
-										_ = puncher.SendHolePunchProbe(addr)
+										_ = puncher.SendHolePunchProbeWithDelta(addr, target.NATDelta)
 									}
 								}
 								if b < 4 {
@@ -1030,10 +1066,15 @@ func StartEngine(configYAML string, tunFd int) string {
 							}
 							if !isForceTCP && puncher != nil {
 								if peerItem.STUNAddr != "" {
-									_ = puncher.SendHolePunchProbe(peerItem.STUNAddr)
+									_ = puncher.SendHolePunchProbeWithDelta(peerItem.STUNAddr, peerItem.NATDelta)
 								}
 								if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr {
-									_ = puncher.SendHolePunchProbe(peerItem.LocalAddr)
+									_ = puncher.SendHolePunchProbeWithDelta(peerItem.LocalAddr, peerItem.NATDelta)
+								}
+								for _, cand := range peerItem.Candidates {
+									if cand != "" && cand != peerItem.STUNAddr && cand != peerItem.LocalAddr {
+										_ = puncher.SendHolePunchProbeWithDelta(cand, peerItem.NATDelta)
+									}
 								}
 							}
 							// Trigger Direct TCP ShadowTLS fallback when UDP is not confirmed or failing ICMP
@@ -1105,14 +1146,14 @@ func StartEngine(configYAML string, tunFd int) string {
 								_ = puncher.SendKeepAlive(peer.ActiveEndpoint)
 							} else {
 								if peer.STUNAddr != "" {
-									_ = puncher.SendHolePunchProbe(peer.STUNAddr)
+									_ = puncher.SendHolePunchProbeWithDelta(peer.STUNAddr, peer.NATDelta)
 								}
 								if peer.LocalAddr != "" {
-									_ = puncher.SendHolePunchProbe(peer.LocalAddr)
+									_ = puncher.SendHolePunchProbeWithDelta(peer.LocalAddr, peer.NATDelta)
 								}
 								for _, cand := range peer.Candidates {
 									if cand != "" && cand != peer.STUNAddr {
-										_ = puncher.SendHolePunchProbe(cand)
+										_ = puncher.SendHolePunchProbeWithDelta(cand, peer.NATDelta)
 									}
 								}
 							}
@@ -1396,7 +1437,7 @@ func attachTUNLocked(tunFd int) {
 							// 1c. Мгновенное реактивное пробитие NAT при попытке отправки данных до неподтвержденного пира
 							if !isForceTCP && (!sentDirect || !targetPeer.DirectP2P) && globalPuncher != nil {
 								if targetEP != "" {
-									_ = globalPuncher.SendHolePunchProbe(targetEP)
+									_ = globalPuncher.SendHolePunchProbeWithDelta(targetEP, targetPeer.NATDelta)
 								}
 								if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 									_ = globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax)
@@ -1978,13 +2019,18 @@ func RefreshPublicIP() {
 		if puncher != nil && globalRegistry != nil {
 			for _, p := range globalRegistry.List() {
 				if p.ActiveEndpoint != "" {
-					_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+					_ = puncher.SendHolePunchProbeWithDelta(p.ActiveEndpoint, p.NATDelta)
 				}
 				if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-					_ = puncher.SendHolePunchProbe(p.STUNAddr)
+					_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 				}
 				if p.IPv6Addr != "" && p.IPv6Addr != p.ActiveEndpoint {
-					_ = puncher.SendHolePunchProbe(p.IPv6Addr)
+					_ = puncher.SendHolePunchProbeWithDelta(p.IPv6Addr, p.NATDelta)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" && cand != p.ActiveEndpoint && cand != p.STUNAddr {
+						_ = puncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
+					}
 				}
 			}
 		}
@@ -2140,14 +2186,14 @@ func SelectExitNode(deviceID string) {
 						_ = puncher.SendKeepAlive(p.ActiveEndpoint)
 					}
 					if p.STUNAddr != "" {
-						_ = puncher.SendHolePunchProbe(p.STUNAddr)
+						_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 					}
 					if p.PublicIP != "" && p.WGPort > 0 {
-						_ = puncher.SendHolePunchProbe(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort))
+						_ = puncher.SendHolePunchProbeWithDelta(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort), p.NATDelta)
 					}
 					for _, cand := range p.Candidates {
 						if cand != "" {
-							_ = puncher.SendHolePunchProbe(cand)
+							_ = puncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 						}
 					}
 					time.Sleep(150 * time.Millisecond)
@@ -2460,15 +2506,20 @@ func GetPeersJSON() string {
 		return "[]"
 	}
 	peers := globalRegistry.List()
+	filtered := make([]*peer.Peer, 0, len(peers))
 	for _, p := range peers {
+		if strings.HasPrefix(p.DeviceID, "natbypass-diag-") || p.Nickname == "DiagCollector" || p.VirtualIP == "" {
+			continue
+		}
 		if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(p.DeviceID) {
 			p.DirectTCP = true
 			p.Transport = "tcp_shadowtls"
 		} else if p.DirectP2P && (p.Transport == "" || p.Transport == "relay_mqtt") {
 			p.Transport = "udp_direct"
 		}
+		filtered = append(filtered, p)
 	}
-	data, _ := json.Marshal(peers)
+	data, _ := json.Marshal(filtered)
 	return string(data)
 }
 
@@ -3007,22 +3058,27 @@ func PingPeer(deviceID string) int64 {
 
 	// Отправляем зонды на все известные адреса пира
 	if peerObj.ActiveEndpoint != "" {
-		_ = p.SendHolePunchProbe(peerObj.ActiveEndpoint)
+		_ = p.SendHolePunchProbeWithDelta(peerObj.ActiveEndpoint, peerObj.NATDelta)
 	}
 	if peerObj.STUNAddr != "" && peerObj.STUNAddr != peerObj.ActiveEndpoint {
-		_ = p.SendHolePunchProbe(peerObj.STUNAddr)
+		_ = p.SendHolePunchProbeWithDelta(peerObj.STUNAddr, peerObj.NATDelta)
 	}
 	if peerObj.IPv6Addr != "" && peerObj.IPv6Addr != peerObj.ActiveEndpoint {
-		_ = p.SendHolePunchProbe(peerObj.IPv6Addr)
+		_ = p.SendHolePunchProbeWithDelta(peerObj.IPv6Addr, peerObj.NATDelta)
 	}
 	if peerObj.LocalAddr != "" {
-		_ = p.SendHolePunchProbe(peerObj.LocalAddr)
+		_ = p.SendHolePunchProbeWithDelta(peerObj.LocalAddr, peerObj.NATDelta)
+	}
+	for _, cand := range peerObj.Candidates {
+		if cand != "" && cand != peerObj.ActiveEndpoint && cand != peerObj.STUNAddr {
+			_ = p.SendHolePunchProbeWithDelta(cand, peerObj.NATDelta)
+		}
 	}
 	if peerObj.PublicIP != "" {
-		_ = p.SendHolePunchProbe(fmt.Sprintf("%s:47832", peerObj.PublicIP))
-		_ = p.SendHolePunchProbe(fmt.Sprintf("%s:51820", peerObj.PublicIP))
+		_ = p.SendHolePunchProbeWithDelta(fmt.Sprintf("%s:47832", peerObj.PublicIP), peerObj.NATDelta)
+		_ = p.SendHolePunchProbeWithDelta(fmt.Sprintf("%s:51820", peerObj.PublicIP), peerObj.NATDelta)
 		if peerObj.WGPort > 0 && peerObj.WGPort != 47832 && peerObj.WGPort != 51820 {
-			_ = p.SendHolePunchProbe(fmt.Sprintf("%s:%d", peerObj.PublicIP, peerObj.WGPort))
+			_ = p.SendHolePunchProbeWithDelta(fmt.Sprintf("%s:%d", peerObj.PublicIP, peerObj.WGPort), peerObj.NATDelta)
 		}
 	}
 

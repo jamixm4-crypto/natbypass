@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta41"
+	Version = "1.9.226-beta42"
 	Commit  = "release"
 )
 
@@ -6122,6 +6122,11 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					if p.VirtualIP == "" || p.PublicKey == "" {
 						continue
 					}
+				}
+
+				// Diagnostic tools are orchestration tools, never mesh peers
+				if strings.HasPrefix(p.DeviceID, "natbypass-diag-") || p.Nickname == "DiagCollector" {
+					continue
 				}
 
 				// Принимаем все маяки внутри сигнальной комнаты

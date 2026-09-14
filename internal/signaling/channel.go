@@ -243,6 +243,9 @@ type Payload struct {
 
 	// IsBootBurst: indicates rapid discovery burst upon node startup/restart
 	IsBootBurst bool `json:"is_boot_burst,omitempty"`
+
+	// IsCoordination: indicates this payload is a transient coordination signal, NOT a mesh presence beacon
+	IsCoordination bool `json:"is_coordination,omitempty"`
 }
 
 // TCPConnectSignal coordinates on-demand direct TCP (ShadowTLS) connection / simultaneous open between peers.
@@ -486,11 +489,13 @@ func EncryptPayloadWithKey(p *Payload, keyStr string) (*Payload, error) {
 	if err != nil {
 		return nil, err
 	}
-	// В открытом виде оставляем ТОЛЬКО идентификатор и зашифрованный блоб
+	// В открытом виде оставляем ТОЛЬКО идентификатор, метку времени, зашифрованный блоб и флаг координации
+	isCoord := p.IsCoordination || p.Coordination != nil || p.Rendezvous != nil || p.TCPConnect != nil || p.SymPunch != nil || p.RemoteDiag != nil || strings.HasPrefix(p.DeviceID, "natbypass-diag-") || p.Nickname == "DiagCollector"
 	res := &Payload{
-		DeviceID:  p.DeviceID,
-		Timestamp: p.Timestamp,
-		Encrypted: enc,
+		DeviceID:       p.DeviceID,
+		Timestamp:      p.Timestamp,
+		Encrypted:      enc,
+		IsCoordination: isCoord,
 	}
 	return res, nil
 }
