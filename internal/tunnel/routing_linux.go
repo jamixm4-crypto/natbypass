@@ -184,6 +184,14 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.conf.default.rp_filter=0")
 	_ = runLinuxCmd("sysctl", "-w", "net.ipv4.conf.nb0.rp_filter=0")
 
+	// F6: Ensure rp_filter=0 and forwarding=1 across all available interface procfs nodes
+	if confDirs, err := os.ReadDir("/proc/sys/net/ipv4/conf"); err == nil {
+		for _, d := range confDirs {
+			_ = os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/rp_filter", d.Name()), []byte("0\n"), 0644)
+			_ = os.WriteFile(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/forwarding", d.Name()), []byte("1\n"), 0644)
+		}
+	}
+
 	if subnet == "" {
 		subnet = "100.64.200.0/24"
 	}
@@ -204,25 +212,24 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 
 	// 2. MANGLE PREROUTING: Mark ANY packet entering nb0 interface with fwmark 0x4e
 	// This enables universal NAT masquerading regardless of client IP / subnet!
-	ensureIptablesRule(ipt, "mangle", "PREROUTING", "-i", "nb0", "-j", "MARK", "--set-mark", "0x4e")
+	forceInsertIptablesRule(ipt, "mangle", "PREROUTING", "-i", "nb0", "-j", "MARK", "--set-mark", "0x4e")
 
 	// 3. NAT MASQUERADE in POSTROUTING:
-	// a) By packet mark 0x4e (any packet that entered via nb0 exiting to WAN)
-	ensureIptablesRule(ipt, "nat", "POSTROUTING", "-m", "mark", "--mark", "0x4e", "!", "-o", "nb0", "-j", "MASQUERADE")
-	// b) Fallback for all standard private & CGNAT ranges used by mesh clients
+	// Inserted at TOP of POSTROUTING (position 1) so it precedes any Docker/UFW/Keenetic NDM chains!
+	forceInsertIptablesRule(ipt, "nat", "POSTROUTING", "-m", "mark", "--mark", "0x4e", "!", "-o", "nb0", "-j", "MASQUERADE")
 	meshSubnets := []string{"10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12"}
 	if cleanSubnet != "" && cleanSubnet != "10.0.0.0/8" && cleanSubnet != "100.64.0.0/10" && cleanSubnet != "172.16.0.0/12" {
 		meshSubnets = append(meshSubnets, cleanSubnet)
 	}
 	for _, s := range meshSubnets {
-		ensureIptablesRule(ipt, "nat", "POSTROUTING", "-s", s, "!", "-o", "nb0", "-j", "MASQUERADE")
+		forceInsertIptablesRule(ipt, "nat", "POSTROUTING", "-s", s, "!", "-o", "nb0", "-j", "MASQUERADE")
 	}
 
 	// 4. Forwarding and Input rules for nb0
-	// FIX-N2: Use forceInsertIptablesRule to place rules at TOP of chain (position 1), bypassing Docker/UFW drop policies
+	// Use forceInsertIptablesRule to place rules at TOP of chain (position 1), bypassing Docker/UFW drop policies
 	forceInsertIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
 	forceInsertIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
-	ensureIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-j", "ACCEPT")
+	forceInsertIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-j", "ACCEPT")
 	ensureIptablesRule(ipt, "", "INPUT", "-p", "icmp", "-j", "ACCEPT")
 	ensureIptablesRule(ipt, "", "INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
 	ensureIptablesRule(ipt, "", "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
@@ -243,20 +250,21 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		}
 	}
 
-	// Keenetic NDM chains if present
+	// Keenetic NDM chains if present: MUST be inserted at position 1 to precede default DROP/REJECT!
 	if isKeeneticDevice() {
-		ensureIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "nb0", "-j", "ACCEPT")
-		ensureIptablesRule(ipt, "", "_NDM_FORWARD", "-o", "nb0", "-j", "ACCEPT")
-		// S5: Keenetic NDM блокирует ICMP по умолчанию — добавляем правило для пинга
-		ensureIptablesRule(ipt, "", "_NDM_INPUT", "-i", "nb0", "-j", "ACCEPT")
-		ensureIptablesRule(ipt, "", "_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
-		ensureIptablesRule(ipt, "", "_NDM_INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
-		ensureIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-p", "icmp", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "nb0", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_FORWARD", "-o", "nb0", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-i", "nb0", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-p", "icmp", "-j", "ACCEPT")
 	}
 
-	// 5. Bi-directional TCP MSS Clamping
+	// 5. Bi-directional TCP MSS Clamping to 1220 bytes (prevents PMTU Blackhole under tunnel encapsulation)
+	forceInsertIptablesRule(ipt, "mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
+	forceInsertIptablesRule(ipt, "mangle", "POSTROUTING", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
 	ensureIptablesRule(ipt, "mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
-	ensureIptablesRule(ipt, "mangle", "POSTROUTING", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
 
 	// 6. nftables fallback (Ubuntu 22.04+, Debian 12+)
 	if nft, err := exec.LookPath("nft"); err == nil {
@@ -271,8 +279,13 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		_ = runLinuxCmd("ip", "route", "replace", cleanSubnet, "dev", "nb0", "table", "main", "onlink")
 	}
 
-	// 8. Keenetic / OpenWrt: ensure forwarded traffic from mesh subnet can lookup default WAN table
+	// 8. Keenetic / OpenWrt: ensure forwarded traffic from mesh subnet looks up the actual WAN table
 	if isKeeneticDevice() {
+		wanTable := findLinuxWANTable()
+		if wanTable == "" || wanTable == "default" {
+			wanTable = "main"
+		}
+
 		// Priority 40: return traffic to mesh subnets always looks up table main
 		for _, s := range []string{"10.1.1.0/24", "100.64.200.0/24", cleanSubnet} {
 			if s != "" {
@@ -287,17 +300,18 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			_ = runLinuxCmd("ip", "rule", "add", "pref", "55", "to", s, "lookup", "main")
 		}
 
-		// Priority 60: forward mesh internet traffic to WAN default table
-		_ = runLinuxCmd("ip", "rule", "del", "pref", "60", "fwmark", "0x4e", "lookup", "default")
-		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", "default")
-		_ = runLinuxCmd("ip", "rule", "del", "pref", "60", "iif", "nb0", "lookup", "default")
-		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", "default")
+		// Priority 60: forward mesh internet traffic to real WAN routing table
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", wanTable)
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", wanTable)
 		for _, s := range []string{"10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12", cleanSubnet} {
 			if s != "" {
-				_ = runLinuxCmd("ip", "rule", "del", "pref", "60", "from", s, "lookup", "default")
-				_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "from", s, "lookup", "default")
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "from", s, "lookup", wanTable)
 			}
 		}
+
+		// Also mirror default route into table main so standard kernel routing finds it
+		ensureDefaultRouteInMain(wanTable)
 
 		StartLinuxNATWatchdog(context.Background(), cleanSubnet)
 	}
@@ -311,7 +325,7 @@ var (
 )
 
 // StartLinuxNATWatchdog запускает фоновый сторож целостности правил iptables ТОЛЬКО на KeeneticOS (каждые 60 сек).
-// S5: Расширен — проверяет и восстанавливает FORWARD, INPUT (ICMP) и MASQUERADE правила при сбросе цепочек NDM.
+// Проверяет и восстанавливает FORWARD, INPUT (ICMP) и MASQUERADE правила при сбросе цепочек NDM.
 func StartLinuxNATWatchdog(ctx context.Context, subnet string) {
 	if !isKeeneticDevice() {
 		return
@@ -345,17 +359,16 @@ func StartLinuxNATWatchdog(ctx context.Context, subnet string) {
 					needRestore = true
 				}
 
-				// S5: Проверяем FORWARD правила для nb0
+				// Проверяем FORWARD правила для nb0
 				if err := exec.Command(ipt, "-w", "2", "-C", "FORWARD",
 					"-i", "nb0", "-j", "ACCEPT").Run(); err != nil {
 					needRestore = true
 				}
 
-				// S5: Проверяем INPUT ICMP через nb0 (Keenetic NDM блокирует ICMP без этого)
+				// Проверяем INPUT ICMP через nb0 (Keenetic NDM блокирует ICMP без этого)
 				if err := exec.Command(ipt, "-w", "2", "-C", "INPUT",
 					"-i", "nb0", "-p", "icmp", "-j", "ACCEPT").Run(); err != nil {
-					// Восстанавливаем ICMP без полного сброса
-					_ = exec.Command(ipt, "-w", "2", "-I", "INPUT",
+					_ = exec.Command(ipt, "-w", "2", "-I", "INPUT", "1",
 						"-i", "nb0", "-p", "icmp", "-j", "ACCEPT").Run()
 				}
 
@@ -402,8 +415,85 @@ var (
 	lastBypassedEndpointIPs []string
 )
 
+// findLinuxWANTable determines the routing table used for the physical WAN gateway.
+// On KeeneticOS, NDM places WAN routes in dedicated ISP tables (e.g. 1000, 1001), while table main has no default route.
+func findLinuxWANTable() string {
+	// 1. Try ip route get 8.8.8.8 (standard kernel FIB query)
+	if out, err := exec.Command("sh", "-c", "ip route get 8.8.8.8 2>/dev/null | head -n1").Output(); err == nil {
+		fields := strings.Fields(string(out))
+		for i, f := range fields {
+			if f == "table" && i+1 < len(fields) {
+				return fields[i+1]
+			}
+		}
+	}
+	// 2. Try ip route show table all default
+	if out, err := exec.Command("sh", "-c", "ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1").Output(); err == nil {
+		fields := strings.Fields(string(out))
+		for i, f := range fields {
+			if f == "table" && i+1 < len(fields) {
+				return fields[i+1]
+			}
+		}
+	}
+	return "main"
+}
+
+// ensureDefaultRouteInMain copies the default route from WAN routing table into table main if missing.
+func ensureDefaultRouteInMain(wanTable string) {
+	out, err := exec.Command("sh", "-c", "ip route show table main default 2>/dev/null | grep -v 'nb0'").Output()
+	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		return // Table main already has a valid physical default route
+	}
+	if wanTable != "" && wanTable != "main" && wanTable != "default" {
+		defOut, defErr := exec.Command("sh", "-c", fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", wanTable)).Output()
+		if defErr == nil {
+			line := strings.TrimSpace(string(defOut))
+			if strings.HasPrefix(line, "default") {
+				parts := strings.Fields(line)
+				var cleanParts []string
+				for i := 0; i < len(parts); i++ {
+					if parts[i] == "table" {
+						i++ // skip table name
+						continue
+					}
+					cleanParts = append(cleanParts, parts[i])
+				}
+				args := append([]string{"route", "replace"}, cleanParts...)
+				args = append(args, "table", "main")
+				_ = runLinuxCmd("ip", args...)
+			}
+		}
+	}
+}
+
 // getPhysicalGatewayLinux finds the physical default gateway IP
 func getPhysicalGatewayLinux() string {
+	// 1. Try ip route get 8.8.8.8 (most accurate query across all Linux/Keenetic/OpenWrt kernels)
+	if out, err := exec.Command("sh", "-c", "ip route get 8.8.8.8 2>/dev/null | head -n1").Output(); err == nil {
+		fields := strings.Fields(string(out))
+		for i, f := range fields {
+			if f == "via" && i+1 < len(fields) {
+				gw := fields[i+1]
+				if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
+					return gw
+				}
+			}
+		}
+	}
+	// 2. Try ip route show table all default
+	if out, err := exec.Command("sh", "-c", "ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1").Output(); err == nil {
+		fields := strings.Fields(string(out))
+		for i, f := range fields {
+			if f == "via" && i+1 < len(fields) {
+				gw := fields[i+1]
+				if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
+					return gw
+				}
+			}
+		}
+	}
+	// 3. Fallback to standard table main
 	cmd := exec.Command("sh", "-c", "ip route show default | grep -v 'nb0' | head -n1 | awk '{print $3}'")
 	out, err := cmd.Output()
 	if err == nil {

@@ -703,8 +703,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 					}
 
-					// Health criteria: peer exists, is online, and seen within last 25 seconds
-					peerHealthy := exitPeer != nil && exitPeer.Online && time.Since(exitPeer.LastSeen) < 25*time.Second
+					// Health criteria: peer exists, is online, and seen within last PeerOfflineThreshold (45s)
+					peerHealthy := exitPeer != nil && exitPeer.Online && time.Since(exitPeer.LastSeen) < constants.PeerOfflineThreshold
 
 					exitRoutingMu.Lock()
 					if peerHealthy {
@@ -1403,18 +1403,24 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							if wssClient != nil && wssClient.IsConnected() {
 								_ = wssClient.SendPacket(p.DeviceID, pkt)
 							} else if sigMgr != nil {
-								dataToSend := pkt
-								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-									cKey := crypto.DeriveKey(activeProf.NetworkKey)
-									epoch := crypto.GetCurrentEpoch()
-									seq := p.NextOutboundSeq()
-									if enc, encErr := crypto.EncryptWithEpochSeq(pkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
-										dataToSend = enc
-									} else if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
-										dataToSend = enc
+								// Strictly do NOT flood MQTT with bulk internet data packets (which causes broker bans/disconnects).
+								// Only small control/ICMP packets or mesh packets are allowed over MQTT relay.
+								outSrcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
+								isForwardedInternet := len(pkt) > 400 || (cleanVIP != "" && outSrcIP != cleanVIP)
+								if !isForwardedInternet {
+									dataToSend := pkt
+									if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+										cKey := crypto.DeriveKey(activeProf.NetworkKey)
+										epoch := crypto.GetCurrentEpoch()
+										seq := p.NextOutboundSeq()
+										if enc, encErr := crypto.EncryptWithEpochSeq(pkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+											dataToSend = enc
+										} else if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+											dataToSend = enc
+										}
 									}
+									_ = sigMgr.PublishTunnelData(p.DeviceID, dataToSend)
 								}
-								_ = sigMgr.PublishTunnelData(p.DeviceID, dataToSend)
 							}
 						}
 					}

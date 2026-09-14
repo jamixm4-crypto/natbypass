@@ -228,43 +228,16 @@ class NatBypassVpnService : VpnService() {
             var selectedExitNode = prefs.getString("selected_exit_node", "")?.trim() ?: ""
             var useExitNode = selectedExitNode.isNotEmpty()
 
-            // Валидация выбранного Exit Node:
-            // Если узел оффлайн или не найден в списке известных узлов сети, НЕ перехватываем весь трафик!
-            // Автоматически сбрасываем в режим чистого сплит-туннеля чтобы интернет не пропадал.
+            // Если выбран Exit Node, сохраняем выбор пользователя и настраиваем полный маршрут 0.0.0.0/0
             if (useExitNode) {
-                try {
-                    val peersJson = org.natbypass.app.util.MobileBridge.getPeersJSON()
-                    if (peersJson.isNotEmpty() && peersJson != "[]") {
-                        val arr = org.json.JSONArray(peersJson)
-                        var foundExit = false
-                        for (i in 0 until arr.length()) {
-                            val p = arr.getJSONObject(i)
-                            val pid = p.optString("device_id", p.optString("DeviceID", ""))
-                            val pvip = p.optString("virtual_ip", p.optString("VirtualIP", "")).substringBefore("/")
-                            val isExit = p.optBoolean("is_exit_node", false) || p.optBoolean("IsExitNode", false)
-                            val online = p.optBoolean("online", p.optBoolean("Online", true))
-                            if ((pid == selectedExitNode || pvip == selectedExitNode) && isExit && online) {
-                                foundExit = true
-                                break
-                            }
-                        }
-                        if (!foundExit && arr.length() > 0) {
-                            Log.w(TAG, "Exit Node '$selectedExitNode' недоступен или оффлайн — сброс в сплит-туннель")
-                            prefs.edit().putString("selected_exit_node", "").apply()
-                            selectedExitNode = ""
-                            useExitNode = false
-                        }
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "Ошибка проверки Exit Node: ${e.message}")
-                }
+                Log.i(TAG, "Активирован полный туннель через Exit Node: $selectedExitNode")
             }
             org.natbypass.app.util.MobileBridge.selectExitNode(selectedExitNode)
 
             val builder = Builder()
                 .setSession("NatBypass")
                 .addAddress(currentVip, prefix)
-                .setMtu(1420)
+                .setMtu(1280)
                 .setBlocking(true)
 
             if (!useExitNode) {

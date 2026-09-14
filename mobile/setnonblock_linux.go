@@ -17,3 +17,9 @@ import "syscall"
 func setTunNonblock(fd int) error {
 	return syscall.SetNonblock(fd, true)
 }
+
+func closeTunFd(fd int) {
+	if fd > 0 {
+		_ = syscall.Close(fd)
+	}
+}

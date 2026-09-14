@@ -15,3 +15,5 @@ package mobile
 func setTunNonblock(_ int) error {
 	return nil
 }
+
+func closeTunFd(_ int) {}

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/natbypass/natbypass/internal/config"
+	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/network"
@@ -36,7 +37,7 @@ import (
 )
 
 
-const Version = "1.9.226-beta49"
+const Version = "1.9.226-beta50"
 
 
 
@@ -280,7 +281,7 @@ func StartEngine(configYAML string, tunFd int) string {
 	cfg, err := parseConfigFromString(configYAML)
 	if err != nil {
 		if tunFd > 0 {
-			_ = syscall.Close(tunFd)
+			closeTunFd(tunFd)
 		}
 		return fmt.Sprintf("ошибка парсинга конфига: %v", err)
 	}
@@ -299,7 +300,7 @@ func StartEngine(configYAML string, tunFd int) string {
 	if err != nil {
 		cancel()
 		if tunFd > 0 {
-			_ = syscall.Close(tunFd)
+			closeTunFd(tunFd)
 		}
 		return fmt.Sprintf("ошибка генерации ключей: %v", err)
 	}
@@ -488,6 +489,9 @@ func StartEngine(configYAML string, tunFd int) string {
 			}
 			p.LastSeen = time.Now() // ВСЕГДА обновляем LastSeen!
 			p.Online = true
+			if puncher != nil && p.ActiveEndpoint != "" {
+				puncher.AddKeepAliveTarget(p.ActiveEndpoint)
+			}
 			globalRegistry.Upsert(p)
 			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("⚡ Android P2P сокет пробит!")
 
@@ -496,6 +500,7 @@ func StartEngine(configYAML string, tunFd int) string {
 	})
 	globalPuncher = puncher
 	if puncher != nil {
+		puncher.StartKeepAliveLoop()
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 			puncher.SetCipherKey(activeProf.NetworkKey)
 		}
@@ -1205,7 +1210,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					}
 				}
 
-				peerHealthy := exitPeer != nil && exitPeer.Online && time.Since(exitPeer.LastSeen) < 25*time.Second
+				peerHealthy := exitPeer != nil && exitPeer.Online && time.Since(exitPeer.LastSeen) < constants.PeerOfflineThreshold
 				if peerHealthy {
 					consecutiveFailures = 0
 				} else {
@@ -1214,12 +1219,18 @@ func StartEngine(configYAML string, tunFd int) string {
 						logger.Warn().
 							Str("exit_node", exitNodeID).
 							Int("failures", consecutiveFailures).
-							Msg("🚨 Exit Node unresponsive (15s) — blackhole recovery: disabling exit node route")
-						engineMu.Lock()
-						if globalExitNode == exitNodeID {
-							globalExitNode = ""
+							Msg("⚠️ Exit Node temporarily quiet (15s) — maintaining selection and triggering proactive probe")
+						// Do NOT wipe globalExitNode! Wiping it creates an instant routing blackhole on Android
+						// because Android VpnService still routes 0.0.0.0/0 into TUN.
+						// Instead, trigger proactive UDP hole punching probes and Direct TCP dial to revive link.
+						if exitPeer != nil && globalPuncher != nil {
+							if exitPeer.ActiveEndpoint != "" {
+								_ = globalPuncher.SendHolePunchProbe(exitPeer.ActiveEndpoint)
+							}
+							if exitPeer.STUNAddr != "" {
+								_ = globalPuncher.SendHolePunchProbeWithDelta(exitPeer.STUNAddr, exitPeer.NATDelta)
+							}
 						}
-						engineMu.Unlock()
 						consecutiveFailures = 0
 					}
 				}
@@ -1292,6 +1303,18 @@ func attachTUNLocked(tunFd int) {
 						p.ActiveEndpoint = srcAddr.String()
 					}
 					globalRegistry.Upsert(p)
+				} else if globalExitNode != "" && srcAddr != nil {
+					// Интернет-трафик, возвращающийся от Exit Node
+					fromStr := srcAddr.String()
+					if ep, ok := globalRegistry.Get(globalExitNode); ok && ep != nil {
+						if ep.ActiveEndpoint == fromStr || ep.STUNAddr == fromStr || (srcAddr.IP != nil && strings.HasPrefix(ep.ActiveEndpoint, srcAddr.IP.String()+":")) {
+							ep.DirectP2P = true
+							ep.LastDirectSeen = time.Now()
+							ep.LastSeen = time.Now()
+							ep.ActiveEndpoint = fromStr
+							globalRegistry.Upsert(ep)
+						}
+					}
 				}
 			}
 
@@ -2167,11 +2190,13 @@ func SelectExitNode(deviceID string) {
 	epDev := deviceID
 	puncher := globalPuncher
 	reg := globalRegistry
+	tcpDirectMgr := globalTCPDirectMgr
+	cfg := globalConfig
 	engineMu.Unlock()
 
 	logger.Info().Str("exit_node", deviceID).Msg("Выбран Exit Node для Android")
 
-	// Немедленно запускаем пробитие UDP-канала до выбранного узла-шлюза
+	// Немедленно запускаем пробитие UDP-канала и TCP-подключение до выбранного узла-шлюза
 	if epDev != "" && puncher != nil && reg != nil {
 		go func() {
 			var p *peer.Peer
@@ -2187,6 +2212,48 @@ func SelectExitNode(deviceID string) {
 				}
 			}
 			if p != nil {
+				targetEP := p.ActiveEndpoint
+				if targetEP == "" {
+					targetEP = p.STUNAddr
+				}
+				if targetEP != "" {
+					puncher.AddKeepAliveTarget(targetEP)
+				}
+				puncher.StartKeepAliveLoop()
+
+				// Проактивное подключение по Direct TCP ShadowTLS для высокоскоростного интернет-шлюза
+				if tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+					defTCPPort := 8443
+					if cfg != nil {
+						if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
+							defTCPPort = activeProf.TCPPort
+						}
+					}
+					tcpTarget := p.TCPAddr
+					if tcpTarget == "" {
+						host := p.PublicIP
+						if host == "" && p.STUNAddr != "" {
+							host = strings.Split(p.STUNAddr, ":")[0]
+						}
+						if host != "" && host != "0.0.0.0" {
+							tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+						} else if p.LocalAddr != "" {
+							host = strings.Split(p.LocalAddr, ":")[0]
+							tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+						}
+					}
+					if tcpTarget != "" {
+						lPort := tcpDirectMgr.Port()
+						if lPort <= 0 && puncher != nil {
+							lPort = puncher.LocalPort()
+						}
+						go func(devID, target string, localP int) {
+							_ = tcpDirectMgr.ConnectPeer(devID, target, localP)
+						}(p.DeviceID, tcpTarget, lPort)
+					}
+				}
+
+				// Burst зондов для быстрого открытия UDP-порта на NAT
 				for i := 0; i < 5; i++ {
 					if p.ActiveEndpoint != "" {
 						_ = puncher.SendKeepAlive(p.ActiveEndpoint)
