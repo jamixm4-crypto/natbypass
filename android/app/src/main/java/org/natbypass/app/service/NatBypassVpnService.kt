@@ -302,13 +302,19 @@ class NatBypassVpnService : VpnService() {
                 // Прямой маршрут к меш-подсети рядом с дефолтным шлюзом
                 try { builder.addRoute(meshSubnet, prefix) } catch (_: Exception) {}
 
-                // ВНИМАНИЕ: НЕ вызываем builder.addDnsServer() даже в режиме Exit Node!
-                // 1) Вызов addDnsServer() перенаправляет системный DNS (netd) в интерфейс tun0,
-                //    создавая циклическую блокировку: MQTT-брокеры не могут разрешиться без DNS,
-                //    а DNS не проходит, пока Exit Node не обнаружен по MQTT.
-                // 2) Android по умолчанию отправляет DNS через физический интерфейс Wi-Fi/LTE
-                //    (к роутеру и провайдеру) и сохраняет работоспособность DoT Private DNS.
-                // 3) Весь пользовательский трафик (HTTP, HTTPS, TCP, UDP) направляется в Exit Node через 0.0.0.0/0.
+                // IPv4 DNS серверы для полного туннеля через Exit Node.
+                // При наличии маршрута 0.0.0.0/0 Android требует DNS-серверы на VPN-интерфейсе,
+                // иначе у приложений (браузеры, мессенджеры) DNS-запросы падают с ошибкой разрешения имён.
+                // Сама служба org.natbypass.app исключена через addDisallowedApplication, поэтому
+                // её служебный трафик (MQTT, STUN) обращается к физическому DNS Wi-Fi/LTE без блокировок.
+                try {
+                    builder.addDnsServer("77.88.8.8")
+                    builder.addDnsServer("1.1.1.1")
+                    builder.addDnsServer("8.8.8.8")
+                    Log.i(TAG, "DNS servers 77.88.8.8, 1.1.1.1, 8.8.8.8 added for Exit Node mode")
+                } catch (e: Exception) {
+                    Log.w(TAG, "addDnsServer error: ${e.message}")
+                }
             } else {
                 try {
                     builder.addRoute(meshSubnet, prefix)

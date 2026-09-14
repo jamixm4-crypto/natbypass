@@ -630,7 +630,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			defer tunnel.DisableMSSClamping(adapterName)
 		}
 
-		if cfg.Network.AllowExitNode {
+		if cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice() {
 			currentVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 			subnet := "100.64.200.0/24"
 			if currentVIP != "" {
@@ -1256,6 +1256,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								targetEP = bestEP
 							}
 						}
+						// LAN Peer Priority: If client has a LocalAddr and is on local network, prefer LocalAddr!
+						myLocal := ""
+						myPub := ""
+						if puncher != nil {
+							myLocal = puncher.LocalAddr()
+							myPub = puncher.MappedIPString()
+						}
+						if p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, myPub) {
+							targetEP = p.LocalAddr
+						}
 						if targetEP == "" && p.IPv6Addr != "" && network.GetLocalIPv6() != "" {
 							targetEP = p.IPv6Addr
 						}
@@ -1310,6 +1320,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							} else {
 								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
 							}
+						}
+						// Dual-send to LocalAddr for LAN clients to guarantee delivery across hairpin NAT
+						if !isForceTCP && !sentTCP && p.LocalAddr != "" && p.LocalAddr != targetEP && puncher != nil {
+							_ = puncher.SendDataPacketWithPadding(p.LocalAddr, pkt, pmin, pmax)
 						}
 						bilateralOK := p.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 
@@ -2659,7 +2673,7 @@ func publishLoop(
 			MTU:              activeMTU,
 			AdaptationEpoch:  activeEpoch,
 			DPIPreset:        activeDPI,
-			IsExitNode:       cfg.Network.AllowExitNode,
+			IsExitNode:       cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice(),
 			AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 		}
 

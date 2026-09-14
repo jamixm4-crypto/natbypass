@@ -93,6 +93,11 @@ func isKeeneticDevice() bool {
 	return isKeeneticCached
 }
 
+// IsKeeneticDevice returns true if the host system is running KeeneticOS.
+func IsKeeneticDevice() bool {
+	return isKeeneticDevice()
+}
+
 // findIptablesBinary finds the preferred iptables executable.
 func findIptablesBinary() string {
 	for _, p := range []string{"/usr/sbin/iptables", "/sbin/iptables", "iptables", "/opt/sbin/iptables"} {

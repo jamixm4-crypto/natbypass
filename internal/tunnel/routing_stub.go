@@ -17,6 +17,11 @@ import (
 
 var ErrRoutingNotSupported = errors.New("routing is only supported on Windows and Linux")
 
+// IsKeeneticDevice returns false on non-Linux platforms.
+func IsKeeneticDevice() bool {
+	return false
+}
+
 // EnableHostIPForwarding stub.
 func EnableHostIPForwarding() error {
 	return ErrRoutingNotSupported

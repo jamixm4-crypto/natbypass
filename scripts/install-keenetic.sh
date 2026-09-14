@@ -331,6 +331,7 @@ network:
   upnp_enabled: false
   ip_timeout: 10
   udp_port: 47832
+  allow_exit_node: true
   stun_servers:
     - "stun.l.google.com:19302"
     - "stun1.l.google.com:19302"
@@ -370,6 +371,12 @@ EOF
         print_green "✓ Конфигурация сохранена с уникальным топиком и сетевым ключом."
 
         chmod 600 "${CONFIG_FILE}"
+    else
+        # Обновляем существующий config.yaml на роутере: гарантируем allow_exit_node: true
+        if [ -f "${CONFIG_FILE}" ] && ! grep -q "allow_exit_node" "${CONFIG_FILE}" 2>/dev/null; then
+            sed -i '/network:/a\  allow_exit_node: true' "${CONFIG_FILE}" 2>/dev/null || true
+            print_cyan "[i] Параметр allow_exit_node: true автоматически добавлен в конфигурацию роутера."
+        fi
     fi
 
 
@@ -486,11 +493,22 @@ ip rule del to 10.0.0.0/8 2>/dev/null || true
 ip rule add to 10.1.1.0/24 lookup main priority 40 2>/dev/null || true
 ip rule add to 10.1.2.0/24 lookup main priority 40 2>/dev/null || true
 ip rule add to 100.64.200.0/24 lookup main priority 40 2>/dev/null || true
-ip rule add fwmark 0x4e lookup default priority 60 2>/dev/null || true
-ip rule add iif nb0 lookup default priority 60 2>/dev/null || true
-ip rule add from 10.1.1.0/24 lookup default priority 60 2>/dev/null || true
-ip rule add from 10.1.2.0/24 lookup default priority 60 2>/dev/null || true
-ip rule add from 100.64.200.0/24 lookup default priority 60 2>/dev/null || true
+
+WAN_TABLE=\$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if(\$i==\"table\") print \$(i+1)}')
+[ -z \"\$WAN_TABLE\" ] && WAN_TABLE=\"main\"
+
+ip rule add fwmark 0x4e lookup \$WAN_TABLE priority 60 2>/dev/null || true
+ip rule add iif nb0 lookup \$WAN_TABLE priority 60 2>/dev/null || true
+ip rule add from 10.1.1.0/24 lookup \$WAN_TABLE priority 60 2>/dev/null || true
+ip rule add from 10.1.2.0/24 lookup \$WAN_TABLE priority 60 2>/dev/null || true
+ip rule add from 100.64.200.0/24 lookup \$WAN_TABLE priority 60 2>/dev/null || true
+
+if [ \"\$WAN_TABLE\" != \"main\" ] && [ \"\$WAN_TABLE\" != \"default\" ]; then
+    WAN_DEF=\$(ip route show table \$WAN_TABLE default 2>/dev/null | grep -v 'nb0' | head -n1)
+    if [ -n \"\$WAN_DEF\" ]; then
+        ip route replace \$WAN_DEF table main 2>/dev/null || true
+    fi
+fi
 NDM_EOF
         chmod +x /opt/etc/ndm/netfilter.d/010-natbypass.sh
         /opt/etc/ndm/netfilter.d/010-natbypass.sh 2>/dev/null || true

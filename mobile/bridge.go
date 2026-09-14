@@ -37,7 +37,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta52"
+const Version          = "1.9.226-beta53"
 
 
 
@@ -1436,6 +1436,19 @@ func attachTUNLocked(tunFd int) {
 							}
 
 							targetEP := targetPeer.ActiveEndpoint
+							// LAN Peer Priority Rule:
+							// If peer is on the same local network (shares Public IP or LocalAddr is in private LAN range),
+							// prefer LocalAddr over STUNAddr to eliminate hairpin NAT blackhole on Wi-Fi routers!
+							myLocal := ""
+							if globalPuncher != nil {
+								myLocal = globalPuncher.LocalAddr()
+							}
+							if targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, globalPublicIP) {
+								targetEP = targetPeer.LocalAddr
+							}
+							if targetEP == "" {
+								targetEP = targetPeer.ActiveEndpoint
+							}
 							if targetEP == "" {
 								targetEP = targetPeer.STUNAddr
 							}
@@ -1468,6 +1481,10 @@ func attachTUNLocked(tunFd int) {
 								if err := globalPuncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
 									sentDirect = true
 								}
+							}
+							// Dual-send to LocalAddr for LAN peers (ensures LAN delivery even if STUNAddr was picked)
+							if !isForceTCP && !sentTCP && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && globalPuncher != nil {
+								_ = globalPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, pkt, pmin, pmax)
 							}
 							// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
 							if !isForceTCP && !sentTCP && !targetPeer.DirectP2P && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
@@ -2224,11 +2241,22 @@ func SelectExitNode(deviceID string) {
 			}
 			if p != nil {
 				targetEP := p.ActiveEndpoint
+				myLocal := ""
+				if puncher != nil {
+					myLocal = puncher.LocalAddr()
+				}
+				isLocal := p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, globalPublicIP)
+				if isLocal && p.LocalAddr != "" {
+					targetEP = p.LocalAddr
+				}
 				if targetEP == "" {
 					targetEP = p.STUNAddr
 				}
 				if targetEP != "" {
 					puncher.AddKeepAliveTarget(targetEP)
+				}
+				if p.LocalAddr != "" && p.LocalAddr != targetEP {
+					puncher.AddKeepAliveTarget(p.LocalAddr)
 				}
 				puncher.StartKeepAliveLoop()
 
@@ -2242,15 +2270,20 @@ func SelectExitNode(deviceID string) {
 					}
 					tcpTarget := p.TCPAddr
 					if tcpTarget == "" {
-						host := p.PublicIP
-						if host == "" && p.STUNAddr != "" {
-							host = strings.Split(p.STUNAddr, ":")[0]
-						}
-						if host != "" && host != "0.0.0.0" {
+						if isLocal && p.LocalAddr != "" {
+							host := strings.Split(p.LocalAddr, ":")[0]
 							tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
-						} else if p.LocalAddr != "" {
-							host = strings.Split(p.LocalAddr, ":")[0]
-							tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+						} else {
+							host := p.PublicIP
+							if host == "" && p.STUNAddr != "" {
+								host = strings.Split(p.STUNAddr, ":")[0]
+							}
+							if host != "" && host != "0.0.0.0" {
+								tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+							} else if p.LocalAddr != "" {
+								host := strings.Split(p.LocalAddr, ":")[0]
+								tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+							}
 						}
 					}
 					if tcpTarget != "" {
@@ -2266,17 +2299,20 @@ func SelectExitNode(deviceID string) {
 
 				// Burst зондов для быстрого открытия UDP-порта на NAT
 				for i := 0; i < 5; i++ {
-					if p.ActiveEndpoint != "" {
+					if p.LocalAddr != "" {
+						_ = puncher.SendKeepAlive(p.LocalAddr)
+					}
+					if p.ActiveEndpoint != "" && p.ActiveEndpoint != p.LocalAddr {
 						_ = puncher.SendKeepAlive(p.ActiveEndpoint)
 					}
-					if p.STUNAddr != "" {
+					if p.STUNAddr != "" && p.STUNAddr != p.LocalAddr {
 						_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
 					}
 					if p.PublicIP != "" && p.WGPort > 0 {
 						_ = puncher.SendHolePunchProbeWithDelta(fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort), p.NATDelta)
 					}
 					for _, cand := range p.Candidates {
-						if cand != "" {
+						if cand != "" && cand != p.LocalAddr {
 							_ = puncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 						}
 					}

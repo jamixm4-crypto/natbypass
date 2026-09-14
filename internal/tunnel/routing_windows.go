@@ -37,6 +37,11 @@ func runRouteCmd(name string, args ...string) error {
 	return nil
 }
 
+// IsKeeneticDevice returns false on Windows.
+func IsKeeneticDevice() bool {
+	return false
+}
+
 // EnableHostIPForwardingSubnet sets IP forwarding and activates Windows NetNat for dynamic mesh subnet.
 func EnableHostIPForwardingSubnet(subnet string) error {
 	if subnet == "" {

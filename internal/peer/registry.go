@@ -849,6 +849,81 @@ func (r *Registry) Exists(deviceID string) bool {
 	return ok
 }
 
+// IsSameLANSubnet checks if an IP belongs to one of the local physical subnets on this machine.
+func IsSameLANSubnet(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		nameLower := strings.ToLower(iface.Name)
+		if strings.HasPrefix(nameLower, "nb") || strings.HasPrefix(nameLower, "tun") || strings.HasPrefix(nameLower, "tap") {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			if ipNet, ok := a.(*net.IPNet); ok {
+				if ipNet.Contains(ip) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// IsLocalLANPeer checks if a peer is on the same local physical network (LAN / Wi-Fi).
+// Returns true if peers share the same Public IP, belong to the same LAN subnet, or share a /24 prefix.
+func IsLocalLANPeer(peerLocalAddr, peerPublicIP, myLocalAddr, myPublicIP string) bool {
+	if peerLocalAddr == "" {
+		return false
+	}
+	peerHost, _, err := net.SplitHostPort(peerLocalAddr)
+	if err != nil {
+		peerHost = peerLocalAddr
+	}
+	pIP := net.ParseIP(peerHost)
+	if pIP == nil || (!pIP.IsPrivate() && !pIP.IsLinkLocalUnicast()) {
+		return false
+	}
+
+	// 1. Both peers share the same public IP -> behind the same NAT router (hairpin NAT scenario)
+	if peerPublicIP != "" && myPublicIP != "" && peerPublicIP == myPublicIP {
+		return true
+	}
+
+	// 2. Peer IP is in the same local subnet as one of our physical interfaces
+	if IsSameLANSubnet(pIP) {
+		return true
+	}
+
+	// 3. Subnet prefix heuristic: if myLocalAddr and peerHost share the /24 prefix (e.g. 10.11.219.x)
+	if myLocalAddr != "" {
+		myHost, _, err := net.SplitHostPort(myLocalAddr)
+		if err != nil {
+			myHost = myLocalAddr
+		}
+		if p1 := strings.LastIndex(myHost, "."); p1 != -1 {
+			if p2 := strings.LastIndex(peerHost, "."); p2 != -1 {
+				if myHost[:p1] == peerHost[:p2] {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 // IsValidEndpointForPeer checks if a socket endpoint is valid to be set as ActiveEndpoint for a peer.
 // Prevents CGNAT / gateway IP poisoning (e.g. 10.100.1.210) from overwriting a valid public STUN address
 // when communicating with remote peers across WAN.
@@ -863,6 +938,17 @@ func IsValidEndpointForPeer(endpoint string, p *Peer, myPublicIP string) bool {
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return false
+	}
+	// If the endpoint is in the same physical LAN subnet as this machine, it is ALWAYS valid!
+	if ip.IsPrivate() && IsSameLANSubnet(ip) {
+		return true
+	}
+	// If the endpoint matches the peer's own advertised LocalAddr, it is valid
+	if ip.IsPrivate() && p.LocalAddr != "" {
+		peerHost, _, _ := net.SplitHostPort(p.LocalAddr)
+		if peerHost == host {
+			return true
+		}
 	}
 	// Private / Loopback / LinkLocal addresses are only valid if both peers share the same Public IP
 	// (meaning they are genuinely on the same local LAN behind the same NAT router) or if public IPs are unknown.

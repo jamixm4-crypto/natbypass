@@ -2139,3 +2139,32 @@ func (p *UDPPuncher) SetMTUCallback(cb DirectMTUCallback) {
 	p.onMTUResult = cb
 	p.mu.Unlock()
 }
+
+// LocalAddr returns the local IP:port string of this machine.
+func (p *UDPPuncher) LocalAddr() string {
+	p.mu.Lock()
+	port := p.localPort
+	p.mu.Unlock()
+	ip := GetLocalIP()
+	if ip != "" && port > 0 {
+		return fmt.Sprintf("%s:%d", ip, port)
+	}
+	return ""
+}
+
+// MappedIP returns the external public IP discovered via STUN.
+func (p *UDPPuncher) MappedIP() net.IP {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.mappedIP
+}
+
+// MappedIPString returns the external public IP string discovered via STUN.
+func (p *UDPPuncher) MappedIPString() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.mappedIP != nil {
+		return p.mappedIP.String()
+	}
+	return ""
+}

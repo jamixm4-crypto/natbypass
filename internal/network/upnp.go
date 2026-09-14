@@ -145,3 +145,12 @@ func getLocalIP() (string, error) {
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	return localAddr.IP.String(), nil
 }
+
+// GetLocalIP returns the primary local IPv4 address of this machine.
+func GetLocalIP() string {
+	ip, err := getLocalIP()
+	if err == nil && ip != "" {
+		return ip
+	}
+	return ""
+}
