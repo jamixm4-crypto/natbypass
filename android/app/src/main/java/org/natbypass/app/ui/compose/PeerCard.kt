@@ -67,6 +67,7 @@ private fun PeerAvatar(displayName: String, modifier: Modifier = Modifier) {
 }
 
 // ── Transport badge (AWG / TLS / Relay) ───────────────────────────────────────
+// ── Transport badge (AWG / TLS / Relay) ───────────────────────────────────────
 @Composable
 private fun TransportBadge(transport: String, channelType: String) {
     val (label, color) = when {
@@ -76,16 +77,15 @@ private fun TransportBadge(transport: String, channelType: String) {
         else                                       -> Pair("Offline", MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
     }
     Surface(
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(4.dp),
         color = color.copy(alpha = 0.15f),
-        modifier = Modifier.padding(start = 4.dp)
     ) {
         Text(
             text = label,
             color = color,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
         )
     }
 }
@@ -98,20 +98,78 @@ private fun VersionBadge(version: String) {
     Surface(
         shape = RoundedCornerShape(4.dp),
         color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
-        modifier = Modifier.padding(start = 4.dp)
     ) {
         Text(
             text = clean,
             color = MaterialTheme.colorScheme.secondary,
-            fontSize = 9.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
         )
     }
 }
 
+// ── Exit node badge ───────────────────────────────────────────────────────────
+@Composable
+private fun ExitNodeBadge(isSelected: Boolean) {
+    val activeColor = Color(0xFF22C55E)
+    val color = if (isSelected) activeColor else MaterialTheme.colorScheme.primary
+    val bgColor = if (isSelected) activeColor.copy(alpha = 0.18f) else color.copy(alpha = 0.12f)
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = bgColor,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Public,
+                contentDescription = "Exit Node",
+                tint = color,
+                modifier = Modifier.size(11.dp)
+            )
+            Spacer(Modifier.width(3.dp))
+            Text(
+                text = if (isSelected) "ШЛЮЗ (АКТИВЕН)" else "ШЛЮЗ",
+                color = color,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+// ── Subnet route badge ────────────────────────────────────────────────────────
+@Composable
+private fun SubnetBadge(subnet: String) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = Color(0xFF38BDF8).copy(alpha = 0.15f),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Home,
+                contentDescription = "Subnet",
+                tint = Color(0xFF0284C7),
+                modifier = Modifier.size(11.dp)
+            )
+            Spacer(Modifier.width(3.dp))
+            Text(
+                text = subnet,
+                color = Color(0xFF0284C7),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
 // ── Main peer card ─────────────────────────────────────────────────────────────
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PeerCard(
     peer: PeerUiModel,
@@ -135,110 +193,112 @@ fun PeerCard(
             try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Exception) {}
             showSheet = true
         },
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-
         Row(
             modifier = Modifier
-                .padding(12.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.Top,
         ) {
             // Avatar
-            PeerAvatar(displayName = peer.displayName)
+            PeerAvatar(
+                displayName = peer.displayName,
+                modifier = Modifier.padding(top = 2.dp)
+            )
 
             Spacer(Modifier.width(12.dp))
 
-            // Name + details
+            // Main info column
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = peer.displayName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Line 1: Name + Status/Ping
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = peer.virtualIp.ifEmpty { "—" },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = peer.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                    if (peer.isOnline) {
-                        TransportBadge(transport = peer.transport, channelType = peer.channelType)
+                    Spacer(Modifier.width(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(dotColor)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = when {
+                                !peer.isOnline -> "офлайн"
+                                peer.pingMs > 0 -> "${peer.pingMs} ms"
+                                else -> "онлайн"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (peer.isOnline) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
-                    if (peer.version.isNotEmpty()) {
-                        VersionBadge(version = peer.version)
-                    }
-                    if (peer.isExitNode) {
-                        Spacer(Modifier.width(4.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = if (peer.isSelectedExitNode) Color(0xFF22C55E).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                            modifier = Modifier.padding(start = 2.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Public,
-                                    contentDescription = "Exit Node",
-                                    tint = if (peer.isSelectedExitNode) Color(0xFF22C55E) else MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                Spacer(Modifier.width(2.dp))
-                                Text(
-                                    text = if (peer.isSelectedExitNode) "ШЛЮЗ" else "EXIT",
-                                    color = if (peer.isSelectedExitNode) Color(0xFF22C55E) else MaterialTheme.colorScheme.primary,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // Line 2: Virtual IP & Transport & Version
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        Text(
+                            text = peer.virtualIp.ifEmpty { "—" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (peer.isOnline) {
+                            Spacer(Modifier.width(6.dp))
+                            TransportBadge(transport = peer.transport, channelType = peer.channelType)
                         }
                     }
-                    if (peer.advertisedRoutes.isNotEmpty()) {
-                        Spacer(Modifier.width(4.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = Color(0xFF38BDF8).copy(alpha = 0.15f),
-                            modifier = Modifier.padding(start = 2.dp)
-                        ) {
-                            Text(
-                                text = "🏠 " + peer.advertisedRoutes.first(),
-                                color = Color(0xFF38BDF8),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                            )
+                    if (peer.version.isNotEmpty()) {
+                        Spacer(Modifier.width(8.dp))
+                        VersionBadge(version = peer.version)
+                    }
+                }
+
+                // Line 3: Extra Badges (Exit Node, Subnets) - only if present
+                val hasExtraBadges = peer.isExitNode || peer.advertisedRoutes.isNotEmpty()
+                if (hasExtraBadges) {
+                    Spacer(Modifier.height(6.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (peer.isExitNode) {
+                            ExitNodeBadge(isSelected = peer.isSelectedExitNode)
+                        }
+                        peer.advertisedRoutes.forEach { subnet ->
+                            SubnetBadge(subnet = subnet)
                         }
                     }
                 }
-            }
-
-            Spacer(Modifier.width(8.dp))
-
-            // RTT + status dot
-            Column(horizontalAlignment = Alignment.End) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(dotColor)
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = if (peer.pingMs > 0) "${peer.pingMs}ms" else "—",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
