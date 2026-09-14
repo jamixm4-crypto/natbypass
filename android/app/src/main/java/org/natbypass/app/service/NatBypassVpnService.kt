@@ -247,7 +247,12 @@ class NatBypassVpnService : VpnService() {
             }
 
             try { builder.allowFamily(android.system.OsConstants.AF_INET) } catch (_: Throwable) {}
-            try { builder.allowFamily(android.system.OsConstants.AF_INET6) } catch (_: Throwable) {}
+            // ВНИМАНИЕ: НЕ вызываем builder.allowFamily(AF_INET6)!
+            // NatBypass — это IPv4-only меш-сеть. При вызове allowFamily(AF_INET6) без IPv6-адреса и маршрутов
+            // Android 14/15/16 (IPv6-First) перенаправляет системный Private DNS DoT (dns.google:853) и IPv6-трафик
+            // в интерфейс tun0, где он отбрасывается, блокируя весь интернет и выдавая "Частный DNS-сервер недоступен".
+            // При указании ТОЛЬКО AF_INET Android по системной спецификации направляет весь IPv6 трафик
+            // напрямую через физическую сеть (Wi-Fi/LTE) в обход VPN.
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 try { builder.setMetered(false) } catch (_: Throwable) {}
@@ -303,8 +308,20 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
-            // 1. Предварительно связываем underlying networks до establish
-            updateUnderlyingNetworks()
+            // 1. Привязываем физическую сеть на уровне Builder (API 33+ Android 13/14/15/16)
+            val defaultNet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork else null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                try {
+                    if (defaultNet != null) {
+                        builder.setUnderlyingNetworks(arrayOf(defaultNet))
+                    } else {
+                        builder.setUnderlyingNetworks(null)
+                    }
+                    Log.i(TAG, "builder.setUnderlyingNetworks applied: defaultNet=$defaultNet")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "builder.setUnderlyingNetworks error: ${t.message}")
+                }
+            }
 
             val pfd = builder.establish()
             if (pfd == null) {
@@ -320,11 +337,19 @@ class NatBypassVpnService : VpnService() {
                 return
             }
 
-            // 2. setUnderlyingNetworks ОБЯЗАН вызываться и ПОСЛЕ establish()!
-            // Это сообщает Android, что VPN работает поверх физического интерфейса (Wi-Fi/LTE)
-            // и весь обычный трафик без маршрутов в VPN (включая Private DNS dns.google DoT:853)
-            // направляется в физическую сеть без сбоев.
-            updateUnderlyingNetworks()
+            // 2. Дублируем привязку physical underlying network после establish()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                try {
+                    if (defaultNet != null) {
+                        setUnderlyingNetworks(arrayOf(defaultNet))
+                    } else {
+                        setUnderlyingNetworks(null)
+                    }
+                    Log.i(TAG, "VpnService.setUnderlyingNetworks applied: defaultNet=$defaultNet")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "VpnService.setUnderlyingNetworks error: ${t.message}")
+                }
+            }
             val fd = pfd.detachFd()
             tunRawFd = fd
             vpnInterface = null
@@ -485,66 +510,6 @@ class NatBypassVpnService : VpnService() {
     private var currentPhysicalNetwork: Network? = null
     private var lastNetworkChangeTs = 0L
 
-    /**
-     * Возвращает список активных физических сетей (Wi-Fi, Cellular, Ethernet),
-     * исключая VPN. Отсортированы: валидированные с интернетом первыми.
-     * ВАЖНО: Мы НЕ фильтруем по NET_CAPABILITY_INTERNET, чтобы не блокировать Private DNS (dns.google).
-     */
-    private fun getPhysicalNetworks(): Array<Network> {
-        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            try {
-                val physical = cm.allNetworks.filter { net ->
-                    try {
-                        val caps = cm.getNetworkCapabilities(net) ?: return@filter false
-                        !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
-                        (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                         caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-                         caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
-                    } catch (_: Throwable) { false }
-                }
-                if (physical.isNotEmpty()) {
-                    val sorted = physical.sortedByDescending { net ->
-                        val caps = cm.getNetworkCapabilities(net)
-                        var score = 0
-                        if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true) score += 20
-                        if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true) score += 10
-                        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true) score += 8
-                        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) score += 6
-                        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true) score += 4
-                        score
-                    }
-                    return sorted.toTypedArray()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "getPhysicalNetworks error: ${e.message}")
-            }
-        }
-        return emptyArray()
-    }
-
-    /**
-     * Привязывает VPN к реальным физическим сетям через setUnderlyingNetworks.
-     * Это критично для Android 9-16:
-     * 1) Позволяет системному NetworkMonitor валидировать Private DNS (DoT dns.google:853) через физическую сеть.
-     * 2) Направляет весь трафик сплит-туннеля мимо VPN без разрыва соединения.
-     */
-    private fun updateUnderlyingNetworks() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            try {
-                val physical = getPhysicalNetworks()
-                if (physical.isNotEmpty()) {
-                    setUnderlyingNetworks(physical)
-                    Log.i(TAG, "setUnderlyingNetworks: applied ${physical.size} physical network(s)")
-                } else {
-                    Log.w(TAG, "setUnderlyingNetworks: no physical networks currently detected (preserving existing)")
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "setUnderlyingNetworks error: ${e.message}")
-            }
-        }
-    }
-
     private fun handleNetworkChange(network: Network?, forceRebind: Boolean = false) {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         if (network != null) {
@@ -557,13 +522,28 @@ class NatBypassVpnService : VpnService() {
             } catch (_: Throwable) {}
         }
 
-        // Обновляем underlying networks для Android (чтобы Private DNS / DoT и системный интернет знали активную физическую сеть)
-        updateUnderlyingNetworks()
+        val activeNet = network ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork else null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            try {
+                if (activeNet != null) {
+                    val caps = cm.getNetworkCapabilities(activeNet)
+                    if (caps != null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                        setUnderlyingNetworks(arrayOf(activeNet))
+                        Log.i(TAG, "setUnderlyingNetworks: updated to active network $activeNet")
+                    } else {
+                        setUnderlyingNetworks(null)
+                    }
+                } else {
+                    setUnderlyingNetworks(null)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "setUnderlyingNetworks error: ${e.message}")
+            }
+        }
 
-        val activePhysical = network ?: getPhysicalNetworks().firstOrNull()
-        val physicalChanged = (activePhysical != null && activePhysical != currentPhysicalNetwork)
-        if (activePhysical != null) {
-            currentPhysicalNetwork = activePhysical
+        val physicalChanged = (activeNet != null && activeNet != currentPhysicalNetwork)
+        if (activeNet != null) {
+            currentPhysicalNetwork = activeNet
         }
 
         if (!isRunning) return
@@ -597,6 +577,10 @@ class NatBypassVpnService : VpnService() {
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 super.onAvailable(network)
+                try {
+                    val caps = cm.getNetworkCapabilities(network)
+                    if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return
+                } catch (_: Throwable) {}
                 Log.i(TAG, "NetworkCallback.onAvailable: $network")
                 handleNetworkChange(network, forceRebind = true)
             }
@@ -619,11 +603,12 @@ class NatBypassVpnService : VpnService() {
         }
         try {
             val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
                 .build()
             cm.registerNetworkCallback(request, cb)
             networkCallback = cb
-            Log.i(TAG, "registerNetworkCallback: registered for physical networks (NOT_VPN)")
+            Log.i(TAG, "registerNetworkCallback: registered for physical networks (INTERNET + NOT_VPN)")
         } catch (e: Exception) { Log.w(TAG, "registerNetworkCallback error: ${e.message}") }
     }
 
