@@ -90,6 +90,26 @@ private fun TransportBadge(transport: String, channelType: String) {
     }
 }
 
+// ── Version badge ─────────────────────────────────────────────────────────────
+@Composable
+private fun VersionBadge(version: String) {
+    if (version.isEmpty()) return
+    val clean = if (version.startsWith("v", ignoreCase = true)) version else "v$version"
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+        modifier = Modifier.padding(start = 4.dp)
+    ) {
+        Text(
+            text = clean,
+            color = MaterialTheme.colorScheme.secondary,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+        )
+    }
+}
+
 // ── Main peer card ─────────────────────────────────────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -153,6 +173,9 @@ fun PeerCard(
                     )
                     if (peer.isOnline) {
                         TransportBadge(transport = peer.transport, channelType = peer.channelType)
+                    }
+                    if (peer.version.isNotEmpty()) {
+                        VersionBadge(version = peer.version)
                     }
                     if (peer.isExitNode) {
                         Spacer(Modifier.width(4.dp))
@@ -275,6 +298,34 @@ private fun PeerActionsContent(
                         },
                         fontWeight = FontWeight.Medium
                     )
+                }
+                if (peer.version.isNotEmpty() || peer.platform.isNotEmpty()) {
+                    Spacer(Modifier.height(3.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (peer.version.isNotEmpty()) {
+                            val vClean = if (peer.version.startsWith("v", ignoreCase = true)) peer.version else "v${peer.version}"
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+                            ) {
+                                Text(
+                                    text = vClean,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                        if (peer.platform.isNotEmpty()) {
+                            if (peer.version.isNotEmpty()) Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "• " + peer.platform,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }

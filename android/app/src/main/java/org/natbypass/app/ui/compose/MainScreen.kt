@@ -5,8 +5,10 @@ import android.content.SharedPreferences
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -796,53 +798,94 @@ private fun RoutingModeCard(
         if (parts.size == 4) "${parts[0]}.${parts[1]}.${parts[2]}.0/24" else "10.1.0.0/16"
     } else "10.1.0.0/16"
 
+    val cardShape = RoundedCornerShape(16.dp)
+    val cardModifier = if (isExitActive) {
+        modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), cardShape)
+    } else {
+        modifier.fillMaxWidth()
+    }
+
     ElevatedCard(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        modifier = cardModifier,
+        shape = cardShape,
         colors = CardDefaults.elevatedCardColors(
-            containerColor = if (isExitActive)
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-            else
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(
-                    imageVector = if (isExitActive) Icons.Outlined.Public else Icons.Outlined.CheckCircle,
-                    contentDescription = null,
-                    tint = if (isExitActive) MaterialTheme.colorScheme.primary else MaterialTheme.natColors.success,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = if (isExitActive) "Шлюз: $selectedExitNodeName" else "Режим: Меш-сеть (Сплит-туннель)",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = if (isExitActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isExitActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            else MaterialTheme.natColors.success.copy(alpha = 0.12f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isExitActive) Icons.Outlined.Public else Icons.Outlined.AltRoute,
+                        contentDescription = null,
+                        tint = if (isExitActive) MaterialTheme.colorScheme.primary else MaterialTheme.natColors.success,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (isExitActive) "Интернет через шлюз" else "Сплит-туннель",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isExitActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    else MaterialTheme.natColors.success.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                text = if (isExitActive) "0.0.0.0/0" else meshSubnet,
+                                color = if (isExitActive) MaterialTheme.colorScheme.primary else MaterialTheme.natColors.success,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = if (isExitActive)
+                            "Весь интернет-трафик телефона маршрутизируется через узел $selectedExitNodeName"
+                        else
+                            "В туннель направляется только сеть топика ($meshSubnet). Обычный интернет (Wi-Fi/LTE) и DNS работают напрямую.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 16.sp
+                    )
+                }
             }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = if (isExitActive)
-                    "Весь интернет-трафик телефона (0.0.0.0/0) маршрутизируется через выбранный узел."
-                else
-                    "В туннель направляется только сеть топика ($meshSubnet). Обычный интернет (Wi-Fi/LTE) и Private DNS работают напрямую.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 16.sp
-            )
+
             if (isExitActive) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 OutlinedButton(
                     onClick = onClearExitNode,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = MaterialTheme.colorScheme.error
                     ),

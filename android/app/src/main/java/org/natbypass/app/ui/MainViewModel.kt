@@ -42,6 +42,7 @@ data class PeerUiModel(
     val isSelectedExitNode: Boolean = false,
     val transport: String = "relay", // "awg" | "tls" | "relay" | "offline"
     val transportDetail: String = "", // e.g. "Прямой AWG (UDP)", "Прямой ShadowTLS (TCP)"
+    val version: String = "",
 )
 
 data class ProfileUiModel(
@@ -275,6 +276,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (effectivePingMs > 0) { totalRtt += effectivePingMs; rttCount++ }
                 }
 
+                val version = obj.optString("version", obj.optString("Version", "")).trim()
+
                 peers.add(PeerUiModel(
                     id                 = id,
                     displayName        = displayName,
@@ -289,6 +292,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     isSelectedExitNode = (selectedExit.isNotEmpty() && selectedExit == id),
                     transport          = transport,
                     transportDetail    = transportDetail,
+                    version            = version,
                 ))
             }
         } catch (_: Exception) {}
