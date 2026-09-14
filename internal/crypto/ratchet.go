@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/hkdf"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 const (
@@ -232,9 +233,34 @@ func GetCurrentEpoch() uint64 {
 	return uint64(time.Now().Unix()) / uint64(EpochDuration.Seconds())
 }
 
+var (
+	epochCacheMu sync.RWMutex
+	epochCache   = make(map[string][32]byte)
+)
+
+func epochCacheKey(baseKey []byte, epoch uint64) string {
+	var b [40]byte
+	if len(baseKey) >= 32 {
+		copy(b[:32], baseKey[:32])
+	} else {
+		copy(b[:len(baseKey)], baseKey)
+	}
+	binary.BigEndian.PutUint64(b[32:], epoch)
+	return string(b[:])
+}
+
 // DeriveEpochKey derives a 32-byte ephemeral master key for a specific time epoch using HKDF-Expand.
 // This ensures that compromise of a long-term network key in the future does not compromise past epoch keys.
+// Derivations are cached in memory to eliminate per-packet HKDF CPU overhead.
 func DeriveEpochKey(baseKey []byte, epoch uint64) ([32]byte, error) {
+	ck := epochCacheKey(baseKey, epoch)
+	epochCacheMu.RLock()
+	if cached, ok := epochCache[ck]; ok {
+		epochCacheMu.RUnlock()
+		return cached, nil
+	}
+	epochCacheMu.RUnlock()
+
 	var epochBytes [8]byte
 	binary.BigEndian.PutUint64(epochBytes[:], epoch)
 
@@ -243,6 +269,14 @@ func DeriveEpochKey(baseKey []byte, epoch uint64) ([32]byte, error) {
 	if _, err := io.ReadFull(hkdf.Expand(sha256.New, baseKey, info), epochKey[:]); err != nil {
 		return [32]byte{}, fmt.Errorf("epoch key derivation failed: %w", err)
 	}
+
+	epochCacheMu.Lock()
+	if len(epochCache) > 128 {
+		epochCache = make(map[string][32]byte)
+	}
+	epochCache[ck] = epochKey
+	epochCacheMu.Unlock()
+
 	return epochKey, nil
 }
 
@@ -301,7 +335,7 @@ func DecryptWithEpoch(data []byte, baseKey []byte, currentEpoch uint64) ([]byte,
 }
 
 // EncryptWithEpochSeq wraps plaintext with an 8-byte epoch and 8-byte sequence counter,
-// then encrypts under the epoch-derived key.
+// then encrypts under the epoch-derived key using a zero-syscall deterministic nonce.
 // Wire format: [Epoch uint64 (8B)][Seq uint64 (8B)][Nonce 24B][Ciphertext + Poly1305 Tag 16B]
 func EncryptWithEpochSeq(plaintext []byte, baseKey []byte, epoch uint64, seq uint64) ([]byte, error) {
 	epochKey, err := DeriveEpochKey(baseKey, epoch)
@@ -309,16 +343,20 @@ func EncryptWithEpochSeq(plaintext []byte, baseKey []byte, epoch uint64, seq uin
 		return nil, err
 	}
 
-	enc, err := EncryptSelf(plaintext, epochKey)
-	if err != nil {
-		return nil, err
-	}
+	// Deterministic 24-byte nonce (WireGuard / RFC 4303 model):
+	// [Epoch 8B][Seq 8B][Salt 8B] strictly guarantees uniqueness per packet without OS entropy syscalls (/dev/urandom).
+	var nonce [24]byte
+	binary.BigEndian.PutUint64(nonce[:8], epoch)
+	binary.BigEndian.PutUint64(nonce[8:16], seq)
+	copy(nonce[16:24], epochKey[:8])
 
-	out := make([]byte, 16+len(enc))
+	out := make([]byte, 16+24, 16+24+len(plaintext)+secretbox.Overhead)
 	binary.BigEndian.PutUint64(out[:8], epoch)
 	binary.BigEndian.PutUint64(out[8:16], seq)
-	copy(out[16:], enc)
-	return out, nil
+	copy(out[16:40], nonce[:])
+
+	sealed := secretbox.Seal(out[:40], plaintext, &nonce, &epochKey)
+	return sealed, nil
 }
 
 // DecryptWithEpochSeq validates epoch tolerance and decrypts the payload.

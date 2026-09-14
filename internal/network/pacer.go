@@ -110,37 +110,11 @@ func (p *AdaptivePacer) ForceEvaluateWindow() {
 	}
 }
 
-// Pace introduces micro-delays between packet bursts when congestion or DPI throttling is active.
+// Pace maintains packet pacing statistics without stalling the kernel packet pipeline.
 func (p *AdaptivePacer) Pace() {
 	p.mu.Lock()
-	loss := p.currentLoss
 	p.burstCounter++
-	burstMax := p.maxBurst
 	p.mu.Unlock()
-
-	if loss <= 0.05 {
-		// Clean network: yield every maxBurst packets
-		if p.burstCounter >= burstMax {
-			p.mu.Lock()
-			p.burstCounter = 0
-			p.mu.Unlock()
-			time.Sleep(100 * time.Microsecond)
-		}
-		return
-	}
-
-	// Active congestion / DPI drop detected (> 5% loss):
-	// Pace packets proportionally to loss rate (0.5ms - 5ms delay)
-	if p.burstCounter >= 2 {
-		p.mu.Lock()
-		p.burstCounter = 0
-		p.mu.Unlock()
-		paceDelay := time.Duration(float64(time.Millisecond) * (1.0 + loss*8.0))
-		if paceDelay > 6*time.Millisecond {
-			paceDelay = 6 * time.Millisecond
-		}
-		time.Sleep(paceDelay)
-	}
 }
 
 // KeepAliveMultiplier calculates a scaling factor (1.0 - 3.0) for keepalive intervals.

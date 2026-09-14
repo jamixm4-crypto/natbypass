@@ -1510,13 +1510,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
 					for _, p := range registry.List() {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
-							// Connected peer: send keepalive only if no recent data flowing (<10s)
-							dataFresh := !p.LastDirectSeen.IsZero() && now.Sub(p.LastDirectSeen) < 10*time.Second
+							// Connected peer: send keepalive only if no recent data flowing (<20s)
+							dataFresh := !p.LastDirectSeen.IsZero() && now.Sub(p.LastDirectSeen) < 20*time.Second
 							if !isForceTCP && puncher != nil && p.Transport != "tcp_direct" && !dataFresh {
 								_ = puncher.SendKeepAlive(p.ActiveEndpoint)
-								if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
-									_ = puncher.SendHolePunchProbe(p.STUNAddr)
-								}
 							}
 							// Clear backoff on successful connection
 							delete(probeBackoff, p.DeviceID)
@@ -1778,6 +1775,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								p.Latency = 0
 								registry.Upsert(p)
 							}
+							continue
+						}
+						// Skip active ICMP ping if data packet flowed recently (<30s)
+						if !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 30*time.Second {
 							continue
 						}
 						vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])

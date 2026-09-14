@@ -1773,9 +1773,6 @@ func (p *UDPPuncher) readLoop() {
 			return
 		}
 
-		// Гарантированный выход при закрытии контекста
-		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-
 		n, remoteAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {

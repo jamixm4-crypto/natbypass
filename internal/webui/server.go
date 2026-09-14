@@ -202,6 +202,28 @@ func (s *Server) SetConfigPath(path string) {
 	}
 }
 
+// resolveConfigPath возвращает реальный путь к файлу конфигурации с учетом роутеров Linux/Keenetic
+func (s *Server) resolveConfigPath() string {
+	cfgPath := s.configPath
+	if cfgPath == "" || cfgPath == "config.yaml" {
+		if runtime.GOOS == "linux" {
+			if _, err := os.Stat("/opt/etc/natbypass/config.yaml"); err == nil {
+				return "/opt/etc/natbypass/config.yaml"
+			}
+			if _, err := os.Stat("/etc/natbypass/config.yaml"); err == nil {
+				return "/etc/natbypass/config.yaml"
+			}
+			if _, err := os.Stat("/opt/etc/natbypass"); err == nil {
+				return "/opt/etc/natbypass/config.yaml"
+			}
+		}
+		if cfgPath == "" {
+			return "config.yaml"
+		}
+	}
+	return cfgPath
+}
+
 // SetConfig привязывает объект конфигурации рантайма
 func (s *Server) SetConfig(cfg *config.Config) {
 	s.cfg = cfg
@@ -947,7 +969,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta56"
+		ver = "1.9.226-beta57"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1095,21 +1117,20 @@ func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		cfgPath := s.configPath
-		if cfgPath == "" || cfgPath == "config.yaml" {
-			if runtime.GOOS == "linux" {
-				if _, err := os.Stat("/etc/natbypass/config.yaml"); err == nil {
-					cfgPath = "/etc/natbypass/config.yaml"
-				} else if _, err := os.Stat("/opt/etc/natbypass/config.yaml"); err == nil {
-					cfgPath = "/opt/etc/natbypass/config.yaml"
-				}
-			}
-		}
+		cfgPath := s.resolveConfigPath()
 		cfg, err := config.Load(cfgPath)
 		if err != nil || cfg == nil {
 			cfg = &config.Config{}
 			cfg.WebUI.Port = s.port
 			cfg.WebUI.Enabled = true
+		}
+		if s.cfg != nil && s.cfg.App.DeviceName != "" {
+			cfg.App.DeviceName = s.cfg.App.DeviceName
+		} else if cfg.App.DeviceName == "" && s.deviceName != "" {
+			cfg.App.DeviceName = s.deviceName
+		}
+		if cfg.App.DeviceID == "" && s.state != nil && s.state.DeviceID != "" {
+			cfg.App.DeviceID = s.state.DeviceID
 		}
 		if runtime.GOOS == "windows" {
 			cfg.App.AutoStart = autostart.IsAutoStartEnabled("NatBypass")
@@ -1123,10 +1144,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		targetPath := s.configPath
-		if targetPath == "" {
-			targetPath = "config.yaml"
-		}
+		targetPath := s.resolveConfigPath()
 
 		existingCfg, _ := config.Load(targetPath)
 		if existingCfg == nil {
@@ -1148,6 +1166,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 		if s.cfg != nil {
 			*s.cfg = *existingCfg
+		}
+		if req.App.DeviceName != "" {
+			s.deviceName = req.App.DeviceName
+			if s.state != nil {
+				s.state.DeviceID = req.App.DeviceName
+			}
 		}
 		if s.onConfigChange != nil {
 			s.onConfigChange()
@@ -1739,13 +1763,23 @@ func (s *Server) handleDeviceRename(w http.ResponseWriter, r *http.Request) {
 	if s.state != nil {
 		s.state.DeviceID = req.Name
 	}
-	cfg, _ := config.Load(s.configPath)
+	if s.cfg != nil {
+		s.cfg.App.DeviceName = req.Name
+		s.cfg.App.DeviceID = req.Name
+		s.cfg.App.Name = req.Name
+	}
+
+	targetPath := s.resolveConfigPath()
+	cfg, _ := config.Load(targetPath)
 	if cfg != nil {
 		cfg.App.DeviceName = req.Name
-		_ = config.Save(cfg, s.configPath, true)
+		cfg.App.DeviceID = req.Name
+		cfg.App.Name = req.Name
+		_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
+		_ = config.Save(cfg, targetPath, true)
 	}
 	s.AddEvent("info", fmt.Sprintf("Устройство переименовано: %s → %s", oldName, req.Name), "")
-	slog.Info("Устройство переименовано через Web UI", "old", oldName, "new", req.Name)
+	slog.Info("Устройство переименовано через Web UI", "old", oldName, "new", req.Name, "path", targetPath)
 	if s.onConfigChange != nil {
 		s.onConfigChange()
 	}
@@ -1915,7 +1949,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta56"
+		ver = "1.9.226-beta57"
 	}
 
 	vip := s.state.VirtualIP
@@ -2560,11 +2594,14 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, _ := config.Load(s.configPath)
+	targetPath := s.resolveConfigPath()
+	cfg, _ := config.Load(targetPath)
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
 	cfg.App.DeviceName = req.DeviceName
+	cfg.App.DeviceID = req.DeviceName
+	cfg.App.Name = req.DeviceName
 	if req.PublishInterval > 0 {
 		cfg.App.PublishInterval = req.PublishInterval
 	}
@@ -2576,6 +2613,9 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		cfg.WebUI.AutoOpenBrowser = req.AutoOpenBrowser
 	}
 	s.deviceName = req.DeviceName
+	if s.state != nil {
+		s.state.DeviceID = req.DeviceName
+	}
 	if req.VirtualIP != "" {
 		cleanVIP := strings.TrimSpace(strings.Split(req.VirtualIP, "/")[0])
 		cfg.Network.Address = req.VirtualIP
@@ -2671,25 +2711,14 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		_ = autostart.SetAutoStart("NatBypass", exePath, req.AutoStart)
 	}
 
-	targetPath := s.configPath
-	if targetPath == "" || targetPath == "config.yaml" {
-		if runtime.GOOS == "linux" {
-			if _, err := os.Stat("/etc/natbypass"); err == nil {
-				targetPath = "/etc/natbypass/config.yaml"
-			} else if _, err := os.Stat("/opt/etc/natbypass"); err == nil {
-				targetPath = "/opt/etc/natbypass/config.yaml"
-			} else {
-				targetPath = "config.yaml"
-			}
-		} else {
-			targetPath = "config.yaml"
-		}
-	}
-
 	if err := config.Save(cfg, targetPath, isWindows); err != nil {
 		slog.Error("Ошибка сохранения конфигурации", "path", targetPath, "err", err)
 		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения настроек: "+err.Error())
 		return
+	}
+
+	if s.cfg != nil && cfg != nil {
+		*s.cfg = *cfg
 	}
 
 	// Динамическое применение нового MQTT топика в работающем демоне

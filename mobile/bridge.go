@@ -38,7 +38,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta56"
+const Version          = "1.9.226-beta57"
 
 
 
@@ -507,7 +507,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 			puncher.SetCipherKey(activeProf.NetworkKey)
 		}
-		shaper := network.NewTrafficShaper(true)
+		shaper := network.NewTrafficShaper(false)
 		shaper.SetProfile(network.ProfileWebRTC)
 		puncher.SetTrafficShaper(shaper)
 	}

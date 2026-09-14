@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta56"
+	Version = "1.9.226-beta57"
 	Commit  = "release"
 )
 
@@ -5477,10 +5477,10 @@ func startEngineFromConfig(c *config.Config) {
 					}
 					for _, p := range peers {
 						if p.DirectP2P && p.ActiveEndpoint != "" {
-							// Connected peer: send keepalive at most once every KeepAliveInterval (15s).
-							// Skip keepalive if data packet was sent/received recently (< 10 seconds).
+							// Connected peer: send keepalive at most once every KeepAliveInterval (25s).
+							// Skip keepalive if data packet was sent/received recently (< 20 seconds).
 							lastKA := lastKeepAliveSent[p.DeviceID]
-							dataFresh := !p.LastDirectSeen.IsZero() && now.Sub(p.LastDirectSeen) < 10*time.Second
+							dataFresh := !p.LastDirectSeen.IsZero() && now.Sub(p.LastDirectSeen) < 20*time.Second
 							if !isForceTCP && udpPuncher != nil && p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" {
 								if !dataFresh && now.Sub(lastKA) >= constants.KeepAliveInterval {
 									lastKeepAliveSent[p.DeviceID] = now
@@ -5633,6 +5633,10 @@ func startEngineFromConfig(c *config.Config) {
 							p.Latency = 0
 							registry.Upsert(p)
 						}
+						continue
+					}
+					// Skip active ICMP ping if data packet flowed recently (<30s)
+					if !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 30*time.Second {
 						continue
 					}
 					vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])

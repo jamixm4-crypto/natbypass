@@ -4892,7 +4892,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
           // App / System Settings
           if (document.getElementById('cfgNick')) {
-            document.getElementById('cfgNick').value = app.device_name || app.DeviceName || '';
+            const currentNick = (document.getElementById('userNameLabel') ? document.getElementById('userNameLabel').innerText.trim() : '');
+            const serverNick = app.device_name || app.DeviceName || app.device_id || app.DeviceID || '';
+            const finalNick = serverNick || (currentNick !== 'Мой компьютер' && currentNick !== 'Мой ПК' ? currentNick : '');
+            if (finalNick) {
+              document.getElementById('cfgNick').value = finalNick;
+            }
           }
           if (document.getElementById('cfgInterval')) {
             document.getElementById('cfgInterval').value = app.publish_interval || app.PublishInterval || 8;

@@ -169,3 +169,94 @@ func TestConfigAPISerializationAndPersistence(t *testing.T) {
 
 	_ = os.RemoveAll(tempDir)
 }
+
+func TestDeviceRenameSync(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "config.yaml")
+
+	initialCfg := &config.Config{
+		App: config.AppConfig{
+			Name:       "NatBypass",
+			DeviceName: "", // initially empty
+		},
+		WebUI: config.WebUIConfig{
+			Enabled: true,
+			Port:    8080,
+		},
+	}
+	_ = config.Save(initialCfg, cfgPath, false)
+
+	reg := peer.NewRegistry()
+	sig := signaling.NewFallbackManager(nil)
+	server := NewServer(8080, "", "", reg, sig)
+	server.SetConfigPath(cfgPath)
+	server.SetConfig(initialCfg)
+	server.SetDeviceName("InitialNode")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/config", server.handleConfig)
+	mux.HandleFunc("/api/device/rename", server.handleDeviceRename)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// 1. Initially, GET /api/config should return the server deviceName if empty in config
+	resp, err := http.Get(ts.URL + "/api/config")
+	if err != nil {
+		t.Fatalf("GET /api/config failed: %v", err)
+	}
+	var getRes struct {
+		Data struct {
+			App struct {
+				DeviceName string `json:"device_name"`
+			} `json:"app"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&getRes)
+	resp.Body.Close()
+	if getRes.Data.App.DeviceName != "InitialNode" {
+		t.Errorf("Expected InitialNode, got '%s'", getRes.Data.App.DeviceName)
+	}
+
+	// 2. POST /api/device/rename
+	renameBody := bytes.NewBufferString(`{"name":"MyRenamedNode"}`)
+	postResp, err := http.Post(ts.URL+"/api/device/rename", "application/json", renameBody)
+	if err != nil {
+		t.Fatalf("POST /api/device/rename failed: %v", err)
+	}
+	postResp.Body.Close()
+
+	// Verify server in-memory state
+	if server.GetDeviceName() != "MyRenamedNode" {
+		t.Errorf("Expected server deviceName 'MyRenamedNode', got '%s'", server.GetDeviceName())
+	}
+	if initialCfg.App.DeviceName != "MyRenamedNode" {
+		t.Errorf("Expected runtime cfg DeviceName 'MyRenamedNode', got '%s'", initialCfg.App.DeviceName)
+	}
+
+	// 3. GET /api/config should now return MyRenamedNode
+	resp2, err := http.Get(ts.URL + "/api/config")
+	if err != nil {
+		t.Fatalf("GET /api/config failed: %v", err)
+	}
+	var getRes2 struct {
+		Data struct {
+			App struct {
+				DeviceName string `json:"device_name"`
+			} `json:"app"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(resp2.Body).Decode(&getRes2)
+	resp2.Body.Close()
+	if getRes2.Data.App.DeviceName != "MyRenamedNode" {
+		t.Errorf("Expected MyRenamedNode in /api/config, got '%s'", getRes2.Data.App.DeviceName)
+	}
+
+	// 4. Verify disk persistence
+	diskCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Failed to load config from disk: %v", err)
+	}
+	if diskCfg.App.DeviceName != "MyRenamedNode" {
+		t.Errorf("Expected disk DeviceName 'MyRenamedNode', got '%s'", diskCfg.App.DeviceName)
+	}
+}
