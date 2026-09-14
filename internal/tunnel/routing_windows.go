@@ -200,6 +200,9 @@ func BypassEndpoint(endpoint string) error {
 	bypassedMu.Lock()
 	defer bypassedMu.Unlock()
 	for _, hostIP := range hostIPs {
+		if hostIP == physGW {
+			continue
+		}
 		alreadyAdded := false
 		for _, prev := range lastBypassedEndpointIPs {
 			if prev == hostIP {

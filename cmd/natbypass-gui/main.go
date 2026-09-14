@@ -2107,9 +2107,22 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 		if activeExitVIP != "" && activeExitVIP != targetVIP {
 			_ = tunnel.DisableExitNodeRouting(activeExitVIP)
 		}
-		bypassIPs := []string{targetPeer.ActiveEndpoint, targetPeer.STUNAddr, targetPeer.PublicIP}
+		bypassIPs := []string{targetPeer.ActiveEndpoint, targetPeer.STUNAddr, targetPeer.PublicIP, targetPeer.LocalAddr}
 		for _, cand := range targetPeer.Candidates {
 			bypassIPs = append(bypassIPs, cand)
+		}
+		if udpPuncher != nil {
+			if targetPeer.LocalAddr != "" {
+				_ = udpPuncher.SendKeepAlive(targetPeer.LocalAddr)
+				udpPuncher.AddKeepAliveTarget(targetPeer.LocalAddr)
+			}
+			if targetPeer.ActiveEndpoint != "" {
+				_ = udpPuncher.SendKeepAlive(targetPeer.ActiveEndpoint)
+				udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
+			}
+			if targetPeer.STUNAddr != "" {
+				udpPuncher.AddKeepAliveTarget(targetPeer.STUNAddr)
+			}
 		}
 		if cfg != nil {
 			for _, stunURL := range cfg.Network.StunServers {
@@ -5087,6 +5100,17 @@ func startEngineFromConfig(c *config.Config) {
 							if targetPeer == nil && exitID != "" {
 								if ep, ok := registry.Get(exitID); ok && ep.Online {
 									targetPeer = ep
+								} else if ep, ok := registry.GetByVirtualIP(exitID); ok && ep.Online {
+									targetPeer = ep
+								} else {
+									cleanExit := strings.TrimSpace(strings.Split(exitID, "/")[0])
+									for _, p := range peers {
+										pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+										if p.DeviceID == exitID || pVIP == cleanExit {
+											targetPeer = p
+											break
+										}
+									}
 								}
 							}
 
@@ -5096,6 +5120,20 @@ func startEngineFromConfig(c *config.Config) {
 									if bestEP, _, _ := guiMagicSock.GetActiveRoute(targetPeer.DeviceID); bestEP != "" {
 										targetEP = bestEP
 									}
+								}
+								// LAN Peer Priority Rule:
+								// If peer is on the same local network, prefer LocalAddr over STUNAddr to eliminate hairpin NAT blackhole on Wi-Fi routers!
+								myLocal := ""
+								myPub := ""
+								if udpPuncher != nil {
+									myLocal = udpPuncher.LocalAddr()
+									myPub = udpPuncher.MappedIPString()
+								}
+								if targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, myPub) {
+									targetEP = targetPeer.LocalAddr
+								}
+								if targetEP == "" {
+									targetEP = targetPeer.ActiveEndpoint
 								}
 								if targetEP == "" {
 									targetEP = targetPeer.STUNAddr
@@ -5137,6 +5175,10 @@ func startEngineFromConfig(c *config.Config) {
 									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
 										sentDirect = true
 									}
+								}
+								// Dual-send to LocalAddr for LAN clients to guarantee delivery across hairpin NAT
+								if !isForceTCP && !sentTCP && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && udpPuncher != nil {
+									_ = udpPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, packet, pmin, pmax)
 								}
 								// Also try STUNAddr if not direct confirmed and different from targetEP (recovers stale endpoints)
 								if !isForceTCP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && udpPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
