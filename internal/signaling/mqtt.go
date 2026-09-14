@@ -287,6 +287,10 @@ func (m *MQTTChannel) ReconnectWithBroker(newBrokerURL string) error {
 			c.Subscribe(currentTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
 				m.handleIncoming(msg)
 			})
+			peerTopicWildcard := fmt.Sprintf("%s/p/+", strings.TrimSuffix(currentTopic, "/#"))
+			c.Subscribe(peerTopicWildcard, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				m.handleIncoming(msg)
+			})
 		}
 		m.tunnelMu.RLock()
 		tTopic := m.tunnelTopic
@@ -432,8 +436,14 @@ func (m *MQTTChannel) UpdateTopic(newTopic string) {
 		if m.client.IsConnected() {
 			if oldTopic != "" {
 				m.client.Unsubscribe(oldTopic)
+				oldPeerWildcard := fmt.Sprintf("%s/p/+", strings.TrimSuffix(oldTopic, "/#"))
+				m.client.Unsubscribe(oldPeerWildcard)
 			}
 			m.client.Subscribe(newTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+				m.handleIncoming(msg)
+			})
+			newPeerWildcard := fmt.Sprintf("%s/p/+", strings.TrimSuffix(newTopic, "/#"))
+			m.client.Subscribe(newPeerWildcard, 0, func(cl mqtt.Client, msg mqtt.Message) {
 				m.handleIncoming(msg)
 			})
 			log.Info().Str("old_topic", oldTopic).Str("new_topic", newTopic).Msg("MQTT топик динамически обновлен")
@@ -441,6 +451,10 @@ func (m *MQTTChannel) UpdateTopic(newTopic string) {
 			tok := m.client.Connect()
 			if tok.WaitTimeout(3 * time.Second) && tok.Error() == nil {
 				m.client.Subscribe(newTopic, 0, func(cl mqtt.Client, msg mqtt.Message) {
+					m.handleIncoming(msg)
+				})
+				newPeerWildcard := fmt.Sprintf("%s/p/+", strings.TrimSuffix(newTopic, "/#"))
+				m.client.Subscribe(newPeerWildcard, 0, func(cl mqtt.Client, msg mqtt.Message) {
 					m.handleIncoming(msg)
 				})
 				log.Info().Str("new_topic", newTopic).Msg("MQTT переподключен и подписан на новый топик")

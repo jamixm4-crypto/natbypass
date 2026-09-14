@@ -42,6 +42,7 @@ import (
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/natbypass/natbypass/internal/system"
 	"github.com/natbypass/natbypass/internal/tray"
 	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/updater"
@@ -106,7 +107,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta57"
+	Version = "1.9.226-beta58"
 	Commit  = "release"
 )
 
@@ -7152,10 +7153,14 @@ func updateData() {
 		setControlText(hLblIpInfo, infoText)
 	}
 
+	mStats := system.GetMetrics()
 	if hLblChannels != 0 {
-		chText := fmt.Sprintf("📡 Активный режим: %s", activeChannelStr)
+		chText := fmt.Sprintf("📡 Режим: %s | 🧠 CPU: %.1f%% | RAM: %.1f MB", activeChannelStr, mStats.ProcessCPUPercent, mStats.ProcessAllocMB)
+		if mStats.SystemCPUPercent > 0 {
+			chText = fmt.Sprintf("📡 Режим: %s | 🧠 CPU: %.1f%% (sys %.0f%%) | RAM: %.1f MB", activeChannelStr, mStats.ProcessCPUPercent, mStats.SystemCPUPercent, mStats.ProcessAllocMB)
+		}
 		if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp" {
-			chText = fmt.Sprintf("📡 Режим: %s • ⚡ Direct TCP (ShadowTLS)", activeChannelStr)
+			chText += " • ⚡ Direct TCP (ShadowTLS)"
 		}
 		setControlText(hLblChannels, chText)
 	}
@@ -7170,9 +7175,9 @@ func updateData() {
 		setControlText(hLblCardSTUN, fmt.Sprintf("STUN Сокет:\r\n%s", stunStr))
 	}
 	if hLblCardSig != 0 {
-		sigText := fmt.Sprintf("Сигнальный канал:\r\n%s", activeChannelStr)
+		sigText := fmt.Sprintf("Сигнал: %s\r\nCPU: %.1f%% | RAM: %.1f MB", activeChannelStr, mStats.ProcessCPUPercent, mStats.ProcessAllocMB)
 		if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp" {
-			sigText = fmt.Sprintf("Сигнал / Режим:\r\n%s • ⚡ Direct TCP", activeChannelStr)
+			sigText = fmt.Sprintf("Сигнал: %s • TCP\r\nCPU: %.1f%% | RAM: %.1f MB", activeChannelStr, mStats.ProcessCPUPercent, mStats.ProcessAllocMB)
 		}
 		setControlText(hLblCardSig, sigText)
 	}

@@ -31,6 +31,7 @@ import (
 	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/natbypass/natbypass/internal/system"
 	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/wireguard"
 	"github.com/rs/zerolog"
@@ -38,7 +39,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta57"
+const Version          = "1.9.226-beta58"
 
 
 
@@ -2640,8 +2641,15 @@ func GetFullTelemetryJSON() string {
 		"tx_bytes":        globalTxBytes.Load(),
 		"rx_bytes":        globalRxBytes.Load(),
 		"uptime":          time.Since(globalStarted).Round(time.Second).String(),
+		"metrics":         system.GetMetrics(),
 	}
 	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+// GetSystemMetricsJSON возвращает системные метрики (CPU, RAM, горутины) в формате JSON для Android
+func GetSystemMetricsJSON() string {
+	data, _ := json.Marshal(system.GetMetrics())
 	return string(data)
 }
 

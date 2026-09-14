@@ -260,3 +260,80 @@ func TestDeviceRenameSync(t *testing.T) {
 		t.Errorf("Expected disk DeviceName 'MyRenamedNode', got '%s'", diskCfg.App.DeviceName)
 	}
 }
+
+func TestSystemMetricsAPI(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "config.yaml")
+
+	initialCfg := &config.Config{
+		App: config.AppConfig{
+			Name:       "NatBypass",
+			DeviceName: "MetricsTestNode",
+		},
+	}
+	_ = config.Save(initialCfg, cfgPath, false)
+
+	server := NewServer(8080, "", "", nil, nil)
+	server.SetConfigPath(cfgPath)
+	server.SetConfig(initialCfg)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/system/metrics", server.handleSystemMetrics)
+	mux.HandleFunc("/api/status", server.handleStatus)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// 1. GET /api/system/metrics
+	resp, err := http.Get(ts.URL + "/api/system/metrics")
+	if err != nil {
+		t.Fatalf("GET /api/system/metrics failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var mRes struct {
+		Ok   bool `json:"ok"`
+		Data struct {
+			NumCPU            int     `json:"num_cpu"`
+			Goroutines        int     `json:"goroutines"`
+			ProcessAllocBytes uint64  `json:"process_alloc_bytes"`
+			SystemTotalRAMMB  float64 `json:"system_total_ram_mb"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&mRes); err != nil {
+		t.Fatalf("Failed to decode /api/system/metrics: %v", err)
+	}
+	if !mRes.Ok {
+		t.Errorf("Expected ok=true, got false")
+	}
+	if mRes.Data.NumCPU <= 0 {
+		t.Errorf("Expected NumCPU > 0, got %d", mRes.Data.NumCPU)
+	}
+	if mRes.Data.Goroutines <= 0 {
+		t.Errorf("Expected Goroutines > 0, got %d", mRes.Data.Goroutines)
+	}
+	if mRes.Data.ProcessAllocBytes <= 0 {
+		t.Errorf("Expected ProcessAllocBytes > 0, got %d", mRes.Data.ProcessAllocBytes)
+	}
+
+	// 2. GET /api/status should include metrics
+	sResp, err := http.Get(ts.URL + "/api/status")
+	if err != nil {
+		t.Fatalf("GET /api/status failed: %v", err)
+	}
+	defer sResp.Body.Close()
+
+	var statusRes struct {
+		Ok   bool                   `json:"ok"`
+		Data map[string]interface{} `json:"data"`
+	}
+	if err := json.NewDecoder(sResp.Body).Decode(&statusRes); err != nil {
+		t.Fatalf("Failed to decode /api/status: %v", err)
+	}
+	if !statusRes.Ok {
+		t.Errorf("Expected ok=true from /api/status")
+	}
+	if _, hasMetrics := statusRes.Data["metrics"]; !hasMetrics {
+		t.Errorf("Expected 'metrics' key in /api/status response")
+	}
+}
+

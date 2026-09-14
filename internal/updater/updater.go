@@ -648,7 +648,7 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	}
 	// Fallback mirrors: для любых файлов с GitHub всегда добавляем скоростные зеркала ghproxy (актуально для РФ)
 	if strings.Contains(assetURL, "github.com/"+GithubRepo+"/releases/download/") {
-		for _, proxyPrefix := range []string{"https://ghproxy.net/", "https://gh-proxy.com/"} {
+		for _, proxyPrefix := range []string{"https://ghproxy.net/", "https://gh-proxy.com/", "https://ghproxy.cc/", "https://mirror.ghproxy.com/"} {
 			proxyURL := proxyPrefix + assetURL
 			alreadyIn := false
 			for _, u := range downloadURLs {

@@ -39,6 +39,7 @@ import (
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/peer"
 	"github.com/natbypass/natbypass/internal/signaling"
+	"github.com/natbypass/natbypass/internal/system"
 	"github.com/natbypass/natbypass/internal/updater"
 	"github.com/natbypass/natbypass/internal/tunnel"
 	"github.com/natbypass/natbypass/internal/wireguard"
@@ -416,6 +417,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/mesh/topology", s.handleMeshTopology)
 	mux.HandleFunc("/api/telemetry", s.handleTelemetry)
 	mux.HandleFunc("/api/analytics", s.handleAnalytics)
+	mux.HandleFunc("/api/system/metrics", s.handleSystemMetrics)
 	mux.HandleFunc("/api/diagnose", s.handleDiagnose)
 	mux.HandleFunc("/api/diagnostics/ping", s.handleDiagnosticsPing)
 	mux.HandleFunc("/api/diagnostics/traceroute", s.handleDiagnosticsTraceroute)
@@ -969,7 +971,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta57"
+		ver = "1.9.226-beta58"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1029,6 +1031,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	status["awg_enabled"] = awgEnabled
+	status["metrics"] = system.GetMetrics()
 
 	s.jsonResponse(w, http.StatusOK, status, "")
 }
@@ -1949,7 +1952,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta57"
+		ver = "1.9.226-beta58"
 	}
 
 	vip := s.state.VirtualIP
@@ -2034,6 +2037,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			return activeProf != nil && activeProf.NetworkKey != ""
 		}(),
 		"tun_status": s.getEffectiveTUNStatus(),
+		"metrics":    system.GetMetrics(),
 	}
 
 	s.jsonResponse(w, http.StatusOK, data, "")
@@ -2280,6 +2284,15 @@ func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	s.jsonResponse(w, http.StatusOK, data, "")
+}
+
+// handleSystemMetrics — GET /api/system/metrics — возвращает текущие системные метрики (CPU, RAM, горутины)
+func (s *Server) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+	s.jsonResponse(w, http.StatusOK, system.GetMetrics(), "")
 }
 
 // handlePeerBookmark — POST /api/peer/bookmark — сохраняет имя (закладку) для пира

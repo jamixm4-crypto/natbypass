@@ -82,6 +82,8 @@ var MirrorTrustedDomains = []string{
 	"raw.githubusercontent.com",
 	"ghproxy.net",
 	"gh-proxy.com",
+	"ghproxy.cc",
+	"mirror.ghproxy.com",
 }
 
 // ---------------------------------------------------------------------------
@@ -169,14 +171,76 @@ func fetchURL(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// fetchParallelFastest опрашивает все зеркала конкурентно (Happy Eyeballs) и возвращает результат первого успешного.
+// Это критично для РФ, где заблокированное зеркало может молча зависать на 5–10 секунд.
+func fetchParallelFastest(ctx context.Context, urls []string, perTimeout time.Duration) ([]byte, string, error) {
+	if len(urls) == 0 {
+		return nil, "", fmt.Errorf("список URL пуст")
+	}
+	if len(urls) == 1 {
+		return fetchWithFallback(ctx, urls, perTimeout)
+	}
+
+	type result struct {
+		data []byte
+		url  string
+		err  error
+	}
+
+	raceCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	resChan := make(chan result, len(urls))
+	nowSec := time.Now().Unix()
+
+	for _, u := range urls {
+		go func(targetURL string) {
+			fetchU := targetURL
+			if strings.Contains(targetURL, "?") {
+				fetchU = fmt.Sprintf("%s&_t=%d", targetURL, nowSec)
+			} else {
+				fetchU = fmt.Sprintf("%s?_t=%d", targetURL, nowSec)
+			}
+
+			reqCtx, reqCancel := context.WithTimeout(raceCtx, perTimeout)
+			defer reqCancel()
+
+			data, err := fetchURL(reqCtx, fetchU)
+			select {
+			case resChan <- result{data: data, url: targetURL, err: err}:
+			case <-raceCtx.Done():
+			}
+		}(u)
+	}
+
+	var lastErr error
+	failures := 0
+
+	for i := 0; i < len(urls); i++ {
+		select {
+		case r := <-resChan:
+			if r.err == nil && len(r.data) > 0 {
+				cancel() // Отменяем остальные запросы для экономии трафика
+				return r.data, r.url, nil
+			}
+			lastErr = r.err
+			failures++
+		case <-ctx.Done():
+			return nil, "", ctx.Err()
+		}
+	}
+
+	return nil, "", fmt.Errorf("все зеркала (%d) недоступны: %w", failures, lastErr)
+}
+
 // ---------------------------------------------------------------------------
 // fetchMirrorManifest — загрузка манифеста зеркала с фоллбеком
 // ---------------------------------------------------------------------------
 
-// fetchMirrorManifest загружает MirrorManifest из списка URL зеркал.
-// Используется как fallback когда GitHub API недоступен.
+// fetchMirrorManifest загружает MirrorManifest из списка URL зеркал с параллельным опросом (Happy Eyeballs).
+// Используется как fallback когда GitHub API недоступен или замедлен.
 func fetchMirrorManifest(ctx context.Context, manifestURLs []string) (*MirrorManifest, error) {
-	data, _, err := fetchWithFallback(ctx, manifestURLs, 5*time.Second)
+	data, _, err := fetchParallelFastest(ctx, manifestURLs, 3500*time.Millisecond)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось загрузить манифест зеркала: %w", err)
 	}
