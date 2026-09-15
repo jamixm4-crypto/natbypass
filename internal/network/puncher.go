@@ -169,6 +169,10 @@ type UDPPuncher struct {
 	// Single-Socket DHT multiplexing (Level 3 low-latency PUNCH NOW)
 	dhtHandler func(data []byte, remoteAddr *net.UDPAddr)
 	dhtMu      sync.RWMutex
+
+	// Transport escalation ladder controls (Level 1 & Level 2)
+	probesDisabled atomic.Bool
+	forceIPv6Only  atomic.Bool
 }
 
 // SetCipherKey конфигурирует ключ симметричного шифрования (ChaCha20-Poly1305) для L3 Data-plane пакетов.
@@ -217,6 +221,9 @@ func (p *UDPPuncher) activeConnFor(rAddr *net.UDPAddr) *net.UDPConn {
 
 // writeToUDP writes a packet to the target address using the correct IPv4 or IPv6 socket.
 func (p *UDPPuncher) writeToUDP(pkt []byte, rAddr *net.UDPAddr) (int, error) {
+	if p.IsForceIPv6Only() && rAddr != nil && rAddr.IP != nil && rAddr.IP.To4() != nil {
+		return 0, errors.New("IPv4 UDP blocked by ForceIPv6Only mode")
+	}
 	conn := p.activeConnFor(rAddr)
 	if conn == nil {
 		return 0, errors.New("UDP socket closed")
@@ -224,11 +231,39 @@ func (p *UDPPuncher) writeToUDP(pkt []byte, rAddr *net.UDPAddr) (int, error) {
 	return conn.WriteToUDP(pkt, rAddr)
 }
 
+// SetProbesDisabled toggles suppression of all outgoing UDP hole punching probes and keepalives.
+// When true, preserves battery and cellular radio state during severe UDP blocks.
+func (p *UDPPuncher) SetProbesDisabled(disabled bool) {
+	p.probesDisabled.Store(disabled)
+}
+
+// IsProbesDisabled reports whether outgoing UDP probes are suppressed.
+func (p *UDPPuncher) IsProbesDisabled() bool {
+	return p.probesDisabled.Load()
+}
+
+// SetForceIPv6Only toggles IPv6-only transport mode when IPv4 UDP is blocked.
+func (p *UDPPuncher) SetForceIPv6Only(v bool) {
+	p.forceIPv6Only.Store(v)
+}
+
+// IsForceIPv6Only reports whether only IPv6 candidates and probes are permitted.
+func (p *UDPPuncher) IsForceIPv6Only() bool {
+	return p.forceIPv6Only.Load()
+}
+
 // SetCurrentASN sets the active cellular carrier ASN (e.g. "AS31133") for selective port prediction.
 func (p *UDPPuncher) SetCurrentASN(asn string) {
 	p.mu.Lock()
 	p.currentASN = asn
 	p.mu.Unlock()
+}
+
+// GetCurrentASN returns the active cellular carrier ASN (e.g. "AS31133") if configured or detected.
+func (p *UDPPuncher) GetCurrentASN() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.currentASN
 }
 
 // SetOnDPIDetected registers a callback triggered when 10 direct STUN probes go unacknowledged.
@@ -606,6 +641,15 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 
 	var res []string
 	for c := range candidateSet {
+		if p.IsForceIPv6Only() {
+			host, _, err := net.SplitHostPort(c)
+			if err == nil {
+				ip := net.ParseIP(host)
+				if ip != nil && ip.To4() != nil {
+					continue // Skip IPv4 candidates in ForceIPv6Only mode
+				}
+			}
+		}
 		res = append(res, c)
 	}
 	return res
@@ -1304,12 +1348,18 @@ func (p *UDPPuncher) ScheduleSimultaneousOpenMilli(ctx context.Context, startAtU
 // SendHolePunchProbeWithDelta отправляет probe пакеты с маскировкой QUIC Initial (RFC 9000) для обхода ТСПУ/DPI
 // и выполняет delta-aware spraying при наличии известного port delta для Symmetric NAT.
 func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta int) error {
+	if p.IsProbesDisabled() {
+		return nil
+	}
 	if targetAddr == "" || p.conn == nil {
 		return nil
 	}
 	rAddr, err := p.resolveAddr(targetAddr)
 	if err != nil {
 		return err
+	}
+	if p.IsForceIPv6Only() && rAddr.IP != nil && rAddr.IP.To4() != nil {
+		return nil
 	}
 
 	nowNano := time.Now().UnixNano()
@@ -1418,7 +1468,7 @@ func (p *UDPPuncher) SendHolePunchBurst(targets []string, bursts int) {
 // SendHolePunchBurstWithDelta sends coordinated burst hole-punch probes to multiple candidate targets
 // with micro-sleeps (20-30ms) between rounds and port prediction based on remote peer delta.
 func (p *UDPPuncher) SendHolePunchBurstWithDelta(targets []string, bursts int, peerDelta int) {
-	if p == nil || len(targets) == 0 {
+	if p == nil || p.IsProbesDisabled() || len(targets) == 0 {
 		return
 	}
 	if bursts <= 0 {
@@ -1462,6 +1512,9 @@ func (p *UDPPuncher) StartKeepAliveLoop() {
 				timer.Stop()
 				return
 			case <-timer.C:
+				if p.IsProbesDisabled() {
+					continue
+				}
 				p.keepAliveMu.Lock()
 				targets := make([]string, 0, len(p.keepAliveTargets))
 				for addr := range p.keepAliveTargets {
@@ -1513,12 +1566,18 @@ func (p *UDPPuncher) HasActiveDirectTargets() bool {
 // SendKeepAlive sends a periodic active ping packet to maintain bidirectional CGNAT port mappings
 // disguised as a QUIC Chameleon probe or padded encrypted datagram with dynamic size variation.
 func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
+	if p.IsProbesDisabled() {
+		return nil
+	}
 	if targetAddr == "" || p.conn == nil {
 		return nil
 	}
 	rAddr, err := p.resolveAddr(targetAddr)
 	if err != nil {
 		return err
+	}
+	if p.IsForceIPv6Only() && rAddr.IP != nil && rAddr.IP.To4() != nil {
+		return nil
 	}
 	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
@@ -1531,7 +1590,7 @@ func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 	if hasCKey {
 		// 1. Приоритет: QUIC Initial chameleon probe (мимикрия под трафик HTTP/3)
 		if qProbe, err := BuildQUICChameleonProbe(p.myDevID, cKey); err == nil && len(qProbe) > 0 {
-			_, err = p.conn.WriteToUDP(qProbe, rAddr)
+			_, err = p.writeToUDP(qProbe, rAddr)
 			return err
 		}
 		// 2. Резерв: зашифрованная проба с переменным случайным паддингом (16..47 байт)
@@ -1543,12 +1602,12 @@ func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 		_ = crypto.SafeRandomBytes(paddedProbe[len(probeData):])
 
 		if enc, encErr := crypto.EncryptSelf(paddedProbe, cKey); encErr == nil && len(enc) > 0 {
-			_, err = p.conn.WriteToUDP(enc, rAddr)
+			_, err = p.writeToUDP(enc, rAddr)
 			return err
 		}
 	}
 
-	_, err = p.conn.WriteToUDP(probeData, rAddr)
+	_, err = p.writeToUDP(probeData, rAddr)
 	return err
 }
 

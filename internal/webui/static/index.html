@@ -1739,19 +1739,42 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               <div id="ncTSPUDetails" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">Блокировок не обнаружено</div>
             </div>
             <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">📏 PATH MTU & ПРОТОКОЛЫ</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">📏 PATH MTU & ПОРТЫ</div>
               <div id="ncMTU" style="font-size:1rem; font-weight:700; color:#fbbf24;">—</div>
               <div id="ncProtoSupport" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">—</div>
             </div>
           </div>
 
+          <!-- Вторая линия: Эскалационная лестница, Dual-Stack WAN и Задержки -->
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
+            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">🪜 ЭСКАЛАЦИЯ ТРАНСПОРТА</div>
+              <div id="ncLadderMode" style="font-size:0.95rem; font-weight:700; color:#38bdf8;">Level 0: UDP Standard</div>
+              <div id="ncLadderDetails" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">Прямой P2P UDP обмен</div>
+            </div>
+            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">🌐 DUAL-STACK WAN IP</div>
+              <div id="ncWanIPv4" style="font-size:0.88rem; font-weight:700; color:#cbd5e1;">IPv4: —</div>
+              <div id="ncWanIPv6" style="font-size:0.75rem; color:#a78bfa; margin-top:2px; word-break:break-all;">IPv6: —</div>
+            </div>
+            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px; grid-column: span 2;">
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">⚡ МАТРИЦА ЗАДЕРЖЕК ЗОНДОВ (RTT)</div>
+              <div id="ncLatencyGrid" style="display:flex; flex-wrap:wrap; gap:8px; font-size:0.76rem;">
+                <span style="color:var(--text-dim);">Ожидание зондов...</span>
+              </div>
+            </div>
+          </div>
+
           <div id="ncRecommendationCard" style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-            <div>
-              <div style="font-size:0.85rem; font-weight:700; color:#38bdf8;">✨ Оптимальный режим передачи трафика:</div>
-              <div id="ncRecommendationText" style="font-size:0.8rem; color:var(--text-muted); margin-top:3px;">Рекомендуется режим прямого UDP (AWG) для максимальной скорости и минимальных задержек.</div>
+            <div style="flex:1; min-width:280px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:0.85rem; font-weight:700; color:#38bdf8;">✨ Оптимальный режим транспорта:</span>
+                <span id="ncRecBadge" class="badge" style="background:rgba(56,189,248,0.2); color:#38bdf8; border:1px solid rgba(56,189,248,0.4); font-size:0.72rem; padding:2px 8px; border-radius:6px;">Direct UDP</span>
+              </div>
+              <div id="ncRecommendationText" style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Рекомендуется режим прямого UDP (AWG) для максимальной скорости и минимальных задержек.</div>
             </div>
             <button id="btnApplyTransport" onclick="applyRecommendedTransport()" class="btn btn-neon" style="padding:7px 16px; font-size:0.82rem;">
-              Применить рекомендацию
+              ⚡ Применить рекомендацию
             </button>
           </div>
         </div>
@@ -3790,36 +3813,44 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         if (p.ip_conflict) {
           ipConflictBadge = '<span class="badge" style="background:rgba(239,68,68,0.2); border:1px solid #ef4444; color:#fca5a5; font-size:0.72rem; margin-right:4px;">⚠️ Конфликт IP (совпадает!)</span>';
         }
+        const isIPv6Ep = Boolean(p.active_endpoint && (p.active_endpoint.includes('[') || (p.active_endpoint.split(':').length > 2)));
+        const punchMethod = p.punch_method || (isDirect ? (isIPv6Ep ? 'direct_ipv6' : 'direct') : (p.relayed_via_name || p.transport === 'relay_mesh' ? 'relay_mesh' : 'relay_mqtt'));
+
         if (!p.online) {
           p2pBadge = '<span class="badge" style="background:rgba(100,116,139,0.2); border:1px solid rgba(100,116,139,0.4); color:#94a3b8; font-size:0.72rem;">⚫ Офлайн</span>';
         } else if (p.awg_mismatch) {
           p2pBadge = '<span class="badge" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.6); color:#fca5a5; font-size:0.72rem; font-weight:700;" title="Параметры AWG (H1-H4, S1-S2, Jc) на этом узле не совпадают с вашими! Связь по WireGuard невозможна. Обновите профиль или синхронизируйте настройки">⚠️ AWG Различается (нет связи)</span>';
         } else if (p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct') {
           p2pBadge = '<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; background:linear-gradient(135deg, #10b981, #059669);">⚡ Direct P2P • 🔒 ShadowTLS 1.3</span>';
+        } else if (punchMethod === 'direct_ipv6') {
+          p2pBadge = '<span class="badge" style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.5); color:#a5b4fc; font-size:0.72rem; padding:3px 8px; font-weight:700;">🌐 IPv6 Direct • 🛡️ AWG ' + pAWGVer + '</span>';
+        } else if (punchMethod === 'predicted') {
+          p2pBadge = '<span class="badge" style="background:rgba(6,182,212,0.2); border:1px solid rgba(6,182,212,0.5); color:#67e8f9; font-size:0.72rem; padding:3px 8px; font-weight:700;">🎯 Predicted • 🛡️ AWG ' + pAWGVer + '</span>';
+        } else if (punchMethod === 'coordinated') {
+          p2pBadge = '<span class="badge" style="background:rgba(16,185,129,0.2); border:1px solid rgba(16,185,129,0.5); color:#6ee7b7; font-size:0.72rem; padding:3px 8px; font-weight:700;">⚡ Coordinated • 🛡️ AWG ' + pAWGVer + '</span>';
         } else if (isDirect) {
           if (hasAWG) {
-            p2pBadge = '<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700;">⚡ Direct P2P • 🛡️ AWG ' + pAWGVer + '</span>';
+            p2pBadge = '<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700;">🟢 Direct P2P • 🛡️ AWG ' + pAWGVer + '</span>';
           } else {
-            p2pBadge = '<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px;">⚡ Direct P2P</span>';
+            p2pBadge = '<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px;">🟢 Direct P2P</span>';
           }
         } else if (p.direct_p2p && !p.active_endpoint) {
           p2pBadge = '<span class="badge" style="background:rgba(234,179,8,0.15); border:1px solid rgba(234,179,8,0.4); color:#fde047; font-size:0.72rem;">🟡 Пробитие NAT... • 🛡️ AWG ' + pAWGVer + '</span>';
-        } else if (p.nat_blocked) {
-          p2pBadge = '<span class="badge" style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; font-size:0.72rem;">🔒 Relay • 🛡️ AWG ' + pAWGVer + '</span>';
+        } else if (punchMethod === 'relay_mesh' || p.relayed_via_name) {
+          const via = p.relayed_via_name || p.relayed_via_vip || 'Mesh Relay';
+          p2pBadge = '<span class="badge" style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; font-size:0.72rem; padding:3px 8px;">🛡️ Relay: ' + via + ' • 🛡️ AWG ' + pAWGVer + '</span>';
         } else {
-          p2pBadge = '<span class="badge badge-cyan" style="font-size:0.72rem;">🌐 Relay • 🛡️ AWG ' + pAWGVer + '</span>';
+          p2pBadge = '<span class="badge badge-cyan" style="font-size:0.72rem;">☁️ Relay (MQTT) • 🛡️ AWG ' + pAWGVer + '</span>';
         }
 
-
-        
         // Реальный пинг: отображается ТОЛЬКО при наличии прямого канала (Direct P2P / ShadowTLS), в режиме Relay пинг отсутствует
         const latMs = (p.latency_ms !== undefined && p.latency_ms !== null && p.latency_ms > 0) 
           ? p.latency_ms 
           : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
         let latDisplay = `<span style="color:var(--text-dim);">—</span>`;
-        if (p.relayed_via_name || p.transport === 'relay_mesh') {
+        if (punchMethod === 'relay_mesh' || p.relayed_via_name) {
           const via = p.relayed_via_name || (p.relayed_via_vip ? p.relayed_via_vip : 'Mesh Relay');
-          latDisplay = `<span class="badge" style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; font-size:0.72rem; padding:2px 7px;" title="Трафик маршрутизируется через Mesh Relay (Уровень 5)">🛡️ Через Relay (${via})</span>`;
+          latDisplay = `<span class="badge" style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; font-size:0.72rem; padding:2px 7px;" title="Трафик маршрутизируется через Mesh Relay (Уровень 5)">🛡️ Relay: ${via}</span>`;
         } else if (isDirect && latMs > 0) {
           let dot = '🟢';
           let col = '#4ade80'; // Зеленый (< 100 ms)
@@ -3830,9 +3861,25 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             dot = '🟡'; 
             col = '#fbbf24'; // Желтый (100-300 ms)
           }
+          if (punchMethod === 'direct_ipv6') {
+            dot = '🌐';
+            col = '#a5b4fc';
+          } else if (punchMethod === 'predicted') {
+            dot = '🎯';
+            col = '#67e8f9';
+          } else if (punchMethod === 'coordinated') {
+            dot = '⚡';
+            col = '#6ee7b7';
+          }
           latDisplay = `<span style="color:${col}; font-weight:700;" class="mono">${dot} ${latMs} ms</span>`;
         } else if (isDirect) {
-          latDisplay = `<span style="color:#4ade80; font-weight:600;" class="mono">🟢 P2P (OK)</span>`;
+          let tag = '🟢 Direct P2P';
+          if (punchMethod === 'direct_ipv6') tag = '🌐 Direct IPv6';
+          else if (punchMethod === 'predicted') tag = '🎯 Predicted';
+          else if (punchMethod === 'coordinated') tag = '⚡ Coordinated';
+          latDisplay = `<span style="color:#4ade80; font-weight:600;" class="mono">${tag}</span>`;
+        } else if (punchMethod === 'relay_mqtt') {
+          latDisplay = `<span style="color:var(--text-dim);" class="mono">☁️ MQTT Relay</span>`;
         } else {
           latDisplay = `<span style="color:var(--text-dim);" class="mono">—</span>`;
         }
@@ -4857,29 +4904,123 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     async function runDiag() {
       const b = document.getElementById('diagBox');
-      b.innerText = '⏳ Запуск комплексной диагностики сети...';
+      b.innerHTML = '<div style="color:var(--text-muted); font-style:italic;">⏳ Выполняется глубокий системный аудит сети, портов, пиров и рантайма...</div>';
       try {
         const res = await fetch('/api/diagnose');
         const json = await res.json();
         if (json.ok && json.data) {
           const d = json.data;
-          lastDiagReport = [
-            `--- Диагностика NatBypass [${new Date().toLocaleString()}] ---`,
-            `Интернет: ${d.internet.ok ? 'OK (' + (d.internet.extra || '') + ')' : 'FAIL (' + d.internet.detail + ')'}`,
-            `Внешний IP: ${d.public_ip.ok ? d.public_ip.extra : d.public_ip.detail}`,
-            `STUN Сокет: ${d.stun.ok ? d.stun.extra : d.stun.detail}`,
-            `Сигнальный канал: ${d.channel.ok ? d.channel.extra : d.channel.detail}`,
-            `Устройства в сети: ${d.peers.ok ? d.peers.detail : d.peers.detail}`,
-            `NAT-тип: ${d.nat_type.ok ? d.nat_type.detail : d.nat_type.detail}`
-          ].join('\n');
+          const nowStr = new Date().toLocaleString();
+          
+          // Formatted ASCII debug report for clipboard copy
+          const lines = [
+            `========================================================================`,
+            `           СИСТЕМНАЯ ДИАГНОСТИКА & ДЕБАГГЕР NATBYPASS [${nowStr}]`,
+            `========================================================================`,
+            `1. СЕТЬ & МАРШРУТИЗАЦИЯ:`,
+            `   - Доступ в Интернет: ${d.internet?.ok ? '✅ OK (' + (d.internet?.extra || '1.1.1.1/8.8.8.8') + ')' : '❌ FAIL (' + (d.internet?.detail || '') + ')'}`,
+            `   - Egress интерфейс: ${d.egress?.interface || 'N/A'} (Шлюз: ${d.egress?.gateway || 'N/A'}, MTU: ${d.egress?.mtu || 1420})`,
+            `   - Внешний IPv4: ${d.public_ip?.ok ? d.public_ip?.extra : d.public_ip?.detail}`,
+            `   - Глобальный IPv6: ${d.ipv6?.ok ? d.ipv6?.extra + ' (' + d.ipv6?.detail + ')' : (d.ipv6?.detail || 'Не обнаружен')}`,
+            `   - TCP 443 доступность: ${d.tcp_443?.ok ? '✅ OK (' + d.tcp_443?.extra + ')' : '❌ ' + (d.tcp_443?.detail || 'Блок')}`,
+            ``,
+            `2. СТАТУС STUN & ТСПУ/DPI:`,
+            `   - STUN UDP Сокет: ${d.stun?.ok ? d.stun?.extra : d.stun?.detail}`,
+            `   - NAT-тип: ${d.nat_type?.detail || 'Unknown'}`,
+            `   - ТСПУ / DPI Цензура: ${d.tspu?.detected ? '⚠️ ОБНАРУЖЕНА (' + d.tspu?.details + ')' : '✅ Чисто (свободный UDP)'}`,
+            ``,
+            `3. ЛЕСТНИЦА ЭСКАЛАЦИИ ТРАНСПОРТА:`,
+            `   - Активный режим: ${d.transport_ladder?.summary || 'Standard UDP'} [${d.transport_ladder?.mode || 'auto'}]`,
+            `   - Force IPv6-Only: ${d.transport_ladder?.force_ipv6_only ? 'АКТИВЕН' : 'Выключен'}`,
+            `   - Подавление UDP проб: ${d.transport_ladder?.probes_disabled ? 'АКТИВНО (экономия батареи/радио)' : 'Выключено'}`,
+            `   - MQTT L3 IP Fallback: ${d.transport_ladder?.mqtt_fallback ? 'АКТИВЕН' : 'Выключен'}`,
+            `   - TCP Relay статус: ${d.transport_ladder?.tcp_relay_connected ? 'Подключен к узлу-релею на порту 443' : (d.transport_ladder?.tcp_relay_server_port > 0 ? 'Сервер слушает на :' + d.transport_ladder.tcp_relay_server_port : 'Неактивен')}`,
+            ``,
+            `4. ВИРТУАЛЬНЫЙ АДАПТЕР (TUN/WINTUN):`,
+            `   - Mesh IP адрес: ${d.tun?.virtual_ip || '10.1.1.x'}`,
+            `   - Драйвер: ${d.tun?.status?.Driver || 'Wintun / TUN (активен)'}`,
+            ``,
+            `5. СЕТЬ & MESH-ПИРЫ:`,
+            `   - Сигнальный канал: ${d.channel?.ok ? d.channel?.extra : d.channel?.detail}`,
+            `   - Всего участников: ${d.mesh_peers?.total ?? d.peers?.detail ?? 0} (P2P: ${d.mesh_peers?.direct_p2p ?? 0}, IPv6: ${d.mesh_peers?.direct_ipv6 ?? 0}, TCP: ${d.mesh_peers?.direct_tcp ?? 0}, Relay: ${(d.mesh_peers?.relay_mesh ?? 0) + (d.mesh_peers?.relay_mqtt ?? 0)})`,
+            ...(d.mesh_peers?.ranking?.map(p => `     -> ${p.name} (${p.vip}) | ${p.method} | Ping: ${p.ping_ms > 0 ? p.ping_ms + 'ms' : 'N/A'}`) || []),
+            ``,
+            `6. РАНТАЙМ & ПРОИЗВОДИТЕЛЬНОСТЬ:`,
+            `   - ОС/Архитектура: ${d.system?.os || 'N/A'} / ${d.system?.arch || 'N/A'}`,
+            `   - Потоки (Горутины): ${d.system?.num_goroutine || 0}`,
+            `   - Память RAM: ${(d.system?.alloc_mb || 0).toFixed(2)} MB (Sys: ${(d.system?.sys_mb || 0).toFixed(2)} MB, GC: ${d.system?.num_gc || 0})`,
+            `   - Аптайм: ${d.system?.uptime || '0s'}`,
+            `========================================================================`
+          ];
+          lastDiagReport = lines.join('\n');
 
+          // Rich HTML Dashboard Rendering
           b.innerHTML = `
-            <div>🌐 <b>Интернет:</b> ${d.internet.ok ? '✅ ' + d.internet.detail + (d.internet.extra ? ' (' + d.internet.extra + ')' : '') : '❌ ' + d.internet.detail}</div>
-            <div>🏠 <b>Внешний IP:</b> ${d.public_ip.ok ? '✅ ' + d.public_ip.extra : '⏳ ' + d.public_ip.detail}</div>
-            <div>⚡ <b>STUN Сокет:</b> ${d.stun.ok ? '✅ ' + d.stun.extra : '⚠️ ' + d.stun.detail}</div>
-            <div>📡 <b>Сигнальный канал:</b> ${d.channel.ok ? '✅ ' + d.channel.extra : '⚠️ ' + d.channel.detail}</div>
-            <div>👥 <b>Устройства в сети:</b> ${d.peers.ok ? '✅ ' + d.peers.detail : '📡 ' + d.peers.detail}</div>
-            <div>🔒 <b>NAT-тип:</b> ${d.nat_type.ok ? '✅ ' + d.nat_type.detail : '⚠️ ' + d.nat_type.detail}</div>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <!-- Section 1: Network & Routes -->
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px 14px;">
+                <div style="font-weight:700; color:#38bdf8; font-size:0.85rem; margin-bottom:6px;">🌐 1. СЕТЬ & МАРШРУТИЗАЦИЯ</div>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:6px; font-size:0.82rem;">
+                  <div><b>Интернет:</b> ${d.internet?.ok ? '✅ Доступен' : '❌ Ограничен'} <span style="color:var(--text-dim); font-size:0.75rem;">(${escapeHtml(d.internet?.extra || '')})</span></div>
+                  <div><b>Интерфейс:</b> ${escapeHtml(d.egress?.interface || 'Авто')} <span style="color:var(--text-dim); font-size:0.75rem;">(GW: ${escapeHtml(d.egress?.gateway || '—')}, MTU: ${d.egress?.mtu || 1420})</span></div>
+                  <div><b>Внешний IPv4:</b> <span style="color:#cbd5e1;">${escapeHtml(d.public_ip?.extra || d.public_ip?.detail || '—')}</span></div>
+                  <div><b>Глобальный IPv6:</b> <span style="color:${d.ipv6?.ok ? '#a78bfa' : 'var(--text-dim)'};">${escapeHtml(d.ipv6?.extra || 'Отсутствует')}</span></div>
+                  <div><b>TCP 443:</b> ${d.tcp_443?.ok ? '✅ Доступен (' + d.tcp_443?.extra + ')' : '❌ Заблокирован'}</div>
+                </div>
+              </div>
+
+              <!-- Section 2: NAT & TSPU DPI -->
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px 14px;">
+                <div style="font-weight:700; color:#a78bfa; font-size:0.85rem; margin-bottom:6px;">🔬 2. СТАТУС STUN & ТСПУ DPI</div>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:6px; font-size:0.82rem;">
+                  <div><b>STUN Сокет:</b> ${d.stun?.ok ? '✅ ' + escapeHtml(d.stun?.extra) : '⚠️ ' + escapeHtml(d.stun?.detail)}</div>
+                  <div><b>Классификация NAT:</b> ${escapeHtml(d.nat_type?.detail || '—')}</div>
+                  <div style="grid-column: span 2;"><b>Цензура ТСПУ:</b> ${d.tspu?.detected ? '<span style="color:#ef4444; font-weight:700;">⚠️ ОБНАРУЖЕНА</span> — ' + escapeHtml(d.tspu?.details) : '<span style="color:#4ade80; font-weight:700;">✅ Чисто</span> — блокировок UDP не обнаружено'}</div>
+                </div>
+              </div>
+
+              <!-- Section 3: Transport Escalation Ladder -->
+              <div style="background:rgba(56,189,248,0.04); border:1px solid rgba(56,189,248,0.2); border-radius:8px; padding:10px 14px;">
+                <div style="font-weight:700; color:#38bdf8; font-size:0.85rem; margin-bottom:6px;">🪜 3. ЛЕСТНИЦА ЭСКАЛАЦИИ ТРАНСПОРТА</div>
+                <div style="font-size:0.84rem; font-weight:700; color:#cbd5e1; margin-bottom:4px;">${escapeHtml(d.transport_ladder?.summary || 'Standard UDP')}</div>
+                <div style="display:flex; flex-wrap:wrap; gap:8px; font-size:0.75rem; margin-top:6px;">
+                  <span class="badge" style="background:rgba(255,255,255,0.05); color:#cbd5e1; border:1px solid rgba(255,255,255,0.1);">IPv6-Only: ${d.transport_ladder?.force_ipv6_only ? '✅ Вкл' : 'Выкл'}</span>
+                  <span class="badge" style="background:rgba(255,255,255,0.05); color:#cbd5e1; border:1px solid rgba(255,255,255,0.1);">UDP Пробы: ${d.transport_ladder?.probes_disabled ? '🛑 Подавлены (Battery Saver)' : 'Активны'}</span>
+                  <span class="badge" style="background:rgba(255,255,255,0.05); color:#cbd5e1; border:1px solid rgba(255,255,255,0.1);">MQTT L3 Fallback: ${d.transport_ladder?.mqtt_fallback ? '✅ Активен' : 'Выкл'}</span>
+                  <span class="badge" style="background:rgba(255,255,255,0.05); color:#cbd5e1; border:1px solid rgba(255,255,255,0.1);">TCP Relay (443): ${d.transport_ladder?.tcp_relay_connected ? '🟢 Подключен' : (d.transport_ladder?.tcp_relay_server_port > 0 ? '📡 Сервер :' + d.transport_ladder.tcp_relay_server_port : 'Неактивен')}</span>
+                </div>
+              </div>
+
+              <!-- Section 4: Mesh Peers & Transport breakdown -->
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px 14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <span style="font-weight:700; color:#4ade80; font-size:0.85rem;">👥 4. MESH-СЕТЬ & СОСТОЯНИЕ УЗЛОВ</span>
+                  <span style="font-size:0.75rem; color:var(--text-dim);">Сигнализация: ${escapeHtml(d.channel?.extra || d.channel?.detail || 'MQTT')}</span>
+                </div>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:6px;">
+                  Всего пиров: <b>${d.mesh_peers?.total ?? d.peers?.detail ?? 0}</b> | Direct P2P: <b>${d.mesh_peers?.direct_p2p ?? 0}</b> | Direct IPv6: <b>${d.mesh_peers?.direct_ipv6 ?? 0}</b> | TCP Direct: <b>${d.mesh_peers?.direct_tcp ?? 0}</b> | Relay: <b>${(d.mesh_peers?.relay_mesh ?? 0) + (d.mesh_peers?.relay_mqtt ?? 0)}</b>
+                </div>
+                ${(d.mesh_peers?.ranking && d.mesh_peers.ranking.length > 0) ? `
+                  <div style="display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto;">
+                    ${d.mesh_peers.ranking.map(p => `
+                      <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.76rem; background:rgba(255,255,255,0.02); padding:3px 8px; border-radius:4px;">
+                        <span><b>${escapeHtml(p.name)}</b> <span style="color:var(--text-dim);">(${escapeHtml(p.vip)})</span></span>
+                        <span style="display:flex; gap:6px; align-items:center;">
+                          <span class="badge" style="font-size:0.68rem; padding:1px 6px;">${escapeHtml(p.method)}</span>
+                          <span style="color:${p.ping_ms > 0 && p.ping_ms < 100 ? '#4ade80' : '#fbbf24'}; font-family:monospace;">${p.ping_ms > 0 ? p.ping_ms + ' ms' : 'N/A'}</span>
+                        </span>
+                      </div>
+                    `).join('')}
+                  </div>
+                ` : '<div style="font-size:0.75rem; color:var(--text-dim); font-style:italic;">Участники в сети пока не обнаружены...</div>'}
+              </div>
+
+              <!-- Section 5: Process & Memory -->
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem; color:var(--text-dim); padding:4px 6px;">
+                <span>🧠 <b>Рантайм:</b> ${escapeHtml(d.system?.os || '')} ${escapeHtml(d.system?.arch || '')} | ${d.system?.num_goroutine || 0} Горутин | ${(d.system?.alloc_mb || 0).toFixed(2)} MB RAM (Sys: ${(d.system?.sys_mb || 0).toFixed(2)} MB, GC: ${d.system?.num_gc || 0})</span>
+                <span>⏱️ <b>Uptime:</b> ${escapeHtml(d.system?.uptime || '—')}</span>
+              </div>
+            </div>
           `;
         }
       } catch (e) {
@@ -4936,16 +5077,74 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           }
 
           document.getElementById('ncMTU').innerText = d.path_mtu ? `${d.path_mtu} байт` : '1420 байт';
-          document.getElementById('ncProtoSupport').innerText = `UDP: ${d.udp_enabled ? '✅' : '❌'} | IPv6: ${d.ipv6_enabled ? '✅' : '❌'}`;
+          const p4 = d.udp_blocked_ipv4 ? '❌ Блок' : '✅ OK';
+          const p6 = d.ipv6_available ? (d.udp_blocked_ipv6 ? '⚠️ IPv6 (UDP блок)' : '✅ IPv6 OK') : '❌ Нет IPv6';
+          const t443 = d.tcp_443_ok ? '✅ TCP 443 OK' : '❌ TCP 443 Блок';
+          document.getElementById('ncProtoSupport').innerText = `IPv4: ${p4} | ${p6} | ${t443}`;
 
+          // Ladder Mode & WAN IPs
+          const lModeEl = document.getElementById('ncLadderMode');
+          const lDetEl = document.getElementById('ncLadderDetails');
+          if (lModeEl) lModeEl.innerText = d.escalation_summary || (d.escalation_mode ? `Level ${d.escalation_level}: ${d.escalation_mode}` : 'Level 0: UDP Standard');
+          if (lDetEl) {
+            if (d.escalation_level === 1) lDetEl.innerText = 'Прямой IPv6 сквозной туннель (Level 1)';
+            else if (d.escalation_level === 3) lDetEl.innerText = 'TCP 443 Peer-as-Relay (Маскировка под HTTPS)';
+            else if (d.escalation_level === 2) lDetEl.innerText = 'MQTT L3 IP-туннель (UDP пробы подавлены)';
+            else lDetEl.innerText = 'Прямой P2P UDP обмен пакетами';
+          }
+
+          const w4El = document.getElementById('ncWanIPv4');
+          const w6El = document.getElementById('ncWanIPv6');
+          if (w4El) w4El.innerText = 'IPv4: ' + (d.public_ipv4 || '—');
+          if (w6El) w6El.innerText = 'IPv6: ' + (d.public_ipv6 || (d.ipv6_available ? 'Доступен (без публичного STUN)' : 'Отсутствует'));
+
+          // Latency Matrix
+          const gridEl = document.getElementById('ncLatencyGrid');
+          if (gridEl && d.latencies_ms) {
+            gridEl.innerHTML = '';
+            const labels = {
+              'google_stun': 'STUN (Google 19302)',
+              'cloudflare_dns': 'DNS (Cloudflare 53)',
+              'yandex_dns': 'DNS (Yandex 53)',
+              'google_dns_ipv6': 'DNS IPv6 (Google 53)',
+              'cloudflare_tcp443': 'TCP 443 (Cloudflare)',
+              'google_tcp443': 'TCP 443 (Google)'
+            };
+            for (const [k, v] of Object.entries(d.latencies_ms)) {
+              const name = labels[k] || k;
+              const isOk = v >= 0;
+              const badge = document.createElement('span');
+              badge.className = 'badge';
+              badge.style.background = isOk ? 'rgba(74,222,128,0.1)' : 'rgba(239,68,68,0.1)';
+              badge.style.color = isOk ? '#4ade80' : '#ef4444';
+              badge.style.border = '1px solid ' + (isOk ? 'rgba(74,222,128,0.3)' : 'rgba(239,68,68,0.3)');
+              badge.innerText = `${name}: ${isOk ? v + ' ms' : '❌ Таймаут'}`;
+              gridEl.appendChild(badge);
+            }
+          }
+
+          // Recommendations
+          const badgeEl = document.getElementById('ncRecBadge');
           const recText = document.getElementById('ncRecommendationText');
           const pref = d.preferred_transport || 'udp';
-          if (pref === 'tcp_shadowtls' || pref === 'force_tcp') {
-            recText.innerText = 'Рекомендован режим TCP ShadowTLS v3: обнаружена цензура/блокировка UDP со стороны ТСПУ или Symmetric NAT.';
+          if (pref === 'ipv6_only') {
+            if (badgeEl) { badgeEl.innerText = '🌐 Force IPv6'; badgeEl.style.color = '#a78bfa'; badgeEl.style.borderColor = 'rgba(167,139,250,0.4)'; }
+            recText.innerHTML = '<b>Рекомендован Level 1: Принудительный IPv6</b> (ForceIPv6Only) — прямой сквозной туннель в обход CGNAT и ТСПУ блокировок IPv4 UDP.';
+          } else if (pref === 'tcp_relay') {
+            if (badgeEl) { badgeEl.innerText = '🛡️ TCP Relay (443)'; badgeEl.style.color = '#fbbf24'; badgeEl.style.borderColor = 'rgba(251,191,36,0.4)'; }
+            recText.innerHTML = '<b>Рекомендован Level 3: TCP Peer-as-Relay (порт 443)</b> — исходящий UDP блокируется ТСПУ, туннель проксируется через десктопный узел сети под видом HTTPS.';
+          } else if (pref === 'mqtt_fallback') {
+            if (badgeEl) { badgeEl.innerText = '☁️ MQTT L3 Fallback'; badgeEl.style.color = '#38bdf8'; badgeEl.style.borderColor = 'rgba(56,189,248,0.4)'; }
+            recText.innerHTML = '<b>Рекомендован Level 2: MQTT L3 Tunnel Fallback</b> — полный сброс UDP радиопроб (экономия батареи) и передача L3 IP-трафика через брокер сигналов.';
+          } else if (pref === 'tcp_shadowtls' || pref === 'force_tcp') {
+            if (badgeEl) { badgeEl.innerText = '🔒 TCP ShadowTLS'; badgeEl.style.color = '#f43f5e'; badgeEl.style.borderColor = 'rgba(244,63,94,0.4)'; }
+            recText.innerHTML = '<b>Рекомендован режим TCP ShadowTLS v3</b>: обнаружена цензура/фильтрация UDP со стороны ТСПУ или жесткий Symmetric NAT.';
           } else if (pref === 'quic') {
-            recText.innerText = 'Рекомендован режим QUIC Multipath: провайдер использует динамический пул портов (Symmetric CGNAT).';
+            if (badgeEl) { badgeEl.innerText = '⚡ QUIC Multipath'; badgeEl.style.color = '#38bdf8'; badgeEl.style.borderColor = 'rgba(56,189,248,0.4)'; }
+            recText.innerHTML = '<b>Рекомендован режим QUIC Multipath</b>: провайдер использует динамический пул портов (Symmetric CGNAT).';
           } else {
-            recText.innerText = 'Рекомендован стандартный режим Direct UDP (AmneziaWG): свободное прохождение пакетов без цензуры.';
+            if (badgeEl) { badgeEl.innerText = '🟢 Direct UDP'; badgeEl.style.color = '#4ade80'; badgeEl.style.borderColor = 'rgba(74,222,128,0.4)'; }
+            recText.innerHTML = '<b>Рекомендован стандартный режим Direct UDP (AmneziaWG 3.1)</b>: свободное прохождение пакетов без цензуры, максимальная скорость и нулевые задержки.';
           }
           showToast('✓ Глубокий Netcheck успешно завершен!');
         } else {
@@ -4964,14 +5163,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         showToast('Сначала выполните диагностику Netcheck!');
         return;
       }
-      let targetMode = 'auto';
-      const pref = lastNetcheckReport.preferred_transport;
-      if (pref === 'tcp_shadowtls' || pref === 'force_tcp') {
-        targetMode = 'force_tcp';
-      } else if (pref === 'quic') {
-        targetMode = 'quic';
-      } else if (pref === 'udp' || pref === 'awg') {
+      let targetMode = lastNetcheckReport.preferred_transport;
+      if (targetMode === 'awg' || targetMode === 'udp') {
         targetMode = 'force_udp';
+      } else if (targetMode === 'tcp_shadowtls') {
+        targetMode = 'force_tcp';
       }
 
       try {

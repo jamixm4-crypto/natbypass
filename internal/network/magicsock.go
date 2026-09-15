@@ -66,6 +66,12 @@ func classifyAddress(addrStr string) (PathType, int) {
 		return PathTypeWAN, 3
 	}
 	if ip.To4() == nil {
+		if ip.IsLinkLocalUnicast() || ip.IsLoopback() || ip.IsUnspecified() {
+			return PathTypeIPv6, 4
+		}
+		if !HasGlobalIPv6() {
+			return PathTypeIPv6, 5
+		}
 		return PathTypeIPv6, 2
 	}
 	if isLocalSubnet(ip) {
@@ -230,7 +236,10 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 	}
 
 	if pr.ActiveEndpoint == "" {
-		if stunAddr != "" {
+		if ipv6Addr != "" && HasGlobalIPv6() {
+			pr.ActiveEndpoint = ipv6Addr
+			pr.ActiveType = PathTypeIPv6
+		} else if stunAddr != "" {
 			pr.ActiveEndpoint = stunAddr
 			pr.ActiveType = PathTypeWAN
 		} else if localAddr != "" {
@@ -239,6 +248,12 @@ func (ms *MagicSock) RegisterPeerEndpoints(deviceID, stunAddr, localAddr, ipv6Ad
 				pr.ActiveEndpoint = localAddr
 				pr.ActiveType = pType
 			}
+		}
+	} else if pr.ActiveType == PathTypeWAN && ipv6Addr != "" && HasGlobalIPv6() {
+		// If current active route is unconfirmed/failing STUN WAN and peer advertises IPv6, promote IPv6
+		if activeCand, ok := pr.Candidates[pr.ActiveEndpoint]; !ok || activeCand.LastSuccess.IsZero() || activeCand.Failures > 0 {
+			pr.ActiveEndpoint = ipv6Addr
+			pr.ActiveType = PathTypeIPv6
 		}
 	}
 }

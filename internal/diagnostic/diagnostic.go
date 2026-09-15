@@ -90,6 +90,9 @@ func RunFullDiagnostics() *DiagnosticReport {
 	// 11. Опрос локального демона NatBypass и активных пиров mesh-сети
 	report.Items = append(report.Items, CheckMeshPeersAndEngine())
 
+	// 12. Dual-Stack IPv6 & TCP 443 доступность (Обход ТСПУ/DPI)
+	report.Items = append(report.Items, CheckIPv6AndTCP443())
+
 	for _, item := range report.Items {
 		if !item.Passed {
 			report.AllPassed = false
@@ -603,12 +606,21 @@ func CheckMeshPeersAndEngine() DiagnosticItem {
 		}
 
 		statusLabel := "Relay [MQTT]"
-		if directTCP || transport == "tcp_tls" || transport == "tcp_shadowtls" {
+		if transport == "direct_ipv6" {
+			statusLabel = "Прямой IPv6 [Direct]"
+			p2pCount++
+		} else if directTCP || transport == "tcp_tls" || transport == "tcp_shadowtls" {
 			statusLabel = "Прямой TCP [ShadowTLS]"
 			p2pCount++
 		} else if directP2P || transport == "udp_direct" {
 			statusLabel = "Прямой P2P [UDP AWG]"
 			p2pCount++
+		} else if transport == "tcp_relay" {
+			statusLabel = "TCP Релей [Port 443]"
+			relayCount++
+		} else if transport == "relay_mesh" {
+			statusLabel = "Mesh Релей [Multi-hop]"
+			relayCount++
 		} else {
 			relayCount++
 		}
@@ -640,5 +652,48 @@ func CheckMeshPeersAndEngine() DiagnosticItem {
 		Elapsed: time.Since(start),
 		Message: msg,
 		Details: strings.TrimRight(sb.String(), "\n"),
+	}
+}
+
+// CheckIPv6AndTCP443 проверяет доступность глобального IPv6 и TCP 443 (тест блокировок ТСПУ/DPI)
+func CheckIPv6AndTCP443() DiagnosticItem {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	defer cancel()
+
+	hasIPv6, pubIPv6 := checkIPv6(ctx)
+	dTCP := net.Dialer{Timeout: 1500 * time.Millisecond}
+	tcpConn, tcpErr := dTCP.DialContext(ctx, "tcp", "1.1.1.1:443")
+	tcpOK := tcpErr == nil
+	if tcpOK {
+		_ = tcpConn.Close()
+	}
+
+	udp6OK := false
+	if hasIPv6 {
+		c6, err := dTCP.DialContext(ctx, "udp6", "[2001:4860:4860::8888]:53")
+		if err == nil {
+			_ = c6.Close()
+			udp6OK = true
+		}
+	}
+
+	elapsed := time.Since(start)
+	statusMsg := fmt.Sprintf("IPv6: %v (UDP6: %v, IP: %s) | TCP 443: %v", hasIPv6, udp6OK, pubIPv6, tcpOK)
+	if !tcpOK && !hasIPv6 {
+		return DiagnosticItem{
+			Name:    "Dual-Stack IPv6 & TCP 443 доступность (Обход ТСПУ/DPI)",
+			Passed:  false,
+			Elapsed: elapsed,
+			Message: "❌ Нет доступа ни по IPv6, ни по TCP 443",
+			Details: statusMsg,
+		}
+	}
+	return DiagnosticItem{
+		Name:    "Dual-Stack IPv6 & TCP 443 доступность (Обход ТСПУ/DPI)",
+		Passed:  true,
+		Elapsed: elapsed,
+		Message: "✓ " + statusMsg,
+		Details: "В случае блокировки IPv4 UDP трафик автоматически эскалируется на прямой IPv6 (Level 1) или TCP/WSS Relay на порту 443 (Level 3).",
 	}
 }

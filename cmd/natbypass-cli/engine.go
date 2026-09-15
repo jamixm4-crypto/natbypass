@@ -59,6 +59,9 @@ var (
 	decoyMgr         *network.DecoyManager
 	wssClient        *relay.WSSRelayClient
 	udpRelay         *relay.UDPRelayClient
+	transportSwitcher *network.TransportSwitcher
+	tcpRelayClient    *relay.TCPRelayClient
+	tcpRelayServer    *relay.TCPRelayServer
 	triggerPublishCh = make(chan struct{}, 10)
 	multiHopRouter   *network.MultiHopRouter
 	transSelector    *transport.TransportSelector
@@ -68,6 +71,10 @@ var (
 	lastPublishTrigger   time.Time
 	publishTriggerMu     sync.Mutex
 	publishDebounceDelay = 2 * time.Second
+
+	lastLeaderSyncPunch = make(map[string]time.Time)
+	leaderPunchMu       sync.Mutex
+	asnCacheFile        string
 )
 
 func triggerPublish() {
@@ -477,6 +484,93 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		}
 	}
 
+	transportSwitcher = network.NewTransportSwitcher()
+	if uiServer != nil {
+		uiServer.SetTransportSwitcher(transportSwitcher)
+	}
+	transportSwitcher.SetOnModeChange(func(oldMode, newMode network.TransportMode) {
+		log.Info().Str("old", string(oldMode)).Str("new", string(newMode)).Msg("🔄 Transport Escalation Mode Changed")
+		switch newMode {
+		case network.TransportModeUDP:
+			if puncher != nil {
+				puncher.SetForceIPv6Only(false)
+				puncher.SetProbesDisabled(false)
+			}
+		case network.TransportModeIPv6:
+			if puncher != nil {
+				puncher.SetForceIPv6Only(true)
+				puncher.SetProbesDisabled(false)
+			}
+		case network.TransportModeTCPRelay, network.TransportModeMQTT:
+			if puncher != nil {
+				puncher.SetProbesDisabled(true)
+			}
+		}
+	})
+
+	// Asynchronous Netcheck evaluation
+	go func() {
+		nCtx, nCancel := context.WithTimeout(engineCtx, 6*time.Second)
+		defer nCancel()
+		report, err := diagnostic.RunNetcheck(nCtx)
+		if err == nil && report != nil {
+			nr := network.NetcheckResult{
+				UDPBlockedIPv4: report.UDPBlockedIPv4,
+				UDPBlockedIPv6: report.UDPBlockedIPv6,
+				IPv6Available:  report.IPv6Available,
+				TCP443OK:       report.TCP443OK,
+			}
+			transportSwitcher.Evaluate(nr)
+		}
+	}()
+
+	// Start Level 3 TCP Relay Server if enabled
+	if cfg.Network.EnableRelayServer {
+		s, err := relay.NewTCPRelayServer(relay.TCPRelayServerConfig{
+			ListenAddr:      ":443",
+			DeviceID:        deviceID,
+			RelayQuotaGBDay: cfg.Network.RelayQuotaGBDay,
+			IsMetered:       func() bool { return false },
+			BatteryLow:      func() bool { return false },
+			OnPacket: func(srcDevID, dstDevID string, payload []byte) {
+				if tunDev != nil && len(payload) > 0 {
+					_ = tunDev.WritePacket(payload)
+				}
+			},
+		})
+		if err != nil {
+			s, err = relay.NewTCPRelayServer(relay.TCPRelayServerConfig{
+				ListenAddr:      ":0",
+				DeviceID:        deviceID,
+				RelayQuotaGBDay: cfg.Network.RelayQuotaGBDay,
+				IsMetered:       func() bool { return false },
+				BatteryLow:      func() bool { return false },
+				OnPacket: func(srcDevID, dstDevID string, payload []byte) {
+					if tunDev != nil && len(payload) > 0 {
+						_ = tunDev.WritePacket(payload)
+					}
+				},
+			})
+		}
+		if err == nil && s != nil {
+			tcpRelayServer = s
+			if uiServer != nil {
+				uiServer.SetTCPRelayServer(tcpRelayServer)
+			}
+			defer tcpRelayServer.Close()
+			log.Info().Int("port", s.Port()).Msg("🛡️ TCP Peer-as-Relay Server listening")
+		}
+	}
+
+	// Subscribe to MQTT L3 Tunnel Fallback data (Level 2)
+	if sigMgr != nil {
+		sigMgr.SubscribeTunnelData(deviceID, func(pkt []byte) {
+			if tunDev != nil && len(pkt) > 0 {
+				_ = tunDev.WritePacket(pkt)
+			}
+		})
+	}
+
 	// Task 2.3: Random MTU in range 1280..1380 to disrupt DPI packet length fingerprinting
 	initialMTU := cfg.WireGuard.MTU
 	if initialMTU < 1280 || initialMTU > 1380 {
@@ -527,6 +621,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	} else {
 		log.Info().Str("addr", dohProxyServer.Addr()).Msg("🛡️ Built-in DoH DNS Proxy active (RFC 8484)")
 		defer dohProxyServer.Close()
+	}
+
+	asnCacheDir := "."
+	if configFile != "" {
+		asnCacheDir = filepath.Dir(configFile)
+	} else {
+		asnCacheDir = filepath.Dir(resolveConfigPath("config.yaml"))
+	}
+	asnCacheFile = filepath.Join(asnCacheDir, ".asn_rules_cache.json")
+	if err := network.LoadASNRulesCache(asnCacheFile); err == nil {
+		log.Debug().Str("path", asnCacheFile).Msg("Loaded dynamic ASN rules cache")
 	}
 
 	if uiServer != nil {
@@ -1340,8 +1445,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 						if p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, myPub) {
 							targetEP = p.LocalAddr
+						} else if (!p.DirectP2P || targetEP == "" || targetEP == p.STUNAddr) && p.IPv6Addr != "" && network.HasGlobalIPv6() {
+							targetEP = p.IPv6Addr
 						}
-						if targetEP == "" && p.IPv6Addr != "" && network.GetLocalIPv6() != "" {
+						if targetEP == "" && p.IPv6Addr != "" && network.HasGlobalIPv6() {
 							targetEP = p.IPv6Addr
 						}
 						if targetEP == "" {
@@ -1421,6 +1528,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								lastReactivePunchCLI[p.DeviceID] = now
 								if targetEP != "" {
 									_ = puncher.SendHolePunchProbe(targetEP)
+								}
+								if p.IPv6Addr != "" && p.IPv6Addr != targetEP && network.HasGlobalIPv6() {
+									_ = puncher.SendHolePunchProbe(p.IPv6Addr)
 								}
 								if p.STUNAddr != "" && p.STUNAddr != targetEP {
 									_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
@@ -1514,6 +1624,24 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										}
 									}
 								}
+							}
+						}
+
+						// 1f. TCP Peer-as-Relay Fallback (Level 3)
+						if needsRelay && !sentDirect && !sentTCP && tcpRelayClient != nil && tcpRelayClient.IsConnected() {
+							if err := tcpRelayClient.SendPacket(p.DeviceID, pkt); err == nil {
+								sentDirect = true
+								p.Transport = "tcp_relay"
+								log.Debug().Str("dst", dstIP).Str("peer", p.DeviceID).Msg("🛡️ Routed packet via TCP 443 Peer-as-Relay")
+							}
+						}
+
+						// 1g. MQTT L3 Tunnel Fallback (Level 2)
+						if needsRelay && !sentDirect && !sentTCP && sigMgr != nil {
+							if err := sigMgr.PublishTunnelData(p.DeviceID, pkt); err == nil {
+								sentDirect = true
+								p.Transport = "relay_mqtt"
+								log.Debug().Str("dst", dstIP).Str("peer", p.DeviceID).Msg("🛡️ Routed packet via MQTT L3 Tunnel Fallback")
 							}
 						}
 
@@ -1716,7 +1844,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 										// Prime local NAT mappings: send immediate burst probes towards peer's known addresses
 										if targetPeer, ok := registry.Get(targetPeerID); ok && targetPeer != nil {
-											primeTargets := append([]string{targetPeer.STUNAddr, targetPeer.ActiveEndpoint, targetPeer.LocalAddr}, targetPeer.Candidates...)
+											primeTargets := []string{targetPeer.ActiveEndpoint}
+											if targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+												primeTargets = append(primeTargets, targetPeer.IPv6Addr)
+											}
+											if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint {
+												primeTargets = append(primeTargets, targetPeer.STUNAddr)
+											}
+											if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetPeer.ActiveEndpoint {
+												primeTargets = append(primeTargets, targetPeer.LocalAddr)
+											}
+											primeTargets = append(primeTargets, targetPeer.Candidates...)
 											puncher.SendHolePunchBurstWithDelta(primeTargets, 3, targetPeer.NATDelta)
 										}
 									}(p.DeviceID)
@@ -2267,10 +2405,31 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 					targetEP = bestEP
 				}
 			}
+
+			// Determine exact 5-tier punch method
+			isCoord := false
+			leaderPunchMu.Lock()
+			if t, ok := lastLeaderSyncPunch[remoteDevID]; ok && time.Since(t) < 15*time.Second {
+				isCoord = true
+			}
+			leaderPunchMu.Unlock()
+
+			if isCoord {
+				p.PunchMethod = "coordinated"
+			} else if network.IsPredictedPort(fromAddr, p.STUNAddr) || (p.NATDelta > 0 && fromAddr != p.STUNAddr && !strings.Contains(fromAddr, "[")) {
+				p.PunchMethod = "predicted"
+			} else if strings.Contains(fromAddr, "[") || (strings.Count(fromAddr, ":") > 1) {
+				p.PunchMethod = "direct_ipv6"
+			} else {
+				p.PunchMethod = "direct"
+			}
+
 			if peer.IsValidEndpointForPeer(targetEP, p, myPubIP) {
 				p.ActiveEndpoint = targetEP
 			} else if p.ActiveEndpoint == "" {
-				if p.STUNAddr != "" {
+				if p.IPv6Addr != "" && network.HasGlobalIPv6() {
+					p.ActiveEndpoint = p.IPv6Addr
+				} else if p.STUNAddr != "" {
 					p.ActiveEndpoint = p.STUNAddr
 				} else if p.LocalAddr != "" {
 					p.ActiveEndpoint = p.LocalAddr
@@ -2723,6 +2882,10 @@ func publishLoop(
 			} else if hasDirect {
 				relayStreakCount = 0
 			}
+
+			if transportSwitcher != nil && transportSwitcher.CurrentMode() == network.TransportModeTCPRelay {
+				ensureDesktopTCPRelay(ctx, deviceID, registry, tunDev, uiServer)
+			}
 		}
 
 		if uiServer != nil {
@@ -2808,13 +2971,31 @@ func publishLoop(
 			}(),
 			Candidates:      candidates,
 			Endpoints: func() []signaling.EndpointDesc {
+				var eps []signaling.EndpointDesc
 				if puncher != nil {
-					return puncher.GetEndpoints()
+					eps = append(eps, puncher.GetEndpoints()...)
 				}
-				return nil
+				if tcpRelayServer != nil && tcpRelayServer.Port() > 0 {
+					pub := ip.String()
+					if pub != "" && pub != "0.0.0.0" && pub != "<nil>" {
+						eps = append(eps, signaling.EndpointDesc{
+							Proto:    "tcp",
+							IP:       pub,
+							Port:     tcpRelayServer.Port(),
+							Priority: 150,
+						})
+					}
+				}
+				return eps
 			}(),
 			NATType:         natLabel,
 			NATDelta:        natDelta,
+			ASN: func() string {
+				if puncher != nil {
+					return puncher.GetCurrentASN()
+				}
+				return ""
+			}(),
 			WGPubKey:        wgPubKey,
 			WGPort: func() int {
 				if wgPort > 0 {
@@ -3052,6 +3233,9 @@ func receiveLoop(
 					otherPeer = sync.PeerA
 				}
 				if targetAddr != "" {
+					leaderPunchMu.Lock()
+					lastLeaderSyncPunch[otherPeer] = time.Now()
+					leaderPunchMu.Unlock()
 					log.Info().Str("other_peer", otherPeer).Str("target_addr", targetAddr).Int64("punch_time_ms", sync.PunchTimeUnix).
 						Msg("⚡ [Level 3 LeaderSync] Запуск миллисекундного синхронного пробития по команде координатора")
 					go func(tAddr string, punchTime int64, oPeerID string) {
@@ -3206,6 +3390,10 @@ func receiveLoop(
 			existingPeer, peerFound := registry.Get(p.DeviceID)
 			needsFastReply := p.IsBootBurst || !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
 
+			if p.ASN != "" && p.NATDelta > 0 {
+				network.RecordPeerObservation(p.ASN, p.NATDelta, asnCacheFile)
+			}
+
 			if p.STUNAddr != "" {
 				if _, _, err := net.SplitHostPort(p.STUNAddr); err != nil || strings.Contains(p.STUNAddr, " ") {
 					p.STUNAddr = ""
@@ -3228,7 +3416,7 @@ func receiveLoop(
 				if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
 					_ = puncher.SendHolePunchProbe(p.LocalAddr)
 				}
-				if p.IPv6Addr != "" {
+				if p.IPv6Addr != "" && network.HasGlobalIPv6() {
 					_ = puncher.SendHolePunchProbe(p.IPv6Addr)
 				}
 				for _, cand := range p.Candidates {
@@ -3347,10 +3535,12 @@ func receiveLoop(
 				PublicIP:          p.PublicIP,
 				STUNAddr:          p.STUNAddr,
 				TCPAddr:           p.TCPAddr,
+				IPv6Addr:          p.IPv6Addr,
 				Candidates:        p.Candidates,
 				Endpoints:         p.Endpoints,
 				NATType:           p.NATType,
 				NATDelta:          p.NATDelta,
+				ASN:               p.ASN,
 				WGPubKey:          p.WGPubKey,
 				WGPort:            p.WGPort,
 				VirtualIP:         p.VirtualIP,
@@ -3414,6 +3604,35 @@ func receiveLoop(
 	}
 }
 
+func ensureDesktopTCPRelay(ctx context.Context, devID string, reg *peer.Registry, tunDev *tunnel.Device, uiServer *webui.Server) {
+	if transportSwitcher == nil || transportSwitcher.CurrentMode() != network.TransportModeTCPRelay || reg == nil {
+		return
+	}
+	if tcpRelayClient != nil && tcpRelayClient.IsConnected() {
+		return
+	}
+	bestPeer, tcpAddr := reg.FindBestTCPRelay(devID)
+	if bestPeer == nil || tcpAddr == "" {
+		return
+	}
+	client := relay.NewTCPRelayClient(tcpAddr, devID, func(srcDevID string, payload []byte) {
+		if tunDev != nil && len(payload) > 0 {
+			_ = tunDev.WritePacket(payload)
+		}
+	}, nil)
+	cCtx, cCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cCancel()
+	if err := client.Connect(cCtx); err == nil {
+		if tcpRelayClient != nil {
+			_ = tcpRelayClient.Close()
+		}
+		tcpRelayClient = client
+		if uiServer != nil {
+			uiServer.SetTCPRelayClient(tcpRelayClient)
+		}
+		log.Info().Str("relay", bestPeer.DeviceID).Str("addr", tcpAddr).Msg("🛡️ Connected to TCP Peer-as-Relay on port 443")
+	}
+}
 
 func handleSIGHUP(ctx context.Context, cfg *config.Config) {
 	sighupCh := make(chan os.Signal, 1)

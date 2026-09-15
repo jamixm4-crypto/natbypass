@@ -94,6 +94,7 @@ type Peer struct {
 	RelayedViaDevID          string                  `json:"relayed_via_dev_id,omitempty"`   // Level 5: Device ID of intermediate relay node
 	RelayedViaName           string                  `json:"relayed_via_name,omitempty"`     // Level 5: Human-readable name of intermediate relay node
 	RelayedViaVIP            string                  `json:"relayed_via_vip,omitempty"`      // Level 5: Virtual IP of intermediate relay node
+	PunchMethod              string                  `json:"punch_method,omitempty"`         // "direct_ipv6", "direct", "predicted", "coordinated", "relay_mesh", "relay_mqtt"
 	ReplayFilter             *crypto.ReplayFilter    `json:"-"`                              // Anti-Replay sliding window (RFC 6479)
 }
 
@@ -126,6 +127,45 @@ func (p *Peer) RecordProbeResult(success bool) {
 
 	popcount := bits.OnesCount32(p.DeliveryMask)
 	p.LossPercent = 100 - (popcount * 100 / 32)
+}
+
+// isIPv6 checks whether an endpoint address represents an IPv6 address.
+func isIPv6(addr string) bool {
+	if addr == "" {
+		return false
+	}
+	if strings.HasPrefix(addr, "[") || strings.Count(addr, ":") > 1 {
+		return true
+	}
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.To4() == nil
+}
+
+// DeterminePunchMethod returns the exact 5-tier punch method classification for the peer.
+func (p *Peer) DeterminePunchMethod() string {
+	if p == nil || !p.Online {
+		return ""
+	}
+	if p.DirectTCP || isDirectTCPTransport(p.Transport) {
+		return "direct_tcp"
+	}
+	if p.DirectP2P {
+		if p.PunchMethod == "coordinated" || p.PunchMethod == "predicted" {
+			return p.PunchMethod
+		}
+		if isIPv6(p.ActiveEndpoint) {
+			return "direct_ipv6"
+		}
+		return "direct"
+	}
+	if p.RelayedViaDevID != "" || p.StandbyRelayReady || p.Transport == "relay_mesh" {
+		return "relay_mesh"
+	}
+	return "relay_mqtt"
 }
 
 // IsBilateralP2P returns true if direct P2P connection was verified bilaterally within maxAge.
@@ -336,7 +376,9 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.ActiveEndpoint = existing.ActiveEndpoint
 	}
 	if newer.ActiveEndpoint == "" {
-		if newer.STUNAddr != "" {
+		if newer.IPv6Addr != "" {
+			newer.ActiveEndpoint = newer.IPv6Addr
+		} else if newer.STUNAddr != "" {
 			newer.ActiveEndpoint = newer.STUNAddr
 		} else if newer.LocalAddr != "" {
 			newer.ActiveEndpoint = newer.LocalAddr
@@ -372,6 +414,20 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.RelayedViaDevID = existing.RelayedViaDevID
 		newer.RelayedViaName = existing.RelayedViaName
 		newer.RelayedViaVIP = existing.RelayedViaVIP
+	}
+	if newer.PunchMethod == "" {
+		if existing.PunchMethod != "" {
+			newer.PunchMethod = existing.PunchMethod
+		} else {
+			newer.PunchMethod = newer.DeterminePunchMethod()
+		}
+	}
+	if !newer.DirectP2P && !newerIsTCP {
+		if newer.RelayedViaDevID != "" || newer.StandbyRelayReady {
+			newer.PunchMethod = "relay_mesh"
+		} else {
+			newer.PunchMethod = "relay_mqtt"
+		}
 	}
 
 
@@ -1115,6 +1171,112 @@ func (r *Registry) FindBestRelay(excludeDeviceID string) *Peer {
 		return latI < latJ
 	})
 	return candidates[0]
+}
+
+// FindBestTCPRelay searches for an online relay-capable peer with an available TCP endpoint (e.g. port 443).
+// Returns the selected Peer and the resolved TCP destination address ("host:port").
+func (r *Registry) FindBestTCPRelay(excludeDeviceID string) (*Peer, string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	today := time.Now().Format("2006-01-02")
+	type tcpCandidate struct {
+		peer *Peer
+		addr string
+	}
+	var candidates []tcpCandidate
+
+	for _, p := range r.peers {
+		if p == nil || !p.Online || p.DeviceID == excludeDeviceID {
+			continue
+		}
+		if p.RelayCapable && !p.IsMetered && !p.BatteryLow {
+			trafficBytes := p.RelayTrafficBytes
+			if p.RelayTrafficDate != today {
+				trafficBytes = 0
+			}
+			if p.RelayQuotaGBDay > 0 {
+				usedGB := trafficBytes / (1024 * 1024 * 1024)
+				if int(usedGB) >= p.RelayQuotaGBDay {
+					continue
+				}
+			}
+
+			// Find TCP endpoint
+			var tcpAddr string
+			for _, ep := range p.Endpoints {
+				if ep.Proto == "tcp" && ep.IP != "" && ep.Port > 0 {
+					if strings.Contains(ep.IP, ":") {
+						tcpAddr = fmt.Sprintf("[%s]:%d", ep.IP, ep.Port)
+					} else {
+						tcpAddr = fmt.Sprintf("%s:%d", ep.IP, ep.Port)
+					}
+					break
+				}
+			}
+			// If no explicit proto=tcp, check if any endpoint or candidate has port 443
+			if tcpAddr == "" {
+				for _, ep := range p.Endpoints {
+					if ep.Port == 443 && ep.IP != "" {
+						if strings.Contains(ep.IP, ":") {
+							tcpAddr = fmt.Sprintf("[%s]:%d", ep.IP, ep.Port)
+						} else {
+							tcpAddr = fmt.Sprintf("%s:%d", ep.IP, ep.Port)
+						}
+						break
+					}
+				}
+			}
+			// If still empty, check Candidates for port 443
+			if tcpAddr == "" {
+				for _, cand := range p.Candidates {
+					if strings.HasSuffix(cand, ":443") || strings.HasSuffix(cand, "]:443") {
+						tcpAddr = cand
+						break
+					}
+				}
+			}
+			// Fallback: If peer has an external IP in endpoints, try port 443
+			if tcpAddr == "" {
+				for _, ep := range p.Endpoints {
+					ip := net.ParseIP(ep.IP)
+					if ip != nil && !ip.IsPrivate() && !ip.IsLoopback() {
+						if strings.Contains(ep.IP, ":") {
+							tcpAddr = fmt.Sprintf("[%s]:443", ep.IP)
+						} else {
+							tcpAddr = fmt.Sprintf("%s:443", ep.IP)
+						}
+						break
+					}
+				}
+			}
+
+			if tcpAddr != "" {
+				candidates = append(candidates, tcpCandidate{peer: p, addr: tcpAddr})
+			}
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil, ""
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].peer.IsExitNode != candidates[j].peer.IsExitNode {
+			return candidates[i].peer.IsExitNode
+		}
+		latI := candidates[i].peer.PingMs
+		if latI <= 0 {
+			latI = 9999
+		}
+		latJ := candidates[j].peer.PingMs
+		if latJ <= 0 {
+			latJ = 9999
+		}
+		return latI < latJ
+	})
+
+	return candidates[0].peer, candidates[0].addr
 }
 
 // RecordRelayTraffic increments the relayed byte count for accounting against user daily quota.

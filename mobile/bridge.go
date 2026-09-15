@@ -18,6 +18,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,7 @@ import (
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/peer"
+	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/system"
 	"github.com/natbypass/natbypass/internal/tunnel"
@@ -39,7 +41,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta63"
+const Version          = "1.9.226-beta64"
 
 
 
@@ -143,13 +145,18 @@ var (
 	globalPuncher          *network.UDPPuncher
 	globalTCPDirectMgr     *network.TCPDirectManager
 	globalMultiHopRouter   *network.MultiHopRouter
+	globalTransportSwitcher *network.TransportSwitcher
+	globalTCPRelayClient    *relay.TCPRelayClient
+	globalTCPRelayServer    *relay.TCPRelayServer
 	globalTunFile   *os.File
 	globalTunCancel context.CancelFunc // controls TUN read goroutine lifecycle
 	globalTxBytes   atomic.Uint64
 	globalRxBytes   atomic.Uint64
-	lastReactivePunchMobile = make(map[string]time.Time)
-	lastReactiveDialMobile  = make(map[string]time.Time)
-	logger          zerolog.Logger
+	lastReactivePunchMobile   = make(map[string]time.Time)
+	lastReactiveDialMobile    = make(map[string]time.Time)
+	lastLeaderSyncPunchMobile = make(map[string]time.Time)
+	leaderPunchMobileMu       sync.Mutex
+	logger                    zerolog.Logger
 )
 
 // atomicGetVIP возвращает текущий виртуальный IP атомарно (без блокировки engineMu).
@@ -485,10 +492,30 @@ func StartEngine(configYAML string, tunFd int) string {
 				}
 				p.LastDirectSeen = time.Now()
 			}
+			// Determine exact 5-tier punch method
+			isCoord := false
+			leaderPunchMobileMu.Lock()
+			if t, ok := lastLeaderSyncPunchMobile[remoteDevID]; ok && time.Since(t) < 15*time.Second {
+				isCoord = true
+			}
+			leaderPunchMobileMu.Unlock()
+
+			if isCoord {
+				p.PunchMethod = "coordinated"
+			} else if network.IsPredictedPort(fromAddr, p.STUNAddr) || (p.NATDelta > 0 && fromAddr != p.STUNAddr && !strings.Contains(fromAddr, "[")) {
+				p.PunchMethod = "predicted"
+			} else if strings.Contains(fromAddr, "[") || (strings.Count(fromAddr, ":") > 1) {
+				p.PunchMethod = "direct_ipv6"
+			} else {
+				p.PunchMethod = "direct"
+			}
+
 			if peer.IsValidEndpointForPeer(fromAddr, p, myPubIP) {
 				p.ActiveEndpoint = fromAddr
 			} else if p.ActiveEndpoint == "" {
-				if p.STUNAddr != "" {
+				if p.IPv6Addr != "" && network.HasGlobalIPv6() {
+					p.ActiveEndpoint = p.IPv6Addr
+				} else if p.STUNAddr != "" {
 					p.ActiveEndpoint = p.STUNAddr
 				} else if p.LocalAddr != "" {
 					p.ActiveEndpoint = p.LocalAddr
@@ -518,6 +545,43 @@ func StartEngine(configYAML string, tunFd int) string {
 		shaper.SetProfile(network.ProfileWebRTC)
 		puncher.SetTrafficShaper(shaper)
 	}
+
+	globalTransportSwitcher = network.NewTransportSwitcher()
+	globalTransportSwitcher.SetOnModeChange(func(oldMode, newMode network.TransportMode) {
+		logger.Info().Str("old", string(oldMode)).Str("new", string(newMode)).Msg("🔄 Transport Escalation Mode Changed")
+		switch newMode {
+		case network.TransportModeUDP:
+			if globalPuncher != nil {
+				globalPuncher.SetForceIPv6Only(false)
+				globalPuncher.SetProbesDisabled(false)
+			}
+		case network.TransportModeIPv6:
+			if globalPuncher != nil {
+				globalPuncher.SetForceIPv6Only(true)
+				globalPuncher.SetProbesDisabled(false)
+			}
+		case network.TransportModeTCPRelay, network.TransportModeMQTT:
+			if globalPuncher != nil {
+				globalPuncher.SetProbesDisabled(true)
+			}
+		}
+	})
+
+	// Asynchronous Netcheck evaluation on startup
+	go func() {
+		nCtx, nCancel := context.WithTimeout(ctx, 6*time.Second)
+		defer nCancel()
+		report, err := diagnostic.RunNetcheck(nCtx)
+		if err == nil && report != nil {
+			nr := network.NetcheckResult{
+				UDPBlockedIPv4: report.UDPBlockedIPv4,
+				UDPBlockedIPv6: report.UDPBlockedIPv6,
+				IPv6Available:  report.IPv6Available,
+				TCP443OK:       report.TCP443OK,
+			}
+			globalTransportSwitcher.Evaluate(nr)
+		}
+	}()
 
 	globalTCPDirectMgr = network.NewTCPDirectManager(ctx)
 	globalTCPDirectMgr.SetDeviceID(devID)
@@ -762,6 +826,18 @@ func StartEngine(configYAML string, tunFd int) string {
 				VirtualIP:        atomicGetVIP(),
 				DirectP2P:        hasDirect,
 				NATType:          natTypeStr,
+				NATDelta: func() int {
+					if puncher != nil {
+						return puncher.GetPortDelta()
+					}
+					return 0
+				}(),
+				ASN: func() string {
+					if puncher != nil {
+						return puncher.GetCurrentASN()
+					}
+					return ""
+				}(),
 				IsExitNode:       globalAllowExitNode || cfg.Network.AllowExitNode,
 				AdvertisedRoutes: func() []string {
 					if len(globalAdvertisedRoutes) > 0 {
@@ -840,9 +916,36 @@ func StartEngine(configYAML string, tunFd int) string {
 					lastPub = now
 					publishOnce()
 				}
+				ensureMobileTCPRelay(ctx, devID)
 			}
 		}
 	}()
+
+	// Level 2 MQTT L3 Tunnel subscription
+	if globalSigMgr != nil {
+		globalSigMgr.SubscribeTunnelData(devID, func(pkt []byte) {
+			engineMu.Lock()
+			tf := globalTunFile
+			cfg := globalConfig
+			engineMu.Unlock()
+			if tf == nil || len(pkt) == 0 {
+				return
+			}
+			dataToWrite := pkt
+			if cfg != nil {
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+					cKey := crypto.DeriveKey(activeProf.NetworkKey)
+					epoch := crypto.GetCurrentEpoch()
+					if dec, _, _, err := crypto.DecryptWithEpochSeq(pkt, cKey[:], epoch); err == nil && len(dec) > 0 {
+						dataToWrite = dec
+					} else if dec, err := crypto.DecryptSelf(pkt, cKey); err == nil && len(dec) > 0 {
+						dataToWrite = dec
+					}
+				}
+			}
+			_, _ = tf.Write(dataToWrite)
+		})
+	}
 
 	// Цикл приёма от сигнального канала
 	go func() {
@@ -915,6 +1018,48 @@ func StartEngine(configYAML string, tunFd int) string {
 									_ = globalTCPDirectMgr.ConnectPeer(targetID, targetAddr, localP)
 								}(tcpSig.SenderDeviceID, tcpSig.SenderTCPAddr, lPort)
 							}
+						}
+						continue
+					}
+
+					// Level 3 NAT Traversal: Handle LeaderPunchSyncSignal from mesh coordinator
+					if p.LeaderSync != nil && puncher != nil {
+						sync := p.LeaderSync
+						var targetAddr string
+						var otherPeer string
+						if sync.PeerA == devID {
+							targetAddr = sync.TargetAddrA
+							otherPeer = sync.PeerB
+						} else if sync.PeerB == devID {
+							targetAddr = sync.TargetAddrB
+							otherPeer = sync.PeerA
+						}
+						if targetAddr != "" {
+							leaderPunchMobileMu.Lock()
+							lastLeaderSyncPunchMobile[otherPeer] = time.Now()
+							leaderPunchMobileMu.Unlock()
+							logger.Info().Str("other_peer", otherPeer).Str("target_addr", targetAddr).Int64("punch_time_ms", sync.PunchTimeUnix).
+								Msg("⚡ [Level 3 LeaderSync] Запуск миллисекундного синхронного пробития по команде координатора")
+							go func(tAddr string, punchTime int64, oPeerID string) {
+								host, portStr, err := net.SplitHostPort(tAddr)
+								if err != nil {
+									return
+								}
+								port, err := strconv.Atoi(portStr)
+								if err != nil {
+									return
+								}
+								var otherDelta int
+								var otherASN string
+								if globalRegistry != nil {
+									if regPeer, ok := globalRegistry.Get(oPeerID); ok && regPeer != nil {
+										otherDelta = regPeer.NATDelta
+										otherASN = regPeer.ASN
+									}
+								}
+								targetPorts := network.GenerateAdaptivePredictPorts(port, otherDelta, otherASN)
+								_ = puncher.ScheduleSimultaneousOpenMilli(ctx, punchTime, host, targetPorts, 12, 10)
+							}(targetAddr, sync.PunchTimeUnix, otherPeer)
 						}
 						continue
 					}
@@ -1057,6 +1202,9 @@ func StartEngine(configYAML string, tunFd int) string {
 					} else if directP2P && transport == "" {
 						transport = "udp_direct"
 					}
+					if p.ASN != "" && p.NATDelta > 0 {
+						network.RecordPeerObservation(p.ASN, p.NATDelta, "")
+					}
 					globalRegistry.Upsert(&peer.Peer{
 						DeviceID:         p.DeviceID,
 						Nickname:         p.Nickname,
@@ -1069,6 +1217,7 @@ func StartEngine(configYAML string, tunFd int) string {
 						Endpoints:        p.Endpoints,
 						NATType:          p.NATType,
 						NATDelta:         p.NATDelta,
+						ASN:              p.ASN,
 						IPv6Addr:         p.IPv6Addr,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
@@ -1101,7 +1250,7 @@ func StartEngine(configYAML string, tunFd int) string {
 									addrs = append(addrs, cand)
 								}
 							}
-							if target.IPv6Addr != "" {
+							if target.IPv6Addr != "" && network.HasGlobalIPv6() {
 								addrs = append(addrs, target.IPv6Addr)
 							}
 							if target.PublicIP != "" {
@@ -1186,6 +1335,9 @@ func StartEngine(configYAML string, tunFd int) string {
 								if peerItem.LocalAddr != "" && peerItem.LocalAddr != peerItem.STUNAddr && peer.IsLocalLANPeer(peerItem.LocalAddr, peerItem.PublicIP, myLocal, globalPublicIP) {
 									_ = puncher.SendHolePunchProbeWithDelta(peerItem.LocalAddr, peerItem.NATDelta)
 								}
+								if peerItem.IPv6Addr != "" && network.HasGlobalIPv6() {
+									_ = puncher.SendHolePunchProbe(peerItem.IPv6Addr)
+								}
 								for _, cand := range peerItem.Candidates {
 									if cand != "" && cand != peerItem.STUNAddr && cand != peerItem.LocalAddr {
 										if candHost, _, err := net.SplitHostPort(cand); err == nil {
@@ -1240,7 +1392,17 @@ func StartEngine(configYAML string, tunFd int) string {
 										}
 										_ = globalSigMgr.Send(ctx, rndvPl)
 										if targetPeer, ok := globalRegistry.Get(targetPeerID); ok && targetPeer != nil {
-											primeTargets := append([]string{targetPeer.STUNAddr, targetPeer.ActiveEndpoint, targetPeer.LocalAddr}, targetPeer.Candidates...)
+											primeTargets := []string{targetPeer.ActiveEndpoint}
+											if targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+												primeTargets = append(primeTargets, targetPeer.IPv6Addr)
+											}
+											if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint {
+												primeTargets = append(primeTargets, targetPeer.STUNAddr)
+											}
+											if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetPeer.ActiveEndpoint {
+												primeTargets = append(primeTargets, targetPeer.LocalAddr)
+											}
+											primeTargets = append(primeTargets, targetPeer.Candidates...)
 											puncher.SendHolePunchBurstWithDelta(primeTargets, 3, targetPeer.NATDelta)
 										}
 									}(peerItem.DeviceID)
@@ -1590,6 +1752,11 @@ func attachTUNLocked(tunFd int) {
 							}
 							if targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, globalPublicIP) {
 								targetEP = targetPeer.LocalAddr
+							} else if (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+								targetEP = targetPeer.IPv6Addr
+							}
+							if targetEP == "" && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+								targetEP = targetPeer.IPv6Addr
 							}
 							if targetEP == "" {
 								targetEP = targetPeer.ActiveEndpoint
@@ -1648,6 +1815,9 @@ func attachTUNLocked(tunFd int) {
 									lastReactivePunchMobile[targetPeer.DeviceID] = now
 									if targetEP != "" {
 										_ = globalPuncher.SendHolePunchProbe(targetEP)
+									}
+									if targetPeer.IPv6Addr != "" && targetPeer.IPv6Addr != targetEP && network.HasGlobalIPv6() {
+										_ = globalPuncher.SendHolePunchProbe(targetPeer.IPv6Addr)
 									}
 									if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 										_ = globalPuncher.SendHolePunchProbeWithDelta(targetPeer.STUNAddr, targetPeer.NATDelta)
@@ -1793,6 +1963,19 @@ func attachTUNLocked(tunFd int) {
 												}
 											}
 										}
+									}
+								}
+							}
+
+							// Level 3: TCP Peer-as-Relay Fallback
+							if needsRelay && !sentDirect && !sentTCP {
+								engineMu.Lock()
+								tcpRelay := globalTCPRelayClient
+								engineMu.Unlock()
+								if tcpRelay != nil && tcpRelay.IsConnected() {
+									if err := tcpRelay.SendPacket(targetPeer.DeviceID, pkt); err == nil {
+										sentDirect = true
+										targetPeer.Transport = "tcp_relay"
 									}
 								}
 							}
@@ -2102,6 +2285,14 @@ func StopEngine() {
 		globalTCPDirectMgr.Close()
 		globalTCPDirectMgr = nil
 	}
+	if globalTCPRelayClient != nil {
+		_ = globalTCPRelayClient.Close()
+		globalTCPRelayClient = nil
+	}
+	if globalTCPRelayServer != nil {
+		_ = globalTCPRelayServer.Close()
+		globalTCPRelayServer = nil
+	}
 	if globalSigMgr != nil {
 		// FallbackManager останавливается через engineCancel() — контекст уже отменён
 		globalSigMgr = nil
@@ -2144,6 +2335,60 @@ func GetUDPSocketFd6() int {
 	}
 	return puncher.SocketFd6()
 }
+
+// GetTCPSocketFd returns the raw file descriptor of the active TCP relay client socket for Android VpnService.protect().
+func GetTCPSocketFd() int {
+	engineMu.Lock()
+	client := globalTCPRelayClient
+	engineMu.Unlock()
+	if client == nil {
+		return -1
+	}
+	return client.GetSocketFd()
+}
+
+func ensureMobileTCPRelay(ctx context.Context, devID string) {
+	engineMu.Lock()
+	client := globalTCPRelayClient
+	reg := globalRegistry
+	ts := globalTransportSwitcher
+	engineMu.Unlock()
+
+	if ts == nil || ts.CurrentMode() != network.TransportModeTCPRelay || reg == nil {
+		return
+	}
+
+	if client != nil && client.IsConnected() {
+		return
+	}
+
+	bestPeer, tcpAddr := reg.FindBestTCPRelay(devID)
+	if bestPeer == nil || tcpAddr == "" {
+		return
+	}
+
+	newClient := relay.NewTCPRelayClient(tcpAddr, devID, func(srcDevID string, payload []byte) {
+		engineMu.Lock()
+		tf := globalTunFile
+		engineMu.Unlock()
+		if tf != nil && len(payload) > 0 {
+			_, _ = tf.Write(payload)
+		}
+	}, nil)
+
+	cCtx, cCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cCancel()
+	if err := newClient.Connect(cCtx); err == nil {
+		engineMu.Lock()
+		if globalTCPRelayClient != nil {
+			_ = globalTCPRelayClient.Close()
+		}
+		globalTCPRelayClient = newClient
+		engineMu.Unlock()
+		logger.Info().Str("relay", bestPeer.DeviceID).Str("addr", tcpAddr).Msg("🛡️ Android connected to TCP Peer-as-Relay on port 443")
+	}
+}
+
 
 // RebindSockets closes the old UDP socket and binds a new one, returning the new raw file descriptor.
 // Must be called on network switch (Wi-Fi <-> Mobile data) so the new socket routes through the new network.

@@ -74,6 +74,8 @@ var defaultSTUNServers = []string{
 var defaultIPv6STUNServers = []string{
 	"[2606:4700:4700::1111]:3478",   // Cloudflare DNS/STUN IPv6 (0ms DNS)
 	"[2001:4860:4860::8888]:19302",  // Google STUN IPv6 (0ms DNS)
+	"stun6.l.google.com:3478",
+	"stun6.l.google.com:19302",
 	"stun.cloudflare.com:3478",
 	"stun.l.google.com:19302",
 }
@@ -226,8 +228,13 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 	}
 }
 
+var hasGlobalIPv6Hook func() bool
+
 // HasGlobalIPv6 returns true if the host has at least one active global unicast IPv6 address.
 func HasGlobalIPv6() bool {
+	if hasGlobalIPv6Hook != nil {
+		return hasGlobalIPv6Hook()
+	}
 	return GetLocalIPv6() != ""
 }
 

@@ -215,6 +215,7 @@ type Payload struct {
 	PingMs           int64      `json:"ping_ms,omitempty"`
 	NATType          string     `json:"nat_type,omitempty"` // "full_cone", "restricted", "symmetric", "unknown"
 	NATDelta         int        `json:"nat_delta,omitempty"`
+	ASN              string     `json:"asn,omitempty"`
 	Candidates       []string   `json:"candidates,omitempty"`
 
 	// MDAR (Mesh Dynamic Adaptive Reconfiguration)
@@ -315,6 +316,8 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 		UpperNATType          string                   `json:"NATType"`
 		UpperNATDelta         *int                     `json:"NATDelta"`
 		CamelNATDelta         *int                     `json:"natDelta"`
+		UpperASN              string                   `json:"ASN"`
+		CamelASN              string                   `json:"asn"`
 		UpperEndpoints        []EndpointDesc           `json:"Endpoints"`
 		CamelEndpoints        []EndpointDesc           `json:"endpoints"`
 		UpperCoordination     *PunchCoordinationSignal `json:"Coordination"`
@@ -457,6 +460,13 @@ func (p *Payload) UnmarshalJSON(data []byte) error {
 			p.NATDelta = *aux.UpperNATDelta
 		} else if aux.CamelNATDelta != nil {
 			p.NATDelta = *aux.CamelNATDelta
+		}
+	}
+	if p.ASN == "" {
+		if aux.UpperASN != "" {
+			p.ASN = aux.UpperASN
+		} else if aux.CamelASN != "" {
+			p.ASN = aux.CamelASN
 		}
 	}
 	if p.RemoteDiag == nil {

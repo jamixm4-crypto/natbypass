@@ -72,12 +72,15 @@ private fun PeerAvatar(displayName: String, modifier: Modifier = Modifier) {
 private fun TransportBadge(transport: String, channelType: String, detail: String = "") {
     val (label, color) = when {
         transport == "tls" || channelType == "tcp" -> Pair("TLS", Color(0xFFA855F7))
+        detail.contains("IPv6")                    -> Pair("🌐 IPv6", Color(0xFF818CF8))
+        detail.contains("Предиктивный") || detail.contains("Predicted") -> Pair("🎯 Predict", Color(0xFF06B6D4))
+        detail.contains("Координированный") || detail.contains("Coord") -> Pair("⚡ Coord", Color(0xFF10B981))
         transport == "awg" || channelType == "p2p" -> Pair("AWG", MaterialTheme.natColors.success)
         channelType == "relay" && detail.startsWith("Релей через") -> {
             val via = detail.removePrefix("Релей через").trim().take(12)
             Pair("🛡️ $via", MaterialTheme.natColors.warning)
         }
-        channelType == "relay"                     -> Pair("Relay", MaterialTheme.natColors.warning)
+        channelType == "relay"                     -> Pair("☁️ MQTT", MaterialTheme.natColors.warning)
         else                                       -> Pair("Offline", MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
     }
     Surface(

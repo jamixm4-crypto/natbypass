@@ -21,31 +21,52 @@ import (
 // NAT behavior (RFC 5780 / RFC 4787 / RFC 6888), DPI/TSPU filtering presence,
 // and optimal transport recommendation.
 type NetcheckReport struct {
-	UDPEnabled         bool             `json:"udp_enabled"`
-	IPv6Enabled        bool             `json:"ipv6_enabled"`
-	NATType            string           `json:"nat_type"`
-	MappingType        string           `json:"mapping_type"`
-	FilteringType      string           `json:"filtering_type"`
-	PublicIPv4         string           `json:"public_ipv4,omitempty"`
-	PublicIPv6         string           `json:"public_ipv6,omitempty"`
-	PortDelta          int              `json:"port_delta"`
-	PBABlockSize       int              `json:"pba_block_size,omitempty"`
-	TSPUDetected       bool             `json:"tspu_detected"`
-	TSPUDetails        string           `json:"tspu_details,omitempty"`
-	PathMTU            int              `json:"path_mtu"`
-	PreferredTransport string           `json:"preferred_transport"`
-	LatenciesMs        map[string]int64 `json:"latencies_ms"`
-	Timestamp          time.Time        `json:"timestamp"`
+	UDPEnabled             bool             `json:"udp_enabled"`
+	UDPBlockedIPv4         bool             `json:"udp_blocked_ipv4"`
+	UDPBlockedIPv6         bool             `json:"udp_blocked_ipv6"`
+	IPv6Enabled            bool             `json:"ipv6_enabled"`
+	IPv6Available          bool             `json:"ipv6_available"`
+	TCP443OK               bool             `json:"tcp_443_ok"`
+	NATType                string           `json:"nat_type"`
+	MappingType            string           `json:"mapping_type"`
+	FilteringType          string           `json:"filtering_type"`
+	PublicIPv4             string           `json:"public_ipv4,omitempty"`
+	PublicIPv6             string           `json:"public_ipv6,omitempty"`
+	PortDelta              int              `json:"port_delta"`
+	PBABlockSize           int              `json:"pba_block_size,omitempty"`
+	TSPUDetected           bool             `json:"tspu_detected"`
+	TSPUDetails            string           `json:"tspu_details,omitempty"`
+	DPIBlockedWireGuard    bool             `json:"dpi_blocked_wireguard"`
+	DPIBlockedStandardUDP  bool             `json:"dpi_blocked_standard_udp"`
+	PathMTU                int              `json:"path_mtu"`
+	PreferredTransport     string           `json:"preferred_transport"`
+	EscalationMode         string           `json:"escalation_mode"`
+	EscalationLevel        int              `json:"escalation_level"`
+	EscalationSummary      string           `json:"escalation_summary"`
+	LatenciesMs            map[string]int64 `json:"latencies_ms"`
+	Timestamp              time.Time        `json:"timestamp"`
 }
 
 // RecommendTransportForReport returns the recommended transport mode for a given NetcheckReport.
 // Rationale:
-// - If UDP is blocked or TSPU DPI censorship is detected: ShadowTLS (or WSS) over TLS 443.
+// - Level 1: If IPv4 UDP is blocked, but IPv6 is available and functional -> ForceIPv6Only.
+// - Level 3: If UDP is blocked, but TCP 443 is functional -> TCP Peer-as-Relay (port 443).
+// - Level 2: If UDP is completely blocked with no TCP 443 -> MQTT L3 Tunnel Fallback.
+// - If UDP is blocked or TSPU DPI censorship is detected without dual-stack: ShadowTLS over TLS 443.
 // - If NAT is Symmetric (Address-and-Port-Dependent / random ports): QUIC (multipath + migration).
 // - If NAT is Cone (Endpoint-Independent / linear predictable delta): AWG (fastest zero-overhead UDP).
 func RecommendTransportForReport(rep *NetcheckReport) string {
 	if rep == nil {
 		return transport.TransportAWG
+	}
+	if rep.UDPBlockedIPv4 && rep.IPv6Available && !rep.UDPBlockedIPv6 {
+		return "ipv6_only"
+	}
+	if rep.UDPBlockedIPv4 && rep.TCP443OK {
+		return "tcp_relay"
+	}
+	if rep.UDPBlockedIPv4 && !rep.TCP443OK {
+		return "mqtt_fallback"
 	}
 	if !rep.UDPEnabled || rep.TSPUDetected {
 		return transport.TransportShadowTLS
@@ -83,12 +104,22 @@ func RunNetcheck(ctx context.Context) (*NetcheckReport, error) {
 	}()
 
 	// 2. IPv6 Check
+	udpBlockedIPv6 := true
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		hasIPv6, pubIPv6 := checkIPv6(ctx)
 		rep.IPv6Enabled = hasIPv6
+		rep.IPv6Available = hasIPv6
 		rep.PublicIPv6 = pubIPv6
+		if hasIPv6 {
+			// Probe UDP6 connectivity to verify if IPv6 UDP is passing through without TSPU drop
+			lat6 := probeLatency(ctx, "udp6", "[2001:4860:4860::8888]:53")
+			if lat6 >= 0 {
+				udpBlockedIPv6 = false
+				rep.LatenciesMs["google_dns_ipv6"] = lat6
+			}
+		}
 	}()
 
 	// 3. TCP 443 Check (Control probe for DPI/TSPU detection)
@@ -96,17 +127,15 @@ func RunNetcheck(ctx context.Context) (*NetcheckReport, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		d := net.Dialer{Timeout: 2 * time.Second}
-		conn, err := d.DialContext(ctx, "tcp", "1.1.1.1:443")
-		if err == nil {
-			_ = conn.Close()
+		lat := probeLatency(ctx, "tcp", "1.1.1.1:443")
+		if lat >= 0 {
 			tcp443OK = true
+			rep.LatenciesMs["cloudflare_tcp443"] = lat
 		} else {
-			// Fallback check to Google
-			conn2, err2 := d.DialContext(ctx, "tcp", "8.8.8.8:443")
-			if err2 == nil {
-				_ = conn2.Close()
+			lat2 := probeLatency(ctx, "tcp", "8.8.8.8:443")
+			if lat2 >= 0 {
 				tcp443OK = true
+				rep.LatenciesMs["google_tcp443"] = lat2
 			}
 		}
 	}()
@@ -145,18 +174,56 @@ func RunNetcheck(ctx context.Context) (*NetcheckReport, error) {
 		rep.FilteringType = "Drop All UDP"
 	}
 
+	rep.UDPBlockedIPv4 = !rep.UDPEnabled
+	rep.UDPBlockedIPv6 = udpBlockedIPv6
+	rep.IPv6Available = rep.IPv6Enabled
+	rep.TCP443OK = tcp443OK
+
+	// Detect UDP drop signatures
+	cDNS, hasCDNS := rep.LatenciesMs["cloudflare_dns"]
+	yDNS, hasYDNS := rep.LatenciesMs["yandex_dns"]
+	gSTUN, hasGSTUN := rep.LatenciesMs["google_stun"]
+	if (hasCDNS && cDNS < 0) && (hasYDNS && yDNS < 0) && (hasGSTUN && gSTUN < 0) {
+		rep.DPIBlockedStandardUDP = true
+	}
+
 	// DPI / TSPU Heuristic:
 	// If TCP 443 works normally, but UDP is completely blocked or failed STUN,
 	// TSPU middlebox is likely dropping non-standard UDP.
 	if tcp443OK && !rep.UDPEnabled {
 		rep.TSPUDetected = true
+		rep.DPIBlockedWireGuard = true
 		rep.TSPUDetails = "Обнаружена фильтрация UDP (ТСПУ DPI / Корпоративный фаервол). Исходящий UDP сбрасывается, доступен только TCP 443."
 	} else if !tcp443OK && !rep.UDPEnabled {
 		rep.TSPUDetails = "Сетевой интерфейс не имеет выхода в Интернет или DNS/маршруты недоступны."
 	}
 
+	// Calculate Escalation Level & Metadata
+	if !rep.UDPBlockedIPv4 {
+		rep.EscalationLevel = 0
+		rep.EscalationMode = "udp_standard"
+		rep.EscalationSummary = "Уровень 0: Стандартный прямой UDP (P2P / AmneziaWG)"
+	} else if rep.IPv6Available && !rep.UDPBlockedIPv6 {
+		rep.EscalationLevel = 1
+		rep.EscalationMode = "ipv6_only"
+		rep.EscalationSummary = "Уровень 1: Принудительный прямой IPv6 (Обход CGNAT и ТСПУ)"
+	} else if rep.TCP443OK {
+		rep.EscalationLevel = 3
+		rep.EscalationMode = "tcp_relay"
+		rep.EscalationSummary = "Уровень 3: TCP Peer-as-Relay на порту 443 (Маскировка под HTTPS)"
+	} else {
+		rep.EscalationLevel = 2
+		rep.EscalationMode = "mqtt_fallback"
+		rep.EscalationSummary = "Уровень 2: L3 IP-туннель через протокол сигналов MQTT"
+	}
+
 	rep.PreferredTransport = RecommendTransportForReport(rep)
 	return rep, nil
+}
+
+// CheckIPv6 checks if the host has an active global unicast IPv6 address and can reach IPv6 endpoints.
+func CheckIPv6(ctx context.Context) (bool, string) {
+	return checkIPv6(ctx)
 }
 
 // checkIPv6 checks if the host has an active global unicast IPv6 address and can reach IPv6 endpoints.

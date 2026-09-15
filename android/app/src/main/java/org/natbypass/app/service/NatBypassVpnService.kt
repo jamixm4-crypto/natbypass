@@ -213,6 +213,8 @@ class NatBypassVpnService : VpnService() {
                                     if (sockFd > 0) protect(sockFd)
                                     val sockFd6 = org.natbypass.app.util.MobileBridge.getUDPSocketFd6()
                                     if (sockFd6 > 0) protect(sockFd6)
+                                    val tcpFd = org.natbypass.app.util.MobileBridge.getTCPSocketFd()
+                                    if (tcpFd > 0) protect(tcpFd)
                                     org.natbypass.app.util.MobileBridge.refreshPublicIP()
                                 } catch (_: Throwable) {}
                             }
@@ -431,6 +433,11 @@ class NatBypassVpnService : VpnService() {
                     val ok6: Boolean = protect(sockFd6)
                     Log.i(TAG, "VpnService.protect($sockFd6) IPv6 applied: $ok6")
                 }
+                val tcpFd: Int = org.natbypass.app.util.MobileBridge.getTCPSocketFd()
+                if (tcpFd > 0) {
+                    val okTcp: Boolean = protect(tcpFd)
+                    Log.i(TAG, "VpnService.protect($tcpFd) TCP applied: $okTcp")
+                }
             } catch (t: Throwable) {
                 Log.w(TAG, "protect socket error: ${t.message}")
             }
@@ -604,6 +611,8 @@ class NatBypassVpnService : VpnService() {
                     }
                     val sockFd6 = org.natbypass.app.util.MobileBridge.getUDPSocketFd6()
                     if (sockFd6 > 0) protect(sockFd6)
+                    val tcpFd = org.natbypass.app.util.MobileBridge.getTCPSocketFd()
+                    if (tcpFd > 0) protect(tcpFd)
                 } catch (t: Throwable) {
                     Log.w(TAG, "Ошибка перепривязки сокета при смене сети: ${t.message}")
                 }

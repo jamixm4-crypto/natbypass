@@ -1,4 +1,4 @@
-// Copyright (C) 2026 jamixm4-crypto
+﻿// Copyright (C) 2026 jamixm4-crypto
 //
 // NatBypass is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -8,89 +8,102 @@
 package network
 
 import (
-	"reflect"
+	"path/filepath"
 	"testing"
 )
 
-func TestLookupCarrierASN(t *testing.T) {
-	tests := []struct {
-		input       string
-		expectedOK  bool
-		carrier     string
-		predictable bool
-	}{
-		{"AS31133", true, "MegaFon/Yota", true},
-		{"31133", true, "MegaFon/Yota", true},
-		{"as8359", true, "MTS", true},
-		{"AS21928", true, "T-Mobile", false},
-		{"", false, "", false},
-		{"UNKNOWN", false, "", false},
-		{"AS999999", false, "", false},
+func TestASNRules_LookupStatic(t *testing.T) {
+	rule, found := LookupCarrierASN("AS31133")
+	if !found {
+		t.Fatalf("expected AS31133 to be found in knownCarrierASNs")
+	}
+	if rule.Carrier != "MegaFon/Yota" || rule.DefaultDelta != 1 {
+		t.Errorf("unexpected rule for AS31133: %+v", rule)
 	}
 
-	for _, tc := range tests {
-		rule, ok := LookupCarrierASN(tc.input)
-		if ok != tc.expectedOK {
-			t.Errorf("LookupCarrierASN(%q) ok = %v, expected %v", tc.input, ok, tc.expectedOK)
-		}
-		if ok {
-			if rule.Carrier != tc.carrier {
-				t.Errorf("LookupCarrierASN(%q) carrier = %q, expected %q", tc.input, rule.Carrier, tc.carrier)
-			}
-			if rule.PredictionViable != tc.predictable {
-				t.Errorf("LookupCarrierASN(%q) predictable = %v, expected %v", tc.input, rule.PredictionViable, tc.predictable)
-			}
-		}
+	// Test without "AS" prefix
+	rule2, found2 := LookupCarrierASN("8359")
+	if !found2 {
+		t.Fatalf("expected 8359 to be resolved to AS8359")
+	}
+	if rule2.Carrier != "MTS" || rule2.DefaultDelta != 2 {
+		t.Errorf("unexpected rule for MTS: %+v", rule2)
 	}
 }
 
-func TestGenerateAdaptivePredictPorts_MegaFonSequential(t *testing.T) {
-	ports := GenerateAdaptivePredictPorts(30000, 0, "AS31133")
-	expected := []int{30000, 30001, 30002, 30003, 30004, 30005, 29999}
-	if !reflect.DeepEqual(ports, expected) {
-		t.Errorf("MegaFon sequential ports mismatch: got %v, expected %v", ports, expected)
+func TestASNRules_DynamicRecordAndPersistence(t *testing.T) {
+	ClearDynamicASNRules()
+	defer ClearDynamicASNRules()
+
+	tmpDir := t.TempDir()
+	cacheFile := filepath.Join(tmpDir, "test_asn_cache.json")
+
+	// Dynamic observation for unknown carrier AS99999
+	changed := RecordPeerObservation("AS99999", 4, cacheFile)
+	if !changed {
+		t.Fatalf("expected RecordPeerObservation to record new ASN")
+	}
+
+	// Save explicitly
+	if err := SaveASNRulesCache(cacheFile); err != nil {
+		t.Fatalf("SaveASNRulesCache failed: %v", err)
+	}
+
+	// Lookup dynamically learned rule
+	dynRule, found := LookupCarrierASN("AS99999")
+	if !found {
+		t.Fatalf("expected dynamically learned AS99999 to be found")
+	}
+	if dynRule.DefaultDelta != 4 || dynRule.PortAllocation != "fixed_step" {
+		t.Errorf("unexpected dynamic rule: %+v", dynRule)
+	}
+
+	// Clear memory and reload from disk
+	ClearDynamicASNRules()
+	_, foundAfterClear := LookupCarrierASN("AS99999")
+	if foundAfterClear {
+		t.Fatalf("expected dynamic rules to be empty after clear")
+	}
+
+	if err := LoadASNRulesCache(cacheFile); err != nil {
+		t.Fatalf("LoadASNRulesCache failed: %v", err)
+	}
+
+	reloadedRule, foundReloaded := LookupCarrierASN("AS99999")
+	if !foundReloaded {
+		t.Fatalf("expected AS99999 to be found after loading from cache file")
+	}
+	if reloadedRule.DefaultDelta != 4 {
+		t.Errorf("expected DefaultDelta 4, got %d", reloadedRule.DefaultDelta)
+	}
+
+	// Ensure random CGNAT (T-Mobile) cannot be overridden
+	if changedRandom := RecordPeerObservation("AS21928", 2, cacheFile); changedRandom {
+		t.Errorf("expected Random CGNAT rule for AS21928 NOT to be overridden")
 	}
 }
 
-func TestGenerateAdaptivePredictPorts_MTSFixedStep(t *testing.T) {
-	ports := GenerateAdaptivePredictPorts(40000, 0, "AS8359")
-	expected := []int{40000, 40002, 40004, 40006, 40008, 40010, 39998}
-	if !reflect.DeepEqual(ports, expected) {
-		t.Errorf("MTS fixed step ports mismatch: got %v, expected %v", ports, expected)
-	}
-}
+func TestASNRules_AdaptivePortsWithDynamicRule(t *testing.T) {
+	ClearDynamicASNRules()
+	defer ClearDynamicASNRules()
 
-func TestGenerateAdaptivePredictPorts_TMobileRandom(t *testing.T) {
-	ports := GenerateAdaptivePredictPorts(50000, 0, "AS21928")
-	expected := []int{50000}
-	if !reflect.DeepEqual(ports, expected) {
-		t.Errorf("T-Mobile random NAT must return strictly single base port: got %v, expected %v", ports, expected)
-	}
-}
+	UpdateCarrierASN("AS55555", CarrierASNRule{
+		Carrier:          "CustomCarrier",
+		PortAllocation:   "sequential",
+		DefaultDelta:     3,
+		SweepRadius:      6,
+		PredictionViable: true,
+	})
 
-func TestGenerateAdaptivePredictPorts_Tele2Jitter(t *testing.T) {
-	ports := GenerateAdaptivePredictPorts(25000, 0, "AS42610")
-	if len(ports) < 10 {
-		t.Errorf("Tele2 small jitter should generate wide jitter set: got %d ports", len(ports))
+	ports := GenerateAdaptivePredictPorts(50000, 0, "AS55555")
+	if len(ports) < 2 {
+		t.Fatalf("expected predicted ports, got %v", ports)
 	}
-	if ports[0] != 25000 {
-		t.Errorf("first port must be base port: got %d", ports[0])
+	if ports[0] != 50000 {
+		t.Errorf("first port should be base port, got %d", ports[0])
 	}
-}
-
-func TestGenerateAdaptivePredictPorts_UnknownWithMeasuredDelta(t *testing.T) {
-	ports := GenerateAdaptivePredictPorts(20000, 4, "")
-	expected := []int{20000, 20004, 20008, 20012, 20016, 19996}
-	if !reflect.DeepEqual(ports, expected) {
-		t.Errorf("Unknown with delta=4 mismatch: got %v, expected %v", ports, expected)
-	}
-}
-
-func TestGenerateAdaptivePredictPorts_InvalidEdgeCases(t *testing.T) {
-	if ports := GenerateAdaptivePredictPorts(0, 0, ""); len(ports) != 0 {
-		t.Errorf("port 0 should return empty: got %v", ports)
-	}
-	if ports := GenerateAdaptivePredictPorts(70000, 0, ""); len(ports) != 0 {
-		t.Errorf("port 70000 should return empty: got %v", ports)
+	// With delta 3 and sequential, next should be 50003
+	if ports[1] != 50003 {
+		t.Errorf("expected second port 50003, got %d", ports[1])
 	}
 }

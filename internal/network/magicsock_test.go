@@ -15,6 +15,9 @@ import (
 )
 
 func TestMagicSock_CandidateSwitching(t *testing.T) {
+	hasGlobalIPv6Hook = func() bool { return false }
+	defer func() { hasGlobalIPv6Hook = nil }()
+
 	isLocalSubnetHook = func(ip net.IP) bool {
 		return ip.String() == "192.168.1.50"
 	}
@@ -28,7 +31,7 @@ func TestMagicSock_CandidateSwitching(t *testing.T) {
 	devID := "peer-test-1"
 	ms.RegisterPeerEndpoints(devID, "95.21.40.10:47832", "192.168.1.50:47832", "[2001:db8::1]:47832")
 
-	// Initially defaults to STUN WAN
+	// Initially defaults to STUN WAN when local host has no IPv6
 	ep, pType, _ := ms.GetActiveRoute(devID)
 	if ep != "95.21.40.10:47832" || pType != PathTypeWAN {
 		t.Errorf("expected initial WAN endpoint, got %s (%s)", ep, pType)
@@ -46,6 +49,37 @@ func TestMagicSock_CandidateSwitching(t *testing.T) {
 	}
 	if lat <= 0 {
 		t.Errorf("expected valid latency, got %v", lat)
+	}
+}
+
+func TestMagicSock_IPv6Priority(t *testing.T) {
+	hasGlobalIPv6Hook = func() bool { return true }
+	defer func() { hasGlobalIPv6Hook = nil }()
+
+	isLocalSubnetHook = func(ip net.IP) bool { return false }
+	defer func() { isLocalSubnetHook = nil }()
+
+	ms := NewMagicSock(nil, func(deviceID, oldPath, newPath string, pType PathType) {
+		t.Logf("Path switched for %s: %s -> %s (%s)", deviceID, oldPath, newPath, pType)
+	})
+	defer ms.Close()
+
+	devID := "peer-ipv6-priority"
+	ms.RegisterPeerEndpoints(devID, "95.21.40.10:47832", "192.168.1.50:47832", "[2001:db8::1]:47832")
+
+	// When host has global IPv6, IPv6 candidate must have priority over IPv4 STUN WAN
+	ep, pType, _ := ms.GetActiveRoute(devID)
+	if ep != "[2001:db8::1]:47832" || pType != PathTypeIPv6 {
+		t.Fatalf("expected initial IPv6 endpoint, got %s (%s)", ep, pType)
+	}
+
+	// Both WAN and IPv6 respond with probe success: IPv6 (Priority 2) must remain active over WAN (Priority 3)
+	ms.RecordProbeSuccess(devID, "95.21.40.10:47832", 20*time.Millisecond)
+	ms.RecordProbeSuccess(devID, "[2001:db8::1]:47832", 25*time.Millisecond)
+
+	ep, pType, _ = ms.GetActiveRoute(devID)
+	if ep != "[2001:db8::1]:47832" || pType != PathTypeIPv6 {
+		t.Errorf("expected IPv6 to retain priority over WAN, got %s (%s)", ep, pType)
 	}
 }
 

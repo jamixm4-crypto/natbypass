@@ -254,14 +254,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     else      -> "relay"
                 }
 
+                val punchMethod = obj.optString("punch_method", "").lowercase()
                 val relayedViaName = obj.optString("relayed_via_name", "").trim()
                 val relayedViaVip = obj.optString("relayed_via_vip", "").trim()
 
                 val transportDetail = when {
                     transport == "tls" -> "Прямой ShadowTLS (TCP)"
+                    punchMethod == "direct_ipv6" -> "Прямой IPv6 (UDP)"
+                    punchMethod == "predicted" -> "Предиктивный P2P (AWG)"
+                    punchMethod == "coordinated" -> "Координированный P2P (DCUtR)"
                     transport == "awg" -> "Прямой AWG (UDP)"
                     transport == "relay" && relayedViaName.isNotEmpty() -> "Релей через $relayedViaName"
                     transport == "relay" && relayedViaVip.isNotEmpty() -> "Релей через $relayedViaVip"
+                    transport == "relay" && punchMethod == "relay_mesh" -> "Релей через Mesh-пира"
                     transport == "relay" -> "Релей (MQTT / WSS)"
                     else -> "Офлайн"
                 }

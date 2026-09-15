@@ -37,7 +37,9 @@ import (
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/diagnostic"
+	"github.com/natbypass/natbypass/internal/network"
 	"github.com/natbypass/natbypass/internal/peer"
+	"github.com/natbypass/natbypass/internal/relay"
 	"github.com/natbypass/natbypass/internal/signaling"
 	"github.com/natbypass/natbypass/internal/system"
 	"github.com/natbypass/natbypass/internal/updater"
@@ -95,8 +97,11 @@ type Server struct {
 	registry   *peer.Registry
 	sigMgr     *signaling.FallbackManager
 	state      *AppState
-	srv        *http.Server
-	allowedIPs []string
+	transportSwitcher *network.TransportSwitcher
+	tcpRelayClient    *relay.TCPRelayClient
+	tcpRelayServer    *relay.TCPRelayServer
+	srv               *http.Server
+	allowedIPs        []string
 	events          []EventEntry
 	eventsMu        sync.Mutex
 	setupDone       bool
@@ -107,6 +112,21 @@ type Server struct {
 	onOpenWindow    func()
 	readyCh         chan struct{}
 	readyOnce       sync.Once
+}
+
+// SetTransportSwitcher links the global TransportSwitcher to the WebUI server.
+func (s *Server) SetTransportSwitcher(ts *network.TransportSwitcher) {
+	s.transportSwitcher = ts
+}
+
+// SetTCPRelayClient links the active TCP relay client to the WebUI server.
+func (s *Server) SetTCPRelayClient(c *relay.TCPRelayClient) {
+	s.tcpRelayClient = c
+}
+
+// SetTCPRelayServer links the active TCP relay server to the WebUI server.
+func (s *Server) SetTCPRelayServer(srv *relay.TCPRelayServer) {
+	s.tcpRelayServer = srv
 }
 
 // SetAllowedIPs sets the list of allowed IP/CIDR addresses for WebUI access.
@@ -447,6 +467,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 	mux.HandleFunc("/icon.png", s.handleIconPng)
 	mux.HandleFunc("/manifest.json", s.handleManifest)
+	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/settings/save", s.handleSettingsSave)
 	mux.HandleFunc("/api/logs/download", s.handleLogsDownload)
 	// Автоматическое обновление
@@ -821,6 +842,9 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 				p.Transport = "offline"
 				p.PingMs = 0
 				p.Latency = 0
+				p.PunchMethod = ""
+			} else if p.PunchMethod == "" {
+				p.PunchMethod = p.DeterminePunchMethod()
 			}
 
 			curCfg, _ := config.Load(s.configPath)
@@ -973,7 +997,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta63"
+		ver = "1.9.226-beta64"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1655,7 +1679,218 @@ func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
 		result["peers"] = check{Ok: false, Detail: "Устройства в сети пока не обнаружены (ожидание маяков)", Extra: "0"}
 	}
 
-	s.AddEvent("info", "Запущена диагностика подключения", fmt.Sprintf("channel=%s ip=%s", ch, pip))
+	// 6. Dual-Stack IPv6 & UDP6
+	ctx, cancel := context.WithTimeout(r.Context(), 2500*time.Millisecond)
+	defer cancel()
+	hasIPv6, pubIPv6 := diagnostic.CheckIPv6(ctx)
+	udp6OK := false
+	if hasIPv6 {
+		d6 := net.Dialer{Timeout: 1200 * time.Millisecond}
+		if c6, err := d6.DialContext(ctx, "udp6", "[2001:4860:4860::8888]:53"); err == nil {
+			_ = c6.Close()
+			udp6OK = true
+		}
+	}
+	if hasIPv6 {
+		udp6Status := "UDP6 свободен"
+		if !udp6OK {
+			udp6Status = "UDP6 сбрасывается ТСПУ"
+		}
+		result["ipv6"] = check{Ok: true, Detail: fmt.Sprintf("Глобальный IPv6 маршрут доступен (%s)", udp6Status), Extra: pubIPv6}
+	} else {
+		result["ipv6"] = check{Ok: false, Detail: "Глобальный IPv6 не обнаружен на сетевых интерфейсах"}
+	}
+
+	// 7. TCP 443 доступность
+	dTCP := net.Dialer{Timeout: 1200 * time.Millisecond}
+	startTCP := time.Now()
+	tcpOK := false
+	tcpLat := int64(-1)
+	if conn, err := dTCP.DialContext(ctx, "tcp", "1.1.1.1:443"); err == nil {
+		_ = conn.Close()
+		tcpOK = true
+		tcpLat = time.Since(startTCP).Milliseconds()
+	} else if conn2, err2 := dTCP.DialContext(ctx, "tcp", "8.8.8.8:443"); err2 == nil {
+		_ = conn2.Close()
+		tcpOK = true
+		tcpLat = time.Since(startTCP).Milliseconds()
+	}
+	if tcpOK {
+		result["tcp_443"] = check{Ok: true, Detail: fmt.Sprintf("TCP порт 443 доступен (задержка %d ms)", tcpLat), Extra: fmt.Sprintf("%d ms", tcpLat)}
+	} else {
+		result["tcp_443"] = check{Ok: false, Detail: "TCP порт 443 заблокирован или недоступен"}
+	}
+
+	// 8. Автоматическая эскалационная лестница транспорта
+	ladderMode := "udp_standard"
+	ladderLevel := 0
+	ladderSummary := "Уровень 0: Стандартный прямой UDP (P2P / AmneziaWG)"
+	forceIPv6 := false
+	probesDisabled := false
+	enableMQTT := false
+	if s.transportSwitcher != nil {
+		ladderMode = string(s.transportSwitcher.CurrentMode())
+		forceIPv6 = s.transportSwitcher.IsForceIPv6Only()
+		probesDisabled = s.transportSwitcher.IsDisableUDPProbes()
+		enableMQTT = s.transportSwitcher.IsEnableMQTTFallback()
+		switch s.transportSwitcher.CurrentMode() {
+		case network.TransportModeIPv6:
+			ladderLevel = 1
+			ladderSummary = "Уровень 1: Принудительный прямой IPv6 (Обход CGNAT и ТСПУ)"
+		case network.TransportModeTCPRelay:
+			ladderLevel = 3
+			ladderSummary = "Уровень 3: TCP Peer-as-Relay на порту 443 (Маскировка под HTTPS)"
+		case network.TransportModeMQTT:
+			ladderLevel = 2
+			ladderSummary = "Уровень 2: L3 IP-туннель через MQTT сигнальный канал"
+		}
+	}
+	tcpRelayConn := false
+	if s.tcpRelayClient != nil && s.tcpRelayClient.IsConnected() {
+		tcpRelayConn = true
+	}
+	tcpServerPort := 0
+	if s.tcpRelayServer != nil {
+		tcpServerPort = s.tcpRelayServer.Port()
+	}
+	result["transport_ladder"] = map[string]interface{}{
+		"mode":                  ladderMode,
+		"level":                 ladderLevel,
+		"summary":               ladderSummary,
+		"force_ipv6_only":       forceIPv6,
+		"probes_disabled":       probesDisabled,
+		"mqtt_fallback":         enableMQTT,
+		"tcp_relay_connected":   tcpRelayConn,
+		"tcp_relay_server_port": tcpServerPort,
+	}
+
+	// 9. Egress физический сетевой интерфейс
+	ifName := ""
+	gw := ""
+	mtu := 1420
+	live := false
+	if s.state != nil {
+		ifName = s.state.InterfaceName
+		gw = s.state.GatewayIP
+		mtu = s.state.MTU
+		live = s.state.InternetLive
+	}
+	result["egress"] = map[string]interface{}{
+		"interface":     ifName,
+		"gateway":       gw,
+		"mtu":           mtu,
+		"internet_live": live,
+	}
+
+	// 10. Виртуальный TUN интерфейс
+	vip := ""
+	if s.state != nil {
+		vip = s.state.VirtualIP
+	}
+	var tunStat *tunnel.TUNStatus
+	if s.state != nil {
+		tunStat = s.state.TUNStatus
+	}
+	result["tun"] = map[string]interface{}{
+		"virtual_ip": vip,
+		"status":     tunStat,
+	}
+
+	// 11. Анализ пиров mesh-сети и классификация транспорта
+	p2pCount := 0
+	ipv6Count := 0
+	tcpCount := 0
+	relayMeshCount := 0
+	relayMQTTCount := 0
+	type peerRank struct {
+		DeviceID string `json:"device_id"`
+		Name     string `json:"name"`
+		VIP      string `json:"vip"`
+		Method   string `json:"method"`
+		PingMs   int64  `json:"ping_ms"`
+	}
+	var ranks []peerRank
+	for _, p := range peers {
+		method := p.DeterminePunchMethod()
+		if p.DirectP2P || method == "direct" {
+			p2pCount++
+		}
+		if method == "direct_ipv6" {
+			ipv6Count++
+		}
+		if p.DirectTCP || strings.HasPrefix(p.Transport, "tcp_") {
+			tcpCount++
+		}
+		if method == "relay_mesh" || p.Transport == "relay_mesh" {
+			relayMeshCount++
+		}
+		if method == "relay_mqtt" || p.Transport == "relay_mqtt" {
+			relayMQTTCount++
+		}
+		pName := p.DeviceName
+		if pName == "" {
+			pName = p.Nickname
+		}
+		if pName == "" {
+			pName = p.DeviceID
+		}
+		ranks = append(ranks, peerRank{
+			DeviceID: p.DeviceID,
+			Name:     pName,
+			VIP:      p.VirtualIP,
+			Method:   method,
+			PingMs:   p.PingMs,
+		})
+	}
+	sort.Slice(ranks, func(i, j int) bool {
+		if ranks[i].PingMs <= 0 {
+			return false
+		}
+		if ranks[j].PingMs <= 0 {
+			return true
+		}
+		return ranks[i].PingMs < ranks[j].PingMs
+	})
+	result["mesh_peers"] = map[string]interface{}{
+		"total":       len(peers),
+		"direct_p2p":  p2pCount,
+		"direct_ipv6": ipv6Count,
+		"direct_tcp":  tcpCount,
+		"relay_mesh":  relayMeshCount,
+		"relay_mqtt":  relayMQTTCount,
+		"ranking":     ranks,
+	}
+
+	// 12. Детекция ТСПУ / DPI эвристика
+	tspuDetected := false
+	tspuDetails := "Блокировок UDP/WireGuard со стороны ТСПУ не зафиксировано."
+	if tcpOK && (stun == "" || stun == "Определяется...") {
+		tspuDetected = true
+		tspuDetails = "Обнаружен сброс UDP (ТСПУ DPI): TCP 443 открыт, но UDP STUN-пакеты не возвращаются."
+	}
+	result["tspu"] = map[string]interface{}{
+		"detected": tspuDetected,
+		"details":  tspuDetails,
+	}
+
+	// 13. Системные ресурсы рантайма Go
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	uptimeStr := ""
+	if s.state != nil && !s.state.StartedAt.IsZero() {
+		uptimeStr = time.Since(s.state.StartedAt).Round(time.Second).String()
+	}
+	result["system"] = map[string]interface{}{
+		"os":            runtime.GOOS,
+		"arch":          runtime.GOARCH,
+		"num_goroutine": runtime.NumGoroutine(),
+		"alloc_mb":      float64(m.Alloc) / (1024 * 1024),
+		"sys_mb":        float64(m.Sys) / (1024 * 1024),
+		"num_gc":        m.NumGC,
+		"uptime":        uptimeStr,
+	}
+
+	s.AddEvent("info", "Запущена комплексная системная диагностика", fmt.Sprintf("channel=%s ip=%s mode=%s", ch, pip, ladderMode))
 	s.jsonResponse(w, http.StatusOK, result, "")
 }
 
@@ -1954,7 +2189,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta63"
+		ver = "1.9.226-beta64"
 	}
 
 	vip := s.state.VirtualIP
@@ -2570,6 +2805,90 @@ func (s *Server) handleRoutingLocalSubnets(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	s.jsonResponse(w, http.StatusOK, subnets, "")
+}
+
+// handleSettings — GET/POST /api/settings — чтение и частичное обновление настроек (например, transport_mode)
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	targetPath := s.resolveConfigPath()
+	cfg, _ := config.Load(targetPath)
+	if cfg == nil {
+		if s.cfg != nil {
+			cfg = s.cfg
+		} else {
+			cfg = &config.Config{}
+		}
+	}
+
+	if r.Method == http.MethodGet {
+		s.jsonResponse(w, http.StatusOK, cfg, "")
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	var req struct {
+		TransportMode string `json:"transport_mode"`
+		TLSMode       string `json:"tls_mode,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка разбора JSON")
+		return
+	}
+
+	if req.TransportMode != "" {
+		cfg.Network.TransportMode = req.TransportMode
+		if active := cfg.EnsureActiveProfile(); active != nil {
+			active.TransportMode = req.TransportMode
+		}
+
+		// Apply immediately to TransportSwitcher if available
+		if s.transportSwitcher != nil {
+			switch req.TransportMode {
+			case "ipv6_only":
+				s.transportSwitcher.ForceIPv6Only()
+			case "tcp_relay":
+				s.transportSwitcher.DisableUDPProbes()
+			case "mqtt_fallback":
+				s.transportSwitcher.EnableMQTTFallback()
+			case "force_udp", "udp", "awg":
+				s.transportSwitcher.ResetToUDP()
+			case "force_tcp", "tcp_shadowtls":
+				s.transportSwitcher.DisableUDPProbes()
+			case "quic":
+				s.transportSwitcher.ResetToUDP()
+			default:
+				// "auto"
+				s.transportSwitcher.ResetToUDP()
+			}
+		}
+
+		s.AddEvent("info", "Смена режима транспорта", fmt.Sprintf("transport_mode=%s", req.TransportMode))
+	}
+
+	if req.TLSMode != "" {
+		cfg.Network.TLSMode = req.TLSMode
+		if active := cfg.EnsureActiveProfile(); active != nil {
+			active.TLSMode = req.TLSMode
+		}
+	}
+
+	if err := config.Save(cfg, targetPath, false); err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения настроек: "+err.Error())
+		return
+	}
+
+	if s.onConfigChange != nil {
+		s.onConfigChange()
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"ok":             true,
+		"transport_mode": cfg.Network.TransportMode,
+		"message":        fmt.Sprintf("Режим транспорта успешно изменен на %s", cfg.Network.TransportMode),
+	}, "")
 }
 
 // handleSettingsSave — POST /api/settings/save — полное сохранение настроек с DPAPI

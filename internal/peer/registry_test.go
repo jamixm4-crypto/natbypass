@@ -618,3 +618,107 @@ func TestRelayedViaPreservation(t *testing.T) {
 		t.Errorf("expected RelayedViaDevID to NOT be restored when DirectP2P is true, got %s", directNewer.RelayedViaDevID)
 	}
 }
+
+func TestPeer_DeterminePunchMethod(t *testing.T) {
+	// Offline peer
+	pOffline := &Peer{Online: false}
+	if m := pOffline.DeterminePunchMethod(); m != "" {
+		t.Errorf("expected empty punch method for offline peer, got %s", m)
+	}
+
+	// Direct IPv6
+	pIPv6 := &Peer{
+		Online:         true,
+		DirectP2P:      true,
+		ActiveEndpoint: "[2001:db8::1]:47832",
+	}
+	if m := pIPv6.DeterminePunchMethod(); m != "direct_ipv6" {
+		t.Errorf("expected direct_ipv6, got %s", m)
+	}
+
+	// Direct IPv4
+	pIPv4 := &Peer{
+		Online:         true,
+		DirectP2P:      true,
+		ActiveEndpoint: "95.21.40.10:47832",
+	}
+	if m := pIPv4.DeterminePunchMethod(); m != "direct" {
+		t.Errorf("expected direct, got %s", m)
+	}
+
+	// Explicit Predicted
+	pPred := &Peer{
+		Online:         true,
+		DirectP2P:      true,
+		PunchMethod:    "predicted",
+		ActiveEndpoint: "95.21.40.10:47835",
+	}
+	if m := pPred.DeterminePunchMethod(); m != "predicted" {
+		t.Errorf("expected predicted, got %s", m)
+	}
+
+	// Explicit Coordinated
+	pCoord := &Peer{
+		Online:         true,
+		DirectP2P:      true,
+		PunchMethod:    "coordinated",
+		ActiveEndpoint: "95.21.40.10:47832",
+	}
+	if m := pCoord.DeterminePunchMethod(); m != "coordinated" {
+		t.Errorf("expected coordinated, got %s", m)
+	}
+
+	// Relay Mesh
+	pRelayMesh := &Peer{
+		Online:          true,
+		DirectP2P:       false,
+		RelayedViaDevID: "relay-1",
+	}
+	if m := pRelayMesh.DeterminePunchMethod(); m != "relay_mesh" {
+		t.Errorf("expected relay_mesh, got %s", m)
+	}
+
+	// Relay MQTT (default fallback)
+	pRelayMQTT := &Peer{
+		Online:    true,
+		DirectP2P: false,
+	}
+	if m := pRelayMQTT.DeterminePunchMethod(); m != "relay_mqtt" {
+		t.Errorf("expected relay_mqtt, got %s", m)
+	}
+}
+
+func TestPeer_PunchMethodMerge(t *testing.T) {
+	existing := &Peer{
+		DeviceID:       "peer-merge-test",
+		Online:         true,
+		DirectP2P:      true,
+		PunchMethod:    "predicted",
+		ActiveEndpoint: "95.21.40.10:47835",
+		LastDirectSeen: time.Now(),
+	}
+
+	// Newer beacon update without punch_method should preserve existing.PunchMethod
+	newer := &Peer{
+		DeviceID: "peer-merge-test",
+		Online:   true,
+	}
+	existing.MergeFrom(newer)
+	if newer.PunchMethod != "predicted" {
+		t.Errorf("expected PunchMethod 'predicted' to be preserved, got %s", newer.PunchMethod)
+	}
+
+	// If peer was demoted from direct P2P, PunchMethod should transition to relay
+	demoted := &Peer{
+		DeviceID:  "peer-merge-test",
+		Online:    true,
+		DirectP2P: false,
+	}
+	// simulate expired direct seen
+	existing.DirectP2P = false
+	existing.LastDirectSeen = time.Now().Add(-1 * time.Hour)
+	existing.MergeFrom(demoted)
+	if demoted.PunchMethod != "relay_mqtt" {
+		t.Errorf("expected demoted PunchMethod 'relay_mqtt', got %s", demoted.PunchMethod)
+	}
+}

@@ -107,7 +107,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta63"
+	Version = "1.9.226-beta64"
 	Commit  = "release"
 )
 
@@ -579,6 +579,10 @@ var (
 	dlgResultOK   bool
 	dlgFinished   bool
 	hDlgEdit      uintptr
+
+	lastLeaderSyncPunch = make(map[string]time.Time)
+	leaderPunchMu       sync.Mutex
+	asnCacheFile        string
 )
 
 const (
@@ -950,6 +954,12 @@ func main() {
 		writeDebug("Конфиг успешно загружен из " + configPath)
 	}
 	cfg = loadedCfg
+
+	asnCacheDir := filepath.Dir(configPath)
+	asnCacheFile = filepath.Join(asnCacheDir, ".asn_rules_cache.json")
+	if err := network.LoadASNRulesCache(asnCacheFile); err == nil {
+		writeDebug("Загружен кэш правил ASN из " + asnCacheFile)
+	}
 	if cfg.App.AddressBook == nil {
 		cfg.App.AddressBook = make(map[string]string)
 	}
@@ -4700,10 +4710,30 @@ func startEngineFromConfig(c *config.Config) {
 					}
 				}
 			}
+			// Determine exact 5-tier punch method
+			isCoord := false
+			leaderPunchMu.Lock()
+			if t, ok := lastLeaderSyncPunch[remoteDevID]; ok && time.Since(t) < 15*time.Second {
+				isCoord = true
+			}
+			leaderPunchMu.Unlock()
+
+			if isCoord {
+				p.PunchMethod = "coordinated"
+			} else if network.IsPredictedPort(fromAddr, p.STUNAddr) || (p.NATDelta > 0 && fromAddr != p.STUNAddr && !strings.Contains(fromAddr, "[")) {
+				p.PunchMethod = "predicted"
+			} else if strings.Contains(fromAddr, "[") || (strings.Count(fromAddr, ":") > 1) {
+				p.PunchMethod = "direct_ipv6"
+			} else {
+				p.PunchMethod = "direct"
+			}
+
 			if peer.IsValidEndpointForPeer(fromAddr, p, myPubIP) {
 				p.ActiveEndpoint = fromAddr
 			} else if p.ActiveEndpoint == "" {
-				if p.STUNAddr != "" {
+				if p.IPv6Addr != "" && network.HasGlobalIPv6() {
+					p.ActiveEndpoint = p.IPv6Addr
+				} else if p.STUNAddr != "" {
 					p.ActiveEndpoint = p.STUNAddr
 				} else if p.LocalAddr != "" {
 					p.ActiveEndpoint = p.LocalAddr
@@ -5195,6 +5225,11 @@ func startEngineFromConfig(c *config.Config) {
 								}
 								if targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, myPub) {
 									targetEP = targetPeer.LocalAddr
+								} else if (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+									targetEP = targetPeer.IPv6Addr
+								}
+								if targetEP == "" && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+									targetEP = targetPeer.IPv6Addr
 								}
 								if targetEP == "" {
 									targetEP = targetPeer.ActiveEndpoint
@@ -5277,8 +5312,11 @@ func startEngineFromConfig(c *config.Config) {
 										if targetEP != "" {
 											_ = udpPuncher.SendHolePunchProbe(targetEP)
 										}
+										if targetPeer.IPv6Addr != "" && targetPeer.IPv6Addr != targetEP && network.HasGlobalIPv6() {
+											_ = udpPuncher.SendHolePunchProbe(targetPeer.IPv6Addr)
+										}
 										if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
-											_ = udpPuncher.SendHolePunchProbe(targetPeer.STUNAddr)
+											_ = udpPuncher.SendHolePunchProbeWithDelta(targetPeer.STUNAddr, targetPeer.NATDelta)
 										}
 										for _, cand := range targetPeer.Candidates {
 											if cand != "" && cand != targetEP && cand != targetPeer.STUNAddr {
@@ -5556,7 +5594,7 @@ func startEngineFromConfig(c *config.Config) {
 								if p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, myPub) {
 									_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
 								}
-								if p.IPv6Addr != "" && network.GetLocalIPv6() != "" {
+								if p.IPv6Addr != "" && network.HasGlobalIPv6() {
 									_ = udpPuncher.SendHolePunchProbe(p.IPv6Addr)
 								}
 								for _, cand := range p.Candidates {
@@ -5619,7 +5657,17 @@ func startEngineFromConfig(c *config.Config) {
 
 										// Prime local NAT mappings: send immediate burst probes towards peer's known addresses
 										if targetPeer, ok := registry.Get(targetPeerID); ok && targetPeer != nil {
-											primeTargets := append([]string{targetPeer.STUNAddr, targetPeer.ActiveEndpoint, targetPeer.LocalAddr}, targetPeer.Candidates...)
+											primeTargets := []string{targetPeer.ActiveEndpoint}
+											if targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+												primeTargets = append(primeTargets, targetPeer.IPv6Addr)
+											}
+											if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetPeer.ActiveEndpoint {
+												primeTargets = append(primeTargets, targetPeer.STUNAddr)
+											}
+											if targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetPeer.ActiveEndpoint {
+												primeTargets = append(primeTargets, targetPeer.LocalAddr)
+											}
+											primeTargets = append(primeTargets, targetPeer.Candidates...)
 											udpPuncher.SendHolePunchBurstWithDelta(primeTargets, 3, targetPeer.NATDelta)
 										}
 									}(p.DeviceID)
@@ -5822,6 +5870,10 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						nick = p.DeviceName
 					}
 
+					if p.ASN != "" && p.NATDelta > 0 {
+						network.RecordPeerObservation(p.ASN, p.NATDelta, asnCacheFile)
+					}
+
 					if guiMagicSock != nil {
 						guiMagicSock.RegisterPeerEndpoints(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr)
 						if p.TCPAddr != "" {
@@ -5837,6 +5889,10 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						LocalAddr:        lanAddr,
 						STUNAddr:         p.STUNAddr,
 						TCPAddr:          p.TCPAddr,
+						IPv6Addr:         p.IPv6Addr,
+						NATType:          p.NATType,
+						NATDelta:         p.NATDelta,
+						ASN:              p.ASN,
 						WGPubKey:         p.WGPubKey,
 						WGPort:           p.WGPort,
 						LastSeen:         time.Now(),
@@ -6025,6 +6081,30 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					PublicIP:         myPublicIP,
 					LocalAddr:        fmt.Sprintf("%s:%d", localIP, pPort),
 					STUNAddr:         mySTUNAddr,
+					IPv6Addr: func() string {
+						if network.HasGlobalIPv6() {
+							return network.GetLocalIPv6()
+						}
+						return ""
+					}(),
+					NATType: func() string {
+						if udpPuncher != nil {
+							return udpPuncher.GetNATType().String()
+						}
+						return ""
+					}(),
+					NATDelta: func() int {
+						if udpPuncher != nil {
+							return udpPuncher.GetPortDelta()
+						}
+						return 0
+					}(),
+					ASN: func() string {
+						if udpPuncher != nil {
+							return udpPuncher.GetCurrentASN()
+						}
+						return ""
+					}(),
 					WGPubKey:         myWGPubKey,
 					WGPort:           pPort,
 					Timestamp:        time.Now(),
@@ -6292,6 +6372,47 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					}
 				}
 
+				// Level 3 NAT Traversal: Handle LeaderPunchSyncSignal from mesh coordinator
+				if p.LeaderSync != nil && udpPuncher != nil {
+					sync := p.LeaderSync
+					var targetAddr string
+					var otherPeer string
+					if sync.PeerA == myDevID {
+						targetAddr = sync.TargetAddrA
+						otherPeer = sync.PeerB
+					} else if sync.PeerB == myDevID {
+						targetAddr = sync.TargetAddrB
+						otherPeer = sync.PeerA
+					}
+					if targetAddr != "" {
+						leaderPunchMu.Lock()
+						lastLeaderSyncPunch[otherPeer] = time.Now()
+						leaderPunchMu.Unlock()
+						writeDebug(fmt.Sprintf("⚡ [Level 3 LeaderSync] Запуск миллисекундного синхронного пробития по команде координатора для %s -> %s", otherPeer, targetAddr))
+						go func(tAddr string, punchTime int64, oPeerID string) {
+							host, portStr, err := net.SplitHostPort(tAddr)
+							if err != nil {
+								return
+							}
+							port, err := strconv.Atoi(portStr)
+							if err != nil {
+								return
+							}
+							var otherDelta int
+							var otherASN string
+							if regPeer, ok := registry.Get(oPeerID); ok && regPeer != nil {
+								otherDelta = regPeer.NATDelta
+								otherASN = regPeer.ASN
+							}
+							targetPorts := network.GenerateAdaptivePredictPorts(port, otherDelta, otherASN)
+							_ = udpPuncher.ScheduleSimultaneousOpenMilli(ctx, punchTime, host, targetPorts, 12, 10)
+						}(targetAddr, sync.PunchTimeUnix, otherPeer)
+					}
+					if p.VirtualIP == "" || p.PublicKey == "" {
+						continue
+					}
+				}
+
 				// SRHP: Handle Synchronized Rendezvous Hole-Punching
 				if p.Rendezvous != nil && udpPuncher != nil && len(sigChannels) > 0 {
 					rndv := p.Rendezvous
@@ -6475,6 +6596,10 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 				existingPeer, peerFound := registry.Get(p.DeviceID)
 				needsFastReply := !peerFound || existingPeer == nil || existingPeer.STUNAddr != p.STUNAddr || time.Since(existingPeer.LastSeen) > 6*time.Second
 
+				if p.ASN != "" && p.NATDelta > 0 {
+					network.RecordPeerObservation(p.ASN, p.NATDelta, asnCacheFile)
+				}
+
 				preservedEP := ""
 				preservedDirect := false
 				preservedLat := time.Duration(0)
@@ -6527,8 +6652,23 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					preservedTransport = "relay_mqtt"
 				}
 
-				if guiMagicSock != nil && p.TCPAddr != "" {
-					guiMagicSock.RegisterPeerTCPAddr(p.DeviceID, p.TCPAddr)
+				if guiMagicSock != nil {
+					myPub := ""
+					if udpPuncher != nil {
+						if myIP, _, err := udpPuncher.DiscoverMappedAddress(ctx); err == nil && myIP != nil {
+							myPub = myIP.String()
+						}
+					}
+					allCandidates := append([]string{}, p.Candidates...)
+					for _, ep := range p.Endpoints {
+						if ep.IP != "" && ep.Port > 0 {
+							allCandidates = append(allCandidates, fmt.Sprintf("%s:%d", ep.IP, ep.Port))
+						}
+					}
+					guiMagicSock.RegisterPeerWithTopology(p.DeviceID, p.STUNAddr, p.LocalAddr, p.IPv6Addr, myPub, "", p.PublicIP, "", allCandidates...)
+					if p.TCPAddr != "" {
+						guiMagicSock.RegisterPeerTCPAddr(p.DeviceID, p.TCPAddr)
+					}
 				}
 
 				effectiveLastSeen := time.Now()
@@ -6562,12 +6702,16 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					LocalAddr:         p.LocalAddr,
 					STUNAddr:          p.STUNAddr,
 					TCPAddr:           p.TCPAddr,
+					IPv6Addr:          p.IPv6Addr,
 					ActiveEndpoint:    preservedEP,
 					DirectP2P:         preservedDirect,
 					Transport:         preservedTransport,
 					Latency:           preservedLat,
 					PingMs:            preservedPingMs,
 					Candidates:        p.Candidates,
+					NATType:           p.NATType,
+					NATDelta:          p.NATDelta,
+					ASN:               p.ASN,
 					WGPubKey:          p.WGPubKey,
 					WGPort:            p.WGPort,
 					LastSeen:          effectiveLastSeen,
@@ -6618,7 +6762,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					if p.LocalAddr != "" {
 						_ = udpPuncher.SendHolePunchProbe(p.LocalAddr)
 					}
-					if p.IPv6Addr != "" {
+					if p.IPv6Addr != "" && network.HasGlobalIPv6() {
 						_ = udpPuncher.SendHolePunchProbe(p.IPv6Addr)
 					}
 					for _, cand := range p.Candidates {
@@ -7013,6 +7157,30 @@ func publishCurrentState(ctx context.Context) {
 		PublicIP:         ipStr,
 		LocalAddr:        localAddr,
 		STUNAddr:         mySTUNAddr,
+		IPv6Addr: func() string {
+			if network.HasGlobalIPv6() {
+				return network.GetLocalIPv6()
+			}
+			return ""
+		}(),
+		NATType: func() string {
+			if udpPuncher != nil {
+				return udpPuncher.GetNATType().String()
+			}
+			return ""
+		}(),
+		NATDelta: func() int {
+			if udpPuncher != nil {
+				return udpPuncher.GetPortDelta()
+			}
+			return 0
+		}(),
+		ASN: func() string {
+			if udpPuncher != nil {
+				return udpPuncher.GetCurrentASN()
+			}
+			return ""
+		}(),
 		TCPAddr: func() string {
 			if guiTCPDirectMgr != nil && guiTCPDirectMgr.Port() > 0 {
 				host := ipStr
@@ -8149,50 +8317,113 @@ func testMQTT() {
 func runDiag() {
 	buttonLabels[ID_BTN_RUN_DIAG] = "⏳ Выполняется диагностика..."
 	procInvalidateRect.Call(hBtnRunDiag, 0, 1)
-	setControlText(hEditDiagLog, "⏳ Выполняется комплексная проверка связности сети...\r\n")
-	writeDebug("Запуск системной диагностики сети...")
+	setControlText(hEditDiagLog, "⏳ Выполняется комплексный аудит RFC 5780 Netcheck, ТСПУ/DPI и диагностика...\r\n")
+	writeDebug("Запуск расширенной системной диагностики сети...")
 	go func() {
 		res := "========================================================================\r\n"
 		res += "              СИСТЕМНАЯ ДИАГНОСТИКА & ДЕБАГГЕР NATBYPASS            \r\n"
 		res += "========================================================================\r\n\r\n"
 
-		// 1. Интернет
+		// 1. Dual-Stack Интернет & TCP 443 (Обход ТСПУ)
+		res += "🌐 1. СВЯЗНОСТЬ ИНТЕРНЕТ И DUAL-STACK\r\n"
 		internetOK := false
+		var internetRTT time.Duration
 		testHosts := []string{"77.88.8.8:53", "8.8.8.8:53", "1.1.1.1:53"}
 		for _, h := range testHosts {
+			t0 := time.Now()
 			conn, err := net.DialTimeout("tcp", h, 2*time.Second)
 			if err == nil {
+				internetRTT = time.Since(t0)
 				conn.Close()
 				internetOK = true
 				break
 			}
 		}
 		if internetOK {
-			res += "✅ 1. Сеть Интернет: ДОСТУПНА (DNS 1.1.1.1/8.8.8.8 отвечает)\r\n"
+			res += fmt.Sprintf("   ├── ✅ IPv4 Интернет: ДОСТУПЕН (DNS TCP :53 RTT: %v)\r\n", internetRTT.Round(time.Millisecond))
 		} else {
-			res += "⚠️ 1. Сеть Интернет: Ограничена (проверьте шлюз)\r\n"
+			res += "   ├── ⚠️ IPv4 Интернет: Ограничен / недоступен (проверьте шлюз)\r\n"
 		}
 
-		// 2. IP адреса
+		// TCP 443 доступность (ключевой тест при блоке UDP со стороны ТСПУ/DPI)
+		tcp443OK := false
+		var tcp443RTT time.Duration
+		t0_443 := time.Now()
+		conn443, err443 := net.DialTimeout("tcp", "1.1.1.1:443", 2*time.Second)
+		if err443 == nil {
+			tcp443RTT = time.Since(t0_443)
+			_ = conn443.Close()
+			tcp443OK = true
+		} else {
+			t0_443 = time.Now()
+			conn443b, err443b := net.DialTimeout("tcp", "8.8.8.8:443", 2*time.Second)
+			if err443b == nil {
+				tcp443RTT = time.Since(t0_443)
+				_ = conn443b.Close()
+				tcp443OK = true
+			}
+		}
+		if tcp443OK {
+			res += fmt.Sprintf("   ├── ✅ TCP 443 (HTTPS/TLS): ДОСТУПЕН (RTT: %v) [Канал эскалации готов]\r\n", tcp443RTT.Round(time.Millisecond))
+		} else {
+			res += "   ├── ❌ TCP 443 (HTTPS/TLS): Заблокирован или таймаут\r\n"
+		}
+
+		// IPv6 Connectivity
+		ipv6Ctx, ipv6Cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+		hasIPv6, wanIPv6 := diagnostic.CheckIPv6(ipv6Ctx)
+		ipv6Cancel()
+		if hasIPv6 {
+			res += fmt.Sprintf("   ├── ✅ Dual-Stack IPv6: АКТИВЕН (WAN IPv6: %s) [Прямой обход ТСПУ]\r\n", wanIPv6)
+		} else {
+			res += "   ├── ℹ️ Dual-Stack IPv6: Не обнаружен / Провайдер выдает только IPv4\r\n"
+		}
+
+		// Локальный и внешний IP
 		lanIP := getLocalLANIP()
-		res += fmt.Sprintf("🏠 2. Локальный LAN IP: %s (Порт :51820 открыт)\r\n", lanIP)
-
+		res += fmt.Sprintf("   ├── 🏠 Локальный LAN IP: %s (Порт :51820 открыт)\r\n", lanIP)
 		if myPublicIP != "" && myPublicIP != "0.0.0.0" {
-			res += fmt.Sprintf("🌐 3. Внешний публичный IP: %s\r\n", myPublicIP)
+			res += fmt.Sprintf("   └── 🌐 Внешний IPv4 WAN: %s\r\n\r\n", myPublicIP)
 		} else {
-			res += "⚠️ 3. Внешний публичный IP: Ожидание ответа STUN...\r\n"
+			res += "   └── ⚠️ Внешний IPv4 WAN: Ожидание ответа STUN...\r\n\r\n"
 		}
 
-		// 3. STUN Hole Punch
+		// 2. Транспортная лестница и режимы работы
+		res += "🪜 2. ЭСКАЛАЦИОННАЯ ЛЕСТНИЦА ТРАНСПОРТА (DPI BYPASS)\r\n"
+		curTransMode := "auto"
+		curSNI := "gateway.icloud.com"
+		if cfg != nil {
+			if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+				if activeProf.TransportMode != "" {
+					curTransMode = activeProf.TransportMode
+				}
+				if activeProf.ObfuscationSNI != "" {
+					curSNI = activeProf.ObfuscationSNI
+				}
+			} else if cfg.Network.TransportMode != "" {
+				curTransMode = cfg.Network.TransportMode
+			}
+			if cfg.Network.ObfuscationSNI != "" && curSNI == "gateway.icloud.com" {
+				curSNI = cfg.Network.ObfuscationSNI
+			}
+		}
+		res += fmt.Sprintf("   ├── ⚙️ Текущий режим транспорта: %s\r\n", strings.ToUpper(curTransMode))
+		if guiTCPDirectMgr != nil {
+			res += fmt.Sprintf("   ├── 🛡️ Direct TCP (ShadowTLS): Порт :%d | TLS Mode: %s | SNI: %s | Активных TCP: %d\r\n",
+				guiTCPDirectMgr.Port(), guiTCPDirectMgr.TLSMode(), curSNI, len(guiTCPDirectMgr.ListConns()))
+		}
 		if mySTUNAddr != "" {
-			res += fmt.Sprintf("⚡ 4. STUN UDP Сокет: %s (Прямой Hole Punching активен)\r\n", mySTUNAddr)
+			res += fmt.Sprintf("   └── ⚡ STUN UDP Сокет: %s (Прямой Hole Punching)\r\n\r\n", mySTUNAddr)
 		} else {
-			res += "⚠️ 4. STUN UDP Сокет: Ожидание связывания сокета...\r\n"
+			res += "   └── ⚠️ STUN UDP Сокет: Ожидание связывания сокета...\r\n\r\n"
 		}
 
-		// 4. Пиры
+		// 3. P2P Mesh Сеть и сигнальные каналы
+		res += "👥 3. СЕТЬ P2P MESH & СИГНАЛЬНЫЕ КАНАЛЫ\r\n"
 		peersCount := 0
 		directP2PCount := 0
+		directTCPCount := 0
+		relayMeshCount := 0
 		if registry != nil {
 			peers := registry.List()
 			peersCount = len(peers)
@@ -8200,37 +8431,80 @@ func runDiag() {
 				if p.DirectP2P {
 					directP2PCount++
 				}
+				if p.DirectTCP || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID)) {
+					directTCPCount++
+				}
+				if p.Transport == "relay_mesh" || p.Transport == "tcp_relay" {
+					relayMeshCount++
+				}
 			}
 		}
-		res += fmt.Sprintf("👥 5. Устройств в сигнальной сети: %d (Ваш IP в Mesh: %s)\r\n", peersCount, myVirtualIP)
-		res += fmt.Sprintf("🚀 6. Пробитых прямых UDP сокетов: %d из %d\r\n", directP2PCount, peersCount)
-
-		// 5. Сигналы и статистика
+		res += fmt.Sprintf("   ├── 👥 Всего узлов в сигнальной сети: %d (Ваш Mesh IP: %s)\r\n", peersCount, myVirtualIP)
+		res += fmt.Sprintf("   ├── 🚀 Прямых UDP P2P соединений: %d из %d\r\n", directP2PCount, peersCount)
+		res += fmt.Sprintf("   ├── 🔒 Прямых TCP/ShadowTLS соединений: %d\r\n", directTCPCount)
+		if relayMeshCount > 0 {
+			res += fmt.Sprintf("   ├── 🔀 Релейных (Relay/Mesh) соединений: %d\r\n", relayMeshCount)
+		}
 		pIn := atomic.LoadUint64(&packetsRecvCount)
 		pOut := atomic.LoadUint64(&packetsSentCount)
-		res += fmt.Sprintf("📡 7. Активный режим: %s\r\n", activeChannelStr)
-		res += fmt.Sprintf("📊 8. Пакетов отправлено/принято: %d / %d\r\n", pOut, pIn)
-		res += fmt.Sprintf("⏱️ 9. Время непрерывной работы процесса: %v\r\n\r\n", time.Since(startTime).Round(time.Second))
+		res += fmt.Sprintf("   ├── 📡 Активный сигнальный канал: %s\r\n", activeChannelStr)
+		res += fmt.Sprintf("   ├── 📊 Пакетов отправлено/принято: %d / %d\r\n", pOut, pIn)
+		res += fmt.Sprintf("   └── ⏱️ Время непрерывной работы процесса: %v\r\n\r\n", time.Since(startTime).Round(time.Second))
 
+		// 4. Ресурсы среды выполнения
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		res += fmt.Sprintf("🧠 10. Потоки и память: %d Горутин | %.2f MB RAM | GC Циклов: %d\r\n\r\n", runtime.NumGoroutine(), float64(m.Alloc)/(1024*1024), m.NumGC)
+		res += fmt.Sprintf("🧠 4. РЕСУРСЫ СИСТЕМЫ: %d Горутин | %.2f MB RAM (Sys: %.2f MB) | GC Циклов: %d\r\n\r\n",
+			runtime.NumGoroutine(), float64(m.Alloc)/(1024*1024), float64(m.Sys)/(1024*1024), m.NumGC)
 
-		// 11. Глубокий аудит RFC 5780 Netcheck & ТСПУ DPI
-		res += "🔬 11. Глубокий аудит RFC 5780 Netcheck & ТСПУ DPI...\r\n"
+		// 5. Глубокий аудит RFC 5780 Netcheck & ТСПУ DPI
+		res += "🔬 5. ГЛУБОКИЙ АУДИТ RFC 5780 STUN NETCHECK & ТСПУ/DPI...\r\n"
 		setControlText(hEditDiagLog, res)
-		ncCtx, ncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ncCtx, ncCancel := context.WithTimeout(context.Background(), 6*time.Second)
 		ncRep, ncErr := diagnostic.RunNetcheck(ncCtx)
 		ncCancel()
 		if ncErr == nil && ncRep != nil {
-			res += fmt.Sprintf("   ├── RFC 5780 NAT Mapping: %s (Дельта: %d)\r\n", ncRep.MappingType, ncRep.PortDelta)
+			res += fmt.Sprintf("   ├── RFC 5780 NAT Mapping: %s (Дельта портов: %+d)\r\n", ncRep.MappingType, ncRep.PortDelta)
 			res += fmt.Sprintf("   ├── RFC 5780 NAT Filtering: %s (Тип: %s)\r\n", ncRep.FilteringType, ncRep.NATType)
 			if ncRep.TSPUDetected {
 				res += fmt.Sprintf("   ├── ⚠️ ТСПУ / DPI Цензура: ОБНАРУЖЕНА (%s)\r\n", ncRep.TSPUDetails)
 			} else {
-				res += "   ├── ✅ ТСПУ / DPI Цензура: НЕ ОБНАРУЖЕНА (UDP свободен)\r\n"
+				res += "   ├── ✅ ТСПУ / DPI Цензура: НЕ ОБНАРУЖЕНА (UDP трафик свободен)\r\n"
+			}
+			if ncRep.DPIBlockedWireGuard {
+				res += "   ├── 🚫 DPI Блокировка WireGuard/AWG: ДА (сигнатурный сброс рукопожатий)\r\n"
+			} else {
+				res += "   ├── ✅ WireGuard/AWG UDP: Проходит фильтрацию провайдера\r\n"
+			}
+			if ncRep.DPIBlockedStandardUDP {
+				res += "   ├── 🚫 DPI Блокировка Standard UDP: ДА (полный сброс исходящего UDP)\r\n"
+			}
+			if len(ncRep.LatenciesMs) > 0 {
+				res += "   ├── ⚡ Матрица задержек зондов (RTT):\r\n"
+				if rtt, ok := ncRep.LatenciesMs["google_dns_ipv4"]; ok {
+					res += fmt.Sprintf("   │   • Google DNS (IPv4 UDP:53): %d ms\r\n", rtt)
+				}
+				if rtt, ok := ncRep.LatenciesMs["cloudflare_dns_ipv4"]; ok {
+					res += fmt.Sprintf("   │   • Cloudflare DNS (IPv4 UDP:53): %d ms\r\n", rtt)
+				}
+				if rtt, ok := ncRep.LatenciesMs["google_dns_ipv6"]; ok && rtt > 0 {
+					res += fmt.Sprintf("   │   • Google DNS (IPv6 UDP:53): %d ms\r\n", rtt)
+				}
+				if rtt, ok := ncRep.LatenciesMs["cloudflare_tcp443"]; ok {
+					res += fmt.Sprintf("   │   • Cloudflare (TCP:443): %d ms\r\n", rtt)
+				}
+				if rtt, ok := ncRep.LatenciesMs["google_tcp443"]; ok {
+					res += fmt.Sprintf("   │   • Google (TCP:443): %d ms\r\n", rtt)
+				}
 			}
 			res += fmt.Sprintf("   ├── Path MTU: %d байт\r\n", ncRep.PathMTU)
+			if ncRep.PublicIPv4 != "" {
+				res += fmt.Sprintf("   ├── Dual-Stack WAN: IPv4=%s | IPv6=%s\r\n", ncRep.PublicIPv4, ncRep.PublicIPv6)
+			}
+			res += fmt.Sprintf("   ├── 🪜 Эскалация: Уровень %d (%s)\r\n", ncRep.EscalationLevel, ncRep.EscalationMode)
+			if ncRep.EscalationSummary != "" {
+				res += fmt.Sprintf("   │   %s\r\n", ncRep.EscalationSummary)
+			}
 			res += fmt.Sprintf("   └── ✨ Рекомендованный транспорт: %s\r\n\r\n", ncRep.PreferredTransport)
 		} else {
 			res += "   └── ⚠️ Аудит RFC 5780: таймаут ответа STUN-серверов\r\n\r\n"
