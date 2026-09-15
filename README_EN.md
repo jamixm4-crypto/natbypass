@@ -23,6 +23,7 @@ Comprehensive documentation and step-by-step guides are available in our [**NatB
 * 🪟 [**Windows Guide**](https://github.com/jamixm4-crypto/natbypass/wiki/Windows-Guide) — native GUI, system tray, Wintun driver, and server background mode.
 * 🧪 [**Updating & Beta Channel**](https://github.com/jamixm4-crypto/natbypass/wiki/Updating-and-Beta-Versions) — 1-click upgrade instructions for Windows, Linux, routers, and Android.
 * 🔧 [**Diagnostics and Troubleshooting**](https://github.com/jamixm4-crypto/natbypass/wiki/Troubleshooting-and-Diagnostics) — universal diagnostic scripts and end-to-end ICMP ping verification.
+* ⚡ [**Multi-Tier NAT Traversal**](docs/NAT_TRAVERSAL.md) — 5-tier CGNAT bypass, ⚡ Coordinator and 🛡️ Relay badge guide.
 
 ---
 
@@ -87,6 +88,26 @@ irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag
 ```
 
 ---
+
+## ⚡ How Multi-Tier NAT Traversal Works
+
+NatBypass features an autonomous **5-tier NAT Traversal architecture** designed to connect mobile clients behind symmetric cellular CGNAT (LTE/5G) directly or via mesh relays **without requiring dedicated servers**:
+
+| Tier | Technology | Description |
+|---|---|---|
+| **Tier 1** | **IPv6 Dual-Stack P2P** | Dual-stack AAAA STUN discovery and direct socket-to-socket IPv6 data path bypassing IPv4 CGNAT. |
+| **Tier 2** | **DPI Drop Detection** | Detects deep packet inspection drop (10 unacked probes) and temporarily escalates to `awg31_strict` for 10 minutes. |
+| **Tier 3** | **Leader-Coordinated Punch** | Millisecond-precision synchronized port opening orchestrated by a Cone NAT mesh coordinator. |
+| **Tier 4** | **ASN-Aware Port Prediction** | Selective port delta prediction (+2, +4) using cellular ASN rules; random pools are skipped to save battery. |
+| **Tier 5** | **Peer-as-Relay** | Transparent E2EE transit through trusted home router/server nodes within daily quotas (5 GB/day default). |
+
+### 🎯 WebUI & Android Badges Explained:
+- ⚡ **Coordinator** (`coordinator_capable`) — Node with Full-Cone NAT or public IP. Coordinates synchronized bilateral port punches between mobile peers.
+- 🛡️ **Relay** (`relay_capable`) — Node (Keenetic router, Linux server, or PC) with `enable_relay_server: true`. Relays encrypted traffic when direct UDP is completely blocked by carrier CGNAT. *(Android devices are automatically excluded on cellular data or low battery).*
+- 🌐 **Exit Node Gateway** (`is_exit_node`) — Node acting as a secure Internet Gateway.
+- 🏠 **Subnet Route** (`advertised_routes`) — Node advertising access to its LAN (e.g., `192.168.1.0/24`).
+
+👉 Comprehensive documentation: [**docs/NAT_TRAVERSAL.md**](docs/NAT_TRAVERSAL.md).
 
 ## 📦 Supported Platforms
 
