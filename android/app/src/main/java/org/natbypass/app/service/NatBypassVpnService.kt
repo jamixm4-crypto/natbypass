@@ -301,6 +301,10 @@ class NatBypassVpnService : VpnService() {
                 }
                 // Прямой маршрут к меш-подсети рядом с дефолтным шлюзом
                 try { builder.addRoute(meshSubnet, prefix) } catch (_: Exception) {}
+                if (currentVip.startsWith("10.1.") || meshSubnet.startsWith("10.1.")) {
+                    try { builder.addRoute("10.1.1.0", 24) } catch (_: Exception) {}
+                    try { builder.addRoute("10.1.2.0", 24) } catch (_: Exception) {}
+                }
 
                 // IPv4 DNS серверы для полного туннеля через Exit Node.
                 // При наличии маршрута 0.0.0.0/0 Android требует DNS-серверы на VPN-интерфейсе,
@@ -323,9 +327,22 @@ class NatBypassVpnService : VpnService() {
                     Log.e(TAG, "Failed to add mesh route: ${e.message}")
                 }
 
+                // Если VIP или подсеть принадлежит диапазону 10.1.x.x,
+                // гарантируем добавление маршрутов для обеих подсетей меш-сети (10.1.1.0/24 и 10.1.2.0/24).
+                // Это устраняет изоляцию узлов, когда мобильный клиент или сервер имеет IP из 10.1.1.x, а остальные узлы — 10.1.2.x.
+                if (currentVip.startsWith("10.1.") || meshSubnet.startsWith("10.1.")) {
+                    try {
+                        builder.addRoute("10.1.1.0", 24)
+                        builder.addRoute("10.1.2.0", 24)
+                        Log.i(TAG, "Mesh cross-subnet routes 10.1.1.0/24 and 10.1.2.0/24 added")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to add 10.1.x cross-subnet routes: ${e.message}")
+                    }
+                }
+
                 // ВНИМАНИЕ: В режиме сплит-туннеля (без Exit Node):
-                // 1) В туннель заворачивается ИСКЛЮЧИТЕЛЬНО подсеть топика ($meshSubnet/$prefix).
-                // 2) НЕ добавляем маршруты 10.1.1.0/24 и 100.64.0.0/10! Они могут перехватывать
+                // 1) В туннель заворачивается ИСКЛЮЧИТЕЛЬНО подсеть топика ($meshSubnet/$prefix и 10.1.x.x).
+                // 2) НЕ добавляем широкие маршруты 10.0.0.0/8 и 100.64.0.0/10! Они могут перехватывать
                 // локальный роутер пользователя или мобильный интернет (CGNAT),
                 // ломая DoT Private DNS (dns.google) и физический доступ в сеть.
                 // 3) НЕ вызываем builder.addDnsServer()! Иначе Android перенаправит ВЕСЬ системный DNS в TUN интерфейс.

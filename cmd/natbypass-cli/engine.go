@@ -1417,10 +1417,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 
 						outSrcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
-						isForwardedInternet := len(pkt) > 400 || (cleanVIP != "" && outSrcIP != cleanVIP) || (cfg != nil && cfg.Network.SelectedExitNode != "")
+						isICMP := len(pkt) >= 20 && pkt[9] == 1
+						isForwardedInternet := !isICMP && (len(pkt) > 400 || (cleanVIP != "" && outSrcIP != cleanVIP && (cfg == nil || cfg.Network.SelectedExitNode == "")))
 
 						// Dual-Path Shadow Relay Rule: ONLY if direct transmission completely failed AND NOT internet traffic!
-						needsRelay := !sentTCP && !sentDirect && !isForwardedInternet
+						// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
+						needsRelay := !sentTCP && !sentDirect && (!isForwardedInternet || isICMP)
 
 						// 1e. Mesh Userspace Multi-Hop Relay Fallback:
 						if needsRelay && !isForceUDP {

@@ -39,7 +39,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta59"
+const Version          = "1.9.226-beta60"
 
 
 
@@ -185,6 +185,16 @@ func deriveInitialVirtualIP(devID string) string {
 			}
 			if pfx != "" && pfx != "100.64.200" {
 				prefix = pfx
+			}
+		}
+	}
+	// Если в реестре уже есть видимые онлайн-пиры из подсети 10.1.2.x, подстраиваемся под них
+	if prefix == "10.1.1" && globalRegistry != nil {
+		for _, p := range globalRegistry.List() {
+			pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			if strings.HasPrefix(pVIP, "10.1.2.") {
+				prefix = "10.1.2"
+				break
 			}
 		}
 	}
@@ -1692,8 +1702,10 @@ func attachTUNLocked(tunFd int) {
 							}
 
 							// Fallback Relay Rule: ONLY if direct transmission completely failed AND NOT Exit Node internet traffic!
-							isExitOrInternet := (globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetPeer.VirtualIP == globalExitNode)) || len(pkt) > 400 || (cleanVIP != "" && srcIP.String() != cleanVIP)
-							needsRelay := !sentTCP && !sentDirect && !isExitOrInternet
+							// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
+							isICMP := len(pkt) >= 20 && pkt[9] == 1
+							isExitOrInternet := !isICMP && ((globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetPeer.VirtualIP == globalExitNode)) || len(pkt) > 400 || (cleanVIP != "" && srcIP.String() != cleanVIP))
+							needsRelay := !sentTCP && !sentDirect && (!isExitOrInternet || isICMP)
 
 							// 1e. Mesh Userspace Relay Fallback (encapsulated in Multi-Hop header)
 							if needsRelay && !isForceUDP && globalRegistry != nil {

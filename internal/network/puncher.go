@@ -819,8 +819,8 @@ func (p *UDPPuncher) CandidatePortsAdvanced(base int, samples []int, prof CGNATP
 }
 
 const (
-	// WideSymmetricSweepRadius: ±N ports around the base for random-delta Symmetric NAT
-	WideSymmetricSweepRadius = 256
+	// WideSymmetricSweepRadius: ±N ports around the base for random-delta Symmetric NAT (reduced to 16 to avoid CGNAT port scan bans)
+	WideSymmetricSweepRadius = 16
 	// SymmetricNATMaxHops: maximum HopPort() cycles in one session
 	SymmetricNATMaxHops = 5
 	// SymmetricNATHopDelay: time between HopPort cycles (allow NAT state to settle)
@@ -1196,54 +1196,49 @@ func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta in
 		_, _ = p.conn.WriteToUDP(pkt, dst)
 	}
 
-	// 1. Отправляем пробу: приоритет отдается QUIC Chameleon probe + low-TTL decoy на Linux
+	// 1. Отправляем пробу на основной адрес: приоритет отдается QUIC Chameleon probe + low-TTL decoy на Linux
 	sendToAddr(rAddr, true)
 
-	// 2. Always probe immediate neighbor ports (±1, ±2, ±3, ±4, ±8) to overcome PON router port drift (Beltelecom, Rostelecom)
-	neighbors := []int{-4, -3, -2, -1, 1, 2, 3, 4, 8, -8}
-	for _, offset := range neighbors {
-		neighborPort := rAddr.Port + offset
-		if neighborPort > 1024 && neighborPort < 65535 {
-			sendToAddr(&net.UDPAddr{IP: rAddr.IP, Port: neighborPort}, false)
-		}
-	}
+	// 2. Сбор уникальных портов для зондирования без дублирования (максимум 24-28 портов на зонд)
+	probedPorts := map[int]bool{rAddr.Port: true}
+	var targetPorts []int
 
-	// 3. Delta-aware spray for Symmetric NAT:
-	// If peer delta or local delta is known (> 0 and < 500), spray multiples of delta!
 	delta := peerDelta
 	if delta <= 0 {
 		p.natTypeMu.RLock()
 		delta = p.portDelta
 		p.natTypeMu.RUnlock()
 	}
-	if delta > 0 && delta < 500 {
-		deltaOffsets := []int{
-			delta, -delta,
-			2 * delta, -2 * delta,
-			3 * delta, -3 * delta,
-			4 * delta, -4 * delta,
-			5 * delta, -5 * delta,
-			6 * delta, -6 * delta,
-			7 * delta, -7 * delta,
-			8 * delta, -8 * delta,
+
+	if p.GetNATType().IsSymmetric() || peerDelta > 0 {
+		// Для Symmetric NAT берем порты из CandidatePortsAdvanced (где уже учтены дельта, соседи и безопасный свайп)
+		candidates := p.CandidatePortsAdvanced(rAddr.Port, nil, CGNATProfile{}, delta)
+		for _, port := range candidates {
+			if !probedPorts[port] && port > 1024 && port < 65535 {
+				probedPorts[port] = true
+				targetPorts = append(targetPorts, port)
+				if len(targetPorts) >= 24 {
+					break
+				}
+			}
 		}
-		for _, offset := range deltaOffsets {
-			targetPort := rAddr.Port + offset
-			if targetPort > 1024 && targetPort < 65535 {
-				sendToAddr(&net.UDPAddr{IP: rAddr.IP, Port: targetPort}, false)
+	} else {
+		// Для Cone NAT зондируем только непосредственных соседей (±1, ±2, ±4) против дрейфа PON-роутеров
+		neighbors := []int{-1, 1, -2, 2, -4, 4}
+		for _, offset := range neighbors {
+			neighborPort := rAddr.Port + offset
+			if !probedPorts[neighborPort] && neighborPort > 1024 && neighborPort < 65535 {
+				probedPorts[neighborPort] = true
+				targetPorts = append(targetPorts, neighborPort)
 			}
 		}
 	}
 
-	// 4. Targeted probing for Symmetric NAT using advanced CGNAT heuristics (Parity, PBA, Delta)
-	if p.GetNATType().IsSymmetric() || peerDelta > 0 {
-		targetIP := rAddr.IP
-		candidates := p.CandidatePortsAdvanced(rAddr.Port, nil, CGNATProfile{}, delta)
-		for _, port := range candidates {
-			if port != rAddr.Port {
-				sendToAddr(&net.UDPAddr{IP: targetIP, Port: port}, false)
-			}
-		}
+	// 3. Отправка дополнительных зондов с микро-пейсингом (1 мс), защищающим от DDoS-фильтров CGNAT
+	targetIP := rAddr.IP
+	for _, port := range targetPorts {
+		sendToAddr(&net.UDPAddr{IP: targetIP, Port: port}, false)
+		time.Sleep(1 * time.Millisecond)
 	}
 
 	return nil
@@ -1260,25 +1255,31 @@ func (p *UDPPuncher) SendHolePunchBurst(targets []string, bursts int) {
 }
 
 // SendHolePunchBurstWithDelta sends coordinated burst hole-punch probes to multiple candidate targets
-// with micro-sleeps (15-25ms) between rounds and port prediction based on remote peer delta.
+// with micro-sleeps (20-30ms) between rounds and port prediction based on remote peer delta.
 func (p *UDPPuncher) SendHolePunchBurstWithDelta(targets []string, bursts int, peerDelta int) {
 	if p == nil || len(targets) == 0 {
 		return
 	}
 	if bursts <= 0 {
+		bursts = 2
+	}
+	if bursts > 3 {
 		bursts = 3
 	}
-	if bursts > 6 {
-		bursts = 6
-	}
 	for b := 0; b < bursts; b++ {
-		for _, tgt := range targets {
+		for i, tgt := range targets {
 			if tgt != "" {
-				_ = p.SendHolePunchProbeWithDelta(tgt, peerDelta)
+				// Веерный поиск по дельте выполняем только для основного адреса (index 0),
+				// а для вторичных адресов (локальный LAN, доп. кандидаты) отправляем точечный зонд
+				if i == 0 {
+					_ = p.SendHolePunchProbeWithDelta(tgt, peerDelta)
+				} else {
+					_ = p.SendHolePunchProbeWithDelta(tgt, 0)
+				}
 			}
 		}
 		if b < bursts-1 {
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(25 * time.Millisecond)
 		}
 	}
 }

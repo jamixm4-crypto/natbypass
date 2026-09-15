@@ -107,7 +107,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta59"
+	Version = "1.9.226-beta60"
 	Commit  = "release"
 )
 
@@ -4521,9 +4521,9 @@ func isMeshSubnetIP(candIP net.IP, myVIP string) bool {
 	if c4 == nil || b4 == nil {
 		return false
 	}
-	// Do not accept carrier-grade NAT 100.64.0.0/10 if local mesh is not 100.64.x
-	if c4[0] == 100 && (c4[1]&0xC0) == 64 && b4[0] != 100 {
-		return false
+	// Accept standard mesh subnets (10.1.1.x and 10.1.2.x across the mesh)
+	if c4[0] == 10 && c4[1] == 1 && b4[0] == 10 && b4[1] == 1 {
+		return true
 	}
 	return c4[0] == b4[0] && c4[1] == b4[1] && c4[2] == b4[2]
 }
@@ -5006,6 +5006,7 @@ func startEngineFromConfig(c *config.Config) {
 			}
 
 			if tunDev != nil {
+				tunnel.EnsurePeerHostRoute(inSrcIP)
 				// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
 				if ihl >= 20 && ihl <= len(payload) {
 					payload[10] = 0
@@ -5282,9 +5283,11 @@ func startEngineFromConfig(c *config.Config) {
 								}
 
 								// Fallback Relay Rule: ONLY if direct transmission completely failed AND NOT Exit Node internet traffic!
+								// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
 								cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-								isExitOrInternet := (exitID != "" && targetPeer.DeviceID == exitID) || !isMeshSubnetIP(destIP, cleanVIP)
-								needsRelay := !sentTCP && !sentDirect && !isExitOrInternet
+								isICMP := len(packet) >= 20 && packet[9] == 1
+								isExitOrInternet := !isICMP && ((exitID != "" && targetPeer.DeviceID == exitID) || !isMeshSubnetIP(destIP, cleanVIP))
+								needsRelay := !sentTCP && !sentDirect && (!isExitOrInternet || isICMP)
 
 								// 1e. Mesh Userspace TCP Relay Fallback:
 								if needsRelay && !isForceUDP && guiTCPDirectMgr != nil {
@@ -5656,6 +5659,7 @@ func startEngineFromConfig(c *config.Config) {
 					}
 					vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 					if vip != "" {
+						tunnel.EnsurePeerHostRoute(vip)
 						pingCtx, pingCancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 						rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 1200*time.Millisecond)
 						pingCancel()

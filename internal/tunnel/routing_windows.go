@@ -104,8 +104,39 @@ func EnableHostIPForwarding() error {
 	return EnableHostIPForwardingSubnet("100.64.200.0/24")
 }
 
-// EnsurePeerHostRoute is a no-op on Windows — the kernel manages routes automatically via NetNat.
-func EnsurePeerHostRoute(peerVIP string) {}
+var winPeerRoutes sync.Map
+
+// EnsurePeerHostRoute adds a /32 host route for a peer's VirtualIP via the NatBypass Wintun interface on Windows.
+// This is critical when peers belong to different subnets (e.g. Android on 10.1.1.x, Windows on 10.1.2.x).
+func EnsurePeerHostRoute(peerVIP string) {
+	if peerVIP == "" {
+		return
+	}
+	cleanVIP := strings.TrimSpace(strings.Split(peerVIP, "/")[0])
+	if net.ParseIP(cleanVIP) == nil {
+		return
+	}
+
+	tunStat := GetTUNStatus()
+	if !tunStat.Active || tunStat.VirtualIP == "" {
+		return
+	}
+	myVIP := tunStat.VirtualIP
+	if cleanVIP == myVIP {
+		return
+	}
+
+	now := time.Now().Unix()
+	if prev, loaded := winPeerRoutes.LoadOrStore(cleanVIP, now); loaded {
+		if ts, ok := prev.(int64); ok && now-ts < 60 {
+			return
+		}
+		winPeerRoutes.Store(cleanVIP, now)
+	}
+
+	// route add <cleanVIP> mask 255.255.255.255 <myVIP> metric 10
+	_ = runRouteCmd("route", "add", cleanVIP, "mask", "255.255.255.255", myVIP, "metric", "10")
+}
 
 
 // DisableHostIPForwarding disables IP forwarding and cleans up NetNat rule.
