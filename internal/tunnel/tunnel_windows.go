@@ -518,10 +518,6 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
 	}
 	_ = exec.CommandContext(ctx, "route", "add", prefix+".0", "mask", "255.255.255.0", cleanVIP, "metric", "10").Run()
-	if strings.HasPrefix(cleanVIP, "10.1.") {
-		_ = exec.CommandContext(ctx, "route", "add", "10.1.1.0", "mask", "255.255.255.0", cleanVIP, "metric", "10").Run()
-		_ = exec.CommandContext(ctx, "route", "add", "10.1.2.0", "mask", "255.255.255.0", cleanVIP, "metric", "10").Run()
-	}
 
 	if err == nil {
 		SetTUNStatus(&TUNStatus{

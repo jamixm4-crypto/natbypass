@@ -286,6 +286,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	deviceID := resolveDeviceID(cfg, pubKey)
 	myVirtualIP := resolveVirtualIP(cfg, deviceID)
 	log.Info().Str("device_id", deviceID).Str("virtual_ip", myVirtualIP).Msg("Device identity initialized")
+	if warn := config.SubnetMismatchWarning(myVirtualIP, config.DeriveSubnetFromProfile(cfg.EnsureActiveProfile())); warn != "" {
+		log.Warn().Msg(warn)
+	}
 
 	engineCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -588,6 +591,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				uiServer.SetVirtualIP(newVIP)
 				uiServer.SetTUNStatus(tunnel.GetTUNStatus())
+			}
+			if warn := config.SubnetMismatchWarning(myVirtualIP, config.DeriveSubnetFromProfile(activeProf)); warn != "" {
+				log.Warn().Msg(warn)
 			}
 			if cfg.Network.AllowExitNode {
 				currentVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])

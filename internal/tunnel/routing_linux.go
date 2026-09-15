@@ -177,6 +177,51 @@ func insertIptablesRule(ipt, table, chain string, args ...string) {
 	_ = exec.Command(ipt, insertArgs...).Run()
 }
 
+// buildMeshSubnetList возвращает уникальный набор подсетей для iptables/ip-route: подсеть из конфига + 100.64.200.0/24.
+func buildMeshSubnetList(configSubnet string) []string {
+	seen := map[string]bool{}
+	var result []string
+	add := func(s string) {
+		if s != "" && s != "10.0.0.0/8" && s != "172.16.0.0/12" && s != "100.64.0.0/10" && !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	if configSubnet != "" {
+		add(configSubnet)
+	}
+	add("100.64.200.0/24")
+	return result
+}
+
+// isMeshIPLinux проверяет, является ли IP адресом из mesh-подсети (динамически по VIP текущего TUN).
+func isMeshIPLinux(hostIP string) bool {
+	ip := net.ParseIP(hostIP)
+	if ip == nil {
+		return false
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	// 100.64.0.0/10 (CGNAT / fallback mesh)
+	if ip4[0] == 100 && (ip4[1]&0xC0) == 64 {
+		return true
+	}
+	// Проверяем по текущей подсети активного TUN
+	tunStat := GetTUNStatus()
+	if tunStat.Active && tunStat.VirtualIP != "" {
+		vipParts := strings.SplitN(strings.Split(tunStat.VirtualIP, "/")[0], ".", 4)
+		candParts := strings.SplitN(hostIP, ".", 4)
+		if len(vipParts) >= 3 && len(candParts) >= 3 {
+			if vipParts[0] == candParts[0] && vipParts[1] == candParts[1] && vipParts[2] == candParts[2] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // EnableHostIPForwardingSubnet enables kernel IPv4 forwarding and adds iptables NAT masquerading for mesh subnet.
 func EnableHostIPForwardingSubnet(subnet string) error {
 	// 1. Kernel sysctl forwarding and rp_filter
@@ -227,10 +272,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", "10.0.0.0/8", "!", "-o", "nb0", "-j", "MASQUERADE").Run()
 	_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", "172.16.0.0/12", "!", "-o", "nb0", "-j", "MASQUERADE").Run()
 
-	meshSubnets := []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24"}
-	if cleanSubnet != "" && cleanSubnet != "10.0.0.0/8" && cleanSubnet != "100.64.0.0/10" && cleanSubnet != "172.16.0.0/12" {
-		meshSubnets = append(meshSubnets, cleanSubnet)
-	}
+	meshSubnets := buildMeshSubnetList(cleanSubnet)
 	for _, s := range meshSubnets {
 		forceInsertIptablesRule(ipt, "nat", "POSTROUTING", "-s", s, "!", "-o", "nb0", "-j", "MASQUERADE")
 	}
@@ -283,7 +325,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	}
 
 	// 7. Ensure direct routes for standard mesh subnets exist on nb0 in table main
-	for _, s := range []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", cleanSubnet} {
+	for _, s := range buildMeshSubnetList(cleanSubnet) {
 		if s != "" {
 			_ = runLinuxCmd("ip", "route", "replace", s, "dev", "nb0", "table", "main", "onlink")
 			_ = runLinuxCmd("ip", "route", "replace", s, "dev", "nb0", "onlink")
@@ -298,7 +340,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		}
 
 		// Priority 40: return traffic to mesh subnets always looks up table main
-		for _, s := range []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", cleanSubnet} {
+		for _, s := range buildMeshSubnetList(cleanSubnet) {
 			if s != "" {
 				_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", s, "lookup", "main")
 				_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", s, "lookup", "main")
@@ -311,7 +353,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		_ = runLinuxCmd("ip", "rule", "del", "from", "172.16.0.0/12")
 
 		// Priority 55: preserve local LAN and mesh destinations before falling through to WAN
-		for _, s := range []string{"192.168.0.0/16", "10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", cleanSubnet} {
+		for _, s := range append([]string{"192.168.0.0/16"}, buildMeshSubnetList(cleanSubnet)...) {
 			if s != "" && s != "10.0.0.0/8" {
 				_ = runLinuxCmd("ip", "rule", "del", "pref", "55", "to", s, "lookup", "main")
 				_ = runLinuxCmd("ip", "rule", "add", "pref", "55", "to", s, "lookup", "main")
@@ -323,7 +365,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", wanTable)
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", wanTable)
-		for _, s := range []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", cleanSubnet} {
+		for _, s := range buildMeshSubnetList(cleanSubnet) {
 			if s != "" && s != "10.0.0.0/8" && s != "172.16.0.0/12" {
 				_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "from", s, "lookup", wanTable)
 			}
@@ -426,7 +468,7 @@ func DisableHostIPForwarding(subnets ...string) error {
 	_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", "10.0.0.0/8", "!", "-o", "nb0", "-j", "MASQUERADE").Run()
 	_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", "172.16.0.0/12", "!", "-o", "nb0", "-j", "MASQUERADE").Run()
 
-	for _, s := range []string{"10.1.1.0/24", "10.1.2.0/24", "100.64.200.0/24", targetSubnet} {
+	for _, s := range buildMeshSubnetList(targetSubnet) {
 		if s != "" {
 			_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", s, "!", "-o", "nb0", "-j", "MASQUERADE").Run()
 			_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-s", s, "-j", "MASQUERADE").Run()
@@ -594,8 +636,8 @@ func BypassEndpoint(endpoint string) error {
 			continue
 		}
 		if ip := net.ParseIP(hostIP); ip != nil {
-			// Do NOT bypass mesh IPs (e.g. 10.1.2.x, 100.64.200.x) to physical gateway
-			if strings.HasPrefix(hostIP, "10.1.") || strings.HasPrefix(hostIP, "100.64.") {
+			// Do NOT bypass mesh IPs to physical gateway — check dynamically against active TUN subnet
+			if isMeshIPLinux(hostIP) {
 				continue
 			}
 		}

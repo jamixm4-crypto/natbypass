@@ -190,3 +190,86 @@ func TestPathTraversalRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestDeterministicSubnetDerivation(t *testing.T) {
+	// 1. Same seed must produce identical subnet
+	sub1 := DeriveSubnetFromSeed("my-secret-topic-key-123")
+	sub2 := DeriveSubnetFromSeed("my-secret-topic-key-123")
+	if sub1 != sub2 {
+		t.Errorf("DeriveSubnetFromSeed not deterministic: %s != %s", sub1, sub2)
+	}
+	if !strings.HasSuffix(sub1, ".0/24") {
+		t.Errorf("DeriveSubnetFromSeed invalid format: %s", sub1)
+	}
+
+	// 2. Different seeds should produce different subnets
+	sub3 := DeriveSubnetFromSeed("another-secret-topic-key-456")
+	if sub1 == sub3 {
+		t.Errorf("DeriveSubnetFromSeed collision on different seeds: %s", sub1)
+	}
+
+	// 3. Profile with explicit Subnet takes precedence
+	profExplicit := &Profile{
+		Subnet:    "10.50.60.0/24",
+		VirtualIP: "10.50.60.5/24",
+		MQTTTopic: "some-topic",
+	}
+	if got := DeriveSubnetFromProfile(profExplicit); got != "10.50.60.0/24" {
+		t.Errorf("DeriveSubnetFromProfile with explicit Subnet: got %s, want 10.50.60.0/24", got)
+	}
+
+	// 4. Profile without Subnet but with VirtualIP derives from VirtualIP
+	profVIP := &Profile{
+		VirtualIP: "10.77.88.99/24",
+		MQTTTopic: "some-topic",
+	}
+	if got := DeriveSubnetFromProfile(profVIP); got != "10.77.88.0/24" {
+		t.Errorf("DeriveSubnetFromProfile with VirtualIP: got %s, want 10.77.88.0/24", got)
+	}
+
+	// 5. Profile with only Topic derives deterministically from Topic
+	profTopic := &Profile{
+		MQTTTopic: "mesh-team-secret",
+	}
+	gotTopicSubnet := DeriveSubnetFromProfile(profTopic)
+	expectedTopicSubnet := DeriveSubnetFromSeed("mesh-team-secret")
+	if gotTopicSubnet != expectedTopicSubnet {
+		t.Errorf("DeriveSubnetFromProfile with Topic: got %s, want %s", gotTopicSubnet, expectedTopicSubnet)
+	}
+
+	// 6. Profile prefix helper
+	prefix := DeriveSubnetPrefixFromProfile(profExplicit)
+	if prefix != "10.50.60" {
+		t.Errorf("DeriveSubnetPrefixFromProfile: got %s, want 10.50.60", prefix)
+	}
+}
+
+func TestSubnetMismatchWarning(t *testing.T) {
+	// Matching subnet - no warning
+	if warn := SubnetMismatchWarning("10.50.60.5", "10.50.60.0/24"); warn != "" {
+		t.Errorf("expected empty warning for matching VIP, got: %s", warn)
+	}
+	if warn := SubnetMismatchWarning("10.50.60.5/24", "10.50.60.0/24"); warn != "" {
+		t.Errorf("expected empty warning for matching VIP with mask, got: %s", warn)
+	}
+
+	// Mismatched subnet - must return warning
+	warn := SubnetMismatchWarning("10.1.1.5", "10.1.2.0/24")
+	if warn == "" {
+		t.Errorf("expected warning for mismatched VIP, got empty string")
+	}
+	if !strings.Contains(warn, "10.1.1.5") || !strings.Contains(warn, "10.1.2.0/24") {
+		t.Errorf("warning missing expected IP/subnet info: %s", warn)
+	}
+}
+
+func TestGetMeshSubnets(t *testing.T) {
+	prof := &Profile{Subnet: "10.20.30.0/24"}
+	subnets := GetMeshSubnets(prof)
+	if len(subnets) != 2 {
+		t.Fatalf("expected 2 subnets, got %d: %v", len(subnets), subnets)
+	}
+	if subnets[0] != "10.20.30.0/24" || subnets[1] != "100.64.200.0/24" {
+		t.Errorf("unexpected subnets: %v", subnets)
+	}
+}

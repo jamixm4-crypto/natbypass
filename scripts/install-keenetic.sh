@@ -7,7 +7,7 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.9.226-beta60"
+    DEFAULT_TAG="v1.9.226-beta61"
 
     # Try to resolve latest tag from GitHub API
     LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
@@ -484,25 +484,30 @@ if [ "$table" = "nat" ]; then
     # Remove broad 10.0.0.0/8 rule that breaks local LAN (e.g. 10.11.219.0/24)
     iptables -t nat -D POSTROUTING -s 10.0.0.0/8 ! -o nb0 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 172.16.0.0/12 ! -o nb0 -j MASQUERADE 2>/dev/null || true
-    iptables -t nat -C POSTROUTING -s 10.1.1.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s 10.1.1.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
-    iptables -t nat -C POSTROUTING -s 10.1.2.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s 10.1.2.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}')
+    if [ -n "$NB_SUBNET" ]; then
+        iptables -t nat -C POSTROUTING -s "$NB_SUBNET" ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s "$NB_SUBNET" ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    fi
     iptables -t nat -C POSTROUTING -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
 fi
 
 ip rule del from 10.0.0.0/8 2>/dev/null || true
 ip rule del to 10.0.0.0/8 2>/dev/null || true
-ip rule add to 10.1.1.0/24 lookup main priority 40 2>/dev/null || true
-ip rule add to 10.1.2.0/24 lookup main priority 40 2>/dev/null || true
+NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}')
+if [ -n "$NB_SUBNET" ]; then
+    ip rule add to "$NB_SUBNET" lookup main priority 40 2>/dev/null || true
+fi
 ip rule add to 100.64.200.0/24 lookup main priority 40 2>/dev/null || true
 
-WAN_TABLE=\$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if(\$i==\"table\") print \$(i+1)}')
-[ -z \"\$WAN_TABLE\" ] && WAN_TABLE=\"main\"
+WAN_TABLE=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="table") print $(i+1)}')
+[ -z "$WAN_TABLE" ] && WAN_TABLE="main"
 
-ip rule add fwmark 0x4e lookup \$WAN_TABLE priority 60 2>/dev/null || true
-ip rule add iif nb0 lookup \$WAN_TABLE priority 60 2>/dev/null || true
-ip rule add from 10.1.1.0/24 lookup \$WAN_TABLE priority 60 2>/dev/null || true
-ip rule add from 10.1.2.0/24 lookup \$WAN_TABLE priority 60 2>/dev/null || true
-ip rule add from 100.64.200.0/24 lookup \$WAN_TABLE priority 60 2>/dev/null || true
+ip rule add fwmark 0x4e lookup $WAN_TABLE priority 60 2>/dev/null || true
+ip rule add iif nb0 lookup $WAN_TABLE priority 60 2>/dev/null || true
+if [ -n "$NB_SUBNET" ]; then
+    ip rule add from "$NB_SUBNET" lookup $WAN_TABLE priority 60 2>/dev/null || true
+fi
+ip rule add from 100.64.200.0/24 lookup $WAN_TABLE priority 60 2>/dev/null || true
 
 if [ \"\$WAN_TABLE\" != \"main\" ] && [ \"\$WAN_TABLE\" != \"default\" ]; then
     WAN_DEF=\$(ip route show table \$WAN_TABLE default 2>/dev/null | grep -v 'nb0' | head -n1)

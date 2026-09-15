@@ -39,7 +39,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta60"
+const Version          = "1.9.226-beta61"
 
 
 
@@ -174,28 +174,12 @@ func deriveInitialVirtualIP(devID string) string {
 		}
 	}
 	if devID == "" {
-		return "10.1.1.10"
+		return "100.64.200.10"
 	}
-	prefix := "10.1.1"
+	prefix := "100.64.200"
 	if globalConfig != nil {
-		if active := globalConfig.EnsureActiveProfile(); active != nil && (active.VirtualIP != "" || active.Subnet != "") {
-			pfx := config.ExtractSubnetPrefix(active.VirtualIP)
-			if pfx == "" || pfx == "100.64.200" {
-				pfx = config.ExtractSubnetPrefix(active.Subnet)
-			}
-			if pfx != "" && pfx != "100.64.200" {
-				prefix = pfx
-			}
-		}
-	}
-	// Если в реестре уже есть видимые онлайн-пиры из подсети 10.1.2.x, подстраиваемся под них
-	if prefix == "10.1.1" && globalRegistry != nil {
-		for _, p := range globalRegistry.List() {
-			pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-			if strings.HasPrefix(pVIP, "10.1.2.") {
-				prefix = "10.1.2"
-				break
-			}
+		if active := globalConfig.EnsureActiveProfile(); active != nil {
+			prefix = config.DeriveSubnetPrefixFromProfile(active)
 		}
 	}
 	return config.GenerateSubnetIP(prefix, devID)
@@ -255,8 +239,8 @@ func negotiateVirtualIP() {
 			prefix := "100.64.200"
 			if cur := atomicGetVIP(); cur != "" && !strings.HasPrefix(cur, "100.64.200.") {
 				prefix = config.ExtractSubnetPrefix(cur)
-			} else if active := cfg.EnsureActiveProfile(); active != nil && active.Subnet != "" {
-				prefix = config.ExtractSubnetPrefix(active.Subnet)
+			} else if active := cfg.EnsureActiveProfile(); active != nil {
+				prefix = config.DeriveSubnetPrefixFromProfile(active)
 			}
 			for i := 10; i <= 250; i++ {
 				cand := fmt.Sprintf("%s.%d", prefix, i)

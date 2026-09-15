@@ -42,6 +42,34 @@ func IsKeeneticDevice() bool {
 	return false
 }
 
+// isMeshIPWindows проверяет, является ли IP адресом из mesh-подсети (динамически по VIP текущего TUN).
+func isMeshIPWindows(hostIP string) bool {
+	ip := net.ParseIP(hostIP)
+	if ip == nil {
+		return false
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	// 100.64.0.0/10 (CGNAT / fallback mesh)
+	if ip4[0] == 100 && (ip4[1]&0xC0) == 64 {
+		return true
+	}
+	// Проверяем по текущей подсети активного TUN
+	tunStat := GetTUNStatus()
+	if tunStat.Active && tunStat.VirtualIP != "" {
+		vipParts := strings.SplitN(strings.Split(tunStat.VirtualIP, "/")[0], ".", 4)
+		candParts := strings.SplitN(hostIP, ".", 4)
+		if len(vipParts) >= 3 && len(candParts) >= 3 {
+			if vipParts[0] == candParts[0] && vipParts[1] == candParts[1] && vipParts[2] == candParts[2] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // EnableHostIPForwardingSubnet sets IP forwarding and activates Windows NetNat for dynamic mesh subnet.
 func EnableHostIPForwardingSubnet(subnet string) error {
 	if subnet == "" {
@@ -250,8 +278,8 @@ func BypassEndpoint(endpoint string) error {
 			continue
 		}
 		if ip := net.ParseIP(hostIP); ip != nil {
-			// Do NOT bypass mesh IPs (e.g. 10.1.2.x, 10.1.1.x, 100.64.200.x) to physical gateway
-			if strings.HasPrefix(hostIP, "10.1.") || strings.HasPrefix(hostIP, "100.64.") {
+			// Do NOT bypass mesh IPs to physical gateway — check dynamically against active TUN subnet
+			if isMeshIPWindows(hostIP) {
 				continue
 			}
 		}

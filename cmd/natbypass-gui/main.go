@@ -107,7 +107,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta60"
+	Version = "1.9.226-beta61"
 	Commit  = "release"
 )
 
@@ -2580,6 +2580,10 @@ func applyActiveProfileLive(target *config.Profile) {
 	setControlText(hEditMqttTp, target.MQTTTopic)
 	myVirtualIP = config.ResolveVirtualIP(cfg, myDevID)
 	cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+	if warn := config.SubnetMismatchWarning(myVirtualIP, config.DeriveSubnetFromProfile(target)); warn != "" {
+		addLog(warn)
+		writeDebug(warn)
+	}
 	if tunDev != nil {
 		_ = tunDev.SetVirtualIP(cleanVIP)
 	}
@@ -4521,10 +4525,6 @@ func isMeshSubnetIP(candIP net.IP, myVIP string) bool {
 	if c4 == nil || b4 == nil {
 		return false
 	}
-	// Accept standard mesh subnets (10.1.1.x and 10.1.2.x across the mesh)
-	if c4[0] == 10 && c4[1] == 1 && b4[0] == 10 && b4[1] == 1 {
-		return true
-	}
 	return c4[0] == b4[0] && c4[1] == b4[1] && c4[2] == b4[2]
 }
 
@@ -4590,6 +4590,10 @@ func startEngineFromConfig(c *config.Config) {
 
 	myVirtualIP = config.ResolveVirtualIP(c, myDevID)
 	writeDebug("Локальный Virtual IP: " + myVirtualIP)
+	if warn := config.SubnetMismatchWarning(myVirtualIP, config.DeriveSubnetFromProfile(c.EnsureActiveProfile())); warn != "" {
+		addLog(warn)
+		writeDebug(warn)
+	}
 
 	if wgKP, wgErr := wireguard.GenerateKeyPair(); wgErr == nil {
 		myWGPubKey = wgKP.PublicKey
@@ -6723,16 +6727,10 @@ func negotiateVirtualIP() {
 	if hasConflict && conflictDev != "" {
 		if myDevID > conflictDev {
 			oldIP := myVirtualIP
-			prefix := "10.1.1"
+			prefix := "100.64.200"
 			if cfg != nil {
 				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
-					pfx := config.ExtractSubnetPrefix(activeProf.VirtualIP)
-					if pfx == "" || pfx == "100.64.200" {
-						pfx = config.ExtractSubnetPrefix(activeProf.Subnet)
-					}
-					if pfx != "" {
-						prefix = pfx
-					}
+					prefix = config.DeriveSubnetPrefixFromProfile(activeProf)
 				}
 			}
 			for i := 1; i <= 254; i++ {

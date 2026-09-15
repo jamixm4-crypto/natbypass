@@ -825,9 +825,11 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 			curCfg, _ := config.Load(s.configPath)
 			if p.VirtualIP == "" {
-				prefix := "10.1.1"
+				prefix := "100.64.200"
 				if myVIP := config.ResolveVirtualIP(curCfg, s.state.DeviceID); myVIP != "" {
 					prefix = config.ExtractSubnetPrefix(myVIP)
+				} else if curCfg != nil {
+					prefix = config.DeriveSubnetPrefixFromProfile(curCfg.EnsureActiveProfile())
 				}
 				p.VirtualIP = config.GenerateSubnetIP(prefix, p.DeviceID)
 			}
@@ -971,7 +973,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta60"
+		ver = "1.9.226-beta61"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1952,7 +1954,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.226-beta60"
+		ver = "1.9.226-beta61"
 	}
 
 	vip := s.state.VirtualIP

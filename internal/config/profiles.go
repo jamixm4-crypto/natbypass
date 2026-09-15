@@ -775,6 +775,84 @@ func GenerateSubnetIP(prefix string, deviceID string) string {
 	return fmt.Sprintf("%s.%d", prefix, octet)
 }
 
+// DeriveSubnetFromSeed вычисляет /24 подсеть детерминированно из seed-строки (NetworkKey или MQTTTopic).
+// Генерирует адрес вида 10.X.Y.0/24, где X ∈ [1..254], Y ∈ [1..254].
+func DeriveSubnetFromSeed(seed string) string {
+	h := sha256.Sum256([]byte("NatBypass-SubnetDerivation-V1:" + seed))
+	x := int(h[0]%254) + 1 // 1..254
+	y := int(h[1]%254) + 1 // 1..254
+	return fmt.Sprintf("10.%d.%d.0/24", x, y)
+}
+
+// DeriveSubnetFromProfile возвращает каноническую подсеть /24 для профиля.
+// Приоритет: Subnet > VirtualIP > детерминированный от NetworkKey/MQTTTopic > fallback 100.64.200.0/24
+func DeriveSubnetFromProfile(p *Profile) string {
+	if p == nil {
+		return "100.64.200.0/24"
+	}
+	// 1. Явно заданная подсеть в профиле
+	if p.Subnet != "" {
+		pfx := ExtractSubnetPrefix(p.Subnet)
+		if pfx != "" && pfx != "100.64.200" {
+			return pfx + ".0/24"
+		}
+		return p.Subnet
+	}
+	// 2. Явно заданный VirtualIP (извлекаем подсеть)
+	if p.VirtualIP != "" {
+		pfx := ExtractSubnetPrefix(p.VirtualIP)
+		if pfx != "" && pfx != "100.64.200" {
+			return pfx + ".0/24"
+		}
+	}
+	// 3. Детерминированная подсеть от ключа сети
+	seed := p.NetworkKey
+	if seed == "" {
+		seed = p.MQTTTopic
+	}
+	if seed != "" {
+		return DeriveSubnetFromSeed(seed)
+	}
+	return "100.64.200.0/24"
+}
+
+// DeriveSubnetPrefixFromProfile возвращает 3-октетный префикс подсети из профиля (e.g. "10.123.45").
+func DeriveSubnetPrefixFromProfile(p *Profile) string {
+	subnet := DeriveSubnetFromProfile(p)
+	return ExtractSubnetPrefix(subnet)
+}
+
+// SubnetMismatchWarning проверяет, что myVIP принадлежит подсети профиля.
+// Возвращает предупреждающее сообщение или "" если всё корректно.
+func SubnetMismatchWarning(myVIP string, profileSubnet string) string {
+	if myVIP == "" || profileSubnet == "" {
+		return ""
+	}
+	myPrefix := ExtractSubnetPrefix(myVIP)
+	profPrefix := ExtractSubnetPrefix(profileSubnet)
+	if myPrefix == profPrefix {
+		return ""
+	}
+	return fmt.Sprintf("⚠️ Несовпадение адресации: Ваш IP (%s) не входит в подсеть сети (%s). Связь с другими устройствами будет нарушена! Включите автоматический IP.", myVIP, profileSubnet)
+}
+
+// GetMeshSubnets возвращает список /24 подсетей, которые необходимо маршрутизировать через mesh-интерфейс.
+// Возвращает уникальный набор: подсеть профиля + fallback 100.64.200.0/24 (для обратной совместимости).
+func GetMeshSubnets(p *Profile) []string {
+	seen := make(map[string]bool)
+	var result []string
+	primary := DeriveSubnetFromProfile(p)
+	if primary != "" && !seen[primary] {
+		seen[primary] = true
+		result = append(result, primary)
+	}
+	compat := "100.64.200.0/24"
+	if !seen[compat] {
+		result = append(result, compat)
+	}
+	return result
+}
+
 // ResolveVirtualIP возвращает актуальный уникальный Virtual IP узла в подсети активного профиля
 func ResolveVirtualIP(cfg *Config, deviceID string) string {
 	if cfg == nil {
