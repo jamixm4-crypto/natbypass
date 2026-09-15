@@ -211,6 +211,8 @@ class NatBypassVpnService : VpnService() {
                                 try {
                                     val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
                                     if (sockFd > 0) protect(sockFd)
+                                    val sockFd6 = org.natbypass.app.util.MobileBridge.getUDPSocketFd6()
+                                    if (sockFd6 > 0) protect(sockFd6)
                                     org.natbypass.app.util.MobileBridge.refreshPublicIP()
                                 } catch (_: Throwable) {}
                             }
@@ -417,12 +419,17 @@ class NatBypassVpnService : VpnService() {
                 org.natbypass.app.util.MobileBridge.selectExitNode(selectedExitNode)
             }
 
-            // Защита сокета UDP от зацикливания маршрутизации (критично для Android 14/15/16)
+            // Защита сокетов UDP IPv4 и IPv6 от зацикливания маршрутизации (критично для Android 14/15/16)
             try {
                 val sockFd: Int = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
                 if (sockFd > 0) {
                     val ok: Boolean = protect(sockFd)
-                    Log.i(TAG, "VpnService.protect($sockFd) applied: $ok")
+                    Log.i(TAG, "VpnService.protect($sockFd) IPv4 applied: $ok")
+                }
+                val sockFd6: Int = org.natbypass.app.util.MobileBridge.getUDPSocketFd6()
+                if (sockFd6 > 0) {
+                    val ok6: Boolean = protect(sockFd6)
+                    Log.i(TAG, "VpnService.protect($sockFd6) IPv6 applied: $ok6")
                 }
             } catch (t: Throwable) {
                 Log.w(TAG, "protect socket error: ${t.message}")
@@ -595,6 +602,8 @@ class NatBypassVpnService : VpnService() {
                         val sockFd = org.natbypass.app.util.MobileBridge.getUDPSocketFd()
                         if (sockFd > 0) protect(sockFd)
                     }
+                    val sockFd6 = org.natbypass.app.util.MobileBridge.getUDPSocketFd6()
+                    if (sockFd6 > 0) protect(sockFd6)
                 } catch (t: Throwable) {
                     Log.w(TAG, "Ошибка перепривязки сокета при смене сети: ${t.message}")
                 }

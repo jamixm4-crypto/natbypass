@@ -421,6 +421,20 @@ object MobileBridge {
         }
     }
 
+    /** Получить файловый дескриптор вторичного IPv6 сокета UDP Puncher для вызова protect(fd) */
+    fun getUDPSocketFd6(): Int {
+        val method = getMethod("getUDPSocketFd6") ?: return -1
+        return try {
+            val res = method.invoke(null)
+            when (res) {
+                is Number -> res.toInt()
+                else -> -1
+            }
+        } catch (e: Exception) {
+            -1
+        }
+    }
+
     /** Переоткрыть сокет при роуминге (Wi-Fi <-> LTE) и получить новый дескриптор */
     fun rebindSockets(): Int {
         val method = getMethod("rebindSockets") ?: return -1

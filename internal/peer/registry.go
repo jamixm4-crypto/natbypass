@@ -88,6 +88,8 @@ type Peer struct {
 	IsMetered                bool                    `json:"is_metered,omitempty"`          // True on mobile data / cellular metered network
 	BatteryLow               bool                    `json:"battery_low,omitempty"`         // True on low battery / power saving mode
 	RelayTrafficBytes        int64                   `json:"relay_traffic_bytes,omitempty"` // Local byte count of relayed packets
+	RelayTrafficDate         string                  `json:"relay_traffic_date,omitempty"`  // Calendar date (YYYY-MM-DD) of RelayTrafficBytes accounting
+	ActiveCoordinations      int                     `json:"active_coordinations,omitempty"` // Level 3: Concurrently active punch coordinations on this node
 	ReplayFilter             *crypto.ReplayFilter    `json:"-"`                              // Anti-Replay sliding window (RFC 6479)
 }
 
@@ -998,7 +1000,8 @@ func IsValidEndpointForPeer(endpoint string, p *Peer, myPublicIP string) bool {
 }
 
 // FindBestCoordinator searches the registry for an online peer with Full Cone / Restricted NAT (non-Symmetric)
-// that is coordinator-capable, not on a metered network, not low on battery, and has the lowest latency.
+// that is coordinator-capable, not on a metered network, not low on battery, has fewer than 5 active coordinations,
+// and has the lowest latency.
 func (r *Registry) FindBestCoordinator(excludeDeviceID string) *Peer {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -1009,6 +1012,10 @@ func (r *Registry) FindBestCoordinator(excludeDeviceID string) *Peer {
 			continue
 		}
 		if p.CoordinatorCapable && p.NATType != "symmetric" && !p.IsMetered && !p.BatteryLow {
+			// Protection against coordinator storm: limit concurrent coordinations per node
+			if p.ActiveCoordinations >= 5 {
+				continue
+			}
 			candidates = append(candidates, p)
 		}
 	}
@@ -1016,6 +1023,10 @@ func (r *Registry) FindBestCoordinator(excludeDeviceID string) *Peer {
 		return nil
 	}
 	sort.Slice(candidates, func(i, j int) bool {
+		// Prefer nodes with fewer active coordinations first to balance mesh load
+		if candidates[i].ActiveCoordinations != candidates[j].ActiveCoordinations {
+			return candidates[i].ActiveCoordinations < candidates[j].ActiveCoordinations
+		}
 		latI := candidates[i].PingMs
 		if latI <= 0 {
 			latI = 9999
@@ -1029,20 +1040,43 @@ func (r *Registry) FindBestCoordinator(excludeDeviceID string) *Peer {
 	return candidates[0]
 }
 
+// IncrementActiveCoordinations tracks concurrent coordinations on a coordinator node.
+func (r *Registry) IncrementActiveCoordinations(deviceID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, ok := r.peers[deviceID]; ok && p != nil {
+		p.ActiveCoordinations++
+	}
+}
+
+// DecrementActiveCoordinations releases a coordination slot on a coordinator node.
+func (r *Registry) DecrementActiveCoordinations(deviceID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, ok := r.peers[deviceID]; ok && p != nil && p.ActiveCoordinations > 0 {
+		p.ActiveCoordinations--
+	}
+}
+
 // FindBestRelay searches the registry for an online peer that explicitly opted into acting as a relay (RelayCapable == true),
-// is not metered, not battery low, and within its daily quota limit.
+// is not metered, not battery low, and within its daily quota limit (with automatic date-based quota reset).
 func (r *Registry) FindBestRelay(excludeDeviceID string) *Peer {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	today := time.Now().Format("2006-01-02")
 	var candidates []*Peer
 	for _, p := range r.peers {
 		if p == nil || !p.Online || p.DeviceID == excludeDeviceID {
 			continue
 		}
 		if p.RelayCapable && !p.IsMetered && !p.BatteryLow {
+			trafficBytes := p.RelayTrafficBytes
+			if p.RelayTrafficDate != today {
+				trafficBytes = 0
+			}
 			if p.RelayQuotaGBDay > 0 {
-				usedGB := p.RelayTrafficBytes / (1024 * 1024 * 1024)
+				usedGB := trafficBytes / (1024 * 1024 * 1024)
 				if int(usedGB) >= p.RelayQuotaGBDay {
 					continue
 				}
@@ -1071,13 +1105,19 @@ func (r *Registry) FindBestRelay(excludeDeviceID string) *Peer {
 }
 
 // RecordRelayTraffic increments the relayed byte count for accounting against user daily quota.
+// Automatically resets the byte counter on calendar day boundary (YYYY-MM-DD).
 func (r *Registry) RecordRelayTraffic(deviceID string, bytes int64) {
 	if bytes <= 0 {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	today := time.Now().Format("2006-01-02")
 	if p, ok := r.peers[deviceID]; ok && p != nil {
+		if p.RelayTrafficDate != today {
+			p.RelayTrafficDate = today
+			p.RelayTrafficBytes = 0
+		}
 		p.RelayTrafficBytes += bytes
 	}
 }

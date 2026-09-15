@@ -513,3 +513,66 @@ func TestRegistry_TCPTransportPreservation(t *testing.T) {
 		t.Errorf("expected PingMs to be preserved as 28, got %d", got.PingMs)
 	}
 }
+
+func TestCoordinatorStormThrottle(t *testing.T) {
+	reg := NewRegistry()
+	reg.Upsert(&Peer{
+		DeviceID:            "node-coord-1",
+		Online:              true,
+		CoordinatorCapable:  true,
+		NATType:             "cone",
+		PingMs:              10,
+		ActiveCoordinations: 5, // At max limit (5)
+	})
+	reg.Upsert(&Peer{
+		DeviceID:            "node-coord-2",
+		Online:              true,
+		CoordinatorCapable:  true,
+		NATType:             "cone",
+		PingMs:              20,
+		ActiveCoordinations: 0, // Available
+	})
+
+	// node-coord-1 has lower ping (10ms) but is capped at 5 active coordinations.
+	// FindBestCoordinator should pick node-coord-2!
+	coord := reg.FindBestCoordinator("my-device")
+	if coord == nil || coord.DeviceID != "node-coord-2" {
+		t.Fatalf("expected node-coord-2 to be selected due to coordinator storm limit, got: %+v", coord)
+	}
+
+	// Increment and Decrement test
+	reg.IncrementActiveCoordinations("node-coord-2")
+	if p, ok := reg.Get("node-coord-2"); !ok || p.ActiveCoordinations != 1 {
+		t.Errorf("expected node-coord-2 to have 1 active coordination, got %d", p.ActiveCoordinations)
+	}
+	reg.DecrementActiveCoordinations("node-coord-2")
+	if p, ok := reg.Get("node-coord-2"); !ok || p.ActiveCoordinations != 0 {
+		t.Errorf("expected node-coord-2 to have 0 active coordinations, got %d", p.ActiveCoordinations)
+	}
+}
+
+func TestRelayQuotaDailyDateReset(t *testing.T) {
+	reg := NewRegistry()
+	yesterday := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
+	reg.Upsert(&Peer{
+		DeviceID:          "node-relay-1",
+		Online:            true,
+		RelayCapable:      true,
+		RelayQuotaGBDay:   5,
+		RelayTrafficBytes: 10 * 1024 * 1024 * 1024, // 10 GB used yesterday (exceeds 5 GB)
+		RelayTrafficDate:  yesterday,
+	})
+
+	// Yesterday's quota was exceeded, but today is a new day: FindBestRelay should accept it!
+	relay := reg.FindBestRelay("my-device")
+	if relay == nil || relay.DeviceID != "node-relay-1" {
+		t.Fatalf("expected node-relay-1 to be available due to new calendar day reset, got: %+v", relay)
+	}
+
+	// RecordRelayTraffic today should reset counter to new traffic
+	reg.RecordRelayTraffic("node-relay-1", 1024)
+	p, _ := reg.Get("node-relay-1")
+	if p.RelayTrafficBytes != 1024 {
+		t.Errorf("expected RelayTrafficBytes to be reset to 1024 on new day, got %d", p.RelayTrafficBytes)
+	}
+}
