@@ -69,10 +69,14 @@ private fun PeerAvatar(displayName: String, modifier: Modifier = Modifier) {
 // ── Transport badge (AWG / TLS / Relay) ───────────────────────────────────────
 // ── Transport badge (AWG / TLS / Relay) ───────────────────────────────────────
 @Composable
-private fun TransportBadge(transport: String, channelType: String) {
+private fun TransportBadge(transport: String, channelType: String, detail: String = "") {
     val (label, color) = when {
-        transport == "tls" || channelType == "tcp" -> Pair("TLS",   Color(0xFFA855F7))
-        transport == "awg" || channelType == "p2p" -> Pair("AWG",   MaterialTheme.natColors.success)
+        transport == "tls" || channelType == "tcp" -> Pair("TLS", Color(0xFFA855F7))
+        transport == "awg" || channelType == "p2p" -> Pair("AWG", MaterialTheme.natColors.success)
+        channelType == "relay" && detail.startsWith("Релей через") -> {
+            val via = detail.removePrefix("Релей через").trim().take(12)
+            Pair("🛡️ $via", MaterialTheme.natColors.warning)
+        }
         channelType == "relay"                     -> Pair("Relay", MaterialTheme.natColors.warning)
         else                                       -> Pair("Offline", MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
     }
@@ -273,7 +277,7 @@ fun PeerCard(
                         )
                         if (peer.isOnline) {
                             Spacer(Modifier.width(6.dp))
-                            TransportBadge(transport = peer.transport, channelType = peer.channelType)
+                            TransportBadge(transport = peer.transport, channelType = peer.channelType, detail = peer.transportDetail)
                         }
                     }
                     if (peer.version.isNotEmpty()) {

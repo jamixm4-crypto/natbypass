@@ -8,6 +8,8 @@
 package dht
 
 import (
+	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -58,5 +60,79 @@ func TestDHT_Replication(t *testing.T) {
 	}
 	if err != nil || endpoint != "100.64.200.55:51820" {
 		t.Fatalf("expected replicated endpoint 100.64.200.55:51820, got %s (err: %v)", endpoint, err)
+	}
+}
+
+func TestSingleSocketDHT_PunchNow(t *testing.T) {
+	var nodeB *Node
+
+	// Node A sends via simulated puncher socket
+	nodeA := NewNodeWithSender("device-a", func(data []byte, rAddr *net.UDPAddr) error {
+		// Route directly to node B's HandlePacket
+		if nodeB != nil {
+			nodeB.HandlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 30001})
+		}
+		return nil
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	var gotSenderID string
+	var gotSenderSTUN string
+
+	// Node B receives via its virtual socket
+	nodeB = NewNodeWithSender("device-b", func(data []byte, rAddr *net.UDPAddr) error {
+		return nil
+	})
+	nodeB.SetOnPunchNow(func(senderID, senderSTUN string) {
+		gotSenderID = senderID
+		gotSenderSTUN = senderSTUN
+		wg.Done()
+	})
+
+	// Node A transmits PUNCH_NOW to Node B
+	err := nodeA.SendPunchNow("device-b", "127.0.0.1:30002", "198.51.100.1:51820")
+	if err != nil {
+		t.Fatalf("SendPunchNow failed: %v", err)
+	}
+
+	wg.Wait()
+
+	if gotSenderID != "device-a" {
+		t.Errorf("expected senderID 'device-a', got %q", gotSenderID)
+	}
+	if gotSenderSTUN != "198.51.100.1:51820" {
+		t.Errorf("expected senderSTUN '198.51.100.1:51820', got %q", gotSenderSTUN)
+	}
+}
+
+func TestSingleSocketDHT_StoreAndFind(t *testing.T) {
+	var nodeA, nodeB *Node
+
+	nodeA = NewNodeWithSender("device-a", func(data []byte, rAddr *net.UDPAddr) error {
+		if nodeB != nil {
+			nodeB.HandlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 40001})
+		}
+		return nil
+	})
+
+	nodeB = NewNodeWithSender("device-b", func(data []byte, rAddr *net.UDPAddr) error {
+		if nodeA != nil {
+			nodeA.HandlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 40002})
+		}
+		return nil
+	})
+
+	// Node A stores key on Node B
+	key := [20]byte{1, 2, 3, 4, 5}
+	nodeA.sendStoreRequest("127.0.0.1:40002", key, []byte("93.184.216.34:51820"))
+
+	nodeB.mu.RLock()
+	val, ok := nodeB.Store[key]
+	nodeB.mu.RUnlock()
+
+	if !ok || string(val) != "93.184.216.34:51820" {
+		t.Fatalf("expected stored value on nodeB, got ok=%v, val=%s", ok, string(val))
 	}
 }

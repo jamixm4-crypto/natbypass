@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -30,6 +31,7 @@ import (
 	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/crypto"
 	"github.com/natbypass/natbypass/internal/daemon"
+	"github.com/natbypass/natbypass/internal/dht"
 	"github.com/natbypass/natbypass/internal/diagnostic"
 	"github.com/natbypass/natbypass/internal/dns"
 	"github.com/natbypass/natbypass/internal/transport"
@@ -50,6 +52,7 @@ import (
 // runEngine initializes and runs the core NatBypass networking pipeline.
 
 var (
+	dhtNode          *dht.Node
 	quicSessMgr      *quic.SessionManager
 	magicSock        *network.MagicSock
 	tcpDirectMgr     *network.TCPDirectManager
@@ -1427,6 +1430,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										_ = puncher.SendHolePunchProbe(cand)
 									}
 								}
+								if dhtNode != nil {
+									mySTUN := puncher.GetCachedSTUNAddr()
+									if targetEP != "" {
+										_ = dhtNode.SendPunchNow(p.DeviceID, targetEP, mySTUN)
+									}
+									if p.STUNAddr != "" && p.STUNAddr != targetEP {
+										_ = dhtNode.SendPunchNow(p.DeviceID, p.STUNAddr, mySTUN)
+									}
+								}
 							}
 						}
 						// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (throttled to 5s)
@@ -1476,12 +1488,28 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 										if err := tcpDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
 											sentDirect = true
 											registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+											rName := relayPeer.DeviceName
+											if rName == "" {
+												rName = relayPeer.Nickname
+											}
+											p.RelayedViaDevID = relayPeer.DeviceID
+											p.RelayedViaName = rName
+											p.RelayedViaVIP = relayPeer.VirtualIP
+											p.Transport = "relay_mesh"
 											log.Debug().Str("dst", dstIP).Str("via", relayPeer.DeviceID).Msg("🔀 MultiHop: Routed packet via Mesh TCP Relay peer")
 										}
 									} else if puncher != nil && relayPeer.DirectP2P && relayPeer.ActiveEndpoint != "" {
 										if err := puncher.SendDataPacketWithPadding(relayPeer.ActiveEndpoint, mhPkt, 0, 0); err == nil {
 											sentDirect = true
 											registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+											rName := relayPeer.DeviceName
+											if rName == "" {
+												rName = relayPeer.Nickname
+											}
+											p.RelayedViaDevID = relayPeer.DeviceID
+											p.RelayedViaName = rName
+											p.RelayedViaVIP = relayPeer.VirtualIP
+											p.Transport = "relay_mesh"
 											log.Debug().Str("dst", dstIP).Str("via", relayPeer.ActiveEndpoint).Msg("🔀 MultiHop: Routed packet via Mesh UDP Relay peer")
 										}
 									}
@@ -1492,6 +1520,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						// Task 3.4: Multi-Path Hot-Standby Heartbeat & Sub-50ms Failover
 						// When direct P2P is active, maintain standby relay path every 15s to guarantee hitless switchover
 						if sentDirect && p.DirectP2P && bilateralOK {
+							p.RelayedViaDevID = ""
+							p.RelayedViaName = ""
+							p.RelayedViaVIP = ""
 							now := time.Now()
 							if p.LastRelayPing.IsZero() || now.Sub(p.LastRelayPing) > 15*time.Second {
 								p.LastRelayPing = now
@@ -2302,6 +2333,27 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			}
 		})
 		log.Info().Int("port", puncher.LocalPort()).Msg("UDP puncher active on persistent socket with MagicSock and KeepAlive")
+
+		// Level 3: Initialize Single-Socket DHT node multiplexed directly on top of UDPPuncher
+		dhtNode = dht.NewNodeWithSender(deviceID, func(data []byte, rAddr *net.UDPAddr) error {
+			if puncher != nil {
+				return puncher.SendDHTPacket(data, rAddr)
+			}
+			return errors.New("puncher closed")
+		})
+		puncher.SetDHTHandler(func(data []byte, remoteAddr *net.UDPAddr) {
+			if dhtNode != nil {
+				dhtNode.HandlePacket(data, remoteAddr)
+			}
+		})
+		dhtNode.SetOnPunchNow(func(senderID, senderSTUN string) {
+			log.Info().Str("sender", senderID).Str("sender_stun", senderSTUN).
+				Msg("⚡ [DHT PUNCH NOW] Получен мгновенный сигнал открытия портов — встречный P2P probe")
+			if puncher != nil && senderSTUN != "" {
+				_ = puncher.SendHolePunchProbe(senderSTUN)
+			}
+		})
+
 		quicSessMgr = quic.NewSessionManager()
 		tcpDirectMgr = network.NewTCPDirectManager(ctx)
 		tcpDirectMgr.SetDeviceID(deviceID)
@@ -2619,6 +2671,16 @@ func publishLoop(
 						if cand != p.STUNAddr && cand != "" {
 							_ = puncher.SendHolePunchProbeWithDelta(cand, p.NATDelta)
 							p.ProbeCount++
+						}
+					}
+					if dhtNode != nil {
+						mySTUN := puncher.GetCachedSTUNAddr()
+						target := p.ActiveEndpoint
+						if target == "" {
+							target = p.STUNAddr
+						}
+						if target != "" {
+							_ = dhtNode.SendPunchNow(p.DeviceID, target, mySTUN)
 						}
 					}
 
@@ -2991,7 +3053,7 @@ func receiveLoop(
 				if targetAddr != "" {
 					log.Info().Str("other_peer", otherPeer).Str("target_addr", targetAddr).Int64("punch_time_ms", sync.PunchTimeUnix).
 						Msg("⚡ [Level 3 LeaderSync] Запуск миллисекундного синхронного пробития по команде координатора")
-					go func(tAddr string, punchTime int64) {
+					go func(tAddr string, punchTime int64, oPeerID string) {
 						host, portStr, err := net.SplitHostPort(tAddr)
 						if err != nil {
 							return
@@ -3000,15 +3062,15 @@ func receiveLoop(
 						if err != nil {
 							return
 						}
-						targetPorts := []int{port}
-						for _, offset := range []int{-2, -1, 1, 2} {
-							np := port + offset
-							if np > 1024 && np < 65535 {
-								targetPorts = append(targetPorts, np)
-							}
+						var otherDelta int
+						var otherASN string
+						if regPeer, ok := registry.Get(oPeerID); ok && regPeer != nil {
+							otherDelta = regPeer.NATDelta
+							otherASN = regPeer.ASN
 						}
+						targetPorts := network.GenerateAdaptivePredictPorts(port, otherDelta, otherASN)
 						_ = puncher.ScheduleSimultaneousOpenMilli(ctx, punchTime, host, targetPorts, 12, 10)
-					}(targetAddr, sync.PunchTimeUnix)
+					}(targetAddr, sync.PunchTimeUnix, otherPeer)
 				}
 				if p.VirtualIP == "" || p.PublicKey == "" {
 					continue

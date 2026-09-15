@@ -91,3 +91,87 @@ func IsPredictionViable(asn string, samples []int, prof CGNATProfile, fallbackDe
 	// Default fallback: small conservative sweep radius of 8 ports
 	return true, 8
 }
+
+// GenerateAdaptivePredictPorts generates an optimized list of candidate target ports
+// based on the remote peer's base port, measured NAT delta, and operator ASN.
+func GenerateAdaptivePredictPorts(basePort int, measuredDelta int, asn string) []int {
+	if basePort <= 0 || basePort > 65535 {
+		return nil
+	}
+
+	// 1. Look up known carrier rule by ASN
+	rule, found := LookupCarrierASN(asn)
+	if found && !rule.PredictionViable {
+		// Carrier uses RFC 4787 Random port allocation (e.g. T-Mobile).
+		// Wide port sweeps will fail and exhaust mobile battery. Punch only the exact base port.
+		return []int{basePort}
+	}
+
+	// 2. Determine effective step / delta
+	step := 1
+	if measuredDelta > 0 && measuredDelta <= 32 {
+		step = measuredDelta
+	} else if found && rule.DefaultDelta > 0 {
+		step = rule.DefaultDelta
+	}
+
+	seen := make(map[int]bool)
+	var ports []int
+
+	addPort := func(p int) {
+		if p >= 1024 && p <= 65535 && !seen[p] {
+			seen[p] = true
+			ports = append(ports, p)
+		}
+	}
+
+	// Always include the exact base port first
+	addPort(basePort)
+
+	// 3. Port allocation strategies
+	alloc := ""
+	if found {
+		alloc = rule.PortAllocation
+	}
+
+	switch alloc {
+	case "sequential", "fixed_step":
+		// Sequential/fixed-step CGNATs (MegaFon, MTS, Rostelecom) allocate forward
+		// on consecutive outbound UDP flows. Sweep predominantly forward.
+		for i := 1; i <= 5; i++ {
+			addPort(basePort + i*step)
+		}
+		// One step backward just in case packet ordering or race occurred
+		addPort(basePort - step)
+
+	case "small_jitter", "pba":
+		// Small jitter around base port (Tele2, Beeline)
+		radius := 6
+		if found && rule.SweepRadius > 0 {
+			radius = rule.SweepRadius
+			if radius > 12 {
+				radius = 12
+			}
+		}
+		for i := 1; i <= radius; i++ {
+			addPort(basePort + i)
+			addPort(basePort - i)
+		}
+
+	default:
+		// Fallback when ASN is unknown:
+		if measuredDelta > 0 && measuredDelta <= 16 {
+			for i := 1; i <= 4; i++ {
+				addPort(basePort + i*measuredDelta)
+			}
+			addPort(basePort - measuredDelta)
+		} else {
+			// Small symmetric fanout [-2, -1, +1, +2]
+			for _, off := range []int{1, -1, 2, -2} {
+				addPort(basePort + off)
+			}
+		}
+	}
+
+	return ports
+}

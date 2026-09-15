@@ -1702,6 +1702,12 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
+							if sentDirect && (targetPeer.DirectP2P || sentTCP) {
+								targetPeer.RelayedViaDevID = ""
+								targetPeer.RelayedViaName = ""
+								targetPeer.RelayedViaVIP = ""
+							}
+
 							// Fallback Relay Rule: ONLY if direct transmission completely failed AND NOT Exit Node internet traffic!
 							// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
 							isICMP := len(pkt) >= 20 && pkt[9] == 1
@@ -1725,12 +1731,28 @@ func attachTUNLocked(tunFd int) {
 												if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
 													relayed = true
 													sentDirect = true
+													rName := rp.DeviceName
+													if rName == "" {
+														rName = rp.Nickname
+													}
+													targetPeer.RelayedViaDevID = rp.DeviceID
+													targetPeer.RelayedViaName = rName
+													targetPeer.RelayedViaVIP = rp.VirtualIP
+													targetPeer.Transport = "relay_mesh"
 													break
 												}
 											} else if globalPuncher != nil && rp.DirectP2P && rp.ActiveEndpoint != "" {
 												if err := globalPuncher.SendDataPacketWithPadding(rp.ActiveEndpoint, relayPkt, 0, 0); err == nil {
 													relayed = true
 													sentDirect = true
+													rName := rp.DeviceName
+													if rName == "" {
+														rName = rp.Nickname
+													}
+													targetPeer.RelayedViaDevID = rp.DeviceID
+													targetPeer.RelayedViaName = rName
+													targetPeer.RelayedViaVIP = rp.VirtualIP
+													targetPeer.Transport = "relay_mesh"
 													break
 												}
 											}
@@ -1745,12 +1767,28 @@ func attachTUNLocked(tunFd int) {
 												if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
 													relayed = true
 													sentDirect = true
+													rName := rp.DeviceName
+													if rName == "" {
+														rName = rp.Nickname
+													}
+													targetPeer.RelayedViaDevID = rp.DeviceID
+													targetPeer.RelayedViaName = rName
+													targetPeer.RelayedViaVIP = rp.VirtualIP
+													targetPeer.Transport = "relay_mesh"
 													break
 												}
 											} else if globalPuncher != nil && rp.DirectP2P && rp.ActiveEndpoint != "" {
 												if err := globalPuncher.SendDataPacketWithPadding(rp.ActiveEndpoint, relayPkt, 0, 0); err == nil {
 													relayed = true
 													sentDirect = true
+													rName := rp.DeviceName
+													if rName == "" {
+														rName = rp.Nickname
+													}
+													targetPeer.RelayedViaDevID = rp.DeviceID
+													targetPeer.RelayedViaName = rName
+													targetPeer.RelayedViaVIP = rp.VirtualIP
+													targetPeer.Transport = "relay_mesh"
 													break
 												}
 											}

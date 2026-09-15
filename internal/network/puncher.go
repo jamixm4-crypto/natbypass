@@ -8,6 +8,7 @@
 package network
 
 import (
+	"bytes"
 	"encoding/binary"
 	"context"
 	"errors"
@@ -164,6 +165,10 @@ type UDPPuncher struct {
 
 	// Carrier ASN for selective port prediction (Level 4)
 	currentASN string
+
+	// Single-Socket DHT multiplexing (Level 3 low-latency PUNCH NOW)
+	dhtHandler func(data []byte, remoteAddr *net.UDPAddr)
+	dhtMu      sync.RWMutex
 }
 
 // SetCipherKey конфигурирует ключ симметричного шифрования (ChaCha20-Poly1305) для L3 Data-plane пакетов.
@@ -1997,6 +2002,14 @@ func (p *UDPPuncher) readLoopIPv6(c6 *net.UDPConn) {
 func (p *UDPPuncher) dispatchPacket(buf []byte, remoteAddr *net.UDPAddr) {
 	n := len(buf)
 	switch {
+	case bytes.HasPrefix(buf[:n], []byte("NATBYPASS:DHT:")):
+		p.dhtMu.RLock()
+		h := p.dhtHandler
+		p.dhtMu.RUnlock()
+		if h != nil {
+			h(buf[:n], remoteAddr)
+		}
+		return
 	case stun.IsMessage(buf[:n]):
 		p.handleSTUNMessage(buf[:n])
 	case n >= 4 && string(buf[:4]) == constants.KeepAlivePayload:
@@ -2397,4 +2410,20 @@ func (p *UDPPuncher) MappedIPString() string {
 		return p.mappedIP.String()
 	}
 	return ""
+}
+
+// SetDHTHandler sets the DHT packet dispatch callback for multiplexed DHT operations.
+func (p *UDPPuncher) SetDHTHandler(h func(data []byte, remoteAddr *net.UDPAddr)) {
+	p.dhtMu.Lock()
+	p.dhtHandler = h
+	p.dhtMu.Unlock()
+}
+
+// SendDHTPacket writes a DHT packet to the specified remote address via the active UDP socket.
+func (p *UDPPuncher) SendDHTPacket(data []byte, remoteAddr *net.UDPAddr) error {
+	if remoteAddr == nil {
+		return errors.New("remoteAddr cannot be nil")
+	}
+	_, err := p.writeToUDP(data, remoteAddr)
+	return err
 }

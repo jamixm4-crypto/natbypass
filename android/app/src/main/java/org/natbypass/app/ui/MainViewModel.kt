@@ -254,11 +254,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     else      -> "relay"
                 }
 
-                val transportDetail = when (transport) {
-                    "tls"     -> "Прямой ShadowTLS (TCP)"
-                    "awg"     -> "Прямой AWG (UDP)"
-                    "relay"   -> "Релей (MQTT / WSS)"
-                    else      -> "Офлайн"
+                val relayedViaName = obj.optString("relayed_via_name", "").trim()
+                val relayedViaVip = obj.optString("relayed_via_vip", "").trim()
+
+                val transportDetail = when {
+                    transport == "tls" -> "Прямой ShadowTLS (TCP)"
+                    transport == "awg" -> "Прямой AWG (UDP)"
+                    transport == "relay" && relayedViaName.isNotEmpty() -> "Релей через $relayedViaName"
+                    transport == "relay" && relayedViaVip.isNotEmpty() -> "Релей через $relayedViaVip"
+                    transport == "relay" -> "Релей (MQTT / WSS)"
+                    else -> "Офлайн"
                 }
 
                 val channelType = when (transport) {

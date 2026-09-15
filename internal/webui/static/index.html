@@ -3817,7 +3817,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           ? p.latency_ms 
           : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
         let latDisplay = `<span style="color:var(--text-dim);">—</span>`;
-        if (isDirect && latMs > 0) {
+        if (p.relayed_via_name || p.transport === 'relay_mesh') {
+          const via = p.relayed_via_name || (p.relayed_via_vip ? p.relayed_via_vip : 'Mesh Relay');
+          latDisplay = `<span class="badge" style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; font-size:0.72rem; padding:2px 7px;" title="Трафик маршрутизируется через Mesh Relay (Уровень 5)">🛡️ Через Relay (${via})</span>`;
+        } else if (isDirect && latMs > 0) {
           let dot = '🟢';
           let col = '#4ade80'; // Зеленый (< 100 ms)
           if (latMs >= 300) { 

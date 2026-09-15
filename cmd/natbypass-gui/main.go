@@ -5295,6 +5295,12 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 
+								if sentDirect && (targetPeer.DirectP2P || sentTCP) {
+									targetPeer.RelayedViaDevID = ""
+									targetPeer.RelayedViaName = ""
+									targetPeer.RelayedViaVIP = ""
+								}
+
 								// Fallback Relay Rule: ONLY if direct transmission completely failed AND NOT Exit Node internet traffic!
 								// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
 								cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
@@ -5308,6 +5314,14 @@ func startEngineFromConfig(c *config.Config) {
 										if mhPkt, mhErr := network.EncodeMultiHopPacket(myDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, packet); mhErr == nil {
 											if err := guiTCPDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
 												sentDirect = true
+												rName := relayPeer.DeviceName
+												if rName == "" {
+													rName = relayPeer.Nickname
+												}
+												targetPeer.RelayedViaDevID = relayPeer.DeviceID
+												targetPeer.RelayedViaName = rName
+												targetPeer.RelayedViaVIP = relayPeer.VirtualIP
+												targetPeer.Transport = "relay_mesh"
 												writeDebug(fmt.Sprintf("🔀 Routed packet to %s via Mesh TCP Relay %s", targetPeer.DeviceID, relayPeer.DeviceID))
 											}
 										}

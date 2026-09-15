@@ -49,6 +49,7 @@ type Peer struct {
 	PingMs           int64                `json:"ping_ms"`
 	NATType          string               `json:"nat_type,omitempty"`
 	NATDelta         int                  `json:"nat_delta,omitempty"`
+	ASN              string               `json:"asn,omitempty"`
 	OS               string               `json:"os,omitempty"`
 	Platform         string               `json:"platform,omitempty"`
 	Arch             string               `json:"arch,omitempty"`
@@ -90,6 +91,9 @@ type Peer struct {
 	RelayTrafficBytes        int64                   `json:"relay_traffic_bytes,omitempty"` // Local byte count of relayed packets
 	RelayTrafficDate         string                  `json:"relay_traffic_date,omitempty"`  // Calendar date (YYYY-MM-DD) of RelayTrafficBytes accounting
 	ActiveCoordinations      int                     `json:"active_coordinations,omitempty"` // Level 3: Concurrently active punch coordinations on this node
+	RelayedViaDevID          string                  `json:"relayed_via_dev_id,omitempty"`   // Level 5: Device ID of intermediate relay node
+	RelayedViaName           string                  `json:"relayed_via_name,omitempty"`     // Level 5: Human-readable name of intermediate relay node
+	RelayedViaVIP            string                  `json:"relayed_via_vip,omitempty"`      // Level 5: Virtual IP of intermediate relay node
 	ReplayFilter             *crypto.ReplayFilter    `json:"-"`                              // Anti-Replay sliding window (RFC 6479)
 }
 
@@ -275,6 +279,10 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 		newer.NATDelta = existing.NATDelta
 	}
 
+	if newer.ASN == "" && existing.ASN != "" {
+		newer.ASN = existing.ASN
+	}
+
 	if newer.Arch == "" && existing.Arch != "" {
 		newer.Arch = existing.Arch
 	}
@@ -359,6 +367,11 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	}
 	if newer.OutboundSeq == 0 && existing.OutboundSeq != 0 {
 		newer.OutboundSeq = existing.OutboundSeq
+	}
+	if newer.RelayedViaDevID == "" && existing.RelayedViaDevID != "" && !newer.DirectP2P && !newer.DirectTCP {
+		newer.RelayedViaDevID = existing.RelayedViaDevID
+		newer.RelayedViaName = existing.RelayedViaName
+		newer.RelayedViaVIP = existing.RelayedViaVIP
 	}
 
 

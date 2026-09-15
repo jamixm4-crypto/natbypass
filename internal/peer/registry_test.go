@@ -576,3 +576,45 @@ func TestRelayQuotaDailyDateReset(t *testing.T) {
 		t.Errorf("expected RelayTrafficBytes to be reset to 1024 on new day, got %d", p.RelayTrafficBytes)
 	}
 }
+
+func TestRelayedViaPreservation(t *testing.T) {
+	existing := &Peer{
+		DeviceID:        "node-b",
+		DirectP2P:       false,
+		DirectTCP:       false,
+		Transport:       "relay_mesh",
+		RelayedViaDevID: "relay-node-1",
+		RelayedViaName:  "Keenetic-Ultra",
+		RelayedViaVIP:   "100.64.200.1",
+	}
+
+	newer := &Peer{
+		DeviceID:  "node-b",
+		VirtualIP: "100.64.200.2",
+		Online:    true,
+	}
+
+	existing.MergeFrom(newer)
+
+	if newer.RelayedViaDevID != "relay-node-1" {
+		t.Errorf("expected RelayedViaDevID to be preserved, got %s", newer.RelayedViaDevID)
+	}
+	if newer.RelayedViaName != "Keenetic-Ultra" {
+		t.Errorf("expected RelayedViaName to be preserved, got %s", newer.RelayedViaName)
+	}
+	if newer.RelayedViaVIP != "100.64.200.1" {
+		t.Errorf("expected RelayedViaVIP to be preserved, got %s", newer.RelayedViaVIP)
+	}
+
+	// When direct P2P becomes true, RelayedVia should NOT be restored from older
+	directNewer := &Peer{
+		DeviceID:       "node-b",
+		DirectP2P:      true,
+		ActiveEndpoint: "192.168.1.50:47832",
+		LastDirectSeen: time.Now(),
+	}
+	existing.MergeFrom(directNewer)
+	if directNewer.RelayedViaDevID != "" {
+		t.Errorf("expected RelayedViaDevID to NOT be restored when DirectP2P is true, got %s", directNewer.RelayedViaDevID)
+	}
+}

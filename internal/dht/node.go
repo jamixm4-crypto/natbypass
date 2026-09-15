@@ -20,10 +20,14 @@ import (
 )
 
 const (
-	dhtStorePrefix = "NATBYPASS:DHT:STORE:"
-	dhtFindPrefix  = "NATBYPASS:DHT:FIND:"
-	dhtFoundPrefix = "NATBYPASS:DHT:FOUND:"
+	dhtStorePrefix    = "NATBYPASS:DHT:STORE:"
+	dhtFindPrefix     = "NATBYPASS:DHT:FIND:"
+	dhtFoundPrefix    = "NATBYPASS:DHT:FOUND:"
+	dhtPunchNowPrefix = "NATBYPASS:DHT:PUNCH_NOW:"
 )
+
+// PacketSenderFunc defines a callback for transmitting UDP packets via an external socket (e.g. UDPPuncher).
+type PacketSenderFunc func(data []byte, rAddr *net.UDPAddr) error
 
 // NodeInfo представляет информацию об узле в сети Kademlia DHT.
 type NodeInfo struct {
@@ -34,11 +38,14 @@ type NodeInfo struct {
 
 // Node представляет автономный DHT-узел для децентрализованной сигнализации.
 type Node struct {
+	DeviceID     string
 	NodeID       [20]byte
 	Address      string
 	RoutingTable [160][]*NodeInfo
 	Store        map[[20]byte][]byte
 	conn         *net.UDPConn
+	sender       PacketSenderFunc
+	onPunchNow   func(senderID, senderSTUN string)
 	mu           sync.RWMutex
 	ctxDone      chan struct{}
 }
@@ -47,10 +54,11 @@ type Node struct {
 func NewNode(deviceID string, address string) *Node {
 	hash := sha1.Sum([]byte(deviceID))
 	n := &Node{
-		NodeID:  hash,
-		Address: address,
-		Store:   make(map[[20]byte][]byte),
-		ctxDone: make(chan struct{}),
+		DeviceID: deviceID,
+		NodeID:   hash,
+		Address:  address,
+		Store:    make(map[[20]byte][]byte),
+		ctxDone:  make(chan struct{}),
 	}
 
 	if address != "" {
@@ -63,6 +71,32 @@ func NewNode(deviceID string, address string) *Node {
 		}
 	}
 	return n
+}
+
+// NewNodeWithSender creates a DHT node multiplexed over an existing socket (e.g. UDPPuncher) without opening its own port.
+func NewNodeWithSender(deviceID string, sender PacketSenderFunc) *Node {
+	hash := sha1.Sum([]byte(deviceID))
+	return &Node{
+		DeviceID: deviceID,
+		NodeID:   hash,
+		Store:    make(map[[20]byte][]byte),
+		sender:   sender,
+		ctxDone:  make(chan struct{}),
+	}
+}
+
+// SetOnPunchNow registers a callback for immediate reactive hole punching upon receiving PUNCH_NOW.
+func (n *Node) SetOnPunchNow(h func(senderID, senderSTUN string)) {
+	n.mu.Lock()
+	n.onPunchNow = h
+	n.mu.Unlock()
+}
+
+// SetSender sets or updates the packet sender callback.
+func (n *Node) SetSender(sender PacketSenderFunc) {
+	n.mu.Lock()
+	n.sender = sender
+	n.mu.Unlock()
 }
 
 // Close останавливает сетевой сокет DHT-узла.
@@ -204,17 +238,93 @@ func (n *Node) getBucketIndex(target [20]byte) int {
 	return 0
 }
 
+func (n *Node) sendPacket(data []byte, rAddr *net.UDPAddr) error {
+	n.mu.RLock()
+	sender := n.sender
+	conn := n.conn
+	n.mu.RUnlock()
+
+	if sender != nil {
+		return sender(data, rAddr)
+	}
+	if conn != nil {
+		_, err := conn.WriteToUDP(data, rAddr)
+		return err
+	}
+	// Fallback ephemeral dial
+	c, err := net.DialUDP("udp", nil, rAddr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	_, err = c.Write(data)
+	return err
+}
+
+// SendPunchNow transmits an ultra-low latency hole punching trigger signal directly to targetAddr.
+func (n *Node) SendPunchNow(targetID, targetAddr, mySTUN string) error {
+	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+	if err != nil {
+		return err
+	}
+	msg := fmt.Sprintf("%s%s:%s:%d:%s", dhtPunchNowPrefix, targetID, n.DeviceID, time.Now().UnixMilli(), mySTUN)
+	return n.sendPacket([]byte(msg), rAddr)
+}
+
+// HandlePacket processes incoming DHT packets received from UDPPuncher or external transport.
+func (n *Node) HandlePacket(buf []byte, rAddr *net.UDPAddr) {
+	data := string(buf)
+	if strings.HasPrefix(data, dhtStorePrefix) {
+		payload := strings.TrimPrefix(data, dhtStorePrefix)
+		parts := strings.SplitN(payload, ":", 2)
+		if len(parts) == 2 {
+			keyBytes, err := hex.DecodeString(parts[0])
+			if err == nil && len(keyBytes) == 20 {
+				var k [20]byte
+				copy(k[:], keyBytes)
+				n.mu.Lock()
+				n.Store[k] = []byte(parts[1])
+				n.mu.Unlock()
+			}
+		}
+	} else if strings.HasPrefix(data, dhtFindPrefix) {
+		keyHex := strings.TrimPrefix(data, dhtFindPrefix)
+		keyBytes, err := hex.DecodeString(keyHex)
+		if err == nil && len(keyBytes) == 20 {
+			var k [20]byte
+			copy(k[:], keyBytes)
+			n.mu.RLock()
+			val, found := n.Store[k]
+			n.mu.RUnlock()
+			if found && rAddr != nil {
+				resp := fmt.Sprintf("%s%x:%s", dhtFoundPrefix, k, string(val))
+				_ = n.sendPacket([]byte(resp), rAddr)
+			}
+		}
+	} else if strings.HasPrefix(data, dhtPunchNowPrefix) {
+		// NATBYPASS:DHT:PUNCH_NOW:<TargetID>:<SenderID>:<Timestamp>:<SenderSTUN>
+		payload := strings.TrimPrefix(data, dhtPunchNowPrefix)
+		parts := strings.SplitN(payload, ":", 4)
+		if len(parts) == 4 {
+			targetID := parts[0]
+			senderID := parts[1]
+			senderSTUN := parts[3]
+			if targetID == n.DeviceID || targetID == "" {
+				n.mu.RLock()
+				h := n.onPunchNow
+				n.mu.RUnlock()
+				if h != nil {
+					h(senderID, senderSTUN)
+				}
+			}
+		}
+	}
+}
+
 func (n *Node) sendStoreRequest(addr string, key [20]byte, val []byte) {
 	if rAddr, err := net.ResolveUDPAddr("udp", addr); err == nil {
 		msg := fmt.Sprintf("%s%x:%s", dhtStorePrefix, key, string(val))
-		if n.conn != nil {
-			_, _ = n.conn.WriteToUDP([]byte(msg), rAddr)
-		} else {
-			if c, err := net.DialUDP("udp", nil, rAddr); err == nil {
-				defer c.Close()
-				_, _ = c.Write([]byte(msg))
-			}
-		}
+		_ = n.sendPacket([]byte(msg), rAddr)
 	}
 }
 
@@ -272,34 +382,6 @@ func (n *Node) listenLoop() {
 			continue
 		}
 
-		data := string(buf[:nRead])
-		if strings.HasPrefix(data, dhtStorePrefix) {
-			payload := strings.TrimPrefix(data, dhtStorePrefix)
-			parts := strings.SplitN(payload, ":", 2)
-			if len(parts) == 2 {
-				keyBytes, err := hex.DecodeString(parts[0])
-				if err == nil && len(keyBytes) == 20 {
-					var k [20]byte
-					copy(k[:], keyBytes)
-					n.mu.Lock()
-					n.Store[k] = []byte(parts[1])
-					n.mu.Unlock()
-				}
-			}
-		} else if strings.HasPrefix(data, dhtFindPrefix) {
-			keyHex := strings.TrimPrefix(data, dhtFindPrefix)
-			keyBytes, err := hex.DecodeString(keyHex)
-			if err == nil && len(keyBytes) == 20 {
-				var k [20]byte
-				copy(k[:], keyBytes)
-				n.mu.RLock()
-				val, found := n.Store[k]
-				n.mu.RUnlock()
-				if found {
-					resp := fmt.Sprintf("%s%x:%s", dhtFoundPrefix, k, string(val))
-					_, _ = n.conn.WriteToUDP([]byte(resp), rAddr)
-				}
-			}
-		}
+		n.HandlePacket(buf[:nRead], rAddr)
 	}
 }
