@@ -3848,6 +3848,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           chanBadge = `<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-dim); font-size:0.72rem; padding:2px 7px;">📡 Сигнал</span>`;
         }
 
+        if (p.relay_capable) {
+          chanBadge += ` <span class="badge" style="background:rgba(59,130,246,0.18); border:1px solid rgba(59,130,246,0.45); color:#60a5fa; font-size:0.72rem; padding:2px 6px;" title="Узел работает как Relay-сервер для меш-сети (Уровень 5)">🛡️ Relay</span>`;
+        } else if (p.coordinator_capable) {
+          chanBadge += ` <span class="badge" style="background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.45); color:#34d399; font-size:0.72rem; padding:2px 6px;" title="Узел координирует P2P-пробитие NAT (Уровень 3)">⚡ Координатор</span>`;
+        }
+
         let exitBadge = '—';
         let exitBtn = '';
         if (p.is_exit_node) {

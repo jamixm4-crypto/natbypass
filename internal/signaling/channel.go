@@ -237,17 +237,37 @@ type Payload struct {
 	// Coordination: synchronized bilateral hole punching coordination signal
 	Coordination *PunchCoordinationSignal `json:"coordination,omitempty"`
 
+	// LeaderSync: synchronized punch command from coordinator leader peer (Level 3 NAT Traversal)
+	LeaderSync *LeaderPunchSyncSignal `json:"leader_sync,omitempty"`
+
 	// Rendezvous: on-demand synchronized bilateral hole-punch coordination
 	Rendezvous *RendezvousSignal `json:"rendezvous,omitempty"`
 
 	// TCPConnect: on-demand direct TCP (ShadowTLS) connection coordination
 	TCPConnect *TCPConnectSignal `json:"tcp_connect,omitempty"`
 
+	// Multi-tier NAT traversal capabilities
+	CoordinatorCapable bool `json:"coordinator_capable,omitempty"` // Cone NAT peer capable of coordinating punches
+	RelayCapable       bool `json:"relay_capable,omitempty"`       // Explicit opt-in relay node (Level 5)
+	RelayQuotaGBDay    int  `json:"relay_quota_gb_day,omitempty"`  // Daily relay quota in GB (0 = unlimited)
+	IsMetered          bool `json:"is_metered,omitempty"`          // True on mobile data / cellular metered network
+	BatteryLow         bool `json:"battery_low,omitempty"`         // True on low battery / power saving mode
+
 	// IsBootBurst: indicates rapid discovery burst upon node startup/restart
 	IsBootBurst bool `json:"is_boot_burst,omitempty"`
 
 	// IsCoordination: indicates this payload is a transient coordination signal, NOT a mesh presence beacon
 	IsCoordination bool `json:"is_coordination,omitempty"`
+}
+
+// LeaderPunchSyncSignal coordinates synchronized bilateral hole-punching orchestrated by a leader peer.
+type LeaderPunchSyncSignal struct {
+	SessionID     string `json:"session_id"`
+	PeerA         string `json:"peer_a"`
+	PeerB         string `json:"peer_b"`
+	PunchTimeUnix int64  `json:"punch_time_unix_ms"` // Unix Epoch milliseconds when both peers must burst
+	TargetAddrA   string `json:"target_addr_a"`      // Target endpoint for PeerA to punch
+	TargetAddrB   string `json:"target_addr_b"`      // Target endpoint for PeerB to punch
 }
 
 // TCPConnectSignal coordinates on-demand direct TCP (ShadowTLS) connection / simultaneous open between peers.

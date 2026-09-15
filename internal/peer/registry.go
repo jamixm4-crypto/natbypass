@@ -82,6 +82,12 @@ type Peer struct {
 	ConsecutiveDirectSuccess int                     `json:"consec_direct_success,omitempty"`// Consecutive successful direct probes (hysteresis)
 	StandbyRelayReady        bool                    `json:"standby_relay_ready,omitempty"`  // True if Hot-Standby Relay path is verified
 	LastRelayPing            time.Time               `json:"last_relay_ping,omitempty"`      // Timestamp of last Hot-Standby heartbeat
+	CoordinatorCapable       bool                    `json:"coordinator_capable,omitempty"` // Level 3: Cone NAT peer capable of coordinating punches
+	RelayCapable             bool                    `json:"relay_capable,omitempty"`       // Level 5: Explicit opt-in relay node
+	RelayQuotaGBDay          int                     `json:"relay_quota_gb_day,omitempty"`  // Daily relay quota in GB (0 = unlimited)
+	IsMetered                bool                    `json:"is_metered,omitempty"`          // True on mobile data / cellular metered network
+	BatteryLow               bool                    `json:"battery_low,omitempty"`         // True on low battery / power saving mode
+	RelayTrafficBytes        int64                   `json:"relay_traffic_bytes,omitempty"` // Local byte count of relayed packets
 	ReplayFilter             *crypto.ReplayFilter    `json:"-"`                              // Anti-Replay sliding window (RFC 6479)
 }
 
@@ -989,4 +995,89 @@ func IsValidEndpointForPeer(endpoint string, p *Peer, myPublicIP string) bool {
 		}
 	}
 	return true
+}
+
+// FindBestCoordinator searches the registry for an online peer with Full Cone / Restricted NAT (non-Symmetric)
+// that is coordinator-capable, not on a metered network, not low on battery, and has the lowest latency.
+func (r *Registry) FindBestCoordinator(excludeDeviceID string) *Peer {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var candidates []*Peer
+	for _, p := range r.peers {
+		if p == nil || !p.Online || p.DeviceID == excludeDeviceID {
+			continue
+		}
+		if p.CoordinatorCapable && p.NATType != "symmetric" && !p.IsMetered && !p.BatteryLow {
+			candidates = append(candidates, p)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		latI := candidates[i].PingMs
+		if latI <= 0 {
+			latI = 9999
+		}
+		latJ := candidates[j].PingMs
+		if latJ <= 0 {
+			latJ = 9999
+		}
+		return latI < latJ
+	})
+	return candidates[0]
+}
+
+// FindBestRelay searches the registry for an online peer that explicitly opted into acting as a relay (RelayCapable == true),
+// is not metered, not battery low, and within its daily quota limit.
+func (r *Registry) FindBestRelay(excludeDeviceID string) *Peer {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var candidates []*Peer
+	for _, p := range r.peers {
+		if p == nil || !p.Online || p.DeviceID == excludeDeviceID {
+			continue
+		}
+		if p.RelayCapable && !p.IsMetered && !p.BatteryLow {
+			if p.RelayQuotaGBDay > 0 {
+				usedGB := p.RelayTrafficBytes / (1024 * 1024 * 1024)
+				if int(usedGB) >= p.RelayQuotaGBDay {
+					continue
+				}
+			}
+			candidates = append(candidates, p)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].IsExitNode != candidates[j].IsExitNode {
+			return candidates[i].IsExitNode
+		}
+		latI := candidates[i].PingMs
+		if latI <= 0 {
+			latI = 9999
+		}
+		latJ := candidates[j].PingMs
+		if latJ <= 0 {
+			latJ = 9999
+		}
+		return latI < latJ
+	})
+	return candidates[0]
+}
+
+// RecordRelayTraffic increments the relayed byte count for accounting against user daily quota.
+func (r *Registry) RecordRelayTraffic(deviceID string, bytes int64) {
+	if bytes <= 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, ok := r.peers[deviceID]; ok && p != nil {
+		p.RelayTrafficBytes += bytes
+	}
 }

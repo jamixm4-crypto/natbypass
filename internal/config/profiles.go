@@ -59,6 +59,8 @@ type Profile struct {
 	TLSMode             string    `json:"tls_mode,omitempty" mapstructure:"tls_mode" yaml:"tls_mode,omitempty"`
 	EnableTCPFallback   bool      `json:"enable_tcp_fallback" mapstructure:"enable_tcp_fallback" yaml:"enable_tcp_fallback"`
 	WSSRelayURL         string    `json:"wss_relay_url,omitempty" mapstructure:"wss_relay_url" yaml:"wss_relay_url,omitempty"`
+	EnableRelayServer   bool      `json:"enable_relay_server,omitempty" mapstructure:"enable_relay_server" yaml:"enable_relay_server,omitempty"`
+	RelayQuotaGBDay     int       `json:"relay_quota_gb_day,omitempty" mapstructure:"relay_quota_gb_day" yaml:"relay_quota_gb_day,omitempty"`
 	IsActive            bool      `json:"is_active" mapstructure:"is_active" yaml:"is_active"`
 	CreatedAt           time.Time `json:"created_at" mapstructure:"created_at" yaml:"created_at"`
 }

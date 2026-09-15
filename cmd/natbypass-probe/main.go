@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var Version = "1.9.226-beta23"
+var Version = "1.9.226-beta62"
 
 func main() {
 	var (
@@ -32,11 +32,22 @@ func main() {
 		label      = flag.String("label", "", "Human-readable label for this node (e.g. 'BY / Beltelecom')")
 		country    = flag.String("country", "", "Country code (BY, RU, US, etc.)")
 		listenPort = flag.Int("port", 19876, "UDP listen port for incoming probe packets (advertised via STUN/MQTT)")
+		mobileTest = flag.Bool("mobile-test", false, "Run cellular/mobile CGNAT port allocation analysis (10 consecutive STUN probes)")
 	)
 	flag.Parse()
 
 	logf("NatBypass Probe v%s (%s/%s)", Version, runtime.GOOS, runtime.GOARCH)
 	logf("=======================================")
+
+	// Mobile test mode: standalone 10-probe STUN port allocation analysis
+	if *mobileTest {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := RunMobileTest(ctx, *outputPath, *listenPort); err != nil {
+			log.Fatalf("Mobile test failed: %v", err)
+		}
+		return
+	}
 
 	// Init mode: create a new probe.json
 	if *initFlag {

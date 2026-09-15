@@ -500,4 +500,94 @@ func TestSymmetricNATSession_FullConePreservesPort(t *testing.T) {
 	}
 }
 
+func TestUnackedProbes_DPITriggerAndReset(t *testing.T) {
+	p, err := NewUDPPuncher(0, "test-unacked", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	dpiDetectedCh := make(chan string, 1)
+	p.SetOnDPIDetected(func(targetAddr string) {
+		dpiDetectedCh <- targetAddr
+	})
+
+	target := "127.0.0.1:45678"
+
+	// Probes with peerDelta > 0 (e.g. Level 4 Port Prediction) MUST NOT increment unackedDirectProbes
+	for i := 0; i < 15; i++ {
+		_ = p.SendHolePunchProbeWithDelta(target, 1)
+	}
+	p.unackedMu.Lock()
+	countDelta := p.unackedDirectProbes[target]
+	p.unackedMu.Unlock()
+	if countDelta != 0 {
+		t.Fatalf("expected 0 unacked direct probes for non-zero delta, got %d", countDelta)
+	}
+
+	// 9 direct probes (peerDelta == 0) -> no DPI trigger
+	for i := 0; i < 9; i++ {
+		_ = p.SendHolePunchProbeWithDelta(target, 0)
+	}
+	select {
+	case addr := <-dpiDetectedCh:
+		t.Fatalf("unexpected DPI trigger at 9 probes for %s", addr)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// 10th probe -> DPI callback must fire
+	_ = p.SendHolePunchProbeWithDelta(target, 0)
+	select {
+	case addr := <-dpiDetectedCh:
+		if addr != target {
+			t.Fatalf("expected DPI alert for %s, got %s", target, addr)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("expected DPI alert after 10 unacked direct probes")
+	}
+
+	// Inbound pong from target resets unacked counter
+	rAddr, _ := net.ResolveUDPAddr("udp4", target)
+	p.handlePong("NATBYPASS:PONG:peer-x:123456789", rAddr)
+
+	p.unackedMu.Lock()
+	resetCount := p.unackedDirectProbes[target]
+	p.unackedMu.Unlock()
+	if resetCount != 0 {
+		t.Fatalf("expected unacked count to be reset to 0, got %d", resetCount)
+	}
+}
+
+func TestCarrierASNRules(t *testing.T) {
+	// MegaFon
+	rule, found := LookupCarrierASN("AS31133")
+	if !found || !rule.PredictionViable || rule.PortAllocation != "sequential" {
+		t.Fatalf("expected MegaFon AS31133 sequential viable rule, got %+v", rule)
+	}
+
+	// MTS
+	ruleMTS, foundMTS := LookupCarrierASN("8359")
+	if !foundMTS || !ruleMTS.PredictionViable {
+		t.Fatalf("expected MTS AS8359 viable rule, got %+v", ruleMTS)
+	}
+
+	// T-Mobile (Random CGNAT)
+	ruleTM, foundTM := LookupCarrierASN("AS21928")
+	if !foundTM || ruleTM.PredictionViable {
+		t.Fatalf("expected T-Mobile AS21928 non-viable rule, got %+v", ruleTM)
+	}
+
+	// IsPredictionViable check
+	viable, _ := IsPredictionViable("AS21928", nil, CGNATProfile{}, 0)
+	if viable {
+		t.Fatalf("expected T-Mobile random CGNAT to be non-viable")
+	}
+
+	viableSeq, radius := IsPredictionViable("AS31133", nil, CGNATProfile{IsSequential: true, Delta: 1}, 1)
+	if !viableSeq || radius <= 0 {
+		t.Fatalf("expected MegaFon sequential CGNAT to be viable with radius > 0")
+	}
+}
+
+
 

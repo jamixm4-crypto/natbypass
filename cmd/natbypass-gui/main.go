@@ -107,7 +107,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.226-beta61"
+	Version = "1.9.226-beta62"
 	Commit  = "release"
 )
 
@@ -3531,7 +3531,16 @@ func handlePingTargetPeer(p *peer.Peer) {
 }
 
 func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, excludeDevID string) *peer.Peer {
-	if reg == nil || tcpMgr == nil {
+	if reg == nil {
+		return nil
+	}
+	// Priority 0 (Level 5 NAT Traversal): Explicit opt-in relay node respecting metered/battery/quota limits
+	if bestRelay := reg.FindBestRelay(excludeDevID); bestRelay != nil {
+		if (tcpMgr != nil && tcpMgr.HasConn(bestRelay.DeviceID)) || (bestRelay.DirectP2P && bestRelay.ActiveEndpoint != "" && bestRelay.LossPercent < 20) {
+			return bestRelay
+		}
+	}
+	if tcpMgr == nil {
 		return nil
 	}
 	// Priority 1: Known VPS / Server nodes
@@ -6007,6 +6016,11 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					Timestamp:        time.Now(),
 					IsExitNode:       allowExitNode,
 					AdvertisedRoutes: advSubnets,
+					CoordinatorCapable: true,
+					RelayCapable:       cfg != nil && cfg.Network.EnableRelayServer,
+					RelayQuotaGBDay:    func() int { if cfg != nil { return cfg.Network.RelayQuotaGBDay }; return 5 }(),
+					IsMetered:          false,
+					BatteryLow:         false,
 					AWG:              awgParams,
 					OS:               "windows",
 					Platform:         "Windows",
@@ -7004,6 +7018,17 @@ func publishCurrentState(ctx context.Context) {
 		Timestamp:        time.Now(),
 		IsExitNode:       allowExitNode,
 		AdvertisedRoutes: advSubnets,
+		CoordinatorCapable: func() bool {
+			if udpPuncher != nil {
+				nat := udpPuncher.GetNATType()
+				return nat != network.NATTypeSymmetric && nat != network.NATTypeUnknown
+			}
+			return false
+		}(),
+		RelayCapable:       cfg != nil && cfg.Network.EnableRelayServer,
+		RelayQuotaGBDay:    func() int { if cfg != nil { return cfg.Network.RelayQuotaGBDay }; return 5 }(),
+		IsMetered:          false,
+		BatteryLow:         false,
 		AWG:              awgParams,
 		OS:               "windows",
 		Platform:         "Windows",

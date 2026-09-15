@@ -122,6 +122,13 @@ func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectM
 	if registry == nil {
 		return nil
 	}
+	// Priority 0 (Level 5 NAT Traversal): Explicit opt-in relay node respecting metered/battery/quota limits
+	if bestRelay := registry.FindBestRelay(excludeDevID); bestRelay != nil {
+		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(bestRelay.DeviceID)) || (bestRelay.DirectP2P && bestRelay.ActiveEndpoint != "" && bestRelay.LossPercent < 20)
+		if hasConn {
+			return bestRelay
+		}
+	}
 	// Priority 1: Known VPS / Server nodes (e.g. 10.1.1.102 or name containing Serv)
 	for _, p := range registry.List() {
 		if p.DeviceID == excludeDevID || !p.Online {
@@ -398,6 +405,34 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	awgParams := cfg.GetAWGParams()
 	if puncher != nil {
 		puncher.SetAWGVersion(string(awgParams.Version))
+
+		var revertTimerMu sync.Mutex
+		var revertTimer *time.Timer
+		origPreset := cfg.WireGuard.AWGPreset
+
+		puncher.SetOnDPIDetected(func(targetAddr string) {
+			log.Warn().Str("target", targetAddr).
+				Msg("🚨 [DPI/ТСПУ] Обнаружено подавление UDP hole punching (10 безответных проб). Временный переход на Strict пресет и эскалация на Уровень 5 (Peer-as-Relay).")
+
+			cfg.WireGuard.AWGPreset = "awg31_strict"
+			awgParams := cfg.GetAWGParams()
+			puncher.SetAWGVersion(string(awgParams.Version))
+
+			revertTimerMu.Lock()
+			defer revertTimerMu.Unlock()
+			if revertTimer != nil {
+				revertTimer.Stop()
+			}
+			revertTimer = time.AfterFunc(10*time.Minute, func() {
+				revertTimerMu.Lock()
+				defer revertTimerMu.Unlock()
+				log.Info().Str("revert_preset", origPreset).
+					Msg("🛡️ [DPI/ТСПУ] Истек адаптивный интервал Strict: возврат на базовый пресет.")
+				cfg.WireGuard.AWGPreset = origPreset
+				reParams := cfg.GetAWGParams()
+				puncher.SetAWGVersion(string(reParams.Version))
+			})
+		})
 	}
 	log.Info().
 		Str("version", string(awgParams.Version)).
@@ -1031,10 +1066,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									if tcpDirectMgr != nil && tcpDirectMgr.HasConn(relayPeer.DeviceID) {
 										if err := tcpDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
 											sent = true
+											registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
 										}
 									} else if puncher != nil && relayPeer.DirectP2P && relayPeer.ActiveEndpoint != "" {
 										if err := puncher.SendDataPacketWithPadding(relayPeer.ActiveEndpoint, mhPkt, 0, 0); err == nil {
 											sent = true
+											registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
 										}
 									}
 								}
@@ -1438,11 +1475,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									if tcpDirectMgr != nil && tcpDirectMgr.HasConn(relayPeer.DeviceID) {
 										if err := tcpDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
 											sentDirect = true
+											registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
 											log.Debug().Str("dst", dstIP).Str("via", relayPeer.DeviceID).Msg("🔀 MultiHop: Routed packet via Mesh TCP Relay peer")
 										}
 									} else if puncher != nil && relayPeer.DirectP2P && relayPeer.ActiveEndpoint != "" {
 										if err := puncher.SendDataPacketWithPadding(relayPeer.ActiveEndpoint, mhPkt, 0, 0); err == nil {
 											sentDirect = true
+											registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
 											log.Debug().Str("dst", dstIP).Str("via", relayPeer.ActiveEndpoint).Msg("🔀 MultiHop: Routed packet via Mesh UDP Relay peer")
 										}
 									}
@@ -2748,6 +2787,11 @@ func publishLoop(
 			MTU:              activeMTU,
 			AdaptationEpoch:  activeEpoch,
 			DPIPreset:        activeDPI,
+			CoordinatorCapable: (natLabel != "symmetric" && natLabel != "unknown"),
+			RelayCapable:       cfg.Network.EnableRelayServer,
+			RelayQuotaGBDay:    cfg.Network.RelayQuotaGBDay,
+			IsMetered:          false,
+			BatteryLow:         false,
 			IsExitNode:       cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice(),
 			AdvertisedRoutes: cfg.Network.AdvertisedSubnets,
 		}
@@ -2926,6 +2970,45 @@ func receiveLoop(
 							_ = puncher.ScheduleSimultaneousOpen(ctx, c.StartAt, host, c.TargetPorts, c.BurstCount, c.IntervalMs)
 						}(coord, targetHost)
 					}
+				}
+				if p.VirtualIP == "" || p.PublicKey == "" {
+					continue
+				}
+			}
+
+			// Level 3 NAT Traversal: Handle LeaderPunchSyncSignal from mesh coordinator
+			if p.LeaderSync != nil && puncher != nil {
+				sync := p.LeaderSync
+				var targetAddr string
+				var otherPeer string
+				if sync.PeerA == deviceID {
+					targetAddr = sync.TargetAddrA
+					otherPeer = sync.PeerB
+				} else if sync.PeerB == deviceID {
+					targetAddr = sync.TargetAddrB
+					otherPeer = sync.PeerA
+				}
+				if targetAddr != "" {
+					log.Info().Str("other_peer", otherPeer).Str("target_addr", targetAddr).Int64("punch_time_ms", sync.PunchTimeUnix).
+						Msg("⚡ [Level 3 LeaderSync] Запуск миллисекундного синхронного пробития по команде координатора")
+					go func(tAddr string, punchTime int64) {
+						host, portStr, err := net.SplitHostPort(tAddr)
+						if err != nil {
+							return
+						}
+						port, err := strconv.Atoi(portStr)
+						if err != nil {
+							return
+						}
+						targetPorts := []int{port}
+						for _, offset := range []int{-2, -1, 1, 2} {
+							np := port + offset
+							if np > 1024 && np < 65535 {
+								targetPorts = append(targetPorts, np)
+							}
+						}
+						_ = puncher.ScheduleSimultaneousOpenMilli(ctx, punchTime, host, targetPorts, 12, 10)
+					}(targetAddr, sync.PunchTimeUnix)
 				}
 				if p.VirtualIP == "" || p.PublicKey == "" {
 					continue

@@ -81,6 +81,10 @@ type NetworkConfig struct {
 	EnableTCPFallback bool `mapstructure:"enable_tcp_fallback" yaml:"enable_tcp_fallback" json:"enable_tcp_fallback"`
 	// ObfuscationSNI — домен маскировки TLS 1.3 ClientHello (по умолчанию gateway.icloud.com)
 	ObfuscationSNI string `mapstructure:"obfuscation_sni" yaml:"obfuscation_sni,omitempty" json:"obfuscation_sni,omitempty"`
+	// EnableRelayServer — явный opt-in: разрешить транзит пакетов через этот узел как Relay (Уровень 5)
+	EnableRelayServer bool `mapstructure:"enable_relay_server" yaml:"enable_relay_server" json:"enable_relay_server"`
+	// RelayQuotaGBDay — квота релея в ГБ/сутки (по умолчанию 5 ГБ, 0 = без ограничений)
+	RelayQuotaGBDay int `mapstructure:"relay_quota_gb_day" yaml:"relay_quota_gb_day,omitempty" json:"relay_quota_gb_day,omitempty"`
 }
 
 // ChannelConfig — настройки одного сигнального канала

@@ -151,6 +151,19 @@ type UDPPuncher struct {
 	cipherKey    [32]byte
 	hasCipherKey bool
 	cipherMu     sync.RWMutex
+
+	// IPv6 dual-stack socket & discovery (Level 1)
+	conn6          *net.UDPConn
+	mappedIPv6     net.IP
+	mappedPortIPv6 int
+
+	// DPI drop detector & adaptive escalation (Level 2)
+	unackedDirectProbes map[string]int
+	unackedMu           sync.Mutex
+	onDPIDetected       func(targetAddr string)
+
+	// Carrier ASN for selective port prediction (Level 4)
+	currentASN string
 }
 
 // SetCipherKey конфигурирует ключ симметричного шифрования (ChaCha20-Poly1305) для L3 Data-plane пакетов.
@@ -183,6 +196,57 @@ func (p *UDPPuncher) resolveAddr(targetAddr string) (*net.UDPAddr, error) {
 	p.addrCache.Store(targetAddr, rAddr)
 	return rAddr, nil
 }
+
+// activeConnFor returns the appropriate UDPConn for the target address (conn6 for IPv6, conn for IPv4).
+func (p *UDPPuncher) activeConnFor(rAddr *net.UDPAddr) *net.UDPConn {
+	if rAddr != nil && rAddr.IP != nil && rAddr.IP.To4() == nil {
+		p.mu.Lock()
+		c6 := p.conn6
+		p.mu.Unlock()
+		if c6 != nil {
+			return c6
+		}
+	}
+	return p.conn
+}
+
+// writeToUDP writes a packet to the target address using the correct IPv4 or IPv6 socket.
+func (p *UDPPuncher) writeToUDP(pkt []byte, rAddr *net.UDPAddr) (int, error) {
+	conn := p.activeConnFor(rAddr)
+	if conn == nil {
+		return 0, errors.New("UDP socket closed")
+	}
+	return conn.WriteToUDP(pkt, rAddr)
+}
+
+// SetCurrentASN sets the active cellular carrier ASN (e.g. "AS31133") for selective port prediction.
+func (p *UDPPuncher) SetCurrentASN(asn string) {
+	p.mu.Lock()
+	p.currentASN = asn
+	p.mu.Unlock()
+}
+
+// SetOnDPIDetected registers a callback triggered when 10 direct STUN probes go unacknowledged.
+func (p *UDPPuncher) SetOnDPIDetected(cb func(targetAddr string)) {
+	p.unackedMu.Lock()
+	p.onDPIDetected = cb
+	p.unackedMu.Unlock()
+}
+
+// resetUnackedProbes clears unacknowledged probe counters upon receiving a valid PING or PONG.
+func (p *UDPPuncher) resetUnackedProbes(addrStr, ipStr string) {
+	p.unackedMu.Lock()
+	defer p.unackedMu.Unlock()
+	delete(p.unackedDirectProbes, addrStr)
+	if ipStr != "" {
+		for k := range p.unackedDirectProbes {
+			if strings.HasPrefix(k, ipStr+":") || strings.HasPrefix(k, "["+ipStr+"]:") {
+				delete(p.unackedDirectProbes, k)
+			}
+		}
+	}
+}
+
 
 
 // tuneLinuxSocketBuffers enlarges system-wide UDP socket buffer limits so SetReadBuffer is not clamped to ~160KB on Linux/Keenetic.
@@ -271,21 +335,46 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &UDPPuncher{
-		conn:            conn,
-		localPort:       localPort,
-		myDevID:         myDevID,
-		stunServers:     stunServers,
-		onPingResult:    onPing,
-		mappedEndpoints: make(map[string]struct{}),
-		stunIPVotes:     make(map[string]int),
-		stunRespCh:      make(chan struct{}, 8),
-		ctx:             ctx,
-		cancel:          cancel,
-		NATType:         NATTypeUnknown,
-		lastProbeMap:    make(map[string]time.Time),
-		lastCleanupTime: time.Now(),
-		pingRateLimiter:  NewIPRateLimiter(60.0, 15.0),
-		pacer:            NewAdaptivePacer(),
+		conn:                conn,
+		localPort:           localPort,
+		myDevID:             myDevID,
+		stunServers:         stunServers,
+		onPingResult:        onPing,
+		mappedEndpoints:     make(map[string]struct{}),
+		stunIPVotes:         make(map[string]int),
+		stunRespCh:          make(chan struct{}, 8),
+		ctx:                 ctx,
+		cancel:              cancel,
+		NATType:             NATTypeUnknown,
+		lastProbeMap:        make(map[string]time.Time),
+		lastCleanupTime:     time.Now(),
+		pingRateLimiter:     NewIPRateLimiter(60.0, 15.0),
+		pacer:               NewAdaptivePacer(),
+		unackedDirectProbes: make(map[string]int),
+	}
+
+	// Try binding secondary IPv6 UDP socket if host has global IPv6 (Level 1 Dual-Stack P2P)
+	if HasGlobalIPv6() {
+		if lAddr6, err6 := net.ResolveUDPAddr("udp6", fmt.Sprintf("[::]:%d", localPort)); err6 == nil {
+			if c6, err := net.ListenUDP("udp6", lAddr6); err == nil && c6 != nil {
+				_ = c6.SetReadBuffer(udpSocketBufSize)
+				_ = c6.SetWriteBuffer(udpSocketBufSize)
+				DisableUDPConnReset(c6)
+				p.conn6 = c6
+				go p.readLoopIPv6(c6)
+			}
+		}
+		if p.conn6 == nil {
+			if lAddr6, err6 := net.ResolveUDPAddr("udp6", "[::]:0"); err6 == nil {
+				if c6, err := net.ListenUDP("udp6", lAddr6); err == nil && c6 != nil {
+					_ = c6.SetReadBuffer(udpSocketBufSize)
+					_ = c6.SetWriteBuffer(udpSocketBufSize)
+					DisableUDPConnReset(c6)
+					p.conn6 = c6
+					go p.readLoopIPv6(c6)
+				}
+			}
+		}
 	}
 
 	// Start packet processing loop
@@ -315,6 +404,31 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 			}
 		}
 	}()
+
+	// Query IPv6 STUN in background (Level 1)
+	if HasGlobalIPv6() {
+		go func() {
+			sCtx, sCancel := context.WithTimeout(ctx, 3*time.Second)
+			defer sCancel()
+			if ip6, port6, err := GetMappedAddressIPv6Global(sCtx); err == nil && ip6 != nil {
+				p.mu.Lock()
+				p.mappedIPv6 = ip6
+				p.mappedPortIPv6 = port6
+				p.mu.Unlock()
+
+				p.natTypeMu.Lock()
+				p.endpoints = append(p.endpoints, signaling.EndpointDesc{
+					Proto:    "udp",
+					IP:       ip6.String(),
+					Port:     port6,
+					NATType:  "full_cone",
+					TTL:      60,
+					Priority: 120, // Prioritize global IPv6 (Level 1) over IPv4 STUN (100)
+				})
+				p.natTypeMu.Unlock()
+			}
+		}()
+	}
 
 	// Try UPnP automatic port mapping on gateway router in background (UDP for hole punch)
 	go func() {
@@ -460,6 +574,29 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 	// исключая виртуальные адаптеры Hyper-V, WSL, VMware, VirtualBox.
 	if primaryLAN := GetLocalLANIP(); primaryLAN != "" {
 		candidateSet[fmt.Sprintf("%s:%d", primaryLAN, localPort)] = struct{}{}
+	}
+
+	// 4. IPv6 Candidates (Level 1 Dual-Stack P2P direct connectivity)
+	if HasGlobalIPv6() {
+		p.mu.Lock()
+		mapped6 := p.mappedIPv6
+		port6 := p.mappedPortIPv6
+		p.mu.Unlock()
+		if mapped6 != nil && port6 > 0 {
+			candidateSet[fmt.Sprintf("[%s]:%d", mapped6.String(), port6)] = struct{}{}
+		}
+		if local6 := GetLocalIPv6(); local6 != "" {
+			port := localPort
+			p.mu.Lock()
+			c6 := p.conn6
+			p.mu.Unlock()
+			if c6 != nil {
+				if l6Addr, ok := c6.LocalAddr().(*net.UDPAddr); ok && l6Addr.Port > 0 {
+					port = l6Addr.Port
+				}
+			}
+			candidateSet[fmt.Sprintf("[%s]:%d", local6, port)] = struct{}{}
+		}
 	}
 
 	var res []string
@@ -805,11 +942,17 @@ func (p *UDPPuncher) CandidatePortsAdvanced(base int, samples []int, prof CGNATP
 		add(base - i*step)
 	}
 
-	// Strategy C: Wide-sweep for Symmetric NAT with random/large delta (random CGNAT)
-	// Triggered when: no PBA block, no sequential delta, and fallbackDelta > 10
-	// Sprays ±WideSymmetricSweepRadius ports around base
-	if prof.BlockSize == 0 && !prof.IsSequential && (fallbackDelta > 10 || (fallbackDelta <= 0 && delta > 10)) {
-		for i := 1; i <= WideSymmetricSweepRadius; i++ {
+	// Strategy C: Port prediction for predictable Symmetric NAT (selective activation based on ASN & variance, Level 4)
+	p.mu.Lock()
+	asn := p.currentASN
+	p.mu.Unlock()
+	viable, sweepRadius := IsPredictionViable(asn, samples, prof, fallbackDelta)
+	if viable && sweepRadius > 0 {
+		radius := sweepRadius
+		if radius > WideSymmetricSweepRadius {
+			radius = WideSymmetricSweepRadius
+		}
+		for i := 1; i <= radius; i++ {
 			add(base + i)
 			add(base - i)
 		}
@@ -1190,14 +1333,27 @@ func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta in
 			pkt = stealthProbe
 		}
 		if withDecoy && runtime.GOOS == "linux" {
-			_ = SendLowTTLDecoyProbe(p.conn, dst, pkt, 2)
+			_ = SendLowTTLDecoyProbe(p.activeConnFor(dst), dst, pkt, 2)
 			time.Sleep(2 * time.Millisecond)
 		}
-		_, _ = p.conn.WriteToUDP(pkt, dst)
+		_, _ = p.writeToUDP(pkt, dst)
 	}
 
 	// 1. Отправляем пробу на основной адрес: приоритет отдается QUIC Chameleon probe + low-TTL decoy на Linux
 	sendToAddr(rAddr, true)
+
+	// Level 2 DPI drop detection: track unacknowledged direct probes ONLY when peerDelta == 0 (direct STUN address)
+	if peerDelta == 0 {
+		p.unackedMu.Lock()
+		p.unackedDirectProbes[targetAddr]++
+		count := p.unackedDirectProbes[targetAddr]
+		cb := p.onDPIDetected
+		p.unackedMu.Unlock()
+
+		if count >= 10 && cb != nil {
+			go cb(targetAddr)
+		}
+	}
 
 	// 2. Сбор уникальных портов для зондирования без дублирования (максимум 24-28 портов на зонд)
 	probedPorts := map[int]bool{rAddr.Port: true}
@@ -1661,12 +1817,12 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 
 	if hasCKey {
 		if qPong, qErr := BuildQUICPongChameleonProbe(p.myDevID, sentTs, cKey); qErr == nil && len(qPong) > 0 {
-			_, _ = p.conn.WriteToUDP(qPong, remoteAddr)
+			_, _ = p.writeToUDP(qPong, remoteAddr)
 		} else if enc, encErr := crypto.EncryptSelf(pongMsg, cKey); encErr == nil && len(enc) > 0 {
-			_, _ = p.conn.WriteToUDP(enc, remoteAddr)
+			_, _ = p.writeToUDP(enc, remoteAddr)
 		}
 	} else {
-		_, _ = p.conn.WriteToUDP(pongMsg, remoteAddr)
+		_, _ = p.writeToUDP(pongMsg, remoteAddr)
 	}
 
 	// Отправляем встречный PING (ограничен 1 разом в 2 секунды на пир) для взаимного сквозного пробития NAT сокет-в-сокет
@@ -1676,13 +1832,18 @@ func (p *UDPPuncher) handlePing(data string, remoteAddr *net.UDPAddr) {
 		reversePing := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, now.UnixNano()))
 		if hasCKey {
 			if qPing, qErr := BuildQUICChameleonProbe(p.myDevID, cKey); qErr == nil && len(qPing) > 0 {
-				_, _ = p.conn.WriteToUDP(qPing, remoteAddr)
+				_, _ = p.writeToUDP(qPing, remoteAddr)
 			} else if enc, encErr := crypto.EncryptSelf(reversePing, cKey); encErr == nil && len(enc) > 0 {
-				_, _ = p.conn.WriteToUDP(enc, remoteAddr)
+				_, _ = p.writeToUDP(enc, remoteAddr)
 			}
 		} else {
-			_, _ = p.conn.WriteToUDP(reversePing, remoteAddr)
+			_, _ = p.writeToUDP(reversePing, remoteAddr)
 		}
+	}
+
+	// Inbound PING confirms direct reachability: reset unacked probes counter (Level 2)
+	if remoteAddr != nil {
+		p.resetUnackedProbes(remoteAddr.String(), remoteAddr.IP.String())
 	}
 
 	// Inbound PING confirms that the remote peer reached us directly over UDP
@@ -1712,6 +1873,11 @@ func (p *UDPPuncher) handlePong(data string, remoteAddr *net.UDPAddr) {
 
 	if p.pacer != nil {
 		p.pacer.RecordAck(rtt)
+	}
+
+	// Inbound PONG confirms direct response: reset unacked probes counter (Level 2)
+	if remoteAddr != nil {
+		p.resetUnackedProbes(remoteAddr.String(), remoteAddr.IP.String())
 	}
 
 	// Track port delta for Symmetric NAT port prediction
@@ -1794,54 +1960,75 @@ func (p *UDPPuncher) readLoop() {
 			continue
 		}
 
-		switch {
-		case stun.IsMessage(buf[:n]):
-			p.handleSTUNMessage(buf[:n])
-		case n >= 4 && string(buf[:4]) == constants.KeepAlivePayload:
-			// Двусторонний ответ KeepAlive для поддержания исходящей трансляции NAT
-			if remoteAddr != nil && conn != nil {
-				_, _ = conn.WriteToUDP([]byte(constants.KeepAlivePayload), remoteAddr)
+		p.dispatchPacket(buf[:n], remoteAddr)
+	}
+}
+
+func (p *UDPPuncher) readLoopIPv6(c6 *net.UDPConn) {
+	bufPtr := packetBufferPool.Get().(*[]byte)
+	defer packetBufferPool.Put(bufPtr)
+	buf := *bufPtr
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		default:
+		}
+
+		n, remoteAddr, err := c6.ReadFromUDP(buf)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue
 			}
-		case n >= 25 && (buf[0]&0xC0 == 0xC0) && binary.BigEndian.Uint32(buf[1:5]) == QUICVersion1:
-			p.cipherMu.RLock()
-			cKey := p.cipherKey
-			hasCKey := p.hasCipherKey
-			p.cipherMu.RUnlock()
-			if hasCKey {
-				if dec, err := ParseQUICChameleonProbe(buf[:n], cKey); err == nil && len(dec) > 0 {
-					decStr := string(dec)
-					if strings.HasPrefix(decStr, constants.PingPrefix) {
-						p.handlePing(decStr, remoteAddr)
-						continue
-					} else if strings.HasPrefix(decStr, constants.PongPrefix) {
-						p.handlePong(decStr, remoteAddr)
-						continue
-					}
+			if strings.Contains(err.Error(), "closed") || strings.Contains(err.Error(), "use of closed") || strings.Contains(err.Error(), "bad file descriptor") {
+				return
+			}
+			continue
+		}
+
+		if n <= 0 {
+			continue
+		}
+
+		p.dispatchPacket(buf[:n], remoteAddr)
+	}
+}
+
+func (p *UDPPuncher) dispatchPacket(buf []byte, remoteAddr *net.UDPAddr) {
+	n := len(buf)
+	switch {
+	case stun.IsMessage(buf[:n]):
+		p.handleSTUNMessage(buf[:n])
+	case n >= 4 && string(buf[:4]) == constants.KeepAlivePayload:
+		// Двусторонний ответ KeepAlive для поддержания исходящей трансляции NAT
+		if remoteAddr != nil {
+			_, _ = p.writeToUDP([]byte(constants.KeepAlivePayload), remoteAddr)
+		}
+	case n >= 25 && (buf[0]&0xC0 == 0xC0) && binary.BigEndian.Uint32(buf[1:5]) == QUICVersion1:
+		p.cipherMu.RLock()
+		cKey := p.cipherKey
+		hasCKey := p.hasCipherKey
+		p.cipherMu.RUnlock()
+		if hasCKey {
+			if dec, err := ParseQUICChameleonProbe(buf[:n], cKey); err == nil && len(dec) > 0 {
+				decStr := string(dec)
+				if strings.HasPrefix(decStr, constants.PingPrefix) {
+					p.handlePing(decStr, remoteAddr)
+					return
+				} else if strings.HasPrefix(decStr, constants.PongPrefix) {
+					p.handlePong(decStr, remoteAddr)
+					return
 				}
 			}
-		case strings.HasPrefix(string(buf[:n]), constants.PingPrefix):
-			p.handlePing(string(buf[:n]), remoteAddr)
-		case strings.HasPrefix(string(buf[:n]), constants.PongPrefix):
-			p.handlePong(string(buf[:n]), remoteAddr)
-		case n > constants.TunPaddedHeaderSize+2 && string(buf[:constants.TunPaddedHeaderSize]) == constants.TunPaddedHeader:
-			realLen := int(binary.BigEndian.Uint16(buf[constants.TunPaddedHeaderSize : constants.TunPaddedHeaderSize+2]))
-			if realLen > 0 && constants.TunPaddedHeaderSize+2+realLen <= n {
-				rawPayload := buf[constants.TunPaddedHeaderSize+2 : constants.TunPaddedHeaderSize+2+realLen]
-				p.cipherMu.RLock()
-				cKey := p.cipherKey
-				hasCKey := p.hasCipherKey
-				p.cipherMu.RUnlock()
-				if hasCKey {
-					if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
-						p.handleTunnelPacket(dec, remoteAddr)
-					}
-					// If cipherKey is set, drop packets that fail decryption
-					continue
-				}
-				p.handleTunnelPacket(rawPayload, remoteAddr)
-			}
-		case n > constants.TunEncryptedHeaderSize && string(buf[:constants.TunEncryptedHeaderSize]) == constants.TunEncryptedHeader:
-			rawPayload := buf[constants.TunEncryptedHeaderSize:n]
+		}
+	case strings.HasPrefix(string(buf[:n]), constants.PingPrefix):
+		p.handlePing(string(buf[:n]), remoteAddr)
+	case strings.HasPrefix(string(buf[:n]), constants.PongPrefix):
+		p.handlePong(string(buf[:n]), remoteAddr)
+	case n > constants.TunPaddedHeaderSize+2 && string(buf[:constants.TunPaddedHeaderSize]) == constants.TunPaddedHeader:
+		realLen := int(binary.BigEndian.Uint16(buf[constants.TunPaddedHeaderSize : constants.TunPaddedHeaderSize+2]))
+		if realLen > 0 && constants.TunPaddedHeaderSize+2+realLen <= n {
+			rawPayload := buf[constants.TunPaddedHeaderSize+2 : constants.TunPaddedHeaderSize+2+realLen]
 			p.cipherMu.RLock()
 			cKey := p.cipherKey
 			hasCKey := p.hasCipherKey
@@ -1851,101 +2038,116 @@ func (p *UDPPuncher) readLoop() {
 					p.handleTunnelPacket(dec, remoteAddr)
 				}
 				// If cipherKey is set, drop packets that fail decryption
-				continue
-			}
-			// TunEncryptedHeader received but no cipherKey configured: drop
-			continue
-		case n > constants.TunHeaderSize && string(buf[:constants.TunHeaderSize]) == constants.TunHeader:
-			rawPayload := buf[constants.TunHeaderSize:n]
-			p.cipherMu.RLock()
-			cKey := p.cipherKey
-			hasCKey := p.hasCipherKey
-			p.cipherMu.RUnlock()
-			if hasCKey {
-				if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
-					p.handleTunnelPacket(dec, remoteAddr)
-				}
-				// If cipherKey is set, drop packets that fail decryption or plaintext leak
-				continue
+				return
 			}
 			p.handleTunnelPacket(rawPayload, remoteAddr)
-		default:
-			p.cipherMu.RLock()
-			cKey := p.cipherKey
-			hasCKey := p.hasCipherKey
-			p.cipherMu.RUnlock()
+		}
+	case n > constants.TunEncryptedHeaderSize && string(buf[:constants.TunEncryptedHeaderSize]) == constants.TunEncryptedHeader:
+		rawPayload := buf[constants.TunEncryptedHeaderSize:n]
+		p.cipherMu.RLock()
+		cKey := p.cipherKey
+		hasCKey := p.hasCipherKey
+		p.cipherMu.RUnlock()
+		if hasCKey {
+			if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
+				p.handleTunnelPacket(dec, remoteAddr)
+			}
+			// If cipherKey is set, drop packets that fail decryption
+			return
+		}
+		// TunEncryptedHeader received but no cipherKey configured: drop
+		return
+	case n > constants.TunHeaderSize && string(buf[:constants.TunHeaderSize]) == constants.TunHeader:
+		rawPayload := buf[constants.TunHeaderSize:n]
+		p.cipherMu.RLock()
+		cKey := p.cipherKey
+		hasCKey := p.hasCipherKey
+		p.cipherMu.RUnlock()
+		if hasCKey {
+			if dec, err := crypto.DecryptSelf(rawPayload, cKey); err == nil && len(dec) > 0 {
+				p.handleTunnelPacket(dec, remoteAddr)
+			}
+			// If cipherKey is set, drop packets that fail decryption or plaintext leak
+			return
+		}
+		p.handleTunnelPacket(rawPayload, remoteAddr)
+	default:
+		p.cipherMu.RLock()
+		cKey := p.cipherKey
+		hasCKey := p.hasCipherKey
+		p.cipherMu.RUnlock()
 
-			if hasCKey {
-				// RFC 9000 QUIC 1-RTT Short Header data packet (camouflaged HTTP/3 traffic)
-				if n >= 31 && (buf[0]&0xC0 == 0x40) {
-					if dec, _, _, qErr := quic.ParseQUICDataPacket(buf[:n], cKey); qErr == nil && len(dec) > 0 {
+		if hasCKey {
+			// RFC 9000 QUIC 1-RTT Short Header data packet (camouflaged HTTP/3 traffic)
+			if n >= 31 && (buf[0]&0xC0 == 0x40) {
+				if dec, _, _, qErr := quic.ParseQUICDataPacket(buf[:n], cKey); qErr == nil && len(dec) > 0 {
+					p.handleTunnelPacket(dec, remoteAddr)
+					return
+				}
+				// If QUIC parsing fails, do not drop! The random nonce byte of a standard encrypted packet
+				// has a 25% chance of matching (buf[0]&0xC0 == 0x40). Fall through to DecryptSelf below.
+			}
+
+			// 1. Try modern Epoch + Seq encrypted packets (RFC 6479 + PFS)
+			if n >= 16+24+16 {
+				curEpoch := crypto.GetCurrentEpoch()
+				if dec, _, _, err := crypto.DecryptWithEpochSeq(buf[:n], cKey[:], curEpoch); err == nil && len(dec) > 0 {
+					if IsMultiHopPacket(dec) {
 						p.handleTunnelPacket(dec, remoteAddr)
-						continue
+						return
 					}
-					// If QUIC parsing fails, do not drop! The random nonce byte of a standard encrypted packet
-					// has a 25% chance of matching (buf[0]&0xC0 == 0x40). Fall through to DecryptSelf below.
-				}
-
-				// 1. Try modern Epoch + Seq encrypted packets (RFC 6479 + PFS)
-				if n >= 16+24+16 {
-					curEpoch := crypto.GetCurrentEpoch()
-					if dec, _, _, err := crypto.DecryptWithEpochSeq(buf[:n], cKey[:], curEpoch); err == nil && len(dec) > 0 {
-						if IsMultiHopPacket(dec) {
-							p.handleTunnelPacket(dec, remoteAddr)
-							continue
-						}
-						decStr := string(dec)
-						if strings.HasPrefix(decStr, constants.PingPrefix) {
-							p.handlePing(decStr, remoteAddr)
-							continue
-						} else if strings.HasPrefix(decStr, constants.PongPrefix) {
-							p.handlePong(decStr, remoteAddr)
-							continue
-						} else if len(dec) >= 3 && (dec[2]>>4 == 4 || dec[2]>>4 == 6) {
-							realLen := int(binary.BigEndian.Uint16(dec[:2]))
-							if realLen > 0 && 2+realLen <= len(dec) {
-								p.handleTunnelPacket(dec[2:2+realLen], remoteAddr)
-								continue
-							}
-						} else if (dec[0]>>4) == 4 || (dec[0]>>4) == 6 {
-							payloadToSend := dec
-							if (dec[0]>>4) == 4 && len(dec) >= 20 {
-								totLen := int(binary.BigEndian.Uint16(dec[2:4]))
-								if totLen >= 20 && totLen <= len(dec) {
-									payloadToSend = dec[:totLen]
-								}
-							} else if (dec[0]>>4) == 6 && len(dec) >= 40 {
-								totLen := 40 + int(binary.BigEndian.Uint16(dec[4:6]))
-								if totLen >= 40 && totLen <= len(dec) {
-									payloadToSend = dec[:totLen]
-								}
-							}
-							p.handleTunnelPacket(payloadToSend, remoteAddr)
-							continue
-						}
-					}
-				}
-
-				// 2. Fallback to legacy static DecryptSelf
-				if n >= 40 {
-					if dec, err := crypto.DecryptSelf(buf[:n], cKey); err == nil && len(dec) > 0 {
-						if IsMultiHopPacket(dec) {
-							p.handleTunnelPacket(dec, remoteAddr)
-							continue
-						}
 					decStr := string(dec)
 					if strings.HasPrefix(decStr, constants.PingPrefix) {
 						p.handlePing(decStr, remoteAddr)
-						continue
+						return
 					} else if strings.HasPrefix(decStr, constants.PongPrefix) {
 						p.handlePong(decStr, remoteAddr)
-						continue
+						return
+					} else if len(dec) >= 3 && (dec[2]>>4 == 4 || dec[2]>>4 == 6) {
+						realLen := int(binary.BigEndian.Uint16(dec[:2]))
+						if realLen > 0 && 2+realLen <= len(dec) {
+							p.handleTunnelPacket(dec[2:2+realLen], remoteAddr)
+							return
+						}
+					} else if (dec[0]>>4) == 4 || (dec[0]>>4) == 6 {
+						payloadToSend := dec
+						if (dec[0]>>4) == 4 && len(dec) >= 20 {
+							totLen := int(binary.BigEndian.Uint16(dec[2:4]))
+							if totLen >= 20 && totLen <= len(dec) {
+								payloadToSend = dec[:totLen]
+							}
+						} else if (dec[0]>>4) == 6 && len(dec) >= 40 {
+							totLen := 40 + int(binary.BigEndian.Uint16(dec[4:6]))
+							if totLen >= 40 && totLen <= len(dec) {
+								payloadToSend = dec[:totLen]
+							}
+						}
+						p.handleTunnelPacket(payloadToSend, remoteAddr)
+						return
+					}
+				}
+			}
+
+			// 2. Fallback to legacy static DecryptSelf
+			if n >= 40 {
+				if dec, err := crypto.DecryptSelf(buf[:n], cKey); err == nil && len(dec) > 0 {
+					if IsMultiHopPacket(dec) {
+						p.handleTunnelPacket(dec, remoteAddr)
+						return
+					}
+					decStr := string(dec)
+					if strings.HasPrefix(decStr, constants.PingPrefix) {
+						p.handlePing(decStr, remoteAddr)
+						return
+					} else if strings.HasPrefix(decStr, constants.PongPrefix) {
+						p.handlePong(decStr, remoteAddr)
+						return
 					} else if len(dec) >= 3 && (dec[2]>>4 == 4 || dec[2]>>4 == 6) {
 						// Stealth tunnel IP packet with 2-byte length prefix from dynamic padding
 						realLen := int(binary.BigEndian.Uint16(dec[:2]))
 						if realLen > 0 && 2+realLen <= len(dec) {
 							p.handleTunnelPacket(dec[2:2+realLen], remoteAddr)
-							continue
+							return
 						}
 					} else if (dec[0]>>4) == 4 || (dec[0]>>4) == 6 {
 						// Direct unpadded stealth tunnel IP packet
@@ -1962,21 +2164,20 @@ func (p *UDPPuncher) readLoop() {
 							}
 						}
 						p.handleTunnelPacket(payloadToSend, remoteAddr)
-						continue
+						return
 					}
 				}
 			}
 		}
 
-			p.mu.Lock()
-			handler := p.awgHandler
-			p.mu.Unlock()
-			if handler != nil {
-				// ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Копируем буфер перед передачей
-				pktCopy := make([]byte, n)
-				copy(pktCopy, buf[:n])
-				handler.HandlePacket(pktCopy, remoteAddr)
-			}
+		p.mu.Lock()
+		handler := p.awgHandler
+		p.mu.Unlock()
+		if handler != nil {
+			// ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Копируем буфер перед передачей
+			pktCopy := make([]byte, n)
+			copy(pktCopy, buf[:n])
+			handler.HandlePacket(pktCopy, remoteAddr)
 		}
 	}
 }
@@ -2077,16 +2278,42 @@ func (p *UDPPuncher) HopPort() (int, error) {
 
 func (p *UDPPuncher) Close() error {
 	p.cancel()
+	p.mu.Lock()
+	c6 := p.conn6
+	p.conn6 = nil
+	p.mu.Unlock()
+	if c6 != nil {
+		_ = c6.Close()
+	}
 	if p.conn != nil {
 		return p.conn.Close()
 	}
 	return nil
 }
 
-// SocketFd returns the underlying socket file descriptor for Android VpnService.protect()
+// SocketFd returns the underlying IPv4 socket file descriptor for Android VpnService.protect()
 func (p *UDPPuncher) SocketFd() int {
 	p.mu.Lock()
 	conn := p.conn
+	p.mu.Unlock()
+	if conn == nil {
+		return -1
+	}
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		return -1
+	}
+	var fdVal int = -1
+	_ = raw.Control(func(fd uintptr) {
+		fdVal = int(fd)
+	})
+	return fdVal
+}
+
+// SocketFd6 returns the underlying IPv6 socket file descriptor for Android VpnService.protect()
+func (p *UDPPuncher) SocketFd6() int {
+	p.mu.Lock()
+	conn := p.conn6
 	p.mu.Unlock()
 	if conn == nil {
 		return -1

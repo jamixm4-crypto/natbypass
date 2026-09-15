@@ -39,7 +39,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta61"
+const Version          = "1.9.226-beta62"
 
 
 
@@ -138,6 +138,8 @@ var (
 	globalAllowExitNode    bool
 	globalAdvertisedRoutes []string
 	globalAWGPreset        string = "dpi"
+	globalIsMetered        atomic.Bool
+	globalBatteryLow       atomic.Bool
 	globalPuncher          *network.UDPPuncher
 	globalTCPDirectMgr     *network.TCPDirectManager
 	globalMultiHopRouter   *network.MultiHopRouter
@@ -163,6 +165,16 @@ func atomicGetVIP() string {
 // atomicSetVIP устанавливает виртуальный IP атомарно.
 func atomicSetVIP(vip string) {
 	globalVirtualIP.Store("vip", vip)
+}
+
+// SetNetworkMetered notifies Go runtime whether the active Android network is metered (cellular).
+func SetNetworkMetered(metered bool) {
+	globalIsMetered.Store(metered)
+}
+
+// SetBatteryLow notifies Go runtime whether device battery is low or power-saving is enabled.
+func SetBatteryLow(low bool) {
+	globalBatteryLow.Store(low)
 }
 
 
@@ -757,6 +769,11 @@ func StartEngine(configYAML string, tunFd int) string {
 					}
 					return cfg.Network.AdvertisedSubnets
 				}(),
+				CoordinatorCapable: (natTypeStr != "symmetric" && natTypeStr != "unknown") && !globalIsMetered.Load() && !globalBatteryLow.Load(),
+				RelayCapable:       (globalAllowExitNode || cfg.Network.EnableRelayServer) && !globalIsMetered.Load() && !globalBatteryLow.Load(),
+				RelayQuotaGBDay:    cfg.Network.RelayQuotaGBDay,
+				IsMetered:          globalIsMetered.Load(),
+				BatteryLow:         globalBatteryLow.Load(),
 				Timestamp:        time.Now(),
 				AWG:              awgParams,
 				NetworkKey:       activeKey,
@@ -2077,6 +2094,17 @@ func GetUDPSocketFd() int {
 		return -1
 	}
 	return puncher.GetSocketFd()
+}
+
+// GetUDPSocketFd6 returns the raw file descriptor of the secondary IPv6 UDP puncher socket for Android VpnService.protect().
+func GetUDPSocketFd6() int {
+	engineMu.Lock()
+	puncher := globalPuncher
+	engineMu.Unlock()
+	if puncher == nil {
+		return -1
+	}
+	return puncher.SocketFd6()
 }
 
 // RebindSockets closes the old UDP socket and binds a new one, returning the new raw file descriptor.

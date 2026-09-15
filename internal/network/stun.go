@@ -70,6 +70,14 @@ var defaultSTUNServers = []string{
 	"relay.webwormhole.io:3478",
 }
 
+// defaultIPv6STUNServers — pre-seeded IPv6 STUN servers for 0ms DNS discovery over AAAA/udp6.
+var defaultIPv6STUNServers = []string{
+	"[2606:4700:4700::1111]:3478",   // Cloudflare DNS/STUN IPv6 (0ms DNS)
+	"[2001:4860:4860::8888]:19302",  // Google STUN IPv6 (0ms DNS)
+	"stun.cloudflare.com:3478",
+	"stun.l.google.com:19302",
+}
+
 type STUNClient struct {
 	servers []string
 }
@@ -217,6 +225,134 @@ func (s *STUNClient) getMappedAddressFromServer(ctx context.Context, server stri
 		return ip, port, nil
 	}
 }
+
+// HasGlobalIPv6 returns true if the host has at least one active global unicast IPv6 address.
+func HasGlobalIPv6() bool {
+	return GetLocalIPv6() != ""
+}
+
+// GetMappedAddressIPv6 performs parallel AAAA STUN discovery over udp6.
+// Returns immediately with error if no global IPv6 interface is active on host.
+func (s *STUNClient) GetMappedAddressIPv6(ctx context.Context) (net.IP, int, error) {
+	if !HasGlobalIPv6() {
+		return nil, 0, errors.New("no active global IPv6 interface found")
+	}
+
+	servers := s.servers
+	if len(servers) == 0 {
+		servers = defaultIPv6STUNServers
+	}
+
+	type stunResult struct {
+		ip   net.IP
+		port int
+		err  error
+	}
+
+	resCh := make(chan stunResult, len(servers))
+	probeCtx, cancelProbes := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelProbes()
+
+	for _, srv := range servers {
+		go func(server string) {
+			ip, port, err := s.getMappedAddressFromServerIPv6(probeCtx, server)
+			resCh <- stunResult{ip: ip, port: port, err: err}
+		}(srv)
+	}
+
+	var lastErr error
+	for i := 0; i < len(servers); i++ {
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		case res := <-resCh:
+			if res.err == nil && res.ip != nil {
+				cancelProbes()
+				return res.ip, res.port, nil
+			}
+			lastErr = res.err
+		}
+	}
+
+	if lastErr != nil {
+		return nil, 0, lastErr
+	}
+	return nil, 0, errors.New("failed to get mapped IPv6 address from all STUN servers")
+}
+
+func (s *STUNClient) getMappedAddressFromServerIPv6(ctx context.Context, server string) (net.IP, int, error) {
+	addr, err := net.ResolveUDPAddr("udp6", server)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	conn, err := net.DialUDP("udp6", nil, addr)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer conn.Close()
+
+	c, err := stun.NewClient(conn)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer c.Close()
+
+	message := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
+
+	var ip net.IP
+	var port int
+	var respErr error
+
+	done := make(chan struct{})
+
+	err = c.Do(message, func(res stun.Event) {
+		defer close(done)
+		if res.Error != nil {
+			respErr = res.Error
+			return
+		}
+
+		var xorAddr stun.XORMappedAddress
+		if err := xorAddr.GetFrom(res.Message); err == nil && xorAddr.IP != nil {
+			ip = xorAddr.IP
+			port = xorAddr.Port
+			return
+		}
+
+		var plain stun.MappedAddress
+		if err := plain.GetFrom(res.Message); err == nil && plain.IP != nil {
+			ip = plain.IP
+			port = plain.Port
+			return
+		}
+		respErr = errors.New("no mapped address attribute in STUN response")
+	})
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, 0, ctx.Err()
+	case <-done:
+		if respErr != nil {
+			return nil, 0, respErr
+		}
+		if ip == nil || ip.To4() != nil || !ip.IsGlobalUnicast() {
+			return nil, 0, errors.New("invalid or non-global IPv6 returned by STUN server")
+		}
+		return ip, port, nil
+	}
+}
+
+// GetMappedAddressIPv6Global is a convenience helper querying defaultIPv6STUNServers over udp6.
+func GetMappedAddressIPv6Global(ctx context.Context) (net.IP, int, error) {
+	client := NewSTUNClient(defaultIPv6STUNServers)
+	return client.GetMappedAddressIPv6(ctx)
+}
+
 
 var stunBufPool = sync.Pool{
 	New: func() interface{} {
