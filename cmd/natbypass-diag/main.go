@@ -187,7 +187,7 @@ func guessGeo(ip, name string) string {
 
 func isBeta7OrNewer(ver string) bool {
 	vLower := strings.ToLower(ver)
-	// Any 1.9.5+ stable or 1.9.225+ beta or newer version supports RemoteDiag
+	// Any 1.9.501+ stable, 1.9.5 stable, or 1.9.225+ beta supports RemoteDiag
 	if strings.Contains(vLower, "1.9.5") || strings.Contains(vLower, "1.9.225") || strings.Contains(vLower, "1.9.226") || strings.Contains(vLower, "1.10.") || strings.Contains(vLower, "2.0.") {
 		return true
 	}

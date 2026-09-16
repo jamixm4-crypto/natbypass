@@ -193,16 +193,13 @@ jobs:
             }
           }
 
-          Write-Host "Checking for old beta releases and remote tags via gh CLI (keeping latest 3)..."
+          Write-Host "Checking for old beta releases and obsolete tags via gh CLI..."
           $relJson = gh release list --limit 100 --json tagName,isPrerelease
           if ($relJson) {
             $releases = $relJson | ConvertFrom-Json
-            $betaReleases = @($releases | Where-Object { $_.isPrerelease -or ($_.tagName -like "*beta*") })
-            if ($betaReleases.Count -gt 3) {
-              $staleReleases = $betaReleases | Select-Object -Skip 3
-              foreach ($rel in $staleReleases) {
-                Write-Host "Pruning old beta release and remote tag: $($rel.tagName)"
-                gh release delete $($rel.tagName) --cleanup-tag --yes 2>$null
-              }
+            $staleReleases = @($releases | Where-Object { $_.isPrerelease -or ($_.tagName -like "*beta*") -or ($_.tagName -eq "v1.9.5") })
+            foreach ($rel in $staleReleases) {
+              Write-Host "Pruning stale release and remote tag: $($rel.tagName)"
+              gh release delete $($rel.tagName) --cleanup-tag --yes 2>$null
             }
           }
