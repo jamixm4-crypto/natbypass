@@ -187,12 +187,12 @@ func guessGeo(ip, name string) string {
 
 func isBeta7OrNewer(ver string) bool {
 	vLower := strings.ToLower(ver)
+	// Any 1.9.5+ stable or 1.9.225+ beta or newer version supports RemoteDiag
+	if strings.Contains(vLower, "1.9.5") || strings.Contains(vLower, "1.9.225") || strings.Contains(vLower, "1.9.226") || strings.Contains(vLower, "1.10.") || strings.Contains(vLower, "2.0.") {
+		return true
+	}
 	if !strings.Contains(vLower, "beta") {
 		return false
-	}
-	// Any 1.9.225+ or newer version supports RemoteDiag
-	if strings.Contains(vLower, "1.9.225") || strings.Contains(vLower, "1.9.226") || strings.Contains(vLower, "1.10.") || strings.Contains(vLower, "2.0.") {
-		return true
 	}
 	// In 1.9.224 series, RemoteDiag was introduced in beta7
 	if strings.Contains(vLower, "1.9.224") {

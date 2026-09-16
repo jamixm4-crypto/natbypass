@@ -41,7 +41,7 @@ import (
 )
 
 
-const Version          = "1.9.226-beta64"
+const Version          = "1.9.5"
 
 
 
