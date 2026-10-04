@@ -443,10 +443,29 @@ func TestSTUN_MultiWAN_QuorumConsensus(t *testing.T) {
 		Port: 54611,
 	})
 
+	// Register transaction IDs so handleSTUNMessage recognizes legitimate responses
+	p.recordSTUNTx(msg194.TransactionID)
+	p.recordSTUNTx(msg77_a.TransactionID)
+	p.recordSTUNTx(msg77_b.TransactionID)
+	p.recordSTUNTx(msg77_c.TransactionID)
+
 	p.handleSTUNMessage(msg194.Raw)
 	p.handleSTUNMessage(msg77_a.Raw)
 	p.handleSTUNMessage(msg77_b.Raw)
 	p.handleSTUNMessage(msg77_c.Raw)
+
+	// An unsolicited/forged STUN message without a matching pending transaction must be silently dropped
+	unsolicitedMsg := stun.MustBuild(stun.TransactionID, stun.BindingSuccess, &stun.XORMappedAddress{
+		IP:   net.ParseIP("6.6.6.6"),
+		Port: 6666,
+	})
+	p.handleSTUNMessage(unsolicitedMsg.Raw)
+	p.mu.Lock()
+	if _, poisoned := p.mappedEndpoints["6.6.6.6:6666"]; poisoned {
+		p.mu.Unlock()
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Unsolicited STUN response poisoned mappedEndpoints!")
+	}
+	p.mu.Unlock()
 
 	p.mu.Lock()
 	mappedIP := p.mappedIP

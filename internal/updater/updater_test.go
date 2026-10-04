@@ -125,6 +125,12 @@ func TestUpdater_Ed25519Verification(t *testing.T) {
 	}
 }
 
+func TestUpdater_DefaultReleasePublicKey(t *testing.T) {
+	if len(DefaultReleasePublicKey) != ed25519.PublicKeySize {
+		t.Fatalf("expected DefaultReleasePublicKey size %d, got %d", ed25519.PublicKeySize, len(DefaultReleasePublicKey))
+	}
+}
+
 func TestUpdater_RejectsUnsignedUpdate(t *testing.T) {
 	pubKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

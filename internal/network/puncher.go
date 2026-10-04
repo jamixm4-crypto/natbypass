@@ -173,6 +173,10 @@ type UDPPuncher struct {
 	// Transport escalation ladder controls (Level 1 & Level 2)
 	probesDisabled atomic.Bool
 	forceIPv6Only  atomic.Bool
+
+	// STUN active transaction validation (Anti-spoofing / anti-poisoning)
+	pendingSTUNTx map[[stun.TransactionIDSize]byte]time.Time
+	pendingSTUNMu sync.Mutex
 }
 
 // SetCipherKey конфигурирует ключ симметричного шифрования (ChaCha20-Poly1305) для L3 Data-plane пакетов.
@@ -287,6 +291,38 @@ func (p *UDPPuncher) resetUnackedProbes(addrStr, ipStr string) {
 	}
 }
 
+// recordSTUNTx registers an outgoing STUN transaction ID with a timestamp.
+func (p *UDPPuncher) recordSTUNTx(txID [stun.TransactionIDSize]byte) {
+	p.pendingSTUNMu.Lock()
+	defer p.pendingSTUNMu.Unlock()
+	if p.pendingSTUNTx == nil {
+		p.pendingSTUNTx = make(map[[stun.TransactionIDSize]byte]time.Time)
+	}
+	now := time.Now()
+	for id, t := range p.pendingSTUNTx {
+		if now.Sub(t) > 10*time.Second {
+			delete(p.pendingSTUNTx, id)
+		}
+	}
+	p.pendingSTUNTx[txID] = now
+}
+
+// validateAndConsumeSTUNTx checks if an incoming STUN response matches an outstanding request,
+// and immediately invalidates it to prevent replay or off-path STUN poisoning attacks.
+func (p *UDPPuncher) validateAndConsumeSTUNTx(txID [stun.TransactionIDSize]byte) bool {
+	p.pendingSTUNMu.Lock()
+	defer p.pendingSTUNMu.Unlock()
+	if p.pendingSTUNTx == nil {
+		return false
+	}
+	t, ok := p.pendingSTUNTx[txID]
+	if !ok {
+		return false
+	}
+	delete(p.pendingSTUNTx, txID)
+	return time.Since(t) <= 10*time.Second
+}
+
 
 
 // tuneLinuxSocketBuffers enlarges system-wide UDP socket buffer limits so SetReadBuffer is not clamped to ~160KB on Linux/Keenetic.
@@ -317,27 +353,13 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 	// 1. If preferredPort > 0, try it first.
 	// 2. If preferredPort <= 0 or fails, try unprivileged candidate ports (>1024) that avoid NAT privileged remapping:
 	//    - 47832: NatBypass default mesh port (constants.DefaultUDPPort)
-	//    - 51820: Standard WireGuard default
 	//    - 0: OS dynamic ephemeral port fallback (>50000, Full Cone compatible)
-	candidates := make([]int, 0, 5)
-	if preferredPort < 0 {
-		candidates = append(candidates, 0)
+	candidates := make([]int, 0, 3)
+	if preferredPort > 0 {
+		candidates = append(candidates, preferredPort, 0)
 	} else {
-		if preferredPort > 0 {
-			candidates = append(candidates, preferredPort)
-		}
-		for _, p := range []int{constants.DefaultUDPPort, 51820, 0} {
-			found := false
-			for _, c := range candidates {
-				if c == p {
-					found = true
-					break
-				}
-			}
-			if !found {
-				candidates = append(candidates, p)
-			}
-		}
+		// Динамический эфемеfilter порт OS (:0) по умолчанию — исключает статическую сигнатуру порта 47832 для DPI/ТСПУ
+		candidates = append(candidates, 0)
 	}
 
 	for _, port := range candidates {
@@ -391,6 +413,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 		pingRateLimiter:     NewIPRateLimiter(60.0, 15.0),
 		pacer:               NewAdaptivePacer(),
 		unackedDirectProbes: make(map[string]int),
+		pendingSTUNTx:       make(map[[stun.TransactionIDSize]byte]time.Time),
 	}
 
 	// Try binding secondary IPv6 UDP socket if host has global IPv6 (Level 1 Dual-Stack P2P)
@@ -559,6 +582,7 @@ func (p *UDPPuncher) DiscoverCandidates(ctx context.Context, publicIP string) []
 			}
 		}
 		msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
+		p.recordSTUNTx(msg.TransactionID)
 		if _, err := p.conn.WriteToUDP(msg.Raw, srvAddr); err == nil {
 			select {
 			case <-p.stunRespCh:
@@ -692,6 +716,7 @@ drained:
 	// Серверы с прямыми IP-адресами опрашиваются немедленно (0 мс DNS),
 	// а доменные имена разрешаются параллельно в фоне, не блокируя цикл.
 	msg := stun.MustBuild(stun.TransactionID, stun.BindingRequest)
+	p.recordSTUNTx(msg.TransactionID)
 	for _, srv := range servers {
 		host, _, splitErr := net.SplitHostPort(srv)
 		if splitErr == nil && net.ParseIP(host) != nil {
@@ -1052,7 +1077,7 @@ func readQUICVarint(data []byte) (int, int, error) {
 	}
 }
 
-// BuildQUICChameleonProbe formats a hole punching probe as a valid QUIC v1 Initial Packet (RFC 9000).
+// BuildQUICChameleonProbe formats a hole punching probe as a valid QUIC v1 Initial Packet (RFC 9000 §14.1 >= 1200 bytes).
 func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 	nowNano := time.Now().UnixNano()
 	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, myDevID, nowNano))
@@ -1061,8 +1086,17 @@ func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 		return nil, err
 	}
 
-	buf := make([]byte, 0, 256)
-	buf = append(buf, QUICHeaderLong)
+	// RFC 9000 §17.2: First byte is 0xC0 | (pnLen - 1)
+	// Randomize packet number length (1 to 4 bytes: 0..3)
+	var randByte [1]byte
+	_ = crypto.SafeRandomBytes(randByte[:])
+	pnLen := int(randByte[0]&0x03) + 1
+	firstByte := byte(0xC0 | (randByte[0] & 0x03))
+
+	// Target datagram length >= 1200 bytes (RFC 9000 §14.1 client Initial requirement)
+	const targetDatagramSize = 1200
+	buf := make([]byte, 0, targetDatagramSize)
+	buf = append(buf, firstByte)
 
 	// Version 1 (4 bytes)
 	var verBuf [4]byte
@@ -1085,17 +1119,31 @@ func BuildQUICChameleonProbe(myDevID string, cKey [32]byte) ([]byte, error) {
 	buf = append(buf, putQUICVarint(len(encPayload))...)
 	buf = append(buf, encPayload...)
 
-	// Length varint + dummy packet payload
-	buf = append(buf, putQUICVarint(16)...)
-	buf = append(buf, 0x00, 0x01)
-	pad := make([]byte, 14)
-	_ = crypto.SafeRandomBytes(pad)
-	buf = append(buf, pad...)
+	// Length varint specifies length of (Packet Number + Payload/Frames).
+	// We want total buffer size = targetDatagramSize (1200).
+	// Varint for length > 63 takes 2 bytes.
+	// Remainder = targetDatagramSize - current_len - 2 (for length varint).
+	remLen := targetDatagramSize - len(buf) - 2
+	if remLen < pnLen {
+		remLen = pnLen
+	}
+	buf = append(buf, putQUICVarint(remLen)...)
+
+	// Packet Number: pnLen bytes
+	pnBytes := make([]byte, pnLen)
+	pnBytes[pnLen-1] = 0x01 // Packet number 1
+	buf = append(buf, pnBytes...)
+
+	// Remainder is padded with RFC 9000 §19.1 PADDING frames (0x00)
+	padNeeded := targetDatagramSize - len(buf)
+	if padNeeded > 0 {
+		buf = append(buf, make([]byte, padNeeded)...)
+	}
 
 	return buf, nil
 }
 
-// BuildQUICPongChameleonProbe formats a PONG response as a valid QUIC v1 Initial Packet.
+// BuildQUICPongChameleonProbe formats a PONG response as a valid QUIC v1 Initial Packet (RFC 9000 >= 1200 bytes).
 func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte, error) {
 	pongData := []byte(fmt.Sprintf("%s%s:%s", constants.PongPrefix, myDevID, sentTs))
 	encPayload, err := crypto.EncryptSelf(pongData, cKey)
@@ -1103,8 +1151,14 @@ func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte,
 		return nil, err
 	}
 
-	buf := make([]byte, 0, 256)
-	buf = append(buf, QUICHeaderLong)
+	var randByte [1]byte
+	_ = crypto.SafeRandomBytes(randByte[:])
+	pnLen := int(randByte[0]&0x03) + 1
+	firstByte := byte(0xC0 | (randByte[0] & 0x03))
+
+	const targetDatagramSize = 1200
+	buf := make([]byte, 0, targetDatagramSize)
+	buf = append(buf, firstByte)
 
 	var verBuf [4]byte
 	binary.BigEndian.PutUint32(verBuf[:], QUICVersion1)
@@ -1123,11 +1177,20 @@ func BuildQUICPongChameleonProbe(myDevID, sentTs string, cKey [32]byte) ([]byte,
 	buf = append(buf, putQUICVarint(len(encPayload))...)
 	buf = append(buf, encPayload...)
 
-	buf = append(buf, putQUICVarint(16)...)
-	buf = append(buf, 0x00, 0x01)
-	pad := make([]byte, 14)
-	_ = crypto.SafeRandomBytes(pad)
-	buf = append(buf, pad...)
+	remLen := targetDatagramSize - len(buf) - 2
+	if remLen < pnLen {
+		remLen = pnLen
+	}
+	buf = append(buf, putQUICVarint(remLen)...)
+
+	pnBytes := make([]byte, pnLen)
+	pnBytes[pnLen-1] = 0x01
+	buf = append(buf, pnBytes...)
+
+	padNeeded := targetDatagramSize - len(buf)
+	if padNeeded > 0 {
+		buf = append(buf, make([]byte, padNeeded)...)
+	}
 
 	return buf, nil
 }
@@ -1137,8 +1200,8 @@ func ParseQUICChameleonProbe(packet []byte, cKey [32]byte) ([]byte, error) {
 	if len(packet) < 25 {
 		return nil, errors.New("packet too short")
 	}
-	if packet[0]&0xC0 != 0xC0 {
-		return nil, errors.New("not a long header")
+	if packet[0]&0xF0 != 0xC0 {
+		return nil, errors.New("not a long header initial")
 	}
 	if binary.BigEndian.Uint32(packet[1:5]) != QUICVersion1 {
 		return nil, errors.New("not quic v1")
@@ -1800,6 +1863,11 @@ func (p *UDPPuncher) handleSTUNMessage(data []byte) {
 		return
 	}
 
+	// Fail-closed STUN transaction validation: discard unsolicited, forged, or replayed STUN messages
+	if !p.validateAndConsumeSTUNTx(stunResp.TransactionID) {
+		return
+	}
+
 	var resIP net.IP
 	var resPort int
 
@@ -2072,11 +2140,10 @@ func (p *UDPPuncher) dispatchPacket(buf []byte, remoteAddr *net.UDPAddr) {
 	case stun.IsMessage(buf[:n]):
 		p.handleSTUNMessage(buf[:n])
 	case n >= 4 && string(buf[:4]) == constants.KeepAlivePayload:
-		// Двусторонний ответ KeepAlive для поддержания исходящей трансляции NAT
-		if remoteAddr != nil {
-			_, _ = p.writeToUDP([]byte(constants.KeepAlivePayload), remoteAddr)
-		}
-	case n >= 25 && (buf[0]&0xC0 == 0xC0) && binary.BigEndian.Uint32(buf[1:5]) == QUICVersion1:
+		// Active probing protection: do not blindly reflect unauthenticated KAEP packets.
+		// Silently consume to maintain NAT bindings without acting as an echo oracle.
+		return
+	case n >= 25 && (buf[0]&0xF0 == 0xC0) && binary.BigEndian.Uint32(buf[1:5]) == QUICVersion1:
 		p.cipherMu.RLock()
 		cKey := p.cipherKey
 		hasCKey := p.hasCipherKey
@@ -2094,9 +2161,19 @@ func (p *UDPPuncher) dispatchPacket(buf []byte, remoteAddr *net.UDPAddr) {
 			}
 		}
 	case strings.HasPrefix(string(buf[:n]), constants.PingPrefix):
-		p.handlePing(string(buf[:n]), remoteAddr)
+		p.cipherMu.RLock()
+		hasCKey := p.hasCipherKey
+		p.cipherMu.RUnlock()
+		if !hasCKey {
+			p.handlePing(string(buf[:n]), remoteAddr)
+		}
 	case strings.HasPrefix(string(buf[:n]), constants.PongPrefix):
-		p.handlePong(string(buf[:n]), remoteAddr)
+		p.cipherMu.RLock()
+		hasCKey := p.hasCipherKey
+		p.cipherMu.RUnlock()
+		if !hasCKey {
+			p.handlePong(string(buf[:n]), remoteAddr)
+		}
 	case n > constants.TunPaddedHeaderSize+2 && string(buf[:constants.TunPaddedHeaderSize]) == constants.TunPaddedHeader:
 		realLen := int(binary.BigEndian.Uint16(buf[constants.TunPaddedHeaderSize : constants.TunPaddedHeaderSize+2]))
 		if realLen > 0 && constants.TunPaddedHeaderSize+2+realLen <= n {

@@ -420,9 +420,27 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		var revertTimer *time.Timer
 		origPreset := cfg.WireGuard.AWGPreset
 
+		var unackedTargetsMu sync.Mutex
+		unackedTargets := make(map[string]int)
+
 		puncher.SetOnDPIDetected(func(targetAddr string) {
-			log.Warn().Str("target", targetAddr).
-				Msg("🚨 [DPI/ТСПУ] Обнаружено подавление UDP hole punching (10 безответных проб). Временный переход на Strict пресет и эскалация на Уровень 5 (Peer-as-Relay).")
+			unackedTargetsMu.Lock()
+			unackedTargets[targetAddr]++
+			distinctFailing := len(unackedTargets)
+			unackedTargetsMu.Unlock()
+
+			// Only escalate to global Strict AWG if failures occur across >= 2 distinct remote peer targets
+			// (or if this is a 1-peer mesh). If other peers are communicating fine, an individual peer
+			// being offline, asleep, or behind strict NAT must NOT trigger global Strict AWG escalation.
+			totalPeers := len(registry.List())
+			if totalPeers > 1 && distinctFailing < 2 {
+				log.Debug().Str("target", targetAddr).Int("failing_targets", distinctFailing).
+					Msg("UDP probes unacknowledged for individual target (target may be offline or behind NAT). Waiting for multi-peer confirmation before escalating.")
+				return
+			}
+
+			log.Warn().Str("target", targetAddr).Int("failing_targets", distinctFailing).
+				Msg("🚨 [DPI/ТСПУ] Обнаружено систематическое подавление UDP hole punching (безответные пробы на нескольких пирах). Временный переход на Strict пресет и эскалация на Уровень 5 (Peer-as-Relay).")
 
 			cfg.WireGuard.AWGPreset = "awg31_strict"
 			awgParams := cfg.GetAWGParams()
@@ -1398,9 +1416,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						bestPrefixLen := -1
 						for _, item := range registry.List() {
 							for _, route := range item.AdvertisedRoutes {
-								if _, ipNet, err2 := net.ParseCIDR(strings.TrimSpace(route)); err2 == nil && ipNet.Contains(dstNetIP) {
+								r := strings.TrimSpace(route)
+								// Security: NEVER allow 0.0.0.0/0, ::/0 or broad prefixes (/0 to /7)
+								// to be dynamically hijacked via AdvertisedRoutes.
+								// Default Internet routing MUST only occur via explicitly selected Exit Node.
+								if r == "0.0.0.0/0" || r == "::/0" {
+									continue
+								}
+								if _, ipNet, err2 := net.ParseCIDR(r); err2 == nil && ipNet.Contains(dstNetIP) {
 									ones, _ := ipNet.Mask.Size()
-									if ones > bestPrefixLen {
+									if ones >= 8 && ones > bestPrefixLen {
 										bestPrefixLen = ones
 										p = item
 										found = true
@@ -1638,10 +1663,21 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 						// 1g. MQTT L3 Tunnel Fallback (Level 2)
 						if needsRelay && !sentDirect && !sentTCP && sigMgr != nil {
-							if err := sigMgr.PublishTunnelData(p.DeviceID, pkt); err == nil {
+							dataToSend := pkt
+							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+								cKey := crypto.DeriveKey(activeProf.NetworkKey)
+								epoch := crypto.GetCurrentEpoch()
+								seq := p.NextOutboundSeq()
+								if enc, encErr := crypto.EncryptWithEpochSeq(pkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+									dataToSend = enc
+								} else if enc, encErr := crypto.EncryptSelf(pkt, cKey); encErr == nil && len(enc) > 0 {
+									dataToSend = enc
+								}
+							}
+							if err := sigMgr.PublishTunnelData(p.DeviceID, dataToSend); err == nil {
 								sentDirect = true
 								p.Transport = "relay_mqtt"
-								log.Debug().Str("dst", dstIP).Str("peer", p.DeviceID).Msg("🛡️ Routed packet via MQTT L3 Tunnel Fallback")
+								log.Debug().Str("dst", dstIP).Str("peer", p.DeviceID).Msg("🛡️ Routed encrypted packet via MQTT L3 Tunnel Fallback")
 							}
 						}
 
@@ -2287,10 +2323,16 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 	if webui.IsKeeneticOS() {
 		log.Info().Msg("🛡️ Обнаружена KeeneticOS: активирована системная авторизация роутера")
 		customAuth = webui.VerifyKeeneticAuth
-	} else if runtime.GOOS != "windows" && username == "" && password == "" {
-		username = "admin"
-		password = "admin"
-		log.Info().Str("user", username).Msg("🔐 Web UI защищен авторизацией по умолчанию (admin/admin)")
+	} else if username == "" || password == "" || password == "admin" || password == "changeme" {
+		if username == "" {
+			username = "admin"
+		}
+		password = config.GenerateRandomHex(8) // 16 characters random secure password
+		cfg.WebUI.Username = username
+		cfg.WebUI.Password = password
+		_ = config.Save(cfg, configFile, false)
+		log.Warn().Str("username", username).Str("password", password).
+			Msg("🔐 [WebUI Security] Сгенерирован случайный пароль администратора при первом запуске. Сохраните его для входа в панель!")
 	}
 
 	uiServer := webui.NewServer(port, username, password, registry, sigMgr)

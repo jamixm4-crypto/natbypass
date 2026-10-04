@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -227,7 +228,9 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 			}
 
 			if realm != "" {
+				keeneticCacheMu.Lock()
 				keeneticRealmHttp = realm
+				keeneticCacheMu.Unlock()
 			}
 
 			realmsToTry := []string{}
@@ -271,9 +274,13 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 					_, _ = io.Copy(io.Discard, pResp.Body)
 					pResp.Body.Close()
 					if pResp.StatusCode == http.StatusOK {
-						authSuccess = 1
+						atomic.StoreInt32(&authSuccess, 1)
 						return
 					}
+				}
+
+				if atomic.LoadInt32(&authSuccess) == 1 {
+					return
 				}
 
 				// Alternative: SHA256 of login:realm:password
@@ -294,7 +301,7 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 						_, _ = io.Copy(io.Discard, pResp2.Body)
 						pResp2.Body.Close()
 						if pResp2.StatusCode == http.StatusOK {
-							authSuccess = 1
+							atomic.StoreInt32(&authSuccess, 1)
 							return
 						}
 					}
@@ -304,7 +311,7 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 	}
 
 	wg.Wait()
-	return authSuccess == 1
+	return atomic.LoadInt32(&authSuccess) == 1
 }
 
 // verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
@@ -677,8 +684,11 @@ func verifyKeeneticHash(username, password, storedHash, hashType string) bool {
 		"",
 	}
 
-	if keeneticRealmHttp != "" {
-		realms = append([]string{keeneticRealmHttp}, realms...)
+	keeneticCacheMu.RLock()
+	cachedRealm := keeneticRealmHttp
+	keeneticCacheMu.RUnlock()
+	if cachedRealm != "" {
+		realms = append([]string{cachedRealm}, realms...)
 	}
 	if keeneticHostnameCache != "" {
 		realms = append([]string{keeneticHostnameCache}, realms...)

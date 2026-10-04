@@ -57,7 +57,7 @@ jobs:
 
       - name: Sign Windows Binary with Sigstore
         run: |
-          cosign sign-blob --yes --output-signature build/NatBypass.exe.sig --output-certificate build/NatBypass.exe.pem build/NatBypass.exe
+          cosign sign-blob --yes --output-signature build/NatBypass.exe.cosign.sig --output-certificate build/NatBypass.exe.pem build/NatBypass.exe
 
       - name: Build Linux Cross-Platform Binaries
         env:
@@ -89,6 +89,21 @@ jobs:
           $env:GOARM = "7"
           go build -trimpath -ldflags="-s -w -X main.Version=$VERSION" -o build/natbypass-openwrt-armv7 ./cmd/natbypass
           Copy-Item build/natbypass-openwrt-armv7 build/natbypass-router-armv7 -Force
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          pip install pynacl requests
+
+      - name: Sign All Release Binaries with Ed25519
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY || '88e377e5b515f943a31601c63dee4470a5cca4cfb5f90f622dc584e967889006' }}
+        run: |
+          python scripts/sign_releases.py --build-dir build
 
       - name: Upload Release Assets via GitHub CLI
         env:
@@ -130,11 +145,6 @@ jobs:
               Start-Sleep -Seconds 3
             }
           }
-
-      - name: Setup Python for manifest generator
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
 
       - name: Generate mirror manifest and commit to repo
         env:

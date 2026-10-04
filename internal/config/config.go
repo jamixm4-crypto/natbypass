@@ -44,6 +44,7 @@ type AppConfig struct {
 type WebUIConfig struct {
 	Enabled         bool     `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
 	Port            int      `mapstructure:"port" yaml:"port" json:"port"`
+	ListenHost      string   `mapstructure:"listen_host" yaml:"listen_host,omitempty" json:"listen_host,omitempty"`
 	Username        string   `mapstructure:"username" yaml:"username,omitempty" json:"username,omitempty"`
 	Password        string   `mapstructure:"password" yaml:"password,omitempty" json:"password,omitempty"`
 	AllowedIPs      []string `mapstructure:"allowed_ips" yaml:"allowed_ips,omitempty" json:"allowed_ips,omitempty"`

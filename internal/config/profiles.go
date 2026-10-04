@@ -69,9 +69,9 @@ type Profile struct {
 // ВАЖНО: содержит строго один URL на физический кластер/хост (без дублей tcp/ssl одного сервера),
 // чтобы предотвратить взаимный разрыв соединений (EOF-storm) брокерами EMQX/HiveMQ.
 var DefaultPublicMQTTBrokers = []string{
-	"tcp://broker.hivemq.com:1883",
-	"tcp://broker.emqx.io:1883",
-	"tcp://test.mosquitto.org:1883",
+	"ssl://broker.emqx.io:8883",
+	"ssl://broker.hivemq.com:8883",
+	"ssl://test.mosquitto.org:8883",
 }
 
 // extractBrokerHost возвращает хостнейм брокера без протокола и порта для дедупликации (e.g. "broker.emqx.io")
@@ -157,16 +157,16 @@ func GenerateRandomAWGProfileParams() (jc, jmin, jmax, s1, s2 int, h1, h2, h3, h
 	if h3 < 1000000 { h3 += 1000000 }
 	if h4 < 1000000 { h4 += 1000000 }
 
-	var r [4]byte
+	var r [8]byte
 	if _, err := io.ReadFull(rand.Reader, r[:]); err != nil {
 		h := sha256.Sum256([]byte(fmt.Sprintf("fallback-awg-r-%d", time.Now().UnixNano())))
-		copy(r[:], h[:4])
+		copy(r[:], h[:8])
 	}
-	jc = 3 + int(r[0]%4)
-	jmin = 25 + int(r[1]%25)
-	jmax = jmin + 30 + int(r[2]%35)
-	s1 = 20 + int(r[3]%45)
-	s2 = 20 + int(r[0]%45)
+	jc = 2 + int(r[0]%8)           // 2..9 (значительно более широкий диапазон)
+	jmin = 15 + int(r[1]%45)       // 15..59
+	jmax = jmin + 35 + int(r[2]%65) // jmin+35..jmin+99
+	s1 = 15 + int(r[3]%65)         // 15..79
+	s2 = 15 + int(r[4]%65)         // 15..79 (отдельный байт r[4], нет корреляции с jc!)
 	hpKey = GenerateRandomHex(32)
 	return
 }
@@ -334,7 +334,7 @@ func (c *Config) SyncSignalingWithProfile(p *Profile) {
 			mqttBroker = c.Signaling.MQTTBroker
 			p.MQTTBroker = mqttBroker
 		} else {
-			mqttBroker = "tcp://broker.emqx.io:1883"
+			mqttBroker = "ssl://broker.emqx.io:8883"
 		}
 	}
 	mqttTopic := p.MQTTTopic
@@ -556,12 +556,13 @@ func ExportProfileURI(p Profile) string {
 	if p.MQTTPass != "" {
 		q.Set("pass", p.MQTTPass)
 	}
-	if p.TGToken != "" {
-		q.Set("tg_token", p.TGToken)
-	}
+	// Security: Do NOT leak administrative Telegram bot token in standard client invite URIs/QRs
+	// (Telegram bot token allows taking over the bot and reading/injecting all signaling traffic).
+	// TGChatID and TGProxy are safe to share for client listener configuration.
 	if p.TGChatID != 0 {
 		q.Set("tg_chat", fmt.Sprintf("%d", p.TGChatID))
 	}
+	q.Set("ts", fmt.Sprintf("%d", time.Now().Unix()))
 	if p.TGProxy != "" {
 		q.Set("tg_proxy", p.TGProxy)
 	}
@@ -632,7 +633,7 @@ func ImportProfileURI(raw string) (*Profile, error) {
 			}
 			broker := q.Get("broker")
 			if broker == "" {
-				broker = "tcp://broker.emqx.io:1883"
+				broker = "ssl://broker.emqx.io:8883"
 			}
 			var tgChat int64
 			if chatStr := q.Get("tg_chat"); chatStr != "" {
@@ -652,10 +653,15 @@ func ImportProfileURI(raw string) (*Profile, error) {
 				tcpFb = false
 			}
 
+			netKey := strings.TrimSpace(q.Get("key"))
+			if netKey != "" && len(netKey) < 16 {
+				return nil, fmt.Errorf("сетевой ключ слишком короткий: требуется не менее 16 символов (≥128 бит) для защиты от офлайн-перебора")
+			}
+
 			p := &Profile{
 				ID:                id,
 				Name:              name,
-				NetworkKey:        q.Get("key"),
+				NetworkKey:        netKey,
 				Subnet:            q.Get("subnet"),
 				MQTTBroker:        broker,
 				MQTTTopic:         topic,
@@ -765,16 +771,47 @@ func ExtractSubnetPrefix(vipOrSubnet string) string {
 
 // GenerateSubnetIP генерирует детерминированный уникальный IP-адрес в подсети для указанного deviceID
 func GenerateSubnetIP(prefix string, deviceID string) string {
+	return GenerateSubnetIPWithSalt(prefix, deviceID, 0)
+}
+
+// GenerateSubnetIPWithSalt генерирует детерминированный IP-адрес с солью (счетчиком попыток) для разрешения коллизий
+func GenerateSubnetIPWithSalt(prefix string, deviceID string, attempt int) string {
 	if prefix == "" {
 		prefix = "100.64.200"
 	}
-	h := sha256.Sum256([]byte(deviceID))
+	var data []byte
+	if attempt <= 0 {
+		data = []byte(deviceID)
+	} else {
+		data = []byte(fmt.Sprintf("%s#salt%d", deviceID, attempt))
+	}
+	h := sha256.Sum256(data)
 	// Диапазон октетов 2..254 (избегая 1 как дефолтный шлюз/создатель и 0/255)
 	octet := int(h[0]%250) + 2
 	if octet == 1 {
 		octet = 2
 	}
 	return fmt.Sprintf("%s.%d", prefix, octet)
+}
+
+// FindFreeSubnetIP ищет первый свободный IP в подсети, исключая занятые usedIPs
+func FindFreeSubnetIP(usedIPs map[string]bool, prefix, deviceID string) string {
+	if prefix == "" {
+		prefix = "100.64.200"
+	}
+	for attempt := 0; attempt < 250; attempt++ {
+		cand := GenerateSubnetIPWithSalt(prefix, deviceID, attempt)
+		if !usedIPs[cand] {
+			return cand
+		}
+	}
+	for octet := 2; octet <= 254; octet++ {
+		cand := fmt.Sprintf("%s.%d", prefix, octet)
+		if !usedIPs[cand] {
+			return cand
+		}
+	}
+	return fmt.Sprintf("%s.2", prefix)
 }
 
 // DeriveSubnetFromSeed вычисляет /24 подсеть детерминированно из seed-строки (NetworkKey или MQTTTopic).

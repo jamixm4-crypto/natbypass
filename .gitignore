@@ -14,6 +14,7 @@ bin/
 /natbypass-diag
 /NatBypass-Diag*
 cluster_diag_*.txt
+diag_report*.txt
 
 # Toolchain and local cache in soft/
 soft/

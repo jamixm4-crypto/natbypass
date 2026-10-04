@@ -318,10 +318,13 @@ func GetMirrorAssetURLs(m *MirrorManifest, assetKey string) []string {
 
 // IsMirrorURL проверяет, что URL исходит из доверенного зеркала NatBypass.
 func IsMirrorURL(urlStr string) bool {
-	// Если это GitHub-прокси (ghproxy.net, gh-proxy.com), строго проверяем,
+	// Если это GitHub-прокси, строго проверяем,
 	// что запрос направлен исключительно к нашему официальному репозиторию!
-	if strings.Contains(urlStr, "ghproxy.net") || strings.Contains(urlStr, "gh-proxy.com") {
-		return strings.Contains(urlStr, "/"+GithubRepo+"/releases/download/")
+	proxyDomains := []string{"ghproxy.net", "gh-proxy.com", "ghproxy.cc", "mirror.ghproxy.com"}
+	for _, pd := range proxyDomains {
+		if strings.Contains(urlStr, pd) {
+			return strings.Contains(urlStr, "/"+GithubRepo+"/releases/download/")
+		}
 	}
 	for _, domain := range MirrorTrustedDomains {
 		if strings.Contains(urlStr, domain) {

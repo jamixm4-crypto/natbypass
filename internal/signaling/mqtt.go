@@ -155,7 +155,7 @@ func NewMQTTChannelNamed(name, brokerURL, topic, clientID, username, password st
 		safeClientID = safeClientID[:12]
 	}
 
-	opts.SetClientID(fmt.Sprintf("nb-%s-%s-%04x", safeClientID, brokerSuffix, time.Now().UnixNano()&0xffff)).
+	opts.SetClientID(fmt.Sprintf("c_%s_%s_%04x", safeClientID, brokerSuffix, time.Now().UnixNano()&0xffff)).
 		SetUsername(username).
 		SetPassword(password).
 		SetCleanSession(true).
@@ -588,8 +588,16 @@ func (m *MQTTChannel) PublishTunnelData(targetDevID string, pkt []byte) error {
 	m.keyMu.RUnlock()
 
 	dataToSend := pkt
-	if hasKey {
-		dataToSend = crypto.SignFrame(pkt, signKey)
+	if hasKey && netKey != "" {
+		// Защита от утечки открытого IP-трафика: если пакет передан в открытом виде (IPv4/IPv6),
+		// обязательно шифруем его ключом сети ChaCha20-Poly1305 перед отправкой через открытый MQTT-брокер!
+		if len(pkt) >= 20 && (pkt[0]>>4 == 4 || pkt[0]>>4 == 6) {
+			cKey := crypto.DeriveKey(netKey)
+			if enc, err := crypto.EncryptSelf(pkt, cKey); err == nil && len(enc) > 0 {
+				dataToSend = enc
+			}
+		}
+		dataToSend = crypto.SignFrame(dataToSend, signKey)
 	}
 
 	topic := crypto.DeriveTunnelTopic(m.GetTopic(), netKey, targetDevID)
@@ -636,6 +644,7 @@ func (m *MQTTChannel) handleTunnelPayload(raw []byte) {
 	m.keyMu.RLock()
 	hasKey := m.hasSignKey
 	signKey := m.signKey
+	netKey := m.rawNetKey
 	m.keyMu.RUnlock()
 
 	if hasKey {
@@ -643,15 +652,23 @@ func (m *MQTTChannel) handleTunnelPayload(raw []byte) {
 			log.Warn().Int("len", len(raw)).Msg("🛡️ MQTT tunnel frame dropped: payload too short for HMAC verification")
 			return
 		}
-		if raw[0] == '{' {
-			log.Warn().Msg("🛡️ MQTT tunnel frame dropped: plaintext payload rejected when NetworkKey is active")
-			return
-		}
 		inner, _, err := crypto.VerifyFrame(raw, signKey, 24*time.Hour)
 		if err != nil {
 			log.Warn().Err(err).Msg("🛡️ MQTT tunnel frame dropped: invalid HMAC signature or replay detected")
 			return
 		}
+		// Если NetworkKey активен, расшифровываем полезную нагрузку ключом сети
+		if netKey != "" {
+			cKey := crypto.DeriveKey(netKey)
+			if dec, decErr := crypto.DecryptSelf(inner, cKey); decErr == nil && len(dec) >= 20 {
+				inner = dec
+			} else if curEpoch := crypto.GetCurrentEpoch(); len(inner) >= 16+24+16 {
+				if decEpoch, _, _, epErr := crypto.DecryptWithEpochSeq(inner, cKey[:], curEpoch); epErr == nil && len(decEpoch) >= 20 {
+					inner = decEpoch
+				}
+			}
+		}
+
 		if len(inner) >= 20 {
 			handler(inner)
 		}

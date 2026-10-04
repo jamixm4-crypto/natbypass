@@ -102,6 +102,38 @@ func setStatus(inProgress bool, percent int, msg string, err string, completed b
 // DefaultReleasePublicKey — глобальный публичный ключ для проверки подписи обновлений
 var DefaultReleasePublicKey ed25519.PublicKey
 
+var (
+	activeVersionMu        sync.RWMutex
+	activeCurrentVersion   string
+)
+
+// SetCurrentVersion сохраняет текущую версию приложения для проверки anti-downgrade.
+func SetCurrentVersion(v string) {
+	activeVersionMu.Lock()
+	defer activeVersionMu.Unlock()
+	activeCurrentVersion = v
+}
+
+func getActiveCurrentVersion() string {
+	activeVersionMu.RLock()
+	defer activeVersionMu.RUnlock()
+	return activeCurrentVersion
+}
+
+// extractVersionFromURL извлекает версию релиза (например, "v1.9.501") из URL ассета или манифеста.
+func extractVersionFromURL(urlStr string) string {
+	parts := strings.Split(urlStr, "/")
+	for i, p := range parts {
+		if (p == "download" || p == "tag") && i+1 < len(parts) {
+			return parts[i+1]
+		}
+	}
+	if lastMirrorManifest != nil && lastMirrorManifest.Version != "" {
+		return lastMirrorManifest.Version
+	}
+	return ""
+}
+
 // Updater обеспечивает безопасную проверку и установку обновлений с GitHub Releases с верификацией Ed25519.
 type Updater struct {
 	currentVersion string
@@ -187,6 +219,7 @@ var lastMirrorManifest *MirrorManifest
 // CheckUpdateWithOptions проверяет наличие новой версии с учётом заданного канала (stable/beta).
 // При недоступности GitHub API автоматически использует зеркала (актуально для РФ).
 func CheckUpdateWithOptions(ctx context.Context, currentVersion string, opts CheckOptions) (*ReleaseInfo, error) {
+	SetCurrentVersion(currentVersion)
 	includePrerelease := opts.IncludePrerelease || strings.EqualFold(opts.Channel, "beta")
 
 	// --- Попытка 1: GitHub API ---
@@ -760,24 +793,64 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 		}
 	}
 
-	// Проверка цифровой подписи Ed25519 релиза (если доступен файл .sig)
-	sigURL := assetURL + ".sig"
-	sigReq, sErr := http.NewRequestWithContext(ctx, "GET", sigURL, nil)
-	if sErr == nil {
-		sigReq.Header.Set("User-Agent", "NatBypass-Updater")
-		sigClient := &http.Client{Timeout: 15 * time.Second}
-		if sigResp, err := sigClient.Do(sigReq); err == nil && sigResp.StatusCode == http.StatusOK {
-			sigData, _ := io.ReadAll(sigResp.Body)
-			sigResp.Body.Close()
-			if len(sigData) == ed25519.SignatureSize && len(DefaultReleasePublicKey) == ed25519.PublicKeySize {
-				binData, _ := os.ReadFile(tmpPath)
-				if !ed25519.Verify(DefaultReleasePublicKey, binData, sigData) {
-					_ = os.Remove(tmpPath)
-					setStatus(false, 0, "", "КРИТИЧЕСКАЯ ОШИБКА: цифровая подпись Ed25519 не прошла проверку!", false)
-					return fmt.Errorf("Ed25519 signature verification failed")
-				}
-			}
+	// Anti-downgrade: запрещаем понижение версии во избежание эксплуатации старых уязвимостей
+	curVer := getActiveCurrentVersion()
+	if targetVersion := extractVersionFromURL(assetURL); targetVersion != "" && curVer != "" {
+		if compareVersions(targetVersion, curVer) < 0 {
+			_ = os.Remove(tmpPath)
+			setStatus(false, 0, "", fmt.Sprintf("ОШИБКА БЕЗОПАСНОСТИ: попытка отката на устаревшую версию %s при текущей %s (Anti-Downgrade)", targetVersion, curVer), false)
+			return fmt.Errorf("anti-downgrade check failed: target %s is older than current %s", targetVersion, curVer)
 		}
+	}
+
+	// 4. Обязательная криптографическая проверка цифровой подписи Ed25519 (fail-closed)
+	if len(DefaultReleasePublicKey) != ed25519.PublicKeySize {
+		_ = os.Remove(tmpPath)
+		setStatus(false, 0, "", "КРИТИЧЕСКАЯ ОШИБКА: встроенный открытый ключ релизов Ed25519 не инициализирован!", false)
+		return fmt.Errorf("embedded Ed25519 release public key not configured (fail-closed)")
+	}
+
+	// Запрашиваем цифровую подпись .sig строго по тому же маршруту (зеркало/прокси), что и скачанный бинарник
+	sigURL := usedURL + ".sig"
+	sigReq, sErr := http.NewRequestWithContext(ctx, "GET", sigURL, nil)
+	if sErr != nil {
+		_ = os.Remove(tmpPath)
+		setStatus(false, 0, "", "КРИТИЧЕСКАЯ ОШИБКА: не удалось сформировать запрос цифровой подписи .sig: "+sErr.Error(), false)
+		return fmt.Errorf("failed to create Ed25519 signature request: %w", sErr)
+	}
+	sigReq.Header.Set("User-Agent", "NatBypass-Updater")
+	sigClient := &http.Client{Timeout: 20 * time.Second}
+	sigResp, err := sigClient.Do(sigReq)
+	if err != nil || sigResp.StatusCode != http.StatusOK {
+		_ = os.Remove(tmpPath)
+		errMsg := "недоступна"
+		if err != nil {
+			errMsg = err.Error()
+		} else {
+			errMsg = fmt.Sprintf("HTTP %d", sigResp.StatusCode)
+			sigResp.Body.Close()
+		}
+		setStatus(false, 0, "", "КРИТИЧЕСКАЯ ОШИБКА БЕЗОПАСНОСТИ: цифровая подпись .sig недоступна ("+errMsg+"). Установка отменена (fail-closed)!", false)
+		return fmt.Errorf("Ed25519 signature download failed (%s) - update aborted (fail-closed)", errMsg)
+	}
+	sigData, errRead := io.ReadAll(sigResp.Body)
+	sigResp.Body.Close()
+	if errRead != nil || len(sigData) != ed25519.SignatureSize {
+		_ = os.Remove(tmpPath)
+		setStatus(false, 0, "", fmt.Sprintf("КРИТИЧЕСКАЯ ОШИБКА: неверный размер подписи Ed25519 (получено %d байт, ожидается %d)", len(sigData), ed25519.SignatureSize), false)
+		return fmt.Errorf("invalid Ed25519 signature size: got %d, expected %d", len(sigData), ed25519.SignatureSize)
+	}
+
+	binData, errBin := os.ReadFile(tmpPath)
+	if errBin != nil {
+		_ = os.Remove(tmpPath)
+		return errBin
+	}
+
+	if !ed25519.Verify(DefaultReleasePublicKey, binData, sigData) {
+		_ = os.Remove(tmpPath)
+		setStatus(false, 0, "", "КРИТИЧЕСКАЯ ОШИБКА БЕЗОПАСНОСТИ: цифровая подпись Ed25519 не прошла проверку! Файл поврежден или подменен сторонним источником!", false)
+		return fmt.Errorf("Ed25519 signature verification failed: rejecting untrusted binary")
 	}
 
 	setStatus(true, 85, "Применение обновления и замена исполняемого файла...", "", false)

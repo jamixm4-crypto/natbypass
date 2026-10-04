@@ -188,12 +188,20 @@ func RunNetcheck(ctx context.Context) (*NetcheckReport, error) {
 	}
 
 	// DPI / TSPU Heuristic:
-	// If TCP 443 works normally, but UDP is completely blocked or failed STUN,
-	// TSPU middlebox is likely dropping non-standard UDP.
+	// A genuine in-path UDP drop (TSPU / DPI) occurs when TCP 443 works normally, but ALL UDP probes fail.
+	// If standard DNS over UDP (port 53) responds, UDP transport is operational and STUN failure is due to
+	// STUN server unreachability or port 3478 block, NOT systematic UDP drops by TSPU.
+	udpDnsWorking := (hasCDNS && cDNS >= 0) || (hasYDNS && yDNS >= 0)
 	if tcp443OK && !rep.UDPEnabled {
-		rep.TSPUDetected = true
-		rep.DPIBlockedWireGuard = true
-		rep.TSPUDetails = "Обнаружена фильтрация UDP (ТСПУ DPI / Корпоративный фаервол). Исходящий UDP сбрасывается, доступен только TCP 443."
+		if udpDnsWorking {
+			rep.TSPUDetected = false
+			rep.DPIBlockedWireGuard = false
+			rep.TSPUDetails = "STUN-серверы недоступны (таймаут или фильтрация 3478), но UDP DNS (53) функционирует. Системной блокировки UDP не зафиксировано."
+		} else {
+			rep.TSPUDetected = true
+			rep.DPIBlockedWireGuard = true
+			rep.TSPUDetails = "Обнаружена фильтрация UDP (ТСПУ DPI / Корпоративный фаервол). Исходящий UDP сбрасывается, доступен только TCP 443."
+		}
 	} else if !tcp443OK && !rep.UDPEnabled {
 		rep.TSPUDetails = "Сетевой интерфейс не имеет выхода в Интернет или DNS/маршруты недоступны."
 	}

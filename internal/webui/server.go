@@ -486,7 +486,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/profiles/export", s.handleProfileExport)
 	mux.HandleFunc("/api/profiles/import", s.handleProfileImport)
 
-	handler := s.ipWhitelistMiddleware(s.corsMiddleware(s.csrfMiddleware(s.authMiddleware(mux))))
+	handler := s.hostValidationMiddleware(s.ipWhitelistMiddleware(s.corsMiddleware(s.csrfMiddleware(s.authMiddleware(mux)))))
 
 	// Ищем свободный порт, начиная с s.port (до +20 портов)
 	var listener net.Listener
@@ -497,8 +497,15 @@ func (s *Server) Start(ctx context.Context) error {
 		initialPort = 8080
 	}
 
+	listenIP := "127.0.0.1"
+	if s.cfg != nil && s.cfg.WebUI.ListenHost != "" {
+		listenIP = s.cfg.WebUI.ListenHost
+	} else if IsKeeneticOS() {
+		listenIP = "0.0.0.0"
+	}
+
 	for p := initialPort; p < initialPort+20; p++ {
-		listener, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", p))
+		listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", listenIP, p))
 		if err == nil {
 			s.port = p
 			break
@@ -506,7 +513,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	if listener == nil {
-		listener, err = net.Listen("tcp", "0.0.0.0:0")
+		listener, err = net.Listen("tcp", fmt.Sprintf("%s:0", listenIP))
 		if err != nil {
 			return fmt.Errorf("не удалось найти свободный порт для Web UI: %w", err)
 		}
@@ -578,10 +585,21 @@ func (s *Server) Start(ctx context.Context) error {
 
 // isAuthRequired checks if authentication is mandatory for this server instance.
 func (s *Server) isAuthRequired() bool {
+	// Если сервер слушает на всех интерфейсах (0.0.0.0 или LAN IP), авторизация строго обязательна!
+	if s.isExposedToLAN() {
+		return true
+	}
 	if runtime.GOOS == "windows" {
 		return s.password != "" || s.customAuth != nil
 	}
 	return s.password != "" || s.customAuth != nil || IsKeeneticOS()
+}
+
+func (s *Server) isExposedToLAN() bool {
+	if s.cfg != nil && s.cfg.WebUI.ListenHost != "" && s.cfg.WebUI.ListenHost != "127.0.0.1" && s.cfg.WebUI.ListenHost != "localhost" {
+		return true
+	}
+	return false
 }
 
 
@@ -719,8 +737,8 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 0. Разрешить локальный read-only опрос статуса, пиров, дашборда, топологии и скачивание логов (localhost 127.0.0.1 / ::1) для diag/CLI/WebUI
-		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck" || r.URL.Path == "/api/signaling/brokers" || r.URL.Path == "/api/signaling/broker/switch" || r.URL.Path == "/api/logs/download") && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
+		// 0. Разрешить локальный read-only опрос статуса, пиров, дашборда и топологии (localhost 127.0.0.1 / ::1) строго по GET
+		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck" || r.URL.Path == "/api/signaling/brokers" || r.URL.Path == "/api/logs/download") && r.Method == http.MethodGet {
 			if isDirectLoopback(r) {
 				next.ServeHTTP(w, r)
 				return
@@ -750,21 +768,80 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-
-
-// corsMiddleware — CORS заголовки
+// corsMiddleware — безопасные CORS заголовки (исключает wildcard * для защиты от CSRF/XSS)
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
-		w.Header().Set("Access-Control-Expose-Headers", "X-CSRF-Token")
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			// Разрешаем только доверенные локальные источники
+			if strings.HasPrefix(origin, "http://127.0.0.1") ||
+				strings.HasPrefix(origin, "http://localhost") ||
+				strings.HasPrefix(origin, "http://[::1]") ||
+				(IsKeeneticOS() && (strings.Contains(origin, ".keenetic.") || strings.HasPrefix(origin, "http://192.168."))) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+				w.Header().Set("Access-Control-Expose-Headers", "X-CSRF-Token")
+			}
+		}
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// hostValidationMiddleware проверяет заголовок Host для защиты от атак DNS Rebinding
+func (s *Server) hostValidationMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.TrimSpace(strings.ToLower(host))
+
+		// 1. Всегда разрешены стандартные loopback-хосты
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 2. На роутерах Keenetic разрешены внутренние домены Keenetic и частные IP
+		if IsKeeneticOS() {
+			if strings.HasSuffix(host, ".keenetic.net") || strings.HasSuffix(host, ".keenetic.pro") ||
+				strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "172.") {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// 3. Явно настроенный listenHost в конфиге
+		if s.cfg != nil && s.cfg.WebUI.ListenHost != "" && s.cfg.WebUI.ListenHost != "0.0.0.0" {
+			if strings.EqualFold(host, s.cfg.WebUI.ListenHost) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// 4. Разрешенные IP из белого списка
+		for _, allowed := range s.allowedIPs {
+			if strings.EqualFold(host, strings.TrimSpace(allowed)) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// Отклоняем недопустимый заголовок Host (защита от DNS Rebinding)
+		slog.Warn("Заблокирован запрос с неразрешенным Host-заголовком (DNS Rebinding protection)", "host", r.Host, "remote_addr", r.RemoteAddr, "path", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":    false,
+			"error": "Forbidden: invalid Host header (DNS Rebinding protection)",
+		})
 	})
 }
 
@@ -813,6 +890,17 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 		if s.state != nil {
 			myID = s.state.DeviceID
 		}
+		curCfg, _ := config.Load(s.configPath)
+		locAWG := wireguard.AWGParams{}
+		if curCfg != nil {
+			locAWG = curCfg.GetAWGParams()
+		}
+		myVIP := ""
+		if curCfg != nil && s.state != nil {
+			myVIP = config.ResolveVirtualIP(curCfg, s.state.DeviceID)
+		}
+		cleanMyVIP := strings.TrimSpace(strings.Split(myVIP, "/")[0])
+
 		peerIndex := 2
 		for _, p := range s.registry.List() {
 			if p == nil || p.DeviceID == "" {
@@ -847,10 +935,9 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 				p.PunchMethod = p.DeterminePunchMethod()
 			}
 
-			curCfg, _ := config.Load(s.configPath)
 			if p.VirtualIP == "" {
 				prefix := "100.64.200"
-				if myVIP := config.ResolveVirtualIP(curCfg, s.state.DeviceID); myVIP != "" {
+				if myVIP != "" {
 					prefix = config.ExtractSubnetPrefix(myVIP)
 				} else if curCfg != nil {
 					prefix = config.DeriveSubnetPrefixFromProfile(curCfg.EnsureActiveProfile())
@@ -861,9 +948,8 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 			// Проверка коллизии IP-адресов
 			p.IPConflict = false
-			if myVIP := config.ResolveVirtualIP(curCfg, s.state.DeviceID); myVIP != "" {
+			if myVIP != "" {
 				pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-				cleanMyVIP := strings.TrimSpace(strings.Split(myVIP, "/")[0])
 				if pVIP == cleanMyVIP && p.DeviceID != s.state.DeviceID {
 					p.IPConflict = true
 				}
@@ -871,23 +957,17 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 			// Проверка соответствия параметров AWG 3.1
 			p.AWGMismatch = false
-			if s.configPath != "" {
-				if curCfg, _ := config.Load(s.configPath); curCfg != nil {
-					loc := curCfg.GetAWGParams()
-					if p.AWG != nil && (p.AWG.H1 != "" || loc.H1 != 0) {
-						remH1 := parseAWGHeaderUint32(p.AWG.H1)
-						remH2 := parseAWGHeaderUint32(p.AWG.H2)
-						remH3 := parseAWGHeaderUint32(p.AWG.H3)
-						remH4 := parseAWGHeaderUint32(p.AWG.H4)
-						if remH1 != loc.H1 || remH2 != loc.H2 || remH3 != loc.H3 || remH4 != loc.H4 ||
-							p.AWG.S1 != loc.S1 || p.AWG.S2 != loc.S2 || p.AWG.Jc != loc.Jc ||
-							// Also check packet-framing flags — they affect AWG wire format
-							p.AWG.RandomTrailers != loc.RandomTrailers ||
-							p.AWG.DisableCookies != loc.DisableCookies ||
-							p.AWG.HeaderProtectionEnabled != loc.HeaderProtectionEnabled {
-							p.AWGMismatch = true
-						}
-					}
+			if p.AWG != nil && (p.AWG.H1 != "" || locAWG.H1 != 0) {
+				remH1 := parseAWGHeaderUint32(p.AWG.H1)
+				remH2 := parseAWGHeaderUint32(p.AWG.H2)
+				remH3 := parseAWGHeaderUint32(p.AWG.H3)
+				remH4 := parseAWGHeaderUint32(p.AWG.H4)
+				if remH1 != locAWG.H1 || remH2 != locAWG.H2 || remH3 != locAWG.H3 || remH4 != locAWG.H4 ||
+					p.AWG.S1 != locAWG.S1 || p.AWG.S2 != locAWG.S2 || p.AWG.Jc != locAWG.Jc ||
+					p.AWG.RandomTrailers != locAWG.RandomTrailers ||
+					p.AWG.DisableCookies != locAWG.DisableCookies ||
+					p.AWG.HeaderProtectionEnabled != locAWG.HeaderProtectionEnabled {
+					p.AWGMismatch = true
 				}
 			}
 			if !p.DirectP2P && !p.DirectTCP && p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" {
@@ -997,7 +1077,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.501"
+		ver = "1.9.502"
 	}
 
 	cfg, _ := config.Load(s.configPath)
@@ -1528,8 +1608,13 @@ func (s *Server) handleAWGConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			allowed := []string{peerVIP + "/32"}
 			for _, route := range p.AdvertisedRoutes {
-				if strings.TrimSpace(route) != "" {
-					allowed = append(allowed, strings.TrimSpace(route))
+				r := strings.TrimSpace(route)
+				if r != "" && r != "0.0.0.0/0" && r != "::/0" {
+					if _, ipNet, err := net.ParseCIDR(r); err == nil {
+						if ones, _ := ipNet.Mask.Size(); ones >= 8 {
+							allowed = append(allowed, r)
+						}
+					}
 				}
 			}
 			endpoint := p.ActiveEndpoint
@@ -1634,17 +1719,22 @@ func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
 		result["public_ip"] = check{Ok: false, Detail: "Внешний IP ещё не определён. Подождите несколько секунд."}
 	}
 
-	// Проверка STUN
+	// Проверка STUN и классификации NAT
 	stun := ""
 	if s.state != nil {
 		stun = s.state.STUNAddr
 	}
-	if stun != "" && stun != "Определяется..." {
+	if stun != "" && stun != "Определяется..." && !strings.Contains(stun, "Недоступен") {
 		result["stun"] = check{Ok: true, Detail: "STUN-адрес определён (возможен прямой P2P)", Extra: stun}
-		result["nat_type"] = check{Ok: true, Detail: "Возможен Full Cone NAT — P2P соединение доступно"}
+		if s.state != nil && s.state.NATType != "" {
+			isSym := strings.Contains(strings.ToLower(s.state.NATType), "symmetric") || strings.Contains(strings.ToLower(s.state.NATType), "симметричный")
+			result["nat_type"] = check{Ok: !isSym, Detail: s.state.NATType}
+		} else {
+			result["nat_type"] = check{Ok: true, Detail: "STUN ответил, выполняется классификация NAT (RFC 5780)"}
+		}
 	} else {
-		result["stun"] = check{Ok: false, Detail: "STUN-адрес не определён (симметричный NAT)."}
-		result["nat_type"] = check{Ok: false, Detail: "Симметричный NAT или CGNAT — используется MQTT relay-канал"}
+		result["stun"] = check{Ok: false, Detail: "STUN-адрес не определён (блокировка UDP или симметричный NAT)."}
+		result["nat_type"] = check{Ok: false, Detail: "Симметричный NAT или блокировка UDP — используется Relay (TCP/MQTT)"}
 	}
 
 	// Проверка сигнального канала
@@ -2182,14 +2272,10 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	throughputStr := "—"
 	throughputKB := 0
-	if p2pActive > 0 {
-		throughputKB = p2pActive * 16
-		throughputStr = fmt.Sprintf("%d KB/s", throughputKB)
-	}
 
 	ver := s.version
 	if ver == "" {
-		ver = "1.9.501"
+		ver = "1.9.502"
 	}
 
 	vip := s.state.VirtualIP
@@ -2225,6 +2311,15 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		natType = "📡 Relay mode (Порт закрыт)"
 	}
 
+	meshHealthScore := 100.0
+	if totalPeers > 0 {
+		// Динамический расчет надежности mesh: P2P дает 100%, Relay — 60%, недоступные — 0%
+		p2pRatio := float64(p2pActive) / float64(totalPeers)
+		relayCount := totalPeers - p2pActive
+		relayRatio := float64(relayCount) / float64(totalPeers)
+		meshHealthScore = float64(int((p2pRatio*100.0+relayRatio*60.0)*10)) / 10.0
+	}
+
 	data := map[string]interface{}{
 		"version":             ver,
 		"pid":                 os.Getpid(),
@@ -2238,7 +2333,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"p2p_active":        p2pActive,
 		"exit_nodes_count":  exitNodesCount,
 		"avg_latency_ms":    avgLatency,
-		"mesh_health_score": 100.0,
+		"mesh_health_score": meshHealthScore,
 		"uptime":            uptimeStr,
 		"channel":           channelName,
 		"public_ip":         pubIP,
@@ -2657,6 +2752,20 @@ func (s *Server) handleAWGParams(w http.ResponseWriter, r *http.Request) {
 		if h2, err := strconv.ParseUint(req.H2, 10, 32); err == nil { cfg.WireGuard.AWG.H2 = uint32(h2) }
 		if h3, err := strconv.ParseUint(req.H3, 10, 32); err == nil { cfg.WireGuard.AWG.H3 = uint32(h3) }
 		if h4, err := strconv.ParseUint(req.H4, 10, 32); err == nil { cfg.WireGuard.AWG.H4 = uint32(h4) }
+
+		// Синхронизируем также с активным профилем, чтобы SyncSignalingWithProfile не затирал изменения при перезагрузке
+		if active := cfg.EnsureActiveProfile(); active != nil {
+			active.Jc = req.Jc
+			active.Jmin = req.Jmin
+			active.Jmax = req.Jmax
+			active.S1 = req.S1
+			active.S2 = req.S2
+			if cfg.WireGuard.AWG.H1 != 0 { active.H1 = cfg.WireGuard.AWG.H1 }
+			if cfg.WireGuard.AWG.H2 != 0 { active.H2 = cfg.WireGuard.AWG.H2 }
+			if cfg.WireGuard.AWG.H3 != 0 { active.H3 = cfg.WireGuard.AWG.H3 }
+			if cfg.WireGuard.AWG.H4 != 0 { active.H4 = cfg.WireGuard.AWG.H4 }
+		}
+
 		_ = config.Save(cfg, s.configPath, true)
 	}
 	s.AddEvent("info", "Параметры AmneziaWG 2.0 обновлены", fmt.Sprintf("Jc=%d S1=%d S2=%d", req.Jc, req.S1, req.S2))
@@ -3433,8 +3542,8 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		H3                  uint32 `json:"h3"`
 		H4                  uint32 `json:"h4"`
 		HeaderProtectionKey string `json:"header_protection_key"`
-		RandomTrailers      bool   `json:"random_trailers"`
-		DisableCookies      bool   `json:"disable_cookies"`
+		RandomTrailers      *bool  `json:"random_trailers"`
+		DisableCookies      *bool  `json:"disable_cookies"`
 		TCPPort             int    `json:"tcp_port"`
 		TransportMode       string `json:"transport_mode"`
 		TLSMode             string `json:"tls_mode"`
@@ -3455,12 +3564,15 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.NetworkKey == "" {
 		req.NetworkKey = config.GenerateRandomHex(16)
+	} else if len(strings.TrimSpace(req.NetworkKey)) < 16 {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "Ключ сети должен содержать не менее 16 символов (≥128 бит энтропии) для защиты от офлайн-перебора")
+		return
 	}
 	if req.MQTTTopic == "" {
 		req.MQTTTopic = crypto.DeriveBaseTopic(req.NetworkKey, "")
 	}
 	if req.MQTTBroker == "" {
-		req.MQTTBroker = "tcp://broker.emqx.io:1883"
+		req.MQTTBroker = "ssl://broker.emqx.io:8883"
 	}
 	if req.AWGPreset == "" {
 		req.AWGPreset = "awg31_strict"
@@ -3469,6 +3581,15 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	jc, jmin, jmax, s1, s2, h1, h2, h3, h4, hpKey := req.Jc, req.Jmin, req.Jmax, req.S1, req.S2, req.H1, req.H2, req.H3, req.H4, req.HeaderProtectionKey
 	if h1 == 0 {
 		jc, jmin, jmax, s1, s2, h1, h2, h3, h4, hpKey = config.GenerateRandomAWGProfileParams()
+	}
+
+	rtVal := true
+	if req.RandomTrailers != nil {
+		rtVal = *req.RandomTrailers
+	}
+	dcVal := true
+	if req.DisableCookies != nil {
+		dcVal = *req.DisableCookies
 	}
 
 	newProf := config.Profile{
@@ -3495,8 +3616,8 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 		H3:                  h3,
 		H4:                  h4,
 		HeaderProtectionKey: hpKey,
-		RandomTrailers:      req.RandomTrailers || true,
-		DisableCookies:      req.DisableCookies || true,
+		RandomTrailers:      rtVal,
+		DisableCookies:      dcVal,
 		TCPPort:             req.TCPPort,
 		TransportMode:       req.TransportMode,
 		TLSMode:             req.TLSMode,
@@ -3548,6 +3669,7 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID                  string `json:"id"`
 		Name                string `json:"name"`
+		NetworkKey          string `json:"network_key"`
 		MQTTBroker          string `json:"mqtt_broker"`
 		MQTTTopic           string `json:"mqtt_topic"`
 		MQTTUser            string `json:"mqtt_user"`
@@ -3567,8 +3689,8 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 		H3                  uint32 `json:"h3"`
 		H4                  uint32 `json:"h4"`
 		HeaderProtectionKey string `json:"header_protection_key"`
-		RandomTrailers      bool   `json:"random_trailers"`
-		DisableCookies      bool   `json:"disable_cookies"`
+		RandomTrailers      *bool  `json:"random_trailers"`
+		DisableCookies      *bool  `json:"disable_cookies"`
 		TCPPort             int    `json:"tcp_port"`
 		TransportMode       string `json:"transport_mode"`
 		TLSMode             string `json:"tls_mode"`
@@ -3610,6 +3732,17 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.Name != "" {
 		target.Name = req.Name
 	}
+	if req.NetworkKey != "" {
+		cleanKey := strings.TrimSpace(req.NetworkKey)
+		if len(cleanKey) < 16 {
+			s.jsonResponse(w, http.StatusBadRequest, nil, "Ключ сети должен содержать не менее 16 символов (≥128 бит энтропии) для защиты от офлайн-перебора")
+			return
+		}
+		target.NetworkKey = cleanKey
+		if req.MQTTTopic == "" {
+			target.MQTTTopic = crypto.DeriveBaseTopic(cleanKey, "")
+		}
+	}
 	if req.MQTTBroker != "" {
 		target.MQTTBroker = req.MQTTBroker
 	}
@@ -3636,6 +3769,42 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AWGPreset != "" {
 		target.AWGPreset = req.AWGPreset
+	}
+	if req.Jc > 0 {
+		target.Jc = req.Jc
+	}
+	if req.Jmin > 0 {
+		target.Jmin = req.Jmin
+	}
+	if req.Jmax > 0 {
+		target.Jmax = req.Jmax
+	}
+	if req.S1 > 0 {
+		target.S1 = req.S1
+	}
+	if req.S2 > 0 {
+		target.S2 = req.S2
+	}
+	if req.H1 != 0 {
+		target.H1 = req.H1
+	}
+	if req.H2 != 0 {
+		target.H2 = req.H2
+	}
+	if req.H3 != 0 {
+		target.H3 = req.H3
+	}
+	if req.H4 != 0 {
+		target.H4 = req.H4
+	}
+	if req.HeaderProtectionKey != "" {
+		target.HeaderProtectionKey = req.HeaderProtectionKey
+	}
+	if req.RandomTrailers != nil {
+		target.RandomTrailers = *req.RandomTrailers
+	}
+	if req.DisableCookies != nil {
+		target.DisableCookies = *req.DisableCookies
 	}
 	if req.TCPPort > 0 {
 		target.TCPPort = req.TCPPort
