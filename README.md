@@ -161,6 +161,67 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/insta
 
 Панель управления будет доступна по адресу: `http://<IP_УСТРОЙСТВА>:8080`.
 
+### 🗑️ Удаление и сброс конфигурации (Linux / Keenetic / OpenWrt)
+
+#### 1. Полное удаление программы со всеми файлами и ключами:
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh -s -- --purge
+```
+*(Скрипт автоматически остановит службу, удалит бинарники, автозапуск, логи, профили и ключи WireGuard)*.
+
+Если нужно удалить программу, но **сохранить конфигурацию** для будущей повторной установки:
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh
+```
+
+#### 2. Очистка и сброс конфигурации (Без удаления программы):
+Если нужно очистить настройки, сгенерировать новый DeviceID и чистую пару WireGuard-ключей:
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh -s -- --reset-config
+```
+
+#### 3. Ручное удаление или сброс (без интернета):
+* **Роутеры Keenetic (Entware):**
+  ```bash
+  # Полное удаление:
+  /opt/etc/init.d/S99natbypass stop
+  rm -f /opt/etc/init.d/S99natbypass /opt/bin/natbypass /opt/usr/bin/natbypass
+  rm -rf /opt/etc/natbypass /opt/var/log/natbypass.log
+  killall natbypass 2>/dev/null || true
+
+  # Только сброс конфигурации:
+  /opt/etc/init.d/S99natbypass stop
+  rm -rf /opt/etc/natbypass/*
+  /opt/etc/init.d/S99natbypass start
+  ```
+* **Серверы Linux (systemd):**
+  ```bash
+  # Полное удаление:
+  systemctl stop natbypass && systemctl disable natbypass
+  rm -f /etc/systemd/system/natbypass.service && systemctl daemon-reload
+  rm -f /usr/local/bin/natbypass /usr/bin/natbypass
+  rm -rf /etc/natbypass /var/log/natbypass.log
+  killall natbypass 2>/dev/null || true
+
+  # Только сброс конфигурации:
+  systemctl stop natbypass
+  rm -rf /etc/natbypass/*
+  systemctl start natbypass
+  ```
+* **Роутеры OpenWrt:**
+  ```bash
+  # Полное удаление:
+  /etc/init.d/natbypass stop && /etc/init.d/natbypass disable
+  rm -f /etc/init.d/natbypass /usr/bin/natbypass
+  rm -rf /etc/natbypass
+  killall natbypass 2>/dev/null || true
+
+  # Только сброс конфигурации:
+  /etc/init.d/natbypass stop
+  rm -rf /etc/natbypass/*
+  /etc/init.d/natbypass start
+  ```
+
 ---
 
 ## 🛡️ AmneziaWG (Защита от ТСПУ / DPI)

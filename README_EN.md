@@ -144,6 +144,66 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/insta
 
 Web Management UI will be accessible at: `http://<DEVICE_IP>:8080`.
 
+### 🗑️ Uninstallation & Configuration Reset (Linux / Keenetic / OpenWrt)
+
+#### 1. Complete Uninstallation (Purge all files, services & keys):
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh -s -- --purge
+```
+
+To remove the binaries and service while **keeping your configuration and keys**:
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh
+```
+
+#### 2. Reset Configuration Only (Keep service and binaries):
+To generate a brand new DeviceID, fresh WireGuard keys, and restore default profiles:
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh -s -- --reset-config
+```
+
+#### 3. Manual Removal / Reset (Offline):
+* **Keenetic Routers (Entware):**
+  ```bash
+  # Complete removal:
+  /opt/etc/init.d/S99natbypass stop
+  rm -f /opt/etc/init.d/S99natbypass /opt/bin/natbypass /opt/usr/bin/natbypass
+  rm -rf /opt/etc/natbypass /opt/var/log/natbypass.log
+  killall natbypass 2>/dev/null || true
+
+  # Reset configuration only:
+  /opt/etc/init.d/S99natbypass stop
+  rm -rf /opt/etc/natbypass/*
+  /opt/etc/init.d/S99natbypass start
+  ```
+* **Linux Servers (systemd):**
+  ```bash
+  # Complete removal:
+  systemctl stop natbypass && systemctl disable natbypass
+  rm -f /etc/systemd/system/natbypass.service && systemctl daemon-reload
+  rm -f /usr/local/bin/natbypass /usr/bin/natbypass
+  rm -rf /etc/natbypass /var/log/natbypass.log
+  killall natbypass 2>/dev/null || true
+
+  # Reset configuration only:
+  systemctl stop natbypass
+  rm -rf /etc/natbypass/*
+  systemctl start natbypass
+  ```
+* **OpenWrt Routers:**
+  ```bash
+  # Complete removal:
+  /etc/init.d/natbypass stop && /etc/init.d/natbypass disable
+  rm -f /etc/init.d/natbypass /usr/bin/natbypass
+  rm -rf /etc/natbypass
+  killall natbypass 2>/dev/null || true
+
+  # Reset configuration only:
+  /etc/init.d/natbypass stop
+  rm -rf /etc/natbypass/*
+  /etc/init.d/natbypass start
+  ```
+
 ---
 
 ## 🛡️ AmneziaWG (DPI Obfuscation)

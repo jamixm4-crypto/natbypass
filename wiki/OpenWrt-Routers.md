@@ -1,4 +1,4 @@
-﻿# 📡 Установка NatBypass на роутеры OpenWrt
+# 📡 Установка NatBypass на роутеры OpenWrt
 
 NatBypass совместим с роутерами на базе **OpenWrt** (архитектуры MIPS, MIPSLE, ARM, ARM64, x86).
 
@@ -26,3 +26,54 @@ NatBypass совместим с роутерами на базе **OpenWrt** (а
 Для свободного доступа ко всей домашней сети через роутер:
 1. В веб-интерфейсе OpenWrt (LuCI) перейдите в **Сеть ➔ Брандмауэр**.
 2. Добавьте интерфейс `natbypass` (или `tun0`) в зону **LAN**.
+
+---
+
+## 🗑️ Полное удаление NatBypass с OpenWrt
+
+### Способ 1: Автоматическое удаление через скрипт
+```sh
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh -s -- --purge
+```
+
+Если вы хотите удалить бинарники, но **сохранить конфигурацию и ключи**:
+```sh
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh
+```
+
+### Способ 2: Ручное удаление через SSH
+```sh
+# 1. Остановить и отключить службу procd
+/etc/init.d/natbypass stop
+/etc/init.d/natbypass disable
+
+# 2. Удалить скрипт службы и бинарник
+rm -f /etc/init.d/natbypass /usr/bin/natbypass /usr/local/bin/natbypass
+
+# 3. Удалить директорию конфигурации и логов
+rm -rf /etc/natbypass /var/log/natbypass.log /var/run/natbypass.pid
+
+# 4. Завершить процесс
+killall natbypass 2>/dev/null || true
+```
+
+---
+
+## 🧹 Очистка и сброс конфигурации (Без удаления программы)
+
+### Способ 1: В 1 команду через скрипт
+```sh
+curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh -s -- --reset-config
+```
+
+### Способ 2: Вручную через SSH
+```sh
+# 1. Остановить службу
+/etc/init.d/natbypass stop
+
+# 2. Очистить конфигурацию
+rm -rf /etc/natbypass/*
+
+# 3. Запустить службу (создастся чистая конфигурация)
+/etc/init.d/natbypass start
+```
