@@ -117,7 +117,7 @@ func (s *SymmetricNATSession) Run(ctx context.Context) string {
 		// Step 3: Build candidate remote port list from the fingerprinted CGNAT profile
 		candidates := s.puncher.candidatePorts(s.basePort)
 
-		// Step 4: Spray probes to all candidates
+		// Step 4: Spray probes to all candidates using single direct probes with micro-pacing (anti-flood)
 	hopDone:
 		for _, port := range candidates {
 			select {
@@ -126,14 +126,15 @@ func (s *SymmetricNATSession) Run(ctx context.Context) string {
 			default:
 			}
 			addr := fmt.Sprintf("%s:%d", s.targetIP, port)
-			_ = s.puncher.SendHolePunchProbe(addr)
+			_ = s.puncher.SendDirectSingleProbe(addr)
+			time.Sleep(3 * time.Millisecond)
 		}
 
 		// Also probe using our own new mapped port as a hint
 		// (symmetric NAT often assigns symmetric port on both sides)
 		if myPort > 0 && myPort != s.basePort {
 			addr := fmt.Sprintf("%s:%d", s.targetIP, myPort)
-			_ = s.puncher.SendHolePunchProbe(addr)
+			_ = s.puncher.SendDirectSingleProbe(addr)
 		}
 
 		// Wait between hops or for early success

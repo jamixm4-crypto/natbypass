@@ -86,6 +86,9 @@ type NetworkConfig struct {
 	EnableRelayServer bool `mapstructure:"enable_relay_server" yaml:"enable_relay_server" json:"enable_relay_server"`
 	// RelayQuotaGBDay — квота релея в ГБ/сутки (по умолчанию 5 ГБ, 0 = без ограничений)
 	RelayQuotaGBDay int `mapstructure:"relay_quota_gb_day" yaml:"relay_quota_gb_day,omitempty" json:"relay_quota_gb_day,omitempty"`
+	// EnableLANBroadcast — явный opt-in: разрешить периодический анонс на 255.255.255.255 для поиска в LAN.
+	// По умолчанию false, чтобы не засорять Wi-Fi/LAN бродкастами и не вызывать блокировок в сотовых/корпоративных сетях.
+	EnableLANBroadcast bool `mapstructure:"enable_lan_broadcast" yaml:"enable_lan_broadcast" json:"enable_lan_broadcast"`
 }
 
 // ChannelConfig — настройки одного сигнального канала

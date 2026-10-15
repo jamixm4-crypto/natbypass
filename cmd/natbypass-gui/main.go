@@ -107,7 +107,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 
 
 var (
-	Version = "1.9.502"
+	Version = "1.9.503"
 	Commit  = "release"
 )
 
@@ -5924,8 +5924,12 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 		}
 	}()
 
-	// 2. Периодическая отправка анонса в локальную сеть каждые 30 секунд (не 4 с — чтобы не перегружать роутер)
+	// 2. Периодическая отправка анонса в локальную сеть (только если явно включено: enable_lan_broadcast)
 	go func() {
+		if cfg == nil || !cfg.Network.EnableLANBroadcast {
+			writeDebug("🏠 LAN Discovery: периодический бродкаст 255.255.255.255 отключен (защита от флуда)")
+			return
+		}
 		ticker := time.NewTicker(120 * time.Second)
 		defer ticker.Stop()
 		for {

@@ -608,5 +608,62 @@ func TestCarrierASNRules(t *testing.T) {
 	}
 }
 
+func TestSendDirectSingleProbe_NoAmplification(t *testing.T) {
+	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("failed to listen on udp: %v", err)
+	}
+	defer listener.Close()
+
+	p, err := NewUDPPuncher(0, "test-single-probe", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	p.natTypeMu.Lock()
+	p.NATType = NATTypeSymmetric
+	p.portDelta = 2
+	p.natTypeMu.Unlock()
+
+	targetAddr := listener.LocalAddr().String()
+	if err := p.SendDirectSingleProbe(targetAddr); err != nil {
+		t.Fatalf("SendDirectSingleProbe failed: %v", err)
+	}
+
+	buf := make([]byte, 1024)
+	_ = listener.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	n, _, err := listener.ReadFrom(buf)
+	if err != nil {
+		t.Fatalf("failed to receive probe: %v", err)
+	}
+	if n <= 0 {
+		t.Fatalf("received 0 bytes")
+	}
+
+	_ = listener.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_, _, extraErr := listener.ReadFrom(buf)
+	if extraErr == nil {
+		t.Fatalf("expected exactly 1 probe packet, but received additional packets (amplification bug!)")
+	}
+}
+
+func TestCandidatePortsAdvanced_MaxCandidateLimit(t *testing.T) {
+	p, err := NewUDPPuncher(0, "test-cap", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create puncher: %v", err)
+	}
+	defer p.Close()
+
+	profPBA := CGNATProfile{
+		BlockSize: 512,
+		BlockBase: 20000,
+	}
+	candidates := p.CandidatePortsAdvanced(20100, nil, profPBA, 1)
+	if len(candidates) > MaxCandidatePorts {
+		t.Fatalf("expected candidate ports capped at %d, got %d", MaxCandidatePorts, len(candidates))
+	}
+}
+
 
 

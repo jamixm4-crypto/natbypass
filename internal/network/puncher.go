@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -984,6 +985,9 @@ func (p *UDPPuncher) CandidatePortsAdvanced(base int, samples []int, prof CGNATP
 			add(port)
 		}
 		if len(ports) > 1 {
+			if len(ports) > MaxCandidatePorts {
+				ports = capPortsAroundBase(ports, base, MaxCandidatePorts)
+			}
 			return ports
 		}
 	}
@@ -1032,10 +1036,15 @@ func (p *UDPPuncher) CandidatePortsAdvanced(base int, samples []int, prof CGNATP
 		}
 	}
 
+	if len(ports) > MaxCandidatePorts {
+		ports = capPortsAroundBase(ports, base, MaxCandidatePorts)
+	}
 	return ports
 }
 
 const (
+	// MaxCandidatePorts: максимальное количество портов для зондирования за один цикл (защита от перегрузки сети)
+	MaxCandidatePorts = 32
 	// WideSymmetricSweepRadius: ±N ports around the base for random-delta Symmetric NAT (reduced to 16 to avoid CGNAT port scan bans)
 	WideSymmetricSweepRadius = 16
 	// SymmetricNATMaxHops: maximum HopPort() cycles in one session
@@ -1043,6 +1052,32 @@ const (
 	// SymmetricNATHopDelay: time between HopPort cycles (allow NAT state to settle)
 	SymmetricNATHopDelay = 800 * time.Millisecond
 )
+
+func capPortsAroundBase(ports []int, base int, maxCount int) []int {
+	if len(ports) <= maxCount {
+		return ports
+	}
+	type portDist struct {
+		port int
+		dist int
+	}
+	dists := make([]portDist, len(ports))
+	for i, pt := range ports {
+		d := pt - base
+		if d < 0 {
+			d = -d
+		}
+		dists[i] = portDist{port: pt, dist: d}
+	}
+	sort.Slice(dists, func(i, j int) bool {
+		return dists[i].dist < dists[j].dist
+	})
+	res := make([]int, maxCount)
+	for i := 0; i < maxCount; i++ {
+		res[i] = dists[i].port
+	}
+	return res
+}
 
 const (
 	QUICVersion1   = uint32(0x00000001)
@@ -1473,6 +1508,13 @@ func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta in
 		}
 	}
 
+	// IPv6 Stateful Firewall Pinholing:
+	// На IPv6 нет трансляции адресов/портов (нет NAT). Достаточно одного направленного пакета на точный порт пира,
+	// чтобы открыть сессию в conntrack оператора сотовой связи. Дальнейшее сканирование портов на IPv6 не требуется!
+	if rAddr.IP != nil && rAddr.IP.To4() == nil {
+		return nil
+	}
+
 	// 2. Сбор уникальных портов для зондирования без дублирования (максимум 24-28 портов на зонд)
 	probedPorts := map[int]bool{rAddr.Port: true}
 	var targetPorts []int
@@ -1508,14 +1550,52 @@ func (p *UDPPuncher) SendHolePunchProbeWithDelta(targetAddr string, peerDelta in
 		}
 	}
 
-	// 3. Отправка дополнительных зондов с микро-пейсингом (1 мс), защищающим от DDoS-фильтров CGNAT
+	// 3. Отправка дополнительных зондов с микро-пейсингом (3 мс), защищающим от DDoS-фильтров CGNAT и перегрузки сотового канала
 	targetIP := rAddr.IP
 	for _, port := range targetPorts {
 		sendToAddr(&net.UDPAddr{IP: targetIP, Port: port}, false)
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(3 * time.Millisecond)
 	}
 
 	return nil
+}
+
+// SendDirectSingleProbe sends exactly ONE UDP probe packet directly to targetAddr without port expansion or cascading sweeps.
+// This is critical for Symmetric NAT sessions, Birthday Paradox probing, and cellular networks to prevent packet flooding ($O(N^2)$).
+func (p *UDPPuncher) SendDirectSingleProbe(targetAddr string) error {
+	if p.IsProbesDisabled() {
+		return nil
+	}
+	if targetAddr == "" || p.conn == nil {
+		return nil
+	}
+	rAddr, err := p.resolveAddr(targetAddr)
+	if err != nil {
+		return err
+	}
+	if p.IsForceIPv6Only() && rAddr.IP != nil && rAddr.IP.To4() != nil {
+		return nil
+	}
+
+	nowNano := time.Now().UnixNano()
+	probeData := []byte(fmt.Sprintf("%s%s:%d", constants.PingPrefix, p.myDevID, nowNano))
+
+	p.cipherMu.RLock()
+	cKey := p.cipherKey
+	hasCKey := p.hasCipherKey
+	p.cipherMu.RUnlock()
+
+	var packetToSend []byte = probeData
+	if hasCKey {
+		if qProbe, err := BuildQUICChameleonProbe(p.myDevID, cKey); err == nil && len(qProbe) > 0 {
+			packetToSend = qProbe
+		} else if enc, err := crypto.EncryptSelf(probeData, cKey); err == nil && len(enc) > 0 {
+			packetToSend = enc
+		}
+	}
+
+	_, err = p.writeToUDP(packetToSend, rAddr)
+	return err
 }
 
 // SendHolePunchProbe sends a hole punch probe using default/observed delta.
