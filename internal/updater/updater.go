@@ -263,7 +263,7 @@ func checkUpdateFromGitHub(ctx context.Context, currentVersion string, includePr
 	req.Header.Set("User-Agent", "NatBypass-Updater/"+currentVersion)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	client := &http.Client{Timeout: 8 * time.Second}
+	client := NewUpdaterHTTPClient(8 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка запроса к GitHub API: %w", err)
@@ -681,7 +681,7 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	}
 	// Fallback mirrors: для любых файлов с GitHub всегда добавляем скоростные зеркала ghproxy (актуально для РФ)
 	if strings.Contains(assetURL, "github.com/"+GithubRepo+"/releases/download/") {
-		for _, proxyPrefix := range []string{"https://ghproxy.net/", "https://gh-proxy.com/", "https://ghproxy.cc/", "https://mirror.ghproxy.com/"} {
+		for _, proxyPrefix := range []string{"https://gh-proxy.com/", "https://ghfast.top/", "https://ghproxy.net/"} {
 			proxyURL := proxyPrefix + assetURL
 			alreadyIn := false
 			for _, u := range downloadURLs {
@@ -819,7 +819,7 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 		return fmt.Errorf("failed to create Ed25519 signature request: %w", sErr)
 	}
 	sigReq.Header.Set("User-Agent", "NatBypass-Updater")
-	sigClient := &http.Client{Timeout: 20 * time.Second}
+	sigClient := NewUpdaterHTTPClient(20 * time.Second)
 	sigResp, err := sigClient.Do(sigReq)
 	if err != nil || sigResp.StatusCode != http.StatusOK {
 		_ = os.Remove(tmpPath)

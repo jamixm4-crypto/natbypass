@@ -81,16 +81,7 @@ func DownloadFile(ctx context.Context, rawURL string, destPath string, cfg Downl
 		cfg.RequestTimeout = 45 * time.Second
 	}
 
-	client := &http.Client{
-		Timeout: 2 * time.Minute,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("stopped after 10 redirects")
-			}
-			req.Header.Set("User-Agent", "NatBypass-Updater")
-			return nil
-		},
-	}
+	client := NewUpdaterHTTPClient(2 * time.Minute)
 
 	// 1. Probe: Проверяем размер файла и поддержку Range через GET с Range: bytes=0-0
 	// (Многие CDN и прокси блокируют HEAD, поэтому GET Range: bytes=0-0 надёжнее на 100%)
@@ -122,7 +113,10 @@ func DownloadFile(ctx context.Context, rawURL string, destPath string, cfg Downl
 
 // probeServerCapabilities определяет размер ресурса и поддержку Range: bytes
 func probeServerCapabilities(ctx context.Context, client *http.Client, targetURL string) (int64, bool, string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
+	probeCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(probeCtx, "GET", targetURL, nil)
 	if err != nil {
 		return 0, false, targetURL, err
 	}
@@ -185,11 +179,8 @@ func downloadMultiThreaded(
 	}
 	defer out.Close()
 
-	// Преаллокация дискового пространства для устранения фрагментации ФС при параллельной записи
-	if err := out.Truncate(totalSize); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("truncate dest file to %d bytes: %w", totalSize, err)
-	}
+	// Преаллокация дискового пространства (если ФС роутера поддерживает truncate)
+	_ = out.Truncate(totalSize)
 
 	// Разбиваем файл на сегменты
 	chunkSize := totalSize / int64(numWorkers)

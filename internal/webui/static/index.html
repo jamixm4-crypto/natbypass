@@ -18,22 +18,123 @@
   <meta name="theme-color" content="#07090e">
   <!-- Zero-latency high-performance local system fonts -->
   <style>
-    :root {
-      --bg-space: #07090e;
-      --bg-workspace: #0b0f19;
-      --bg-sidebar: #0e121d;
-      --border-grid: rgba(255, 255, 255, 0.04);
-      --glass-bg: rgba(18, 24, 38, 0.65);
-      --glass-hover: rgba(25, 34, 54, 0.85);
-      --glass-border: rgba(168, 85, 247, 0.25);
-      --glass-glow: 0 0 30px rgba(168, 85, 247, 0.15), inset 0 0 20px rgba(56, 189, 248, 0.08);
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --text-dim: #64748b;
-      --accent-purple: #c084fc;
-      --accent-cyan: #38bdf8;
-      --success: #10b981;
+    :root, [data-theme="dark"] {
+      --pc-bg: #07090e;
+      --pc-workspace: #0b0f19;
+      --pc-sidebar: #0e121d;
+      --pc-card-bg: #131927;
+      --pc-card-elevated: #1a2336;
+      --pc-glass-bg: rgba(18, 24, 38, 0.72);
+      --pc-glass-hover: rgba(25, 34, 54, 0.88);
+      --pc-glass-border: rgba(99, 102, 241, 0.25);
+      --pc-glass-glow: 0 0 24px rgba(99, 102, 241, 0.12), inset 0 0 16px rgba(56, 189, 248, 0.06);
+      --pc-border: rgba(255, 255, 255, 0.08);
+      --pc-border-grid: rgba(255, 255, 255, 0.035);
+      --pc-text: #f8fafc;
+      --pc-text-muted: #94a3b8;
+      --pc-text-dim: #64748b;
+      --pc-primary: #6366f1;
+      --pc-primary-hover: #818cf8;
+      --pc-accent: #38bdf8;
+      --pc-success: #10b981;
+      --pc-warning: #f59e0b;
+      --pc-danger: #ef4444;
+      --pc-input-bg: rgba(13, 19, 32, 0.9);
+      --pc-input-border: rgba(255, 255, 255, 0.12);
+
+      /* Compatibility bindings */
+      --bg-space: var(--pc-bg);
+      --bg-workspace: var(--pc-workspace);
+      --bg-sidebar: var(--pc-sidebar);
+      --border-grid: var(--pc-border-grid);
+      --glass-bg: var(--pc-glass-bg);
+      --glass-hover: var(--pc-glass-hover);
+      --glass-border: var(--pc-glass-border);
+      --glass-glow: var(--pc-glass-glow);
+      --text-main: var(--pc-text);
+      --text-muted: var(--pc-text-muted);
+      --text-dim: var(--pc-text-dim);
+      --accent-purple: var(--pc-primary);
+      --accent-cyan: var(--pc-accent);
+      --success: var(--pc-success);
     }
+
+    [data-theme="light"] {
+      --pc-bg: #eef2f6;
+      --pc-workspace: #f8fafc;
+      --pc-sidebar: #e2e8f0;
+      --pc-card-bg: #ffffff;
+      --pc-card-elevated: #f1f5f9;
+      --pc-glass-bg: rgba(255, 255, 255, 0.92);
+      --pc-glass-hover: rgba(248, 250, 252, 0.98);
+      --pc-glass-border: rgba(99, 102, 241, 0.3);
+      --pc-glass-glow: 0 4px 20px rgba(15, 23, 42, 0.06);
+      --pc-border: #cbd5e1;
+      --pc-border-grid: rgba(15, 23, 42, 0.04);
+      --pc-text: #0f172a;
+      --pc-text-muted: #475569;
+      --pc-text-dim: #64748b;
+      --pc-primary: #4f46e5;
+      --pc-primary-hover: #4338ca;
+      --pc-accent: #0284c7;
+      --pc-success: #059669;
+      --pc-warning: #d97706;
+      --pc-danger: #dc2626;
+      --pc-input-bg: #ffffff;
+      --pc-input-border: #cbd5e1;
+
+      --bg-space: var(--pc-bg);
+      --bg-workspace: var(--pc-workspace);
+      --bg-sidebar: var(--pc-sidebar);
+      --border-grid: var(--pc-border-grid);
+      --glass-bg: var(--pc-glass-bg);
+      --glass-hover: var(--pc-glass-hover);
+      --glass-border: var(--pc-glass-border);
+      --glass-glow: var(--pc-glass-glow);
+      --text-main: var(--pc-text);
+      --text-muted: var(--pc-text-muted);
+      --text-dim: var(--pc-text-dim);
+      --accent-purple: var(--pc-primary);
+      --accent-cyan: var(--pc-accent);
+      --success: var(--pc-success);
+    }
+
+    /* Tabular numbers across networking metrics and tables */
+    .mono, table, .metric-val, .metric-sub, .badge, .counter, #topCpuVal, #topRamVal, #topVipLabel {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1;
+    }
+
+    /* Tactile physics-based micro-interactions */
+    .btn, .glow-pill, .btn-pill, .seg-btn, .nav-item, .brand-btn {
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+    .btn:active, .btn-pill:active, .glow-pill:active, .seg-btn:active {
+      transform: scale(0.97) !important;
+    }
+
+    /* Light mode element overrides */
+    [data-theme="light"] ::-webkit-scrollbar-track { background: rgba(226, 232, 240, 0.6); }
+    [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.4); }
+    [data-theme="light"] .topbar { background: rgba(248, 250, 252, 0.96) !important; border-bottom: 1px solid rgba(203, 213, 225, 0.8) !important; }
+    [data-theme="light"] .glass-card { background: var(--pc-card-bg); border-color: rgba(203, 213, 225, 0.85); box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05); }
+    [data-theme="light"] table th { background: rgba(241, 245, 249, 0.95); color: #334155; }
+    [data-theme="light"] table td { border-bottom-color: rgba(226, 232, 240, 0.8); color: #0f172a; }
+    [data-theme="light"] .form-input, [data-theme="light"] .form-select { background: #ffffff; color: #0f172a; border-color: #cbd5e1; }
+    [data-theme="light"] .metric-val { color: #0f172a; text-shadow: none; }
+    [data-theme="light"] .sidebar { border-right-color: #cbd5e1; }
+    [data-theme="light"] .nav-item { color: #64748b; }
+    [data-theme="light"] .nav-item:hover { color: #0f172a; background: rgba(0, 0, 0, 0.05); }
+    [data-theme="light"] .nav-item.active { color: #ffffff; background: var(--pc-primary); }
+    [data-theme="light"] .nav-item::after { background: #0f172a; color: #ffffff; }
+    [data-theme="light"] .user-pill { background: rgba(255, 255, 255, 0.9); border-color: #cbd5e1; }
+    [data-theme="light"] .segmented-group { background: rgba(226, 232, 240, 0.8); border-color: #cbd5e1; }
+    [data-theme="light"] .seg-btn { color: #475569; }
+    [data-theme="light"] .seg-btn:hover { color: #0f172a; }
+    [data-theme="light"] .seg-btn.active { background: #ffffff; color: var(--pc-primary); border-color: var(--pc-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    [data-theme="light"] .modal-content, [data-theme="light"] .modal-box { background: #ffffff !important; color: #0f172a !important; border-color: #cbd5e1 !important; box-shadow: 0 20px 50px rgba(0,0,0,0.15) !important; }
+    [data-theme="light"] .more-menu-tile { background: #f8fafc; border-color: #e2e8f0; color: #0f172a; }
+    [data-theme="light"] .more-menu-tile:hover { background: #f1f5f9; border-color: var(--pc-primary); }
 
     * { 
       box-sizing: border-box; 
@@ -192,6 +293,46 @@
     .nav-item:hover::after {
       opacity: 1;
       transform: translateX(0);
+    }
+
+    .mobile-more-btn {
+      display: none !important;
+    }
+
+    .more-menu-tile {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: var(--card-bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      color: var(--text-main);
+      user-select: none;
+    }
+    .more-menu-tile:hover {
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.35);
+      transform: translateY(-1px);
+    }
+    .more-menu-tile:active {
+      transform: scale(0.97);
+    }
+    .more-menu-tile svg {
+      color: var(--pc-accent);
+      flex-shrink: 0;
+    }
+    .more-menu-tile .tile-title {
+      font-size: 0.88rem;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .more-menu-tile .tile-desc {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 2px;
     }
 
     .workspace {
@@ -458,10 +599,12 @@
         width: 100% !important;
       }
       .nav-item {
-        width: 42px !important;
-        height: 42px !important;
+        width: 44px !important;
+        height: 44px !important;
       }
       .nav-item::after { display: none !important; }
+      .nav-desktop-only { display: none !important; }
+      .mobile-more-btn { display: flex !important; }
       .workspace {
         padding: 8px 10px 70px 10px !important;
         height: calc(100vh - 52px) !important;
@@ -893,7 +1036,7 @@
       text-align: left;
     }
 
-    body.is-windows #nav-logout, body.is-windows #btnTopLogout, body.is-windows #btnSettingsLogout { display: none !important; }
+    body.is-windows #nav-logout, body.is-windows #btnTopLogout, body.is-windows #btnSettingsLogout, body.is-windows #authScreen, body.is-windows #cardAdminPassword { display: none !important; }
   
     #pathLatencyLine, #pathLatencyArea, #pathThroughputLine, #pathThroughputArea {
       transition: d 0.85s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1090,7 +1233,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
   <!-- Fullscreen Login & Authorization Screen -->
   <div id="authScreen" style="display:none;">
     <div class="login-card">
-      <div class="login-logo">🛡️</div>
+      <div class="login-logo">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+      </div>
       <h1 class="login-title">Вход в NatBypass</h1>
       <p class="login-subtitle" id="authHintText">Авторизация в панели управления P2P Mesh сетью</p>
 
@@ -1098,25 +1243,49 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       <form id="authForm" onsubmit="doLogin(event)" style="text-align:left;">
         <div class="form-group">
-          <label class="form-label">👤 Имя пользователя / Логин:</label>
+          <label class="form-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:text-bottom; margin-right:4px;"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            Имя пользователя / Логин:
+          </label>
           <input type="text" id="authUsername" class="form-input" value="admin" placeholder="admin" required autofocus autocomplete="username">
         </div>
 
         <div class="form-group">
-          <label class="form-label">🔑 Пароль:</label>
+          <label class="form-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:text-bottom; margin-right:4px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            Пароль:
+          </label>
           <div style="position:relative;">
             <input type="password" id="authPassword" class="form-input" placeholder="Введите пароль" required autocomplete="current-password">
-            <span onclick="togglePasswordVis('authPassword', this)" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); cursor:pointer; font-size:0.95rem; opacity:0.6;" title="Показать/скрыть пароль">👁️</span>
+            <span onclick="togglePasswordVis('authPassword', this)" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); cursor:pointer; opacity:0.7;" title="Показать/скрыть пароль" id="authEyeBtn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </span>
           </div>
         </div>
 
-        <button type="submit" id="btnSubmitAuth" class="btn btn-neon" style="width:100%; height:44px; justify-content:center; font-size:0.92rem; margin-top:8px;">
-          ⚡ Войти в панель управления
+        <button type="submit" id="btnSubmitAuth" class="btn btn-neon" style="width:100%; height:44px; justify-content:center; font-size:0.92rem; margin-top:10px; gap:8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+          <span>Войти в панель управления</span>
         </button>
       </form>
 
-      <div style="margin-top:20px; font-size:0.75rem; color:var(--text-dim);">
-        🌐 🌐 Для роутеров Keenetic: вход <b>строго по учётным данным администратора роутера</b> (логин и пароль от веб-интерфейса Keenetic)
+      <!-- Context-Aware Platform Help Cards -->
+      <div id="authHelpWindows" style="display:none; margin-top:20px; padding:12px 14px; border-radius:12px; background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); text-align:left; font-size:0.78rem; line-height:1.5;">
+        <div style="font-weight:700; color:#818cf8; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+          <span>Где найти пароль?</span>
+        </div>
+        <div style="color:var(--text-muted);">
+          Для безопасности при первом запуске был сгенерирован случайный пароль. Он сохранён в файле <b>config.yaml</b> (в папке программы) в блоке <code style="background:rgba(0,0,0,0.3); padding:2px 6px; border-radius:4px; font-family:monospace; color:#38bdf8;">web_ui: password</code>.
+        </div>
+      </div>
+
+      <div id="authHelpKeenetic" style="display:none; margin-top:20px; padding:12px 14px; border-radius:12px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); text-align:left; font-size:0.78rem; line-height:1.5;">
+        <div style="font-weight:700; color:#34d399; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+          <span>Роутер Keenetic</span>
+        </div>
+        <div style="color:var(--text-muted);">Вход выполняется строго по учётным данным администратора роутера (логин и пароль от веб-интерфейса KeeneticOS).</div>
       </div>
     </div>
   </div>
@@ -1157,25 +1326,28 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <li id="nav-profiles" class="nav-item" data-tooltip="Сети и профили" onclick="switchTab('profiles')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
       </li>
-      <li id="nav-channels" class="nav-item" data-tooltip="Каналы связи" onclick="switchTab('channels')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"></path><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"></path><circle cx="12" cy="12" r="2"></circle><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"></path><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"></path></svg>
-      </li>
       <li id="nav-routing" class="nav-item" data-tooltip="Шлюз и подсети" onclick="switchTab('routing')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" x2="22" y1="12" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
       </li>
-      <li id="nav-awg" class="nav-item" data-tooltip="AmneziaWG 3.1" onclick="switchTab('awg')">
+      <li id="nav-channels" class="nav-item nav-desktop-only" data-tooltip="Каналы связи" onclick="switchTab('channels')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"></path><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"></path><circle cx="12" cy="12" r="2"></circle><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"></path><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"></path></svg>
+      </li>
+      <li id="nav-awg" class="nav-item nav-desktop-only" data-tooltip="AmneziaWG 3.1" onclick="switchTab('awg')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
       </li>
-      <li id="nav-timeline" class="nav-item" data-tooltip="Журнал" onclick="switchTab('timeline')">
+      <li id="nav-timeline" class="nav-item nav-desktop-only" data-tooltip="Журнал" onclick="switchTab('timeline')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
       </li>
-      <li id="nav-diagnostics" class="nav-item" data-tooltip="Диагностика" onclick="switchTab('diagnostics')">
+      <li id="nav-diagnostics" class="nav-item nav-desktop-only" data-tooltip="Диагностика" onclick="switchTab('diagnostics')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
       </li>
-      <li id="nav-settings" class="nav-item" data-tooltip="Настройки" onclick="switchTab('settings')">
+      <li id="nav-settings" class="nav-item nav-desktop-only" data-tooltip="Настройки" onclick="switchTab('settings')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
       </li>
-      <li id="nav-logout" class="nav-item" data-tooltip="Выйти из системы" onclick="doLogout()" style="display: none; margin-top: 16px; border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1);">
+      <li id="nav-more" class="nav-item mobile-more-btn" data-tooltip="Все разделы" onclick="openMoreMenuModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect></svg>
+      </li>
+      <li id="nav-logout" class="nav-item nav-desktop-only" data-tooltip="Выйти из системы" onclick="doLogout()" style="display: none; margin-top: 16px; border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.1);">
         <svg viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
       </li>
     </ul>
@@ -1229,18 +1401,24 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
         <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span id="topUpdateLabel">v1.9.223-beta.3</span>
+          <span id="topUpdateLabel">Обновления</span>
         </button>
 
-        <button onclick="openQRModal()" class="btn-pill" style="background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
+        <button onclick="openQRModal()" class="btn-pill" style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-          <span>📱 QR</span>
+          <span>QR-код</span>
+        </button>
+
+        <!-- Theme Switcher (Dark / Light) -->
+        <button id="btnThemeToggle" onclick="toggleTheme()" class="btn-pill" style="padding: 4px 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--pc-border); color: var(--text-main); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" title="Переключить тему (Светлая / Тёмная)">
+          <svg id="themeIconSun" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" style="display:none;"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+          <svg id="themeIconMoon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
         </button>
 
         <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
           <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;">v1.9.223-beta.3</span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;"></span>
           <div class="online-dot"></div>
         </div>
 
@@ -1427,12 +1605,21 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div class="glass-card">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
           <div>
-            <h2 style="font-size: 1.15rem; font-weight: 800;">👥 Адресная книга & Устройства сети</h2>
-            <p style="color: var(--text-muted); font-size: 0.8rem;">Назначайте имена, копируйте Virtual IP, тестируйте RTT пинг сокетов</p>
+            <h2 style="font-size: 1.15rem; font-weight: 800; display:flex; align-items:center; gap:8px;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+              <span>Адресная книга & Устройства сети</span>
+            </h2>
+            <p style="color: var(--text-muted); font-size: 0.8rem; margin-top:2px;">Назначайте имена, копируйте Virtual IP, тестируйте RTT пинг сокетов</p>
           </div>
           <div style="display:flex; gap:8px;">
-            <button onclick="clearPeersCache()" class="btn btn-glass" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171;">🧹 Очистить кэш</button>
-            <button onclick="refreshData()" class="btn btn-neon">⚡ Обновить маяки</button>
+            <button onclick="clearPeersCache()" class="btn btn-glass" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171; display:flex; align-items:center; gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              <span>Очистить кэш</span>
+            </button>
+            <button onclick="refreshData()" class="btn btn-neon" style="display:flex; align-items:center; gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Обновить маяки</span>
+            </button>
           </div>
         </div>
 
@@ -1459,13 +1646,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     <!-- TAB 3: CHANNELS (SIGNALING RELAY) -->
     <div id="tab-channels" class="tab-pane">
       <div class="glass-card">
-        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px;">📡 Сигнальные каналы и переключение брокеров</h2>
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px; display:flex; align-items:center; gap:8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"></path><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"></path><circle cx="12" cy="12" r="2"></circle><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"></path><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"></path></svg>
+          <span>Сигнальные каналы и переключение брокеров</span>
+        </h2>
         <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 20px;">Выберите активный режим передачи маяков между узлами сети</p>
 
         <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
           <div class="glass-card" id="cardChanMqtt" onclick="switchChannelMode('mqtt')" style="cursor:pointer; padding:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-              <h3 style="font-size:0.95rem; font-weight:700;">⚡ Только MQTT</h3>
+              <h3 style="font-size:0.95rem; font-weight:700;">Только MQTT</h3>
               <span class="badge badge-cyan">Доступен</span>
             </div>
             <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">Сверхбыстрый обмен маяками сокета через легковесный MQTT-брокер.</p>
@@ -1473,18 +1663,18 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
           <div class="glass-card" id="cardChanTg" onclick="switchChannelMode('telegram')" style="cursor:pointer; padding:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-              <h3 style="font-size:0.95rem; font-weight:700;">💬 Только Telegram</h3>
+              <h3 style="font-size:0.95rem; font-weight:700;">Только Telegram</h3>
               <span class="badge badge-cyan">Резерв</span>
             </div>
             <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">Скрытый обмен через Telegram Bot API с поддержкой SOCKS5 прокси.</p>
           </div>
 
-          <div class="glass-card" id="cardChanParallel" onclick="switchChannelMode('parallel')" style="cursor:pointer; padding:20px; border-color:rgba(168,85,247,0.8);">
+          <div class="glass-card" id="cardChanParallel" onclick="switchChannelMode('parallel')" style="cursor:pointer; padding:20px; border-color:var(--pc-primary);">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-              <h3 style="font-size:0.95rem; font-weight:700;">⚡+💬 Параллельно</h3>
+              <h3 style="font-size:0.95rem; font-weight:700;">Параллельный режим</h3>
               <span class="badge badge-success">Рекомендуется</span>
             </div>
-            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">Одновременная доставка через оба канала для 100% стабильности.</p>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">Одновременная доставка через оба канала (MQTT + Telegram) для 100% стабильности.</p>
           </div>
         </div>
       </div>
@@ -1493,7 +1683,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     <!-- TAB 4: ROUTING & EXIT NODES -->
     <div id="tab-routing" class="tab-pane">
       <div class="glass-card" style="margin-bottom: 20px;">
-        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px;">🌐 Маршрутизация Exit Node (Шлюз Интернета)</h2>
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px; display:flex; align-items:center; gap:8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" x2="22" y1="12" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+          <span>Маршрутизация Exit Node (Шлюз Интернета)</span>
+        </h2>
         <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 20px;">Выходите в интернет через удалённый узел или сделайте этот ПК шлюзом для других</p>
 
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
@@ -1665,7 +1858,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
           <div>
             <h2 style="font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
-              <span style="color:#38bdf8;">🛠️</span> Сетевые утилиты: Ping и Traceroute с интерфейса
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+              <span>Сетевые утилиты: Ping и Traceroute с интерфейса</span>
             </h2>
             <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Прямая проверка времени отклика, трассировки маршрута и доступности виртуальных IP узлов</p>
           </div>
@@ -1673,19 +1867,28 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
         <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px;">
           <input type="text" id="diagTargetIP" class="form-input mono" placeholder="Целевой IP (например, 10.10.77.2 или 1.1.1.1)" style="flex:1; min-width:220px; font-size:0.9rem;">
-          <button onclick="runPingTool()" class="btn btn-neon" style="padding:9px 18px; font-size:0.84rem;">⚡ Запустить Ping</button>
-          <button onclick="runTracerouteTool()" class="btn btn-glass" style="padding:9px 18px; font-size:0.84rem; color:#38bdf8; border-color:rgba(56,189,248,0.4);">🌐 Traceroute</button>
-          <button onclick="checkInternetAccessTool()" class="btn btn-glass" style="padding:9px 16px; font-size:0.84rem; color:#4ade80; border-color:rgba(74,222,128,0.4);">🌍 Проверить Интернет</button>
+          <button onclick="runPingTool()" class="btn btn-neon" style="padding:9px 18px; font-size:0.84rem; display:flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            <span>Запустить Ping</span>
+          </button>
+          <button onclick="runTracerouteTool()" class="btn btn-glass" style="padding:9px 18px; font-size:0.84rem; color:#38bdf8; border-color:rgba(56,189,248,0.4); display:flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="2" x2="22" y1="12" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            <span>Traceroute</span>
+          </button>
+          <button onclick="checkInternetAccessTool()" class="btn btn-glass" style="padding:9px 16px; font-size:0.84rem; color:#4ade80; border-color:rgba(74,222,128,0.4); display:flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
+            <span>Проверить Интернет</span>
+          </button>
         </div>
 
         <div style="display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;">
           <span style="font-size:0.75rem; color:var(--text-dim); align-self:center;">Быстрый выбор цели:</span>
           <button type="button" onclick="setDiagTarget('1.1.1.1')" class="btn-pill" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-muted); padding:3px 8px; font-size:0.75rem; cursor:pointer;">Cloudflare (1.1.1.1)</button>
           <button type="button" onclick="setDiagTarget('8.8.8.8')" class="btn-pill" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-muted); padding:3px 8px; font-size:0.75rem; cursor:pointer;">Google DNS (8.8.8.8)</button>
-          <button type="button" onclick="fillFirstPeerTarget()" class="btn-pill" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; padding:3px 8px; font-size:0.75rem; cursor:pointer;">🎯 Первый пир в сети</button>
+          <button type="button" onclick="fillFirstPeerTarget()" class="btn-pill" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; padding:3px 8px; font-size:0.75rem; cursor:pointer;">Первый пир в сети</button>
         </div>
 
-        <pre id="netToolOutput" class="mono" style="background:#090d16; border:1px solid rgba(51,65,85,0.6); border-radius:10px; padding:14px; font-size:0.82rem; line-height:1.6; min-height:100px; max-height:260px; overflow-y:auto; color:#94a3b8; white-space:pre-wrap;">Готов к запуску. Введите IP адрес узла и нажмите «⚡ Запустить Ping» или «🌐 Traceroute».</pre>
+        <pre id="netToolOutput" class="mono" style="background:#090d16; border:1px solid rgba(51,65,85,0.6); border-radius:10px; padding:14px; font-size:0.82rem; line-height:1.6; min-height:100px; max-height:260px; overflow-y:auto; color:#94a3b8; white-space:pre-wrap;">Готов к запуску. Введите IP адрес узла и нажмите «Запустить Ping» или «Traceroute».</pre>
       </div>
 
       <!-- 2. Subnet Routes & Exit Node Access Overview -->
@@ -1693,11 +1896,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
           <div>
             <h2 style="font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
-              <span style="color:#10b981;">🗺️</span> Расшаренные подсети & Доступ в интернет через узлы
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+              <span>Расшаренные подсети & Доступ в интернет через узлы</span>
             </h2>
             <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Список локальных LAN-сетей (Subnets) и шлюзов, анонсированных участниками сети</p>
           </div>
-          <button onclick="loadPeerRoutesDiag()" class="btn btn-glass" style="padding:6px 12px; font-size:0.8rem;">🔄 Обновить</button>
+          <button onclick="loadPeerRoutesDiag()" class="btn btn-glass" style="padding:6px 12px; font-size:0.8rem; display:flex; align-items:center; gap:6px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span>Обновить</span>
+          </button>
         </div>
 
         <div id="peerRoutesContainer" style="display:flex; flex-direction:column; gap:10px;">
@@ -1710,13 +1917,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
           <div>
             <h2 style="font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
-              <span style="color:#38bdf8;">🔬</span> Глубокий аудит сети (RFC 5780 STUN Netcheck & ТСПУ DPI)
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M6 18h8"></path><path d="M3 22h18"></path><path d="M14 22a7 7 0 1 0 0-14h-1"></path><path d="M9 14h2"></path><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"></path><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"></path></svg>
+              <span>Глубокий аудит сети (RFC 5780 STUN Netcheck & ТСПУ DPI)</span>
             </h2>
             <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Анализ поведения NAT (Mapping & Filtering), детекция трансграничных блокировок ТСПУ и Path MTU</p>
           </div>
           <div style="display:flex; gap:8px;">
-            <button id="btnRunNetcheck" onclick="runNetcheck()" class="btn btn-neon" style="background: linear-gradient(135deg, #0284c7, #38bdf8); font-size:0.85rem; padding:8px 18px;">
-              ⚡ Запустить Netcheck
+            <button id="btnRunNetcheck" onclick="runNetcheck()" class="btn btn-neon" style="background: linear-gradient(135deg, #0284c7, #38bdf8); font-size:0.85rem; padding:8px 18px; display:flex; align-items:center; gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              <span>Запустить Netcheck</span>
             </button>
           </div>
         </div>
@@ -2115,6 +2324,68 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
     </div>
   </main>
+
+  <!-- Mobile More Menu Sheet -->
+  <div id="modalMoreMenu" class="modal-overlay" onclick="if(event.target===this) closeMoreMenuModal();">
+    <div class="modal-box" style="width: 440px; max-width: 95%; padding: 20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+        <h3 style="font-size: 1.05rem; font-weight: 800; display:flex; align-items:center; gap:8px; margin:0; color:var(--text-main);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect></svg>
+          Разделы панели
+        </h3>
+        <button onclick="closeMoreMenuModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem; line-height:1; padding:4px;">✕</button>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div onclick="switchTab('channels'); closeMoreMenuModal();" class="more-menu-tile">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"></path><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"></path><circle cx="12" cy="12" r="2"></circle><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"></path><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"></path></svg>
+          <div>
+            <div class="tile-title">Каналы связи</div>
+            <div class="tile-desc">MQTT, брокеры</div>
+          </div>
+        </div>
+
+        <div onclick="switchTab('awg'); closeMoreMenuModal();" class="more-menu-tile">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <div>
+            <div class="tile-title">AmneziaWG 3.1</div>
+            <div class="tile-desc">DPI обфускация</div>
+          </div>
+        </div>
+
+        <div onclick="switchTab('timeline'); closeMoreMenuModal();" class="more-menu-tile">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          <div>
+            <div class="tile-title">Журнал</div>
+            <div class="tile-desc">События и логи</div>
+          </div>
+        </div>
+
+        <div onclick="switchTab('diagnostics'); closeMoreMenuModal();" class="more-menu-tile">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+          <div>
+            <div class="tile-title">Диагностика</div>
+            <div class="tile-desc">Пинг, трассировка</div>
+          </div>
+        </div>
+
+        <div onclick="switchTab('settings'); closeMoreMenuModal();" class="more-menu-tile" style="grid-column: span 2;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          <div>
+            <div class="tile-title">Параметры системы</div>
+            <div class="tile-desc">Порты, автозапуск, MTU и сервисы</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="modalMoreLogoutRow" style="display:none; margin-top:14px; border-top:1px solid var(--border-subtle); padding-top:12px;">
+        <button onclick="closeMoreMenuModal(); doLogout();" class="btn btn-secondary" style="width:100%; color:#f87171; border-color:rgba(239,68,68,0.3); display:flex; align-items:center; justify-content:center; gap:8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+          <span>Выйти из веб-интерфейса</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Node Info Modal -->
   <div id="nodeInfoModal" class="modal-overlay">
@@ -2705,6 +2976,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const navBtn = document.getElementById('nav-' + tabName);
       if (navBtn) navBtn.classList.add('active');
 
+      const secondaryTabs = ['channels', 'awg', 'timeline', 'diagnostics', 'settings'];
+      const navMore = document.getElementById('nav-more');
+      if (navMore) {
+        if (secondaryTabs.includes(tabName)) {
+          navMore.classList.add('active');
+        } else {
+          navMore.classList.remove('active');
+        }
+      }
+
       try {
         if (tabName === 'profiles' && typeof loadProfiles === 'function') loadProfiles();
         if (tabName === 'awg' && typeof loadAWG === 'function') loadAWG();
@@ -2714,6 +2995,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       } catch (e) {
         console.error('switchTab hook error:', e);
       }
+    }
+
+    function openMoreMenuModal() {
+      const modal = document.getElementById('modalMoreMenu');
+      if (modal) modal.classList.add('active');
+    }
+
+    function closeMoreMenuModal() {
+      const modal = document.getElementById('modalMoreMenu');
+      if (modal) modal.classList.remove('active');
     }
 
     // Auto-Updater Modal & Functions
@@ -3392,7 +3683,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             if (autoStartEl) autoStartEl.style.display = 'flex';
             if (autoOpenBrowserEl) autoOpenBrowserEl.style.display = 'flex';
             document.body.classList.add('is-windows');
-            ['nav-logout', 'btnTopLogout', 'btnSettingsLogout'].forEach(id => {
+            ['nav-logout', 'btnTopLogout', 'btnSettingsLogout', 'modalMoreLogoutRow'].forEach(id => {
               const el = document.getElementById(id);
               if (el) {
                 el.style.setProperty('display', 'none', 'important');
@@ -3409,19 +3700,32 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             if (topLog) topLog.style.display = 'flex';
             const setLog = document.getElementById('btnSettingsLogout');
             if (setLog) setLog.style.display = 'block';
+            const moreLog = document.getElementById('modalMoreLogoutRow');
+            if (moreLog) moreLog.style.display = 'block';
           }
 
-          // Password change card: Visible on all devices except Keenetic (where router credentials manage it)
+          // Password change card: Visible on standalone Linux where auth is active, hidden on Keenetic and Windows
           const passCard = document.getElementById('cardAdminPassword');
           if (passCard) {
-            if (!d.is_keenetic) {
+            if (!d.is_keenetic && !isWin) {
               passCard.style.display = 'block';
             } else {
               passCard.style.display = 'none';
             }
           }
 
-          if (d.authenticated || !d.auth_required) {
+          // Context-aware help card for authentication screen
+          const hw = document.getElementById('authHelpWindows');
+          const hk = document.getElementById('authHelpKeenetic');
+          if (d.is_keenetic) {
+            if (hk) hk.style.display = 'block';
+            if (hw) hw.style.display = 'none';
+          } else {
+            if (hk) hk.style.display = 'none';
+            if (hw) hw.style.display = 'block';
+          }
+
+          if (isWin || d.authenticated || !d.auth_required) {
             isUserAuthenticated = true;
             hideAuthScreen();
             startAppPolling();
@@ -3437,6 +3741,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     }
 
     function showAuthScreen() {
+      if (document.body.classList.contains('is-windows')) {
+        hideAuthScreen();
+        return;
+      }
       const scr = document.getElementById('authScreen');
       if (scr) scr.style.display = 'flex';
       const pass = document.getElementById('authPassword');
@@ -3468,7 +3776,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (errBox) errBox.style.display = 'none';
       if (btn) {
         btn.disabled = true;
-        btn.innerText = '⏳ Проверка реквизитов...';
+        btn.innerHTML = '<span>Проверка реквизитов...</span>';
       }
 
       try {
@@ -3499,12 +3807,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       } finally {
         if (btn) {
           btn.disabled = false;
-          btn.innerText = '⚡ Войти в панель управления';
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg> <span>Войти в панель управления</span>';
         }
       }
     }
 
     async function doLogout() {
+      if (document.body.classList.contains('is-windows')) {
+        return;
+      }
       try {
         await fetch('/api/auth/logout', {method: 'POST'});
       } catch (e) {}
@@ -3517,11 +3828,37 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (!el) return;
       if (el.type === 'password') {
         el.type = 'text';
-        if (iconEl) iconEl.innerText = '🔒';
+        if (iconEl) iconEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
       } else {
         el.type = 'password';
-        if (iconEl) iconEl.innerText = '👁️';
+        if (iconEl) iconEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
       }
+    }
+
+    function initTheme() {
+      const saved = localStorage.getItem('natbypass_theme');
+      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const theme = saved ? saved : (prefersDark ? 'dark' : 'dark');
+      setTheme(theme);
+    }
+
+    function setTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      localStorage.setItem('natbypass_theme', theme);
+      const sun = document.getElementById('themeIconSun');
+      const moon = document.getElementById('themeIconMoon');
+      if (theme === 'light') {
+        if (sun) sun.style.display = 'block';
+        if (moon) moon.style.display = 'none';
+      } else {
+        if (sun) sun.style.display = 'none';
+        if (moon) moon.style.display = 'block';
+      }
+    }
+
+    function toggleTheme() {
+      const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+      setTheme(cur === 'dark' ? 'light' : 'dark');
     }
 
     // Live Dashboard Fetch
@@ -3790,9 +4127,33 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const curVal = (selExit && selExit.value) ? selExit.value : currentSelectedExitNode;
 
       if (!peers || peers.length === 0) {
-        const empty = `<tr><td colspan="7" style="text-align:center; color: var(--text-dim); padding: 22px; font-weight: 600;">📡 ОЖИДАНИЕ СВЯЗИ (0 пиров онлайн) — ПОИСК УСТРОЙСТВ В СЕТИ...</td></tr>`;
-        if (qb) qb.innerHTML = empty;
-        if (fb) fb.innerHTML = empty;
+        const emptyQuick = `<tr><td colspan="7" style="text-align:center; padding: 24px 14px;">
+          <div style="display:inline-flex; flex-direction:column; align-items:center; gap:8px;">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2" style="opacity:0.85;"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+            <div style="font-size:0.88rem; font-weight:700; color:var(--text-main);">Поиск устройств в сети...</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); max-width:320px;">Ожидание первого пира. Убедитесь, что на других узлах выбран этот же профиль сети.</div>
+          </div>
+        </td></tr>`;
+        const emptyFull = `<tr><td colspan="8" style="text-align:center; padding: 36px 16px;">
+          <div style="display:inline-flex; flex-direction:column; align-items:center; gap:12px; max-width:440px;">
+            <div style="width:48px; height:48px; border-radius:50%; background:var(--card-bg-elevated); border:1px solid var(--border-subtle); display:flex; align-items:center; justify-content:center;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            </div>
+            <div style="font-size:0.98rem; font-weight:700; color:var(--text-main);">Нет активных устройств в сети</div>
+            <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.45;">Подключите ваш смартфон, второй компьютер или роутер Keenetic к этой зашифрованной P2P сети с помощью QR-кода профиля.</div>
+            <div style="display:flex; gap:10px; margin-top:4px; flex-wrap:wrap; justify-content:center;">
+              <button class="btn btn-primary" onclick="openQrModal()" style="display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; padding:8px 16px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                <span>Поделиться через QR-код</span>
+              </button>
+              <button class="btn btn-secondary" onclick="switchTab('profiles')" style="font-size:0.8rem; padding:8px 14px;">
+                Сети и ключи
+              </button>
+            </div>
+          </div>
+        </td></tr>`;
+        if (qb) qb.innerHTML = emptyQuick;
+        if (fb) fb.innerHTML = emptyFull;
         if (selExit) selExit.innerHTML = '<option value="">🚫 Локальный интернет (Шлюз выключен)</option>';
         return;
       }
@@ -6062,6 +6423,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     }
 
     window.addEventListener('DOMContentLoaded', () => {
+      initTheme();
       // Ensure all sidebar nav items have direct click bindings
       document.querySelectorAll('.nav-item').forEach(item => {
         const id = item.id;

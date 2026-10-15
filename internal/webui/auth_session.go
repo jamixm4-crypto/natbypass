@@ -38,6 +38,9 @@ var (
 
 	loginLimiterMu sync.Mutex
 	loginAttempts  = make(map[string]*loginAttemptInfo)
+
+	launchTokenMu sync.Mutex
+	launchTokens  = make(map[string]time.Time)
 )
 
 type SessionEntry struct {
@@ -196,6 +199,50 @@ func deleteSession(token string) {
 	saveSessionsToDisk()
 }
 
+// GetLocalLaunchURL generates a cryptographically random, single-use launch token
+// and returns a full URL (e.g. http://127.0.0.1:8080/?token=...) for the local desktop window.
+// This allows native Windows desktop windows to open into the WebUI fully authenticated,
+// without requiring the local machine user to copy/paste the random admin password.
+func GetLocalLaunchURL(port int) string {
+	if port <= 0 {
+		port = 8080
+	}
+	b := make([]byte, 24)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		h := sha256.Sum256([]byte(fmt.Sprintf("launch-%d", time.Now().UnixNano())))
+		copy(b, h[:24])
+	}
+	token := hex.EncodeToString(b)
+
+	launchTokenMu.Lock()
+	now := time.Now()
+	for k, exp := range launchTokens {
+		if now.After(exp) {
+			delete(launchTokens, k)
+		}
+	}
+	launchTokens[token] = now.Add(90 * time.Second)
+	launchTokenMu.Unlock()
+
+	return fmt.Sprintf("http://127.0.0.1:%d/?token=%s", port, token)
+}
+
+func consumeOneTimeLaunchToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	launchTokenMu.Lock()
+	defer launchTokenMu.Unlock()
+
+	exp, ok := launchTokens[token]
+	if !ok {
+		return false
+	}
+	delete(launchTokens, token) // single-use: immediately consumed
+
+	return time.Now().Before(exp)
+}
+
 func isValidSession(token string) bool {
 	if token == "" {
 		return false
@@ -346,12 +393,19 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handleAuthCheck — GET /api/auth/check
 func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 	isWindows := (runtime.GOOS == "windows")
-	var authRequired bool
 	if isWindows {
-		authRequired = (s.password != "" || s.customAuth != nil)
-	} else {
-		authRequired = (s.password != "" || s.customAuth != nil || IsKeeneticOS())
+		s.jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"authenticated": true,
+			"auth_required": false,
+			"username":      "admin",
+			"is_keenetic":   false,
+			"is_windows":    true,
+			"os":            runtime.GOOS,
+		}, "")
+		return
 	}
+
+	authRequired := (s.password != "" || s.customAuth != nil || IsKeeneticOS())
 	
 	// Check session cookie
 	if cookie, err := r.Cookie("nb_session"); err == nil && isValidSession(cookie.Value) {
@@ -360,7 +414,7 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 			"auth_required": authRequired,
 			"username":      getSessionUsername(cookie.Value),
 			"is_keenetic":   IsKeeneticOS(),
-			"is_windows":    isWindows,
+			"is_windows":    false,
 			"os":            runtime.GOOS,
 		}, "")
 		return
@@ -373,7 +427,7 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 			"auth_required": authRequired,
 			"username":      user,
 			"is_keenetic":   IsKeeneticOS(),
-			"is_windows":    isWindows,
+			"is_windows":    false,
 			"os":            runtime.GOOS,
 		}, "")
 		return
@@ -383,7 +437,7 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 		"authenticated": !authRequired,
 		"auth_required": authRequired,
 		"is_keenetic":   IsKeeneticOS(),
-			"is_windows":    isWindows,
-			"os":            runtime.GOOS,
+		"is_windows":    false,
+		"os":            runtime.GOOS,
 	}, "")
 }

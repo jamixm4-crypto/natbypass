@@ -10,11 +10,13 @@ package updater
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestVersionCompare(t *testing.T) {
@@ -177,6 +179,76 @@ func TestPickAsset_Logic(t *testing.T) {
 	t.Logf("Running pickAsset on %s/%s -> name=%s, size=%d, url=%s", runtime.GOOS, runtime.GOARCH, name, size, url)
 	if url == "" || name == "" {
 		t.Fatalf("expected pickAsset to find an asset for current platform, got empty")
+	}
+}
+
+func TestUpdaterTransport_TLSAndCertPool(t *testing.T) {
+	pool := getUpdaterCertPool()
+	if pool == nil {
+		t.Fatalf("expected updater cert pool to be initialized")
+	}
+
+	tlsCfg := getUpdaterTLSConfig()
+	if tlsCfg == nil {
+		t.Fatalf("expected updater tls config to be non-nil")
+	}
+	if tlsCfg.Renegotiation != tls.RenegotiateFreelyAsClient {
+		t.Errorf("expected RenegotiateFreelyAsClient for proxy support, got %v", tlsCfg.Renegotiation)
+	}
+
+	// Test RTC uninitialized guard
+	if tlsCfg.Time != nil {
+		refTime := tlsCfg.Time()
+		if refTime.Year() < 2024 {
+			t.Errorf("expected time hook to return >= 2024, got %d", refTime.Year())
+		}
+	}
+
+	client := NewUpdaterHTTPClient(10 * time.Second)
+	if client == nil || client.Transport == nil {
+		t.Fatalf("expected client with custom transport")
+	}
+}
+
+func TestMirrorResolution_KeeneticRouterMipsle(t *testing.T) {
+	key := mirrorAssetKey("linux", "mipsle", "natbypass")
+	if key != "linux/mipsle" {
+		t.Fatalf("expected asset key 'linux/mipsle' for Keenetic, got %s", key)
+	}
+
+	testURLs := []string{
+		"https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.503/natbypass-router-mipsle",
+		"https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.503/natbypass-router-mipsle",
+		"https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.503/natbypass-router-mipsle",
+	}
+
+	for _, u := range testURLs {
+		if !IsMirrorURL(u) {
+			t.Errorf("expected IsMirrorURL to accept %s", u)
+		}
+		if !IsValidAssetURL(u) {
+			t.Errorf("expected IsValidAssetURL to accept %s", u)
+		}
+	}
+
+	// Fake manifest check
+	manifest := &MirrorManifest{
+		Version: "v1.9.503",
+		Assets: map[string]MirrorAsset{
+			"linux/mipsle": {
+				Name: "natbypass-router-mipsle",
+				URL:  "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.503/natbypass-router-mipsle",
+				Mirrors: []string{
+					"https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.503/natbypass-router-mipsle",
+					"https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.503/natbypass-router-mipsle",
+				},
+			},
+		},
+	}
+
+	urls := GetMirrorAssetURLs(manifest, key)
+	if len(urls) != 3 {
+		t.Fatalf("expected 3 download URLs (1 primary + 2 mirrors), got %d: %v", len(urls), urls)
 	}
 }
 

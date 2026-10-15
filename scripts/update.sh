@@ -103,29 +103,29 @@ main() {
     TAG=""
     if [ "$BETA_MODE" -eq 1 ]; then
         print_yellow ">> Канал обновлений: BETA / PRE-RELEASE"
-        # 1. Try jsDelivr mirror manifest (fastest and unblocked in RU)
-        TAG=$(curl -s "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest-beta.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        # 2. Try GitHub API
-        if [ -z "$TAG" ]; then
-            TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        fi
-        # 3. Try ghproxy GitHub API
-        if [ -z "$TAG" ]; then
-            TAG=$(curl -s "https://ghproxy.net/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        fi
+        for manifest_url in \
+            "https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" \
+            "https://gh-proxy.com/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" \
+            "https://ghfast.top/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" \
+            "https://api.github.com/repos/${REPO}/releases" \
+            "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest-beta.json"
+        do
+            TAG=$(curl -fsSL -k --connect-timeout 4 --max-time 10 "${manifest_url}" 2>/dev/null | grep -E '"(version|tag_name)":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+            [ -n "$TAG" ] && break
+        done
         [ -z "$TAG" ] && TAG="${DEFAULT_BETA}"
     else
         print_bold ">> Канал обновлений: STABLE"
-        # 1. Try jsDelivr mirror manifest
-        TAG=$(curl -s "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        # 2. Try GitHub API
-        if [ -z "$TAG" ]; then
-            TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        fi
-        # 3. Try ghproxy
-        if [ -z "$TAG" ]; then
-            TAG=$(curl -s "https://ghproxy.net/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        fi
+        for manifest_url in \
+            "https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest.json" \
+            "https://gh-proxy.com/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest.json" \
+            "https://ghfast.top/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest.json" \
+            "https://api.github.com/repos/${REPO}/releases/latest" \
+            "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest.json"
+        do
+            TAG=$(curl -fsSL -k --connect-timeout 4 --max-time 10 "${manifest_url}" 2>/dev/null | grep -E '"(version|tag_name)":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+            [ -n "$TAG" ] && break
+        done
         [ -z "$TAG" ] && TAG="${DEFAULT_STABLE}"
     fi
 
@@ -196,15 +196,16 @@ main() {
 
     for name in $DL_NAMES; do
         CANDIDATE_URLS="
-https://github.com/${REPO}/releases/download/${TAG}/${name}
-https://ghproxy.net/https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://ghproxy.net/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://github.com/${REPO}/releases/download/${TAG}/${name}
 "
         for u in $CANDIDATE_URLS; do
             [ -z "$u" ] && continue
             if command -v aria2c >/dev/null 2>&1; then
                 rm -f "${TMP_BIN}" "${TMP_BIN}.aria2"
-                if aria2c -q -x 4 -s 4 -k 512K --connect-timeout=8 --timeout=30 -d /tmp -o natbypass.new "$u" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if aria2c -q -x 4 -s 4 -k 512K --check-certificate=false --connect-timeout=8 --timeout=30 -d /tmp -o natbypass.new "$u" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         SUCCESS_URL="$u"
@@ -214,7 +215,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                 fi
             fi
             if command -v curl >/dev/null 2>&1; then
-                if curl -fsSL --connect-timeout 8 --max-time 180 --retry 4 --retry-delay 1 --retry-connrefused "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if curl -fsSL -k --connect-timeout 8 --max-time 180 --retry 3 --retry-delay 1 "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         SUCCESS_URL="$u"
@@ -223,7 +224,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                     rm -f "${TMP_BIN}"
                 fi
             elif command -v wget >/dev/null 2>&1; then
-                if wget -q --timeout=15 --tries=4 -c "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if wget -q --no-check-certificate --timeout=15 --tries=3 -c "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         SUCCESS_URL="$u"

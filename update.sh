@@ -33,6 +33,26 @@ main() {
     print_red()    { printf "\033[0;31m%s\033[0m\n" "$1"; }
     print_bold()   { printf "\033[1;37m%s\033[0m\n" "$1"; }
 
+    verify_sha256() {
+        _file="$1"
+        _expected="$2"
+        _calculated=""
+        if command -v sha256sum >/dev/null 2>&1; then
+            _calculated=$(sha256sum "$_file" 2>/dev/null | awk '{print $1}' | tr 'A-Z' 'a-z')
+        elif command -v openssl >/dev/null 2>&1; then
+            _calculated=$(openssl dgst -sha256 "$_file" 2>/dev/null | awk '{print $NF}' | tr 'A-Z' 'a-z')
+        elif command -v shasum >/dev/null 2>&1; then
+            _calculated=$(shasum -a 256 "$_file" 2>/dev/null | awk '{print $1}' | tr 'A-Z' 'a-z')
+        fi
+        if [ -z "$_calculated" ]; then
+            return 2 # tool unavailable
+        fi
+        if [ "$_calculated" = "$_expected" ]; then
+            return 0 # match
+        fi
+        return 1 # mismatch
+    }
+
     echo "--------------------------------------------------------------"
     print_bold ">> NatBypass Mesh Network — Универсальный авто-обновлятор"
     echo "--------------------------------------------------------------"
@@ -83,29 +103,29 @@ main() {
     TAG=""
     if [ "$BETA_MODE" -eq 1 ]; then
         print_yellow ">> Канал обновлений: BETA / PRE-RELEASE"
-        # 1. Try jsDelivr mirror manifest (fastest and unblocked in RU)
-        TAG=$(curl -s "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest-beta.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        # 2. Try GitHub API
-        if [ -z "$TAG" ]; then
-            TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        fi
-        # 3. Try ghproxy GitHub API
-        if [ -z "$TAG" ]; then
-            TAG=$(curl -s "https://ghproxy.net/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        fi
+        for manifest_url in \
+            "https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" \
+            "https://gh-proxy.com/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" \
+            "https://ghfast.top/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" \
+            "https://api.github.com/repos/${REPO}/releases" \
+            "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest-beta.json"
+        do
+            TAG=$(curl -fsSL -k --connect-timeout 4 --max-time 10 "${manifest_url}" 2>/dev/null | grep -E '"(version|tag_name)":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+            [ -n "$TAG" ] && break
+        done
         [ -z "$TAG" ] && TAG="${DEFAULT_BETA}"
     else
         print_bold ">> Канал обновлений: STABLE"
-        # 1. Try jsDelivr mirror manifest
-        TAG=$(curl -s "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        # 2. Try GitHub API
-        if [ -z "$TAG" ]; then
-            TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        fi
-        # 3. Try ghproxy
-        if [ -z "$TAG" ]; then
-            TAG=$(curl -s "https://ghproxy.net/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        fi
+        for manifest_url in \
+            "https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest.json" \
+            "https://gh-proxy.com/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest.json" \
+            "https://ghfast.top/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest.json" \
+            "https://api.github.com/repos/${REPO}/releases/latest" \
+            "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest.json"
+        do
+            TAG=$(curl -fsSL -k --connect-timeout 4 --max-time 10 "${manifest_url}" 2>/dev/null | grep -E '"(version|tag_name)":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+            [ -n "$TAG" ] && break
+        done
         [ -z "$TAG" ] && TAG="${DEFAULT_STABLE}"
     fi
 
@@ -124,39 +144,28 @@ main() {
             BIN_SUFFIX="linux-arm64"
             ARCH_DESC="ARM64 (Keenetic Titan/Hero/Giga, Raspberry Pi)"
             ;;
-        mips|mips64|mipsel|mipsle)
-            # Detect endianness:
-            # 1. Check /proc/cpuinfo for known MediaTek/Ralink/Keenetic models (100% mipsle)
-            # 2. Check ELF header of /bin/sh (byte 5: 01=little-endian, 02=big-endian)
-            # 3. Fallback to arch name
-            IS_LE=0
-            if grep -qiE 'MT7621|MT7628|MT7620|MediaTek|Ralink' /proc/cpuinfo 2>/dev/null; then
-                IS_LE=1
-            elif [ -f /bin/sh ]; then
-                ELF_ENDIAN=$(dd if=/bin/sh bs=1 count=1 skip=5 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n' || true)
-                if [ "$ELF_ENDIAN" = "01" ]; then
-                    IS_LE=1
-                elif [ "$ELF_ENDIAN" = "02" ]; then
-                    IS_LE=0
-                elif [ "$RAW_ARCH" = "mipsel" ] || [ "$RAW_ARCH" = "mipsle" ]; then
-                    IS_LE=1
-                fi
-            elif [ "$RAW_ARCH" = "mipsel" ] || [ "$RAW_ARCH" = "mipsle" ]; then
-                IS_LE=1
-            fi
-
-            if [ "$IS_LE" -eq 1 ]; then
-                BIN_SUFFIX="router-mipsle"
-                ARCH_DESC="MIPS Little-Endian (Keenetic MT7621 / KN-1010 / Viva / Extra)"
-            else
+        mips)
+            if echo -n I | hexdump -o 2>/dev/null | grep -q '0000000 0001'; then
                 BIN_SUFFIX="router-mips"
-                ARCH_DESC="MIPS Big-Endian (Atheros / QCA)"
+                ARCH_DESC="MIPS Big-Endian"
+            else
+                BIN_SUFFIX="router-mipsle"
+                ARCH_DESC="MIPS Little-Endian (Keenetic MT7621)"
             fi
+            ;;
+        mips64)
+            BIN_SUFFIX="router-mips"
+            ARCH_DESC="MIPS64"
+            ;;
+        mipsel|mipsle)
+            BIN_SUFFIX="router-mipsle"
+            ARCH_DESC="MIPS Little-Endian (Keenetic / MT7621 / KN-1010)"
             ;;
         armv7l|armv6l|armv7|armhf|arm)
             BIN_SUFFIX="router-armv7"
             ARCH_DESC="ARMv7 32-bit (Keenetic Hopper/Voyager, Cortex-A7)"
             ;;
+
         *)
             BIN_SUFFIX="linux-amd64"
             ARCH_DESC="Generic (${RAW_ARCH})"
@@ -183,37 +192,42 @@ main() {
 
     echo ">> Загрузка новой версии (${TAG})..."
     DOWNLOADED=0
+    SUCCESS_URL=""
 
     for name in $DL_NAMES; do
         CANDIDATE_URLS="
-https://github.com/${REPO}/releases/download/${TAG}/${name}
-https://ghproxy.net/https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://ghproxy.net/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://github.com/${REPO}/releases/download/${TAG}/${name}
 "
         for u in $CANDIDATE_URLS; do
             [ -z "$u" ] && continue
             if command -v aria2c >/dev/null 2>&1; then
                 rm -f "${TMP_BIN}" "${TMP_BIN}.aria2"
-                if aria2c -q -x 4 -s 4 -k 512K --connect-timeout=8 --timeout=30 -d /tmp -o natbypass.new "$u" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if aria2c -q -x 4 -s 4 -k 512K --check-certificate=false --connect-timeout=8 --timeout=30 -d /tmp -o natbypass.new "$u" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
+                        SUCCESS_URL="$u"
                         break 2
                     fi
                     rm -f "${TMP_BIN}"
                 fi
             fi
             if command -v curl >/dev/null 2>&1; then
-                if curl -fsSL --connect-timeout 8 --max-time 180 --retry 4 --retry-delay 1 --retry-connrefused "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if curl -fsSL -k --connect-timeout 8 --max-time 180 --retry 3 --retry-delay 1 "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
+                        SUCCESS_URL="$u"
                         break 2
                     fi
                     rm -f "${TMP_BIN}"
                 fi
             elif command -v wget >/dev/null 2>&1; then
-                if wget -q --timeout=15 --tries=4 -c "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if wget -q --no-check-certificate --timeout=15 --tries=3 -c "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
+                        SUCCESS_URL="$u"
                         break 2
                     fi
                     rm -f "${TMP_BIN}"
@@ -227,6 +241,37 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
         print_yellow "Проверьте подключение к сети и доступность релизов на GitHub / зеркалах."
         rm -f "${TMP_BIN}"
         exit 1
+    fi
+
+    # 3. Verify SHA256 Checksum of the downloaded update binary
+    SHA_URL="${SUCCESS_URL}.sha256"
+    CHECKSUM_FILE="/tmp/natbypass_update.sha256"
+    rm -f "${CHECKSUM_FILE}"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --connect-timeout 8 --max-time 30 "$SHA_URL" -o "${CHECKSUM_FILE}" 2>/dev/null || true
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q --timeout=8 -t 2 "$SHA_URL" -O "${CHECKSUM_FILE}" 2>/dev/null || true
+    fi
+
+    EXPECTED_HASH=$(awk '{print $1}' "${CHECKSUM_FILE}" 2>/dev/null | tr 'A-Z' 'a-z')
+    rm -f "${CHECKSUM_FILE}"
+
+    if [ -n "$EXPECTED_HASH" ] && [ "${#EXPECTED_HASH}" -eq 64 ]; then
+        verify_sha256 "${TMP_BIN}" "$EXPECTED_HASH"
+        V_STATUS=$?
+        if [ "$V_STATUS" -eq 0 ]; then
+            SHORT_HASH=$(echo "$EXPECTED_HASH" | cut -c 1-16)
+            print_green "✓ Контрольная сумма SHA-256 обновления подтверждена (${SHORT_HASH}...)"
+        elif [ "$V_STATUS" -eq 1 ]; then
+            print_red "[!] КРИТИЧЕСКАЯ ОШИБКА: Контрольная сумма SHA-256 файла обновления не совпадает!"
+            print_red "  Ожидалось: ${EXPECTED_HASH}"
+            rm -f "${TMP_BIN}"
+            exit 1
+        else
+            print_yellow "[!] Утилита sha256sum/openssl не найдена, строгая проверка хеша пропущена."
+        fi
+    else
+        print_yellow "[i] Файл контрольной суммы .sha256 недоступен для релиза, пропуск верификации."
     fi
 
     chmod 0755 "${TMP_BIN}"

@@ -134,3 +134,63 @@ func TestAdminPasswordChange(t *testing.T) {
 		t.Fatal("expected old password 'admin' to be rejected")
 	}
 }
+
+func TestLocalLaunchURLAndAutoLogin(t *testing.T) {
+	url := GetLocalLaunchURL(8080)
+	if !strings.HasPrefix(url, "http://127.0.0.1:8080/?token=") {
+		t.Fatalf("unexpected launch url: %s", url)
+	}
+
+	token := strings.TrimPrefix(url, "http://127.0.0.1:8080/?token=")
+	if len(token) != 48 { // 24 bytes hex = 48 chars
+		t.Fatalf("expected 48 hex chars token, got len=%d: %s", len(token), token)
+	}
+
+	s := NewServer(8080, "admin", "secret123", nil, nil)
+
+	// 1. First loopback access with launch token should set session cookie and 302 redirect to "/"
+	req := httptest.NewRequest("GET", "/?token="+token, nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	w := httptest.NewRecorder()
+
+	s.handleIndex(w, req)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	cookie := w.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookie {
+		if c.Name == "nb_session" {
+			sessionCookie = c
+			break
+		}
+	}
+	if sessionCookie == nil || sessionCookie.Value == "" {
+		t.Fatal("expected nb_session cookie to be set")
+	}
+	if !isValidSession(sessionCookie.Value) {
+		t.Fatal("expected generated session to be valid in sessionStore")
+	}
+
+	// 2. Replay with the same token should fail (single-use: consumed)
+	req2 := httptest.NewRequest("GET", "/?token="+token, nil)
+	req2.RemoteAddr = "127.0.0.1:54322"
+	w2 := httptest.NewRecorder()
+
+	s.handleIndex(w2, req2)
+	if w2.Code == http.StatusFound {
+		t.Fatal("expected token reuse to not trigger 302 redirect")
+	}
+
+	// 3. Non-loopback access with token should NOT auto-login
+	urlRemote := GetLocalLaunchURL(8080)
+	tokenRemote := strings.TrimPrefix(urlRemote, "http://127.0.0.1:8080/?token=")
+	reqRemote := httptest.NewRequest("GET", "/?token="+tokenRemote, nil)
+	reqRemote.RemoteAddr = "192.168.1.100:54321"
+	wRemote := httptest.NewRecorder()
+
+	s.handleIndex(wRemote, reqRemote)
+	if wRemote.Code == http.StatusFound {
+		t.Fatal("expected remote LAN access with launch token to be rejected from auto-login")
+	}
+}

@@ -585,12 +585,13 @@ func (s *Server) Start(ctx context.Context) error {
 
 // isAuthRequired checks if authentication is mandatory for this server instance.
 func (s *Server) isAuthRequired() bool {
+	// В версии для Windows (NatBypass.exe / desktop) авторизация полностью отключена
+	if runtime.GOOS == "windows" {
+		return false
+	}
 	// Если сервер слушает на всех интерфейсах (0.0.0.0 или LAN IP), авторизация строго обязательна!
 	if s.isExposedToLAN() {
 		return true
-	}
-	if runtime.GOOS == "windows" {
-		return s.password != "" || s.customAuth != nil
 	}
 	return s.password != "" || s.customAuth != nil || IsKeeneticOS()
 }
@@ -650,13 +651,7 @@ func (s *Server) csrfMiddleware(next http.Handler) http.Handler {
 				return
 			}
 
-			// 2. If authentication is not required for this instance (e.g. Windows desktop client), skip CSRF
-			if !s.isAuthRequired() {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// 3. Local desktop loopback (127.0.0.1 / ::1) without cross-site origin: skip CSRF
+			// 2. Local desktop loopback (127.0.0.1 / ::1) without cross-site origin: skip CSRF
 			// isDirectLoopback() also checks that no X-Forwarded-For/X-Real-IP is present
 			// to prevent reverse-proxy bypass by external clients faking loopback origin.
 			origin := r.Header.Get("Origin")
@@ -866,6 +861,39 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
+	// 0. Auto-login for local desktop window via one-time launch token
+	if token := r.URL.Query().Get("token"); token != "" {
+		if isDirectLoopback(r) && consumeOneTimeLaunchToken(token) {
+			sessionToken := createSession("admin")
+			http.SetCookie(w, &http.Cookie{
+				Name:     "nb_session",
+				Value:    sessionToken,
+				Path:     "/",
+				Expires:  time.Now().Add(30 * 24 * time.Hour),
+				HttpOnly: true,
+				SameSite: http.SameSiteStrictMode,
+			})
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
+	}
+
+	// 1. On Windows, automatically set session cookie so any browser/WebView request has valid session
+	if runtime.GOOS == "windows" {
+		if c, err := r.Cookie("nb_session"); err != nil || !isValidSession(c.Value) {
+			sessionToken := createSession("admin")
+			http.SetCookie(w, &http.Cookie{
+				Name:     "nb_session",
+				Value:    sessionToken,
+				Path:     "/",
+				Expires:  time.Now().Add(30 * 24 * time.Hour),
+				HttpOnly: true,
+				SameSite: http.SameSiteStrictMode,
+			})
+		}
+	}
+
 	content, err := staticFS.ReadFile("static/index.html")
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)

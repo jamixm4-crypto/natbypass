@@ -2324,7 +2324,7 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 	if webui.IsKeeneticOS() {
 		log.Info().Msg("🛡️ Обнаружена KeeneticOS: активирована системная авторизация роутера")
 		customAuth = webui.VerifyKeeneticAuth
-	} else if username == "" || password == "" || password == "admin" || password == "changeme" {
+	} else if runtime.GOOS != "windows" && (username == "" || password == "" || password == "admin" || password == "changeme") {
 		if username == "" {
 			username = "admin"
 		}
@@ -2334,6 +2334,11 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 		_ = config.Save(cfg, configFile, false)
 		log.Warn().Str("username", username).Str("password", password).
 			Msg("🔐 [WebUI Security] Сгенерирован случайный пароль администратора при первом запуске. Сохраните его для входа в панель!")
+	}
+
+	if runtime.GOOS == "windows" {
+		username = ""
+		password = ""
 	}
 
 	uiServer := webui.NewServer(port, username, password, registry, sigMgr)

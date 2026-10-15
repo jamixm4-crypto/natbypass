@@ -130,6 +130,7 @@ func TestParallelDownloader_RangeSupported(t *testing.T) {
 	if reqCount < 4 {
 		t.Fatalf("expected at least 4 parallel chunk requests, got %d", reqCount)
 	}
+	_ = os.Remove(destPath)
 }
 
 // TestParallelDownloader_FallbackToSingleStream tests fallback when the server does not support Range.

@@ -128,8 +128,9 @@ def build_manifest(release: dict, token: str | None, mirror_base: str | None, bu
 
         # Автоматические быстрые CDN-зеркала для РФ и регионов с блокировками GitHub
         mirrors = [
-            f"https://ghproxy.net/{dl_url}",
             f"https://gh-proxy.com/{dl_url}",
+            f"https://ghfast.top/{dl_url}",
+            f"https://ghproxy.net/{dl_url}",
         ]
         if mirror_base:
             mirrors.append(f"{mirror_base.rstrip('/')}/{tag}/{name}")
