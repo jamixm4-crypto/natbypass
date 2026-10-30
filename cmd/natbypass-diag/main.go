@@ -48,11 +48,11 @@ var (
 )
 
 const (
-	colorReset         = "\033[0m"
-	colorBold          = "\033[1m"
-	colorDim           = "\033[2m"
-	colorItalic        = "\033[3m"
-	colorUnderline     = "\033[4m"
+	colorReset     = "\033[0m"
+	colorBold      = "\033[1m"
+	colorDim       = "\033[2m"
+	colorItalic    = "\033[3m"
+	colorUnderline = "\033[4m"
 
 	// High-Contrast Vivid Bright ANSI Colors
 	colorBrightRed     = "\033[91m"
@@ -64,13 +64,13 @@ const (
 	colorBrightWhite   = "\033[97m"
 
 	// Vibrant Aliases with maximum readability on dark terminal backgrounds
-	colorRed           = "\033[91m"
-	colorGreen         = "\033[92m"
-	colorYellow        = "\033[93m"
-	colorBlue          = "\033[94m"
-	colorCyan          = "\033[96m"
-	colorWhite         = "\033[97m"
-	colorGray          = "\033[90m"
+	colorRed    = "\033[91m"
+	colorGreen  = "\033[92m"
+	colorYellow = "\033[93m"
+	colorBlue   = "\033[94m"
+	colorCyan   = "\033[96m"
+	colorWhite  = "\033[97m"
+	colorGray   = "\033[90m"
 )
 
 type NodeResponse struct {
@@ -996,7 +996,7 @@ func main() {
 		if networkKey != "" {
 			fmt.Printf(colorGreen+"[✓] Шифрование: Включено (NetworkKey: %s***)\n"+colorReset, networkKey[:min(4, len(networkKey))])
 		} else {
-			fmt.Printf(colorYellow+"[!] Шифрование: Отключено (открытый канал)\n"+colorReset)
+			fmt.Printf(colorYellow + "[!] Шифрование: Отключено (открытый канал)\n" + colorReset)
 		}
 		fmt.Println(colorBold + "─────────────────────────────────────────────────────────────────────────" + colorReset)
 

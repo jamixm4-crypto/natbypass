@@ -207,7 +207,7 @@ jobs:
           $relJson = gh release list --limit 100 --json tagName,isPrerelease
           if ($relJson) {
             $releases = $relJson | ConvertFrom-Json
-            $staleReleases = @($releases | Where-Object { $_.isPrerelease -or ($_.tagName -like "*beta*") -or ($_.tagName -eq "v1.9.5") })
+            $staleReleases = @($releases | Where-Object { ($_.isPrerelease -or ($_.tagName -like "*beta*") -or ($_.tagName -eq "v1.9.5")) -and ($_.tagName -ne "${{ github.ref_name }}") })
             foreach ($rel in $staleReleases) {
               Write-Host "Pruning stale release and remote tag: $($rel.tagName)"
               gh release delete $($rel.tagName) --cleanup-tag --yes 2>$null

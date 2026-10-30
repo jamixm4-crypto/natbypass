@@ -39,7 +39,6 @@ var (
 	procGetWindowRect            = user32.NewProc("GetWindowRect")
 	procGetClassNameW            = user32.NewProc("GetClassNameW")
 
-
 	procGetProcessTimes       = kernel32.NewProc("GetProcessTimes")
 	procGetProcessIoCounters  = kernel32.NewProc("GetProcessIoCounters")
 	procGetProcessHandleCount = kernel32.NewProc("GetProcessHandleCount")
@@ -610,7 +609,6 @@ func keyListener(ctx context.Context, triggerDump chan<- struct{}, cancel contex
 
 	<-ctx.Done()
 }
-
 
 func main() {
 	enableVirtualTerminal()

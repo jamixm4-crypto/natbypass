@@ -32,7 +32,6 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-
 var (
 	singleInstanceMutex windows.Handle
 	moduser32Instance   = windows.NewLazySystemDLL("user32.dll")
@@ -507,7 +506,6 @@ const (
 	menuItemExit   = 2004
 )
 
-
 type notifyIconDataW struct {
 	cbSize           uint32
 	hWnd             uintptr
@@ -564,7 +562,6 @@ func startTrayIcon(port int) {
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-
 
 	procRegisterClassExW := moduser32Instance.NewProc("RegisterClassExW")
 	procCreateWindowExW := moduser32Instance.NewProc("CreateWindowExW")
@@ -722,6 +719,7 @@ func diagnoseWebUI(port int) {
 	}
 	fmt.Println("===================================")
 }
+
 // findChromiumAppBrowser returns the path to an installed Chromium browser
 // (Edge, Chrome, Brave) suitable for launching dedicated standalone App windows.
 func findChromiumAppBrowser() string {
@@ -792,5 +790,5 @@ func notifyAdminRightsRequired(err error) {
 	title, _ := windows.UTF16PtrFromString("NatBypass — Требуются права Администратора")
 	text := fmt.Sprintf("Виртуальный сетевой адаптер Wintun не может быть запущен:\n%v\n\nДля создания виртуального сетевого интерфейса и P2P-туннелей запустите NatBypass от имени Администратора (ПКМ -> Запуск от имени администратора).\n\nПрограмма продолжает работу в фоновом режиме (доступен WebUI и ретрансляция).", err)
 	textPtr, _ := windows.UTF16PtrFromString(text)
-	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(textPtr)), uintptr(unsafe.Pointer(title)), 0x00000030 /* MB_ICONWARNING */|0x00040000 /* MB_TOPMOST */)
+	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(textPtr)), uintptr(unsafe.Pointer(title)), 0x00000030 /* MB_ICONWARNING */ |0x00040000 /* MB_TOPMOST */)
 }

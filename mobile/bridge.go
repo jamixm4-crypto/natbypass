@@ -40,11 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-
-const Version          = "1.9.504"
-
-
-
+const Version = "1.9.505-beta.1"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -120,38 +116,38 @@ func (lr *logRing) Clear() {
 }
 
 var (
-	engineMu        sync.Mutex
-	engineCtx       context.Context
-	engineCancel    context.CancelFunc
-	engineRunning   bool
-	globalRegistry  *peer.Registry
-	globalSigMgr    *signaling.FallbackManager
-	globalConfig    *config.Config
-	globalDevID     string
-	globalDevName   string
-	globalPublicIP  string
-	globalIPv6      string
-	globalSTUN      string
+	engineMu       sync.Mutex
+	engineCtx      context.Context
+	engineCancel   context.CancelFunc
+	engineRunning  bool
+	globalRegistry *peer.Registry
+	globalSigMgr   *signaling.FallbackManager
+	globalConfig   *config.Config
+	globalDevID    string
+	globalDevName  string
+	globalPublicIP string
+	globalIPv6     string
+	globalSTUN     string
 	// S4: atomicGetVIP() теперь atomic.Value для безопасного чтения из горутин
 	// без захвата engineMu (TUN loop, signaling ticker читают без блокировки)
-	globalVirtualIP  sync.Map // used as atomic string via atomicGetVIP/atomicSetVIP
-	globalStarted    time.Time
-	globalExitNode         string
-	globalAllowExitNode    bool
-	globalAdvertisedRoutes []string
-	globalAWGPreset        string = "dpi"
-	globalIsMetered        atomic.Bool
-	globalBatteryLow       atomic.Bool
-	globalPuncher          *network.UDPPuncher
-	globalTCPDirectMgr     *network.TCPDirectManager
-	globalMultiHopRouter   *network.MultiHopRouter
-	globalTransportSwitcher *network.TransportSwitcher
-	globalTCPRelayClient    *relay.TCPRelayClient
-	globalTCPRelayServer    *relay.TCPRelayServer
-	globalTunFile   *os.File
-	globalTunCancel context.CancelFunc // controls TUN read goroutine lifecycle
-	globalTxBytes   atomic.Uint64
-	globalRxBytes   atomic.Uint64
+	globalVirtualIP           sync.Map // used as atomic string via atomicGetVIP/atomicSetVIP
+	globalStarted             time.Time
+	globalExitNode            string
+	globalAllowExitNode       bool
+	globalAdvertisedRoutes    []string
+	globalAWGPreset           string = "dpi"
+	globalIsMetered           atomic.Bool
+	globalBatteryLow          atomic.Bool
+	globalPuncher             *network.UDPPuncher
+	globalTCPDirectMgr        *network.TCPDirectManager
+	globalMultiHopRouter      *network.MultiHopRouter
+	globalTransportSwitcher   *network.TransportSwitcher
+	globalTCPRelayClient      *relay.TCPRelayClient
+	globalTCPRelayServer      *relay.TCPRelayServer
+	globalTunFile             *os.File
+	globalTunCancel           context.CancelFunc // controls TUN read goroutine lifecycle
+	globalTxBytes             atomic.Uint64
+	globalRxBytes             atomic.Uint64
 	lastReactivePunchMobile   = make(map[string]time.Time)
 	lastReactiveDialMobile    = make(map[string]time.Time)
 	lastLeaderSyncPunchMobile = make(map[string]time.Time)
@@ -183,7 +179,6 @@ func SetNetworkMetered(metered bool) {
 func SetBatteryLow(low bool) {
 	globalBatteryLow.Store(low)
 }
-
 
 func deriveInitialVirtualIP(devID string) string {
 	if globalConfig != nil {
@@ -225,7 +220,6 @@ func ResolveConfigVirtualIP(configYAML string) string {
 	}
 	return GetVirtualIP()
 }
-
 
 func negotiateVirtualIP() {
 	// BUG-09 FIX: globalConfig, globalRegistry, globalDevID are protected by engineMu.
@@ -271,7 +265,6 @@ func negotiateVirtualIP() {
 		}
 	}
 }
-
 
 func init() {
 	multiWriter := io.MultiWriter(os.Stdout, globalLogs)
@@ -532,7 +525,7 @@ func StartEngine(configYAML string, tunFd int) string {
 			globalRegistry.Upsert(p)
 			logger.Info().Str("peer", remoteDevID).Str("endpoint", fromAddr).Int64("ping_ms", p.PingMs).Msg("⚡ Android P2P сокет пробит!")
 
-// periodic probeTicker maintains connection
+			// periodic probeTicker maintains connection
 		}
 	})
 	globalPuncher = puncher
@@ -636,8 +629,12 @@ func StartEngine(configYAML string, tunFd int) string {
 			regPeer.DirectP2P = true
 			regPeer.DirectTCP = true
 			regPeer.Transport = "tcp_shadowtls"
+			regPeer.RelayedViaDevID = ""
+			regPeer.RelayedViaName = ""
+			regPeer.RelayedViaVIP = ""
 			regPeer.TCPAddr = remoteAddr
 			regPeer.LastDirectSeen = time.Now()
+			regPeer.LastBilateralSeen = time.Now()
 			globalRegistry.Upsert(regPeer)
 		}
 	})
@@ -799,13 +796,13 @@ func StartEngine(configYAML string, tunFd int) string {
 				natTypeStr = puncher.GetNATType().String()
 			}
 			payload := &signaling.Payload{
-				DeviceID:         devID,
-				Nickname:         globalDevName,
-				DeviceName:       globalDevName,
-				PublicKey:        crypto.KeyToHex(pubKey),
-				PublicIP:         globalPublicIP,
-				LocalAddr:        localAddr,
-				STUNAddr:         globalSTUN,
+				DeviceID:   devID,
+				Nickname:   globalDevName,
+				DeviceName: globalDevName,
+				PublicKey:  crypto.KeyToHex(pubKey),
+				PublicIP:   globalPublicIP,
+				LocalAddr:  localAddr,
+				STUNAddr:   globalSTUN,
 				TCPAddr: func() string {
 					if globalTCPDirectMgr != nil && globalTCPDirectMgr.Port() > 0 {
 						host := globalPublicIP
@@ -820,12 +817,12 @@ func StartEngine(configYAML string, tunFd int) string {
 					}
 					return ""
 				}(),
-				IPv6Addr:         globalIPv6,
-				WGPubKey:         wgKey.PublicKey,
-				WGPort:           pPort,
-				VirtualIP:        atomicGetVIP(),
-				DirectP2P:        hasDirect,
-				NATType:          natTypeStr,
+				IPv6Addr:  globalIPv6,
+				WGPubKey:  wgKey.PublicKey,
+				WGPort:    pPort,
+				VirtualIP: atomicGetVIP(),
+				DirectP2P: hasDirect,
+				NATType:   natTypeStr,
 				NATDelta: func() int {
 					if puncher != nil {
 						return puncher.GetPortDelta()
@@ -838,7 +835,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					}
 					return ""
 				}(),
-				IsExitNode:       globalAllowExitNode || cfg.Network.AllowExitNode,
+				IsExitNode: globalAllowExitNode || cfg.Network.AllowExitNode,
 				AdvertisedRoutes: func() []string {
 					if len(globalAdvertisedRoutes) > 0 {
 						return globalAdvertisedRoutes
@@ -850,15 +847,15 @@ func StartEngine(configYAML string, tunFd int) string {
 				RelayQuotaGBDay:    cfg.Network.RelayQuotaGBDay,
 				IsMetered:          globalIsMetered.Load(),
 				BatteryLow:         globalBatteryLow.Load(),
-				Timestamp:        time.Now(),
-				AWG:              awgParams,
-				NetworkKey:       activeKey,
-				OS:               "android",
-				Platform:         "Android",
-				Arch:             runtime.GOARCH,
-				Version:          Version,
-				IsKeenetic:       false,
-				Topic:            activeTopic,
+				Timestamp:          time.Now(),
+				AWG:                awgParams,
+				NetworkKey:         activeKey,
+				OS:                 "android",
+				Platform:           "Android",
+				Arch:               runtime.GOARCH,
+				Version:            Version,
+				IsKeenetic:         false,
+				Topic:              activeTopic,
 			}
 			toSend := payload
 			if activeKey != "" {
@@ -1546,8 +1543,6 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 	}()
 
-
-
 	if tunFd > 0 {
 		attachTUNLocked(tunFd)
 	}
@@ -1602,10 +1597,14 @@ func attachTUNLocked(tunFd int) {
 				srcVIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
 				if p, ok := globalRegistry.GetByVirtualIP(srcVIP); ok {
 					p.DirectP2P = true
-					if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" {
+					if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" || p.Transport == "relay_mesh" {
 						p.Transport = "udp_direct"
+						p.RelayedViaDevID = ""
+						p.RelayedViaName = ""
+						p.RelayedViaVIP = ""
 					}
 					p.LastDirectSeen = time.Now()
+					p.LastBilateralSeen = time.Now()
 					p.LastSeen = time.Now()
 					if srcAddr != nil {
 						p.ActiveEndpoint = srcAddr.String()
@@ -1711,7 +1710,6 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 						}
-
 
 						if destIP.String() == cleanVIP {
 							if tf != nil {
@@ -1872,17 +1870,26 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							if sentDirect && (targetPeer.DirectP2P || sentTCP) {
+							bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
+							if sentDirect && (targetPeer.DirectP2P || sentTCP) && bilateralOK {
 								targetPeer.RelayedViaDevID = ""
 								targetPeer.RelayedViaName = ""
 								targetPeer.RelayedViaVIP = ""
+								if targetPeer.Transport == "relay_mesh" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" {
+									if sentTCP {
+										targetPeer.Transport = "tcp_tls"
+									} else {
+										targetPeer.Transport = "udp_direct"
+									}
+								}
 							}
 
-							// Fallback Relay Rule: ONLY if direct transmission completely failed AND NOT Exit Node internet traffic!
+							// Fallback Relay Rule: ONLY if direct transmission is not bilaterally verified AND NOT Exit Node internet traffic!
 							// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
 							isICMP := len(pkt) >= 20 && pkt[9] == 1
-							isExitOrInternet := !isICMP && ((globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetPeer.VirtualIP == globalExitNode)) || len(pkt) > 400 || (cleanVIP != "" && srcIP.String() != cleanVIP))
-							needsRelay := !sentTCP && !sentDirect && (!isExitOrInternet || isICMP)
+							isExitOrInternet := !isICMP && ((globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetPeer.VirtualIP == globalExitNode)) || (cleanVIP != "" && srcIP.String() != cleanVIP))
+							directVerified := sentTCP || (sentDirect && targetPeer.DirectP2P && bilateralOK)
+							needsRelay := !directVerified && (!isExitOrInternet || isICMP)
 
 							// 1e. Mesh Userspace Relay Fallback (encapsulated in Multi-Hop header)
 							if needsRelay && !isForceUDP && globalRegistry != nil {
@@ -2070,7 +2077,6 @@ func sendTCPConnectSignal(ctx context.Context, sigMgr *signaling.FallbackManager
 		_ = sigMgr.Send(ctx, toSend)
 	}(targetDevID, myTCPAddr)
 }
-
 
 func respondICMPEcho(payload []byte, fromAddr *net.UDPAddr) {
 	if len(payload) < 20 {
@@ -2306,7 +2312,6 @@ func StopEngine() {
 	logger.Info().Msg("NatBypass Android ядро остановлено")
 }
 
-
 // RestartEngine перезапускает движок с новым конфигом
 func RestartEngine(configYAML string) string {
 	StopEngine()
@@ -2388,7 +2393,6 @@ func ensureMobileTCPRelay(ctx context.Context, devID string) {
 		logger.Info().Str("relay", bestPeer.DeviceID).Str("addr", tcpAddr).Msg("🛡️ Android connected to TCP Peer-as-Relay on port 443")
 	}
 }
-
 
 // RebindSockets closes the old UDP socket and binds a new one, returning the new raw file descriptor.
 // Must be called on network switch (Wi-Fi <-> Mobile data) so the new socket routes through the new network.
@@ -2502,23 +2506,23 @@ func RefreshPublicIP() {
 
 			cleanVIP := strings.TrimSpace(strings.Split(atomicGetVIP(), "/")[0])
 			payload := &signaling.Payload{
-				DeviceID:         globalDevID,
-				Nickname:         globalDevName,
-				DeviceName:       globalDevName,
-				PublicIP:         globalPublicIP,
-				STUNAddr:         globalSTUN,
-				IPv6Addr:         globalIPv6,
-				VirtualIP:        cleanVIP,
-				NATType:          "unknown",
-				Timestamp:        time.Now(),
-				AWG:              awgParams,
-				OS:               "android",
-				Platform:         "Android",
-				Arch:             "arm64",
-				Version:          Version,
-				IsKeenetic:       false,
-				NetworkKey:       activeKey,
-				Topic:            activeTopic,
+				DeviceID:   globalDevID,
+				Nickname:   globalDevName,
+				DeviceName: globalDevName,
+				PublicIP:   globalPublicIP,
+				STUNAddr:   globalSTUN,
+				IPv6Addr:   globalIPv6,
+				VirtualIP:  cleanVIP,
+				NATType:    "unknown",
+				Timestamp:  time.Now(),
+				AWG:        awgParams,
+				OS:         "android",
+				Platform:   "Android",
+				Arch:       "arm64",
+				Version:    Version,
+				IsKeenetic: false,
+				NetworkKey: activeKey,
+				Topic:      activeTopic,
 			}
 			toSend := payload
 			if activeKey != "" {
@@ -2787,8 +2791,6 @@ func GetSelectedExitNode() string {
 	return globalExitNode
 }
 
-
-
 // SetAllowExitNode разрешает другим устройствам выходить в интернет через этот узел
 func SetAllowExitNode(allow bool) {
 	engineMu.Lock()
@@ -2984,7 +2986,6 @@ func ImportAllProfilesJSON(jsonStr string) string {
 	return "OK"
 }
 
-
 // GetFullTelemetryJSON возвращает детальные телеметрические метрики
 func GetFullTelemetryJSON() string {
 	engineMu.Lock()
@@ -3041,30 +3042,30 @@ func GetFullTelemetryJSON() string {
 	}
 
 	res := map[string]interface{}{
-		"running":         engineRunning,
-		"version":         Version,
-		"device_id":       globalDevID,
-		"device_name":     globalDevName,
-		"public_ip":       globalPublicIP,
-		"stun_addr":       globalSTUN,
-		"virtual_ip":      atomicGetVIP(),
-		"tun_active":      tunActive,
-		"tun_status":      tunStatus,
-		"tun_device":      "nb0",
-		"peers_count":     peersCount,
-		"direct_p2p":      directCount > 0,
-		"direct_count":    directCount,
-		"avg_ping_ms":     avgPing,
-		"channel":         channel,
-		"exit_node":       globalExitNode,
-		"awg_preset":      globalAWGPreset,
-		"awg_active":      awgActive,
-		"awg_version":     "3.1",
-		"awg":             awgData,
-		"tx_bytes":        globalTxBytes.Load(),
-		"rx_bytes":        globalRxBytes.Load(),
-		"uptime":          time.Since(globalStarted).Round(time.Second).String(),
-		"metrics":         system.GetMetrics(),
+		"running":      engineRunning,
+		"version":      Version,
+		"device_id":    globalDevID,
+		"device_name":  globalDevName,
+		"public_ip":    globalPublicIP,
+		"stun_addr":    globalSTUN,
+		"virtual_ip":   atomicGetVIP(),
+		"tun_active":   tunActive,
+		"tun_status":   tunStatus,
+		"tun_device":   "nb0",
+		"peers_count":  peersCount,
+		"direct_p2p":   directCount > 0,
+		"direct_count": directCount,
+		"avg_ping_ms":  avgPing,
+		"channel":      channel,
+		"exit_node":    globalExitNode,
+		"awg_preset":   globalAWGPreset,
+		"awg_active":   awgActive,
+		"awg_version":  "3.1",
+		"awg":          awgData,
+		"tx_bytes":     globalTxBytes.Load(),
+		"rx_bytes":     globalRxBytes.Load(),
+		"uptime":       time.Since(globalStarted).Round(time.Second).String(),
+		"metrics":      system.GetMetrics(),
 	}
 	data, _ := json.Marshal(res)
 	return string(data)
@@ -3157,7 +3158,7 @@ func GetDiagnosticsJSON() string {
 		result["stun"] = check{Ok: false, Detail: "STUN не определён"}
 	}
 
-	//                 
+	//
 	ch := "MQTT / Telegram"
 	if globalSigMgr != nil && globalSigMgr.CurrentChannel() != "" {
 		ch = globalSigMgr.CurrentChannel()
@@ -3215,7 +3216,6 @@ func DeletePeer(deviceID string) {
 		globalRegistry.Delete(deviceID)
 	}
 }
-
 
 // GenerateInviteQRText возвращает строку QR-кода приглашения
 func GenerateInviteQRText() string {
@@ -3598,8 +3598,6 @@ func rebuildSignalingInternal(p *config.Profile) {
 	}
 }
 
-
-
 // PingPeer активно отправляет системный ICMP эхо-запрос (или UDP зонд) пиру и возвращает реальный RTT в миллисекундах (-1 при отсутствии ответа)
 func PingPeer(deviceID string) int64 {
 	engineMu.Lock()
@@ -3682,8 +3680,6 @@ func PingPeer(deviceID string) int64 {
 	return -1
 }
 
-
-
 // SetProfileVirtualIP устанавливает кастомный Virtual IP для профиля
 func SetProfileVirtualIP(profileID, vip string) bool {
 	engineMu.Lock()
@@ -3705,7 +3701,6 @@ func SetProfileVirtualIP(profileID, vip string) bool {
 	}
 	return false
 }
-
 
 // ConnectPeerTCP attempts to connect directly to the given peer via TCP ShadowTLS
 func ConnectPeerTCP(deviceID string) bool {

@@ -78,13 +78,13 @@ func (d *Discovery) PublishBeacon(ctx context.Context, beacon *ProbeBeacon) erro
 		return err
 	}
 	payload := &signaling.Payload{
-		DeviceID:   d.myNodeID,
-		STUNAddr:   beacon.STUNAddr,
-		NATType:    beacon.NATType,
-		PublicKey:  beacon.PubKey,
-		VirtualIP:  beacon.VIP,
+		DeviceID:    d.myNodeID,
+		STUNAddr:    beacon.STUNAddr,
+		NATType:     beacon.NATType,
+		PublicKey:   beacon.PubKey,
+		VirtualIP:   beacon.VIP,
 		CountryFlag: beacon.Country,
-		Nickname:   string(data), // embed full beacon JSON in Nickname field
+		Nickname:    string(data), // embed full beacon JSON in Nickname field
 	}
 	return d.sigMgr.Send(ctx, payload)
 }

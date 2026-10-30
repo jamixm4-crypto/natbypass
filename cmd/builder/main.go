@@ -28,25 +28,25 @@ var (
 	modgdi32    = windows.NewLazySystemDLL("gdi32.dll")
 	modcomctl32 = windows.NewLazySystemDLL("comctl32.dll")
 
-	procRegisterClassExW      = moduser32.NewProc("RegisterClassExW")
-	procCreateWindowExW       = moduser32.NewProc("CreateWindowExW")
-	procDefWindowProcW        = moduser32.NewProc("DefWindowProcW")
-	procPostQuitMessage       = moduser32.NewProc("PostQuitMessage")
-	procGetMessageW           = moduser32.NewProc("GetMessageW")
-	procTranslateMessage      = moduser32.NewProc("TranslateMessage")
-	procDispatchMessageW      = moduser32.NewProc("DispatchMessageW")
-	procSendMessageW          = moduser32.NewProc("SendMessageW")
-	procGetWindowTextW        = moduser32.NewProc("GetWindowTextW")
-	procSetWindowTextW        = moduser32.NewProc("SetWindowTextW")
-	procEnableWindow          = moduser32.NewProc("EnableWindow")
-	procLoadIconW             = moduser32.NewProc("LoadIconW")
-	procGetModuleHandleW      = modkernel32.NewProc("GetModuleHandleW")
-	procCreateFontW           = modgdi32.NewProc("CreateFontW")
-	procCreateSolidBrush      = modgdi32.NewProc("CreateSolidBrush")
-	procSetBkMode             = modgdi32.NewProc("SetBkMode")
-	procSetTextColor          = modgdi32.NewProc("SetTextColor")
-	procSetBkColor            = modgdi32.NewProc("SetBkColor")
-	procInitCommonControlsEx  = modcomctl32.NewProc("InitCommonControlsEx")
+	procRegisterClassExW     = moduser32.NewProc("RegisterClassExW")
+	procCreateWindowExW      = moduser32.NewProc("CreateWindowExW")
+	procDefWindowProcW       = moduser32.NewProc("DefWindowProcW")
+	procPostQuitMessage      = moduser32.NewProc("PostQuitMessage")
+	procGetMessageW          = moduser32.NewProc("GetMessageW")
+	procTranslateMessage     = moduser32.NewProc("TranslateMessage")
+	procDispatchMessageW     = moduser32.NewProc("DispatchMessageW")
+	procSendMessageW         = moduser32.NewProc("SendMessageW")
+	procGetWindowTextW       = moduser32.NewProc("GetWindowTextW")
+	procSetWindowTextW       = moduser32.NewProc("SetWindowTextW")
+	procEnableWindow         = moduser32.NewProc("EnableWindow")
+	procLoadIconW            = moduser32.NewProc("LoadIconW")
+	procGetModuleHandleW     = modkernel32.NewProc("GetModuleHandleW")
+	procCreateFontW          = modgdi32.NewProc("CreateFontW")
+	procCreateSolidBrush     = modgdi32.NewProc("CreateSolidBrush")
+	procSetBkMode            = modgdi32.NewProc("SetBkMode")
+	procSetTextColor         = modgdi32.NewProc("SetTextColor")
+	procSetBkColor           = modgdi32.NewProc("SetBkColor")
+	procInitCommonControlsEx = modcomctl32.NewProc("InitCommonControlsEx")
 )
 
 const (
@@ -57,43 +57,43 @@ const (
 	WS_VSCROLL          = 0x00200000
 	WS_TABSTOP          = 0x00010000
 
-	WS_EX_CLIENTEDGE    = 0x00000200
-	WS_EX_STATICEDGE    = 0x00020000
+	WS_EX_CLIENTEDGE = 0x00000200
+	WS_EX_STATICEDGE = 0x00020000
 
-	BS_AUTOCHECKBOX     = 0x00000003
-	BS_PUSHBUTTON       = 0x00000000
-	BS_DEFPUSHBUTTON    = 0x00000001
+	BS_AUTOCHECKBOX  = 0x00000003
+	BS_PUSHBUTTON    = 0x00000000
+	BS_DEFPUSHBUTTON = 0x00000001
 
-	ES_LEFT             = 0x0000
-	ES_MULTILINE        = 0x0004
-	ES_AUTOVSCROLL      = 0x0040
-	ES_AUTOHSCROLL      = 0x0080
-	ES_READONLY         = 0x0800
-	ES_PASSWORD         = 0x0020
+	ES_LEFT        = 0x0000
+	ES_MULTILINE   = 0x0004
+	ES_AUTOVSCROLL = 0x0040
+	ES_AUTOHSCROLL = 0x0080
+	ES_READONLY    = 0x0800
+	ES_PASSWORD    = 0x0020
 
-	WM_COMMAND          = 0x0111
-	WM_DESTROY          = 0x0002
-	WM_SETFONT          = 0x0030
-	WM_CTLCOLOREDIT     = 0x0133
-	WM_CTLCOLORSTATIC   = 0x0138
-	WM_CTLCOLORBTN      = 0x0135
+	WM_COMMAND        = 0x0111
+	WM_DESTROY        = 0x0002
+	WM_SETFONT        = 0x0030
+	WM_CTLCOLOREDIT   = 0x0133
+	WM_CTLCOLORSTATIC = 0x0138
+	WM_CTLCOLORBTN    = 0x0135
 
-	EM_SETSEL           = 0x00B1
-	EM_REPLACESEL       = 0x00C2
-	EM_SCROLLCARET      = 0x00B7
-	BM_GETCHECK         = 0x00F0
-	BM_SETCHECK         = 0x00F1
-	BST_CHECKED         = 1
+	EM_SETSEL      = 0x00B1
+	EM_REPLACESEL  = 0x00C2
+	EM_SCROLLCARET = 0x00B7
+	BM_GETCHECK    = 0x00F0
+	BM_SETCHECK    = 0x00F1
+	BST_CHECKED    = 1
 
-	PBM_SETRANGE32      = 0x0406
-	PBM_SETPOS          = 0x0402
-	PBM_SETBARCOLOR     = 0x0409
+	PBM_SETRANGE32  = 0x0406
+	PBM_SETPOS      = 0x0402
+	PBM_SETBARCOLOR = 0x0409
 
-	IDI_APPLICATION     = 32512
+	IDI_APPLICATION = 32512
 
-	BTN_BUILD_ALL       = 101
-	BTN_BUILD_ROUTER    = 102
-	BTN_OPEN_DIST       = 103
+	BTN_BUILD_ALL    = 101
+	BTN_BUILD_ROUTER = 102
+	BTN_OPEN_DIST    = 103
 )
 
 type INITCOMMONCONTROLSEX struct {
@@ -126,13 +126,13 @@ type MSG struct {
 }
 
 var (
-	hMainWnd       windows.HWND
-	hFont          windows.Handle
-	hFontBold      windows.Handle
-	hFontTitle     windows.Handle
-	hFontCode      windows.Handle
-	hBgBrush       windows.Handle
-	hEditBrush     windows.Handle
+	hMainWnd   windows.HWND
+	hFont      windows.Handle
+	hFontBold  windows.Handle
+	hFontTitle windows.Handle
+	hFontCode  windows.Handle
+	hBgBrush   windows.Handle
+	hEditBrush windows.Handle
 
 	// Controls
 	hTxtTgToken    windows.HWND
@@ -537,7 +537,7 @@ func startBuild(mode string) {
 
 	type target struct {
 		goos, goarch, ext, gomips, name string
-		checked                          bool
+		checked                         bool
 	}
 
 	targets := []target{

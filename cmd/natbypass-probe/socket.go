@@ -76,9 +76,9 @@ type ProbeSocket struct {
 	udpReplies chan udpReplyEvent
 	awgReplies chan awgReplyEvent
 
-	ctx        context.Context
-	cancel     context.CancelFunc
-	punchOnce  sync.Once
+	ctx       context.Context
+	cancel    context.CancelFunc
+	punchOnce sync.Once
 }
 
 // NewProbeSocket открывает локальный UDP-сокет и запускает единый readLoop

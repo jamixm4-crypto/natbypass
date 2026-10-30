@@ -57,52 +57,52 @@ foreach ($n in $names) { Remove-NetFirewallRule -DisplayName $n -ErrorAction Sil
 func ensureFirewallRule() {
 	exePath, _ := os.Executable()
 	rules := []struct {
-		name    string
+		name      string
 		netshArgs []string
-		psNew   string
+		psNew     string
 	}{
 		{
-			name: "NatBypass UDP P2P (443)",
+			name:      "NatBypass UDP P2P (443)",
 			netshArgs: []string{"dir=in", "action=allow", "protocol=UDP", "localport=443", "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
-			name: "NatBypass UDP P2P (47832)",
+			name:      "NatBypass UDP P2P (47832)",
 			netshArgs: []string{"dir=in", "action=allow", "protocol=UDP", "localport=47832", "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
-			name: "NatBypass UDP P2P (51820)",
+			name:      "NatBypass UDP P2P (51820)",
 			netshArgs: []string{"dir=in", "action=allow", "protocol=UDP", "localport=51820", "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
-			name: "NatBypass TCP Mesh (8443)",
+			name:      "NatBypass TCP Mesh (8443)",
 			netshArgs: []string{"dir=in", "action=allow", "protocol=TCP", "localport=8443", "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
-			name: "NatBypass TCP Mesh (4443)",
+			name:      "NatBypass TCP Mesh (4443)",
 			netshArgs: []string{"dir=in", "action=allow", "protocol=TCP", "localport=4443", "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
-			name: "NatBypass TCP Mesh (47832)",
+			name:      "NatBypass TCP Mesh (47832)",
 			netshArgs: []string{"dir=in", "action=allow", "protocol=TCP", "localport=47832", "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
-			name: "NatBypass TCP Mesh (51820)",
+			name:      "NatBypass TCP Mesh (51820)",
 			netshArgs: []string{"dir=in", "action=allow", "protocol=TCP", "localport=51820", "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
-			name: "NatBypass App In",
+			name:      "NatBypass App In",
 			netshArgs: []string{"dir=in", "action=allow", "program=" + exePath, "enable=yes", "profile=any", "edge=yes"},
 		},
 		{
-			name: "NatBypass ICMPv4 In",
+			name:  "NatBypass ICMPv4 In",
 			psNew: `New-NetFirewallRule -DisplayName 'NatBypass ICMPv4 In' -Name 'NatBypass ICMPv4 In' -Direction Inbound -Action Allow -Protocol ICMPv4 -Profile Any -ErrorAction SilentlyContinue`,
 		},
 		{
-			name: "NatBypass Adapter All In",
+			name:  "NatBypass Adapter All In",
 			psNew: `New-NetFirewallRule -DisplayName 'NatBypass Adapter All In' -Name 'NatBypass Adapter All In' -Direction Inbound -Action Allow -InterfaceAlias 'NatBypass' -Profile Any -ErrorAction SilentlyContinue`,
 		},
 		{
-			name: "NatBypass Adapter All Out",
+			name:  "NatBypass Adapter All Out",
 			psNew: `New-NetFirewallRule -DisplayName 'NatBypass Adapter All Out' -Name 'NatBypass Adapter All Out' -Direction Outbound -Action Allow -InterfaceAlias 'NatBypass' -Profile Any -ErrorAction SilentlyContinue`,
 		},
 	}
@@ -157,10 +157,10 @@ func relaunchAsAdmin() bool {
 	}
 
 	sei := &SHELLEXECUTEINFO{
-		fMask:   0x00000040, // SEE_MASK_NOCLOSEPROCESS
-		lpVerb:  verb,
-		lpFile:  exePtr,
-		nShow:   1,
+		fMask:  0x00000040, // SEE_MASK_NOCLOSEPROCESS
+		lpVerb: verb,
+		lpFile: exePtr,
+		nShow:  1,
 	}
 	sei.cbSize = uint32(unsafe.Sizeof(*sei))
 
@@ -169,4 +169,3 @@ func relaunchAsAdmin() bool {
 	ret, _, _ := procShellExecuteEx.Call(uintptr(unsafe.Pointer(sei)))
 	return ret != 0
 }
-

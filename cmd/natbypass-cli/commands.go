@@ -269,7 +269,6 @@ func newStatusCmd() *cobra.Command {
 	}
 }
 
-
 // newKeygenCmd creates the key generation command for NaCl keys.
 func newKeygenCmd() *cobra.Command {
 	return &cobra.Command{

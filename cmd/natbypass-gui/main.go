@@ -105,12 +105,10 @@ func applyAWGProfileToGUI(p *config.Profile) {
 	triggerPublish()
 }
 
-
 var (
-	Version = "1.9.504"
+	Version = "1.9.505-beta.1"
 	Commit  = "release"
 )
-
 
 // Win32 API
 var (
@@ -120,62 +118,62 @@ var (
 	modcomctl32 = windows.NewLazySystemDLL("comctl32.dll")
 	moddwmapi   = windows.NewLazySystemDLL("dwmapi.dll")
 
-	procRegisterClassExW      = moduser32.NewProc("RegisterClassExW")
-	procCreateWindowExW       = moduser32.NewProc("CreateWindowExW")
-	procDefWindowProcW        = moduser32.NewProc("DefWindowProcW")
-	procPostQuitMessage       = moduser32.NewProc("PostQuitMessage")
-	procGetMessageW           = moduser32.NewProc("GetMessageW")
-	procTranslateMessage      = moduser32.NewProc("TranslateMessage")
-	procDispatchMessageW      = moduser32.NewProc("DispatchMessageW")
-	procSendMessageW          = moduser32.NewProc("SendMessageW")
-	procGetWindowTextW        = moduser32.NewProc("GetWindowTextW")
-	procSetWindowTextW        = moduser32.NewProc("SetWindowTextW")
-	procSetWindowPos          = moduser32.NewProc("SetWindowPos")
-	procShowWindow            = moduser32.NewProc("ShowWindow")
-	procUpdateWindow          = moduser32.NewProc("UpdateWindow")
-	procSetForegroundWindow   = moduser32.NewProc("SetForegroundWindow")
-	procFindWindowW           = moduser32.NewProc("FindWindowW")
-	procSetTimer              = moduser32.NewProc("SetTimer")
-	procKillTimer             = moduser32.NewProc("KillTimer")
-	procLoadIconW             = moduser32.NewProc("LoadIconW")
-	procLoadCursorW           = moduser32.NewProc("LoadCursorW")
-	procSetCursor             = moduser32.NewProc("SetCursor")
-	procGetModuleHandleW      = modkernel32.NewProc("GetModuleHandleW")
-	procRtlMoveMemory         = modkernel32.NewProc("RtlMoveMemory")
-	procCreateFontW           = modgdi32.NewProc("CreateFontW")
-	procCreateSolidBrush      = modgdi32.NewProc("CreateSolidBrush")
-	procDeleteObject          = modgdi32.NewProc("DeleteObject")
-	procSetBkMode             = modgdi32.NewProc("SetBkMode")
-	procSetTextColor          = modgdi32.NewProc("SetTextColor")
-	procSetBkColor            = modgdi32.NewProc("SetBkColor")
-	procSelectObject          = modgdi32.NewProc("SelectObject")
-	procRoundRect             = modgdi32.NewProc("RoundRect")
-	procCreatePen             = modgdi32.NewProc("CreatePen")
-	procDrawTextW             = moduser32.NewProc("DrawTextW")
-	procFillRect              = moduser32.NewProc("FillRect")
-	procFrameRect             = moduser32.NewProc("FrameRect")
-	procBeginPaint            = moduser32.NewProc("BeginPaint")
-	procEndPaint              = moduser32.NewProc("EndPaint")
-	procInvalidateRect        = moduser32.NewProc("InvalidateRect")
-	procInitCommonControlsEx  = modcomctl32.NewProc("InitCommonControlsEx")
-	procDwmSetWindowAttribute = moddwmapi.NewProc("DwmSetWindowAttribute")
-	procMoveToEx              = modgdi32.NewProc("MoveToEx")
-	procLineTo                = modgdi32.NewProc("LineTo")
-	procCreateMutexW          = modkernel32.NewProc("CreateMutexW")
-	procCloseHandle           = modkernel32.NewProc("CloseHandle")
-	procEnumWindows           = moduser32.NewProc("EnumWindows")
+	procRegisterClassExW         = moduser32.NewProc("RegisterClassExW")
+	procCreateWindowExW          = moduser32.NewProc("CreateWindowExW")
+	procDefWindowProcW           = moduser32.NewProc("DefWindowProcW")
+	procPostQuitMessage          = moduser32.NewProc("PostQuitMessage")
+	procGetMessageW              = moduser32.NewProc("GetMessageW")
+	procTranslateMessage         = moduser32.NewProc("TranslateMessage")
+	procDispatchMessageW         = moduser32.NewProc("DispatchMessageW")
+	procSendMessageW             = moduser32.NewProc("SendMessageW")
+	procGetWindowTextW           = moduser32.NewProc("GetWindowTextW")
+	procSetWindowTextW           = moduser32.NewProc("SetWindowTextW")
+	procSetWindowPos             = moduser32.NewProc("SetWindowPos")
+	procShowWindow               = moduser32.NewProc("ShowWindow")
+	procUpdateWindow             = moduser32.NewProc("UpdateWindow")
+	procSetForegroundWindow      = moduser32.NewProc("SetForegroundWindow")
+	procFindWindowW              = moduser32.NewProc("FindWindowW")
+	procSetTimer                 = moduser32.NewProc("SetTimer")
+	procKillTimer                = moduser32.NewProc("KillTimer")
+	procLoadIconW                = moduser32.NewProc("LoadIconW")
+	procLoadCursorW              = moduser32.NewProc("LoadCursorW")
+	procSetCursor                = moduser32.NewProc("SetCursor")
+	procGetModuleHandleW         = modkernel32.NewProc("GetModuleHandleW")
+	procRtlMoveMemory            = modkernel32.NewProc("RtlMoveMemory")
+	procCreateFontW              = modgdi32.NewProc("CreateFontW")
+	procCreateSolidBrush         = modgdi32.NewProc("CreateSolidBrush")
+	procDeleteObject             = modgdi32.NewProc("DeleteObject")
+	procSetBkMode                = modgdi32.NewProc("SetBkMode")
+	procSetTextColor             = modgdi32.NewProc("SetTextColor")
+	procSetBkColor               = modgdi32.NewProc("SetBkColor")
+	procSelectObject             = modgdi32.NewProc("SelectObject")
+	procRoundRect                = modgdi32.NewProc("RoundRect")
+	procCreatePen                = modgdi32.NewProc("CreatePen")
+	procDrawTextW                = moduser32.NewProc("DrawTextW")
+	procFillRect                 = moduser32.NewProc("FillRect")
+	procFrameRect                = moduser32.NewProc("FrameRect")
+	procBeginPaint               = moduser32.NewProc("BeginPaint")
+	procEndPaint                 = moduser32.NewProc("EndPaint")
+	procInvalidateRect           = moduser32.NewProc("InvalidateRect")
+	procInitCommonControlsEx     = modcomctl32.NewProc("InitCommonControlsEx")
+	procDwmSetWindowAttribute    = moddwmapi.NewProc("DwmSetWindowAttribute")
+	procMoveToEx                 = modgdi32.NewProc("MoveToEx")
+	procLineTo                   = modgdi32.NewProc("LineTo")
+	procCreateMutexW             = modkernel32.NewProc("CreateMutexW")
+	procCloseHandle              = modkernel32.NewProc("CloseHandle")
+	procEnumWindows              = moduser32.NewProc("EnumWindows")
 	procGetWindowThreadProcessId = moduser32.NewProc("GetWindowThreadProcessId")
-	procPostMessageW          = moduser32.NewProc("PostMessageW")
-	procGetClientRect         = moduser32.NewProc("GetClientRect")
-	procGetWindowRect         = moduser32.NewProc("GetWindowRect")
-	procEnableWindow          = moduser32.NewProc("EnableWindow")
-	procSetFocus              = moduser32.NewProc("SetFocus")
-	procDestroyWindow         = moduser32.NewProc("DestroyWindow")
-	procMessageBoxW           = moduser32.NewProc("MessageBoxW")
-	procGetTextExtentPoint32W = modgdi32.NewProc("GetTextExtentPoint32W")
-	procCreatePopupMenu       = moduser32.NewProc("CreatePopupMenu")
-	procAppendMenuW           = moduser32.NewProc("AppendMenuW")
-	procTrackPopupMenu        = moduser32.NewProc("TrackPopupMenu")
+	procPostMessageW             = moduser32.NewProc("PostMessageW")
+	procGetClientRect            = moduser32.NewProc("GetClientRect")
+	procGetWindowRect            = moduser32.NewProc("GetWindowRect")
+	procEnableWindow             = moduser32.NewProc("EnableWindow")
+	procSetFocus                 = moduser32.NewProc("SetFocus")
+	procDestroyWindow            = moduser32.NewProc("DestroyWindow")
+	procMessageBoxW              = moduser32.NewProc("MessageBoxW")
+	procGetTextExtentPoint32W    = modgdi32.NewProc("GetTextExtentPoint32W")
+	procCreatePopupMenu          = moduser32.NewProc("CreatePopupMenu")
+	procAppendMenuW              = moduser32.NewProc("AppendMenuW")
+	procTrackPopupMenu           = moduser32.NewProc("TrackPopupMenu")
 	procGetCursorPos             = moduser32.NewProc("GetCursorPos")
 	procLoadImageW               = moduser32.NewProc("LoadImageW")
 	procGetForegroundWindow      = moduser32.NewProc("GetForegroundWindow")
@@ -190,7 +188,6 @@ var (
 	procDragFinish        = modshell32.NewProc("DragFinish")
 	procShellExecuteExW   = modshell32.NewProc("ShellExecuteExW")
 )
-
 
 type NOTIFYICONDATAW struct {
 	CbSize           uint32
@@ -248,21 +245,21 @@ const (
 	LBS_NOTIFY           = 0x0001
 	LBS_NOINTEGRALHEIGHT = 0x0100
 
-	WM_SIZE           = 0x0005
-	WM_DESTROY        = 0x0002
-	WM_ERASEBKGND     = 0x0014
-	WM_SETCURSOR      = 0x0020
-	WM_CLOSE          = 0x0010
-	WM_PAINT          = 0x000F
-	WM_COMMAND        = 0x0111
-	WM_SYSCOMMAND     = 0x0112
-	WM_TIMER          = 0x0113
-	WM_DRAWITEM       = 0x002B
-	WM_CTLCOLORSTATIC = 0x0138
-	WM_CTLCOLOREDIT   = 0x0133
-	WM_CTLCOLORBTN    = 0x0135
-	WM_CTLCOLORLISTBOX= 0x0134
-	WS_FIXEDWINDOW    = 0x00CA0000
+	WM_SIZE            = 0x0005
+	WM_DESTROY         = 0x0002
+	WM_ERASEBKGND      = 0x0014
+	WM_SETCURSOR       = 0x0020
+	WM_CLOSE           = 0x0010
+	WM_PAINT           = 0x000F
+	WM_COMMAND         = 0x0111
+	WM_SYSCOMMAND      = 0x0112
+	WM_TIMER           = 0x0113
+	WM_DRAWITEM        = 0x002B
+	WM_CTLCOLORSTATIC  = 0x0138
+	WM_CTLCOLOREDIT    = 0x0133
+	WM_CTLCOLORBTN     = 0x0135
+	WM_CTLCOLORLISTBOX = 0x0134
+	WS_FIXEDWINDOW     = 0x00CA0000
 
 	SC_CLOSE = 0xF060
 
@@ -412,15 +409,15 @@ var (
 	hListSummaryPeers     uintptr
 
 	// Вкладка 1: Устройства (Peers)
-	hLblPeersDesc         uintptr
-	hListPeers            uintptr
-	hBtnCopyPeerVIP       uintptr
-	hBtnPingPeer          uintptr
-	lastPeersHash         string
-	activeExitNodeID      string
-	activeExitVIP         string
-	activeSubnetRoutes    = make(map[string]string)
-	activeSubnetRoutesMu  sync.RWMutex
+	hLblPeersDesc        uintptr
+	hListPeers           uintptr
+	hBtnCopyPeerVIP      uintptr
+	hBtnPingPeer         uintptr
+	lastPeersHash        string
+	activeExitNodeID     string
+	activeExitVIP        string
+	activeSubnetRoutes   = make(map[string]string)
+	activeSubnetRoutesMu sync.RWMutex
 
 	// Состояние асинхронной проверки обновлений
 	updateCheckMu    sync.Mutex
@@ -493,10 +490,10 @@ var (
 	hBtnDumpStack     uintptr
 	hBtnRelaunchAdmin uintptr
 	hEditDiagLog      uintptr
-	hEditLogs      uintptr
-	hBtnClrLogs    uintptr
-	hBtnSaveLogs   uintptr
-	hBtnToggleDiag uintptr
+	hEditLogs         uintptr
+	hBtnClrLogs       uintptr
+	hBtnSaveLogs      uintptr
+	hBtnToggleDiag    uintptr
 
 	// Вкладка 7: Настройки приложения (Settings)
 	hEditMyNick              uintptr
@@ -523,47 +520,47 @@ var (
 	allControls []uintptr
 
 	// Движок и сетевое состояние
-	configPath       string
-	cfg              *config.Config
-	registry         *peer.Registry
-	sigChannels      []signaling.SignalingChannel
-	sigMode          string
-	ipDisc           *network.Discoverer
-	udpPuncher       *network.UDPPuncher
-	guiTCPDirectMgr  *network.TCPDirectManager
-	guiDecoyMgr      *network.DecoyManager
-	activeMQTT       *signaling.MQTTChannel
-	uiServer         *webui.Server
-	tunDev           *tunnel.Device
-	myPubKey         [32]byte
-	myPrivKey        [32]byte
-	myWGPubKey       string
-	myWGPrivKey      string
-	myDevID          string
-	myNick           string
-	addressBook      map[string]string = make(map[string]string)
-	addressBookMu    sync.RWMutex
-	saveLogsToDisk   bool = false
-	showDiagnostics  bool = true
-	myVirtualIP      string = "100.64.200.1"
-	myPublicIP       string
-	mySTUNAddr       string
-	activeChannelStr string
-	vpnConnected     bool = false
-	engineCtx        context.Context
-	engineCancel     context.CancelFunc
-	engineMu         sync.Mutex
-	logsMutex        sync.Mutex
-	logsBuffer       []string
-	logsDirty        bool
-	awgDirty         bool
-	cachedAWGParams  wireguard.AWGParams
-	triggerPublishCh chan struct{}
-	isShuttingDown   int32
-	tgMuted          bool
-	myCountryFlagMu     sync.RWMutex
-	myCountryFlagCached string
-	lastCountryLookupIP string
+	configPath              string
+	cfg                     *config.Config
+	registry                *peer.Registry
+	sigChannels             []signaling.SignalingChannel
+	sigMode                 string
+	ipDisc                  *network.Discoverer
+	udpPuncher              *network.UDPPuncher
+	guiTCPDirectMgr         *network.TCPDirectManager
+	guiDecoyMgr             *network.DecoyManager
+	activeMQTT              *signaling.MQTTChannel
+	uiServer                *webui.Server
+	tunDev                  *tunnel.Device
+	myPubKey                [32]byte
+	myPrivKey               [32]byte
+	myWGPubKey              string
+	myWGPrivKey             string
+	myDevID                 string
+	myNick                  string
+	addressBook             map[string]string = make(map[string]string)
+	addressBookMu           sync.RWMutex
+	saveLogsToDisk          bool   = false
+	showDiagnostics         bool   = true
+	myVirtualIP             string = "100.64.200.1"
+	myPublicIP              string
+	mySTUNAddr              string
+	activeChannelStr        string
+	vpnConnected            bool = false
+	engineCtx               context.Context
+	engineCancel            context.CancelFunc
+	engineMu                sync.Mutex
+	logsMutex               sync.Mutex
+	logsBuffer              []string
+	logsDirty               bool
+	awgDirty                bool
+	cachedAWGParams         wireguard.AWGParams
+	triggerPublishCh        chan struct{}
+	isShuttingDown          int32
+	tgMuted                 bool
+	myCountryFlagMu         sync.RWMutex
+	myCountryFlagCached     string
+	lastCountryLookupIP     string
 	guiInboundPacketHandler func(srcAddr *net.UDPAddr, payload []byte, isTCP, isRelay bool)
 
 	// Статистика дебаггера
@@ -599,44 +596,44 @@ const (
 	ID_NAV_SETTINGS  = 3008
 
 	// Действия
-	ID_BTN_VPN             = 4001
-	ID_BTN_REFRESH         = 4002
-	ID_BTN_MANAGE_PROFILES = 4003
-	ID_BTN_AWG_STD         = 4004
-	ID_BTN_AWG_DPI         = 4005
-	ID_BTN_AWG_STEALTH     = 4006
-	ID_BTN_RAND_AWG        = 4007
-	ID_BTN_COPY_AWG        = 4008
-	ID_BTN_TEST_TG         = 4009
-	ID_BTN_TEST_MQTT       = 4010
-	ID_BTN_SAVE_CFG        = 4011
-	ID_BTN_RUN_DIAG        = 4012
-	ID_BTN_CLR_LOGS        = 4013
-	ID_BTN_MODE_PARALLEL   = 4020
-	ID_BTN_MODE_MQTT       = 4021
-	ID_BTN_MODE_TG         = 4022
-	ID_BTN_DUMP_STACK      = 4023
-	ID_BTN_SAVE_LOGS       = 4024
-	ID_BTN_SAVE_AWG        = 4025
-	ID_BTN_OPEN_AWG_CLIENT = 4026
-	ID_BTN_SYNC_AWG        = 4027
-	ID_BTN_BOOKMARK_PEER   = 4030
-	ID_BTN_TOGGLE_LOGS     = 4031
-	ID_BTN_TOGGLE_DIAG     = 4032
-	ID_BTN_ALLOW_EXIT      = 4033
+	ID_BTN_VPN              = 4001
+	ID_BTN_REFRESH          = 4002
+	ID_BTN_MANAGE_PROFILES  = 4003
+	ID_BTN_AWG_STD          = 4004
+	ID_BTN_AWG_DPI          = 4005
+	ID_BTN_AWG_STEALTH      = 4006
+	ID_BTN_RAND_AWG         = 4007
+	ID_BTN_COPY_AWG         = 4008
+	ID_BTN_TEST_TG          = 4009
+	ID_BTN_TEST_MQTT        = 4010
+	ID_BTN_SAVE_CFG         = 4011
+	ID_BTN_RUN_DIAG         = 4012
+	ID_BTN_CLR_LOGS         = 4013
+	ID_BTN_MODE_PARALLEL    = 4020
+	ID_BTN_MODE_MQTT        = 4021
+	ID_BTN_MODE_TG          = 4022
+	ID_BTN_DUMP_STACK       = 4023
+	ID_BTN_SAVE_LOGS        = 4024
+	ID_BTN_SAVE_AWG         = 4025
+	ID_BTN_OPEN_AWG_CLIENT  = 4026
+	ID_BTN_SYNC_AWG         = 4027
+	ID_BTN_BOOKMARK_PEER    = 4030
+	ID_BTN_TOGGLE_LOGS      = 4031
+	ID_BTN_TOGGLE_DIAG      = 4032
+	ID_BTN_ALLOW_EXIT       = 4033
 	ID_BTN_EXIT_NODE_SELECT = 4034
-	ID_BTN_TOGGLE_SUBNET   = 4035
+	ID_BTN_TOGGLE_SUBNET    = 4035
 	ID_BTN_ADD_LOCAL_SUBNET = 4036
-	ID_BTN_COPY_PEER_VIP   = 4037
-	ID_BTN_PING_PEER       = 4038
+	ID_BTN_COPY_PEER_VIP    = 4037
+	ID_BTN_PING_PEER        = 4038
 	ID_BTN_TOGGLE_AUTOSTART = 4039
-	ID_BTN_TOGGLE_TRAY     = 4040
-	ID_BTN_SAVE_CHANNELS   = 4041
+	ID_BTN_TOGGLE_TRAY      = 4040
+	ID_BTN_SAVE_CHANNELS    = 4041
 
-	ID_BTN_MQ_EMQX         = 4051
-	ID_BTN_MQ_HIVE         = 4052
-	ID_BTN_MQ_MOSQ         = 4053
-	ID_BTN_MQ_ECL          = 4054
+	ID_BTN_MQ_EMQX           = 4051
+	ID_BTN_MQ_HIVE           = 4052
+	ID_BTN_MQ_MOSQ           = 4053
+	ID_BTN_MQ_ECL            = 4054
 	ID_BTN_CHECK_UPDATE      = 4055
 	ID_BTN_EXIT_NODE_DISABLE = 4056
 	ID_BTN_TOGGLE_BETA       = 4057
@@ -646,23 +643,21 @@ const (
 	WM_CHECK_UPDATE_DONE     = 0x8000 + 105
 
 	// Профили
-	ID_BTN_PROF_SWITCH = 4060
-	ID_BTN_PROF_CREATE = 4061
-	ID_BTN_PROF_SAVE   = 4062
-	ID_BTN_PROF_DELETE = 4063
-	ID_BTN_PROF_EXPORT = 4064
-	ID_BTN_PROF_IMPORT = 4065
-	ID_BTN_PROF_QR     = 4066
-	ID_BTN_CONNECT_TCP       = 4070
-	ID_BTN_TOGGLE_TRANSPORT  = 4071
+	ID_BTN_PROF_SWITCH      = 4060
+	ID_BTN_PROF_CREATE      = 4061
+	ID_BTN_PROF_SAVE        = 4062
+	ID_BTN_PROF_DELETE      = 4063
+	ID_BTN_PROF_EXPORT      = 4064
+	ID_BTN_PROF_IMPORT      = 4065
+	ID_BTN_PROF_QR          = 4066
+	ID_BTN_CONNECT_TCP      = 4070
+	ID_BTN_TOGGLE_TRANSPORT = 4071
 )
 
 var (
 	hBtnConnectPeerTCP      uintptr
 	hBtnToggleTransportMode uintptr
 )
-
-
 
 func initDebugLog() {
 	startTime = time.Now()
@@ -851,7 +846,7 @@ func activateExistingGUIWindow(hwnd uintptr) {
 	procShowWindow.Call(hwnd, 5 /* SW_SHOW */)
 
 	// 2. Set to top of Z-order and bring to top
-	procSetWindowPos.Call(hwnd, 0 /* HWND_TOP */, 0, 0, 0, 0, 0x0001 /* SWP_NOSIZE */|0x0002 /* SWP_NOMOVE */|0x0040 /* SWP_SHOWWINDOW */)
+	procSetWindowPos.Call(hwnd, 0 /* HWND_TOP */, 0, 0, 0, 0, 0x0001 /* SWP_NOSIZE */ |0x0002 /* SWP_NOMOVE */ |0x0040 /* SWP_SHOWWINDOW */)
 	procBringWindowToTop.Call(hwnd)
 	procSetForegroundWindow.Call(hwnd)
 
@@ -990,7 +985,6 @@ func main() {
 	// чтобы первый publish-бекон содержал корректные AWG-параметры (включая S1..S4, H1..H4).
 	cachedAWGParams = cfg.GetAWGParams()
 
-
 	// 4. Создание постоянных ресурсов GDI, иконок и курсора
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	hCursor, _, _ = procLoadCursorW.Call(0, 32512) // IDC_ARROW
@@ -1115,7 +1109,6 @@ func main() {
 	hMainWnd = hwnd
 	procDragAcceptFiles.Call(hMainWnd, 1)
 	writeDebug(fmt.Sprintf("Главное окно создано, HWND=0x%X", hMainWnd))
-
 
 	// Устанавливаем иконки окна для панели задач и заголовка (WM_SETICON)
 	procSendMessageW.Call(hMainWnd, 0x0080 /* WM_SETICON */, 1 /* ICON_BIG */, hIconBig)
@@ -1349,7 +1342,6 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 		}
 		return 0
 
-
 	case WM_COMMAND:
 		id := LOWORD(wParam)
 		if lParam == hListProfiles {
@@ -1385,7 +1377,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) (res uintptr) {
 			procAppendMenuW.Call(hMenu, 0, 1003, uintptr(unsafe.Pointer(exitStr)))
 
 			procSetForegroundWindow.Call(hwnd)
-			cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */|0x0002 /* TPM_RIGHTBUTTON */, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
+			cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */ |0x0002 /* TPM_RIGHTBUTTON */, uintptr(pt.X), uintptr(pt.Y), 0, hwnd, 0)
 
 			if cmd == 1001 {
 				activateExistingGUIWindow(hMainWnd)
@@ -1657,8 +1649,6 @@ func handleCommand(id uint16) {
 	case ID_BTN_SAVE_CHANNELS:
 		handleSaveChannels()
 
-
-
 	case ID_BTN_PROF_SWITCH:
 		handleProfileSwitch()
 
@@ -1874,7 +1864,6 @@ func handleCommand(id uint16) {
 
 			procPostMessageW.Call(hMainWnd, WM_CHECK_UPDATE_DONE, 0, 0)
 		}()
-
 
 	case ID_BTN_MODE_PARALLEL:
 		setSigModeUI("parallel")
@@ -2712,7 +2701,7 @@ func handleProfileDelete() {
 	ret, _, _ := procMessageBoxW.Call(hMainWnd,
 		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(fmt.Sprintf("Удалить профиль «%s»? Связь с участниками этой сети будет разорвана.", p.Name)))),
 		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Подтверждение удаления"))),
-		0x00000004 /* MB_YESNO */|0x00000030 /* MB_ICONWARNING */)
+		0x00000004 /* MB_YESNO */ |0x00000030 /* MB_ICONWARNING */)
 	if ret != 6 /* IDYES */ {
 		return
 	}
@@ -3435,7 +3424,6 @@ func handleSaveChannels() {
 	}
 }
 
-
 func handleCopySelectedPeerVIP() {
 	if registry == nil {
 		return
@@ -3759,7 +3747,6 @@ func updateTransportButtonUI(mode string) {
 	}
 }
 
-
 func handlePingSelectedPeer() {
 	if registry == nil {
 		return
@@ -3872,7 +3859,7 @@ func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
 	procAppendMenuW.Call(hMenu, 0, 6006, uintptr(unsafe.Pointer(subnetStr)))
 
 	procSetForegroundWindow.Call(hParent)
-	cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */|0x0002 /* TPM_RIGHTBUTTON */, uintptr(x), uintptr(y), 0, hParent, 0)
+	cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */ |0x0002 /* TPM_RIGHTBUTTON */, uintptr(x), uintptr(y), 0, hParent, 0)
 
 	switch cmd {
 	case 6001:
@@ -4924,12 +4911,18 @@ func startEngineFromConfig(c *config.Config) {
 					if isTCP {
 						targetPeer.DirectP2P = true
 						targetPeer.Transport = "tcp_tls"
+						targetPeer.RelayedViaDevID = ""
+						targetPeer.RelayedViaName = ""
+						targetPeer.RelayedViaVIP = ""
 						targetPeer.LastBilateralSeen = time.Now()
 					} else {
 						// For UDP: verified inbound L3 packet from peer over direct socket.
 						targetPeer.DirectP2P = true
-						if targetPeer.Transport == "" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "mqtt" {
+						if targetPeer.Transport == "" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "mqtt" || targetPeer.Transport == "relay_mesh" {
 							targetPeer.Transport = "udp_direct"
+							targetPeer.RelayedViaDevID = ""
+							targetPeer.RelayedViaName = ""
+							targetPeer.RelayedViaVIP = ""
 						}
 						targetPeer.LastBilateralSeen = time.Now()
 					}
@@ -5333,18 +5326,26 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 
-								if sentDirect && (targetPeer.DirectP2P || sentTCP) {
+								if sentDirect && (targetPeer.DirectP2P || sentTCP) && bilateralOK {
 									targetPeer.RelayedViaDevID = ""
 									targetPeer.RelayedViaName = ""
 									targetPeer.RelayedViaVIP = ""
+									if targetPeer.Transport == "relay_mesh" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" {
+										if sentTCP {
+											targetPeer.Transport = "tcp_tls"
+										} else {
+											targetPeer.Transport = "udp_direct"
+										}
+									}
 								}
 
-								// Fallback Relay Rule: ONLY if direct transmission completely failed AND NOT Exit Node internet traffic!
+								// Fallback Relay Rule: ONLY if direct transmission is not bilaterally verified AND NOT Exit Node internet traffic!
 								// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
 								cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 								isICMP := len(packet) >= 20 && packet[9] == 1
 								isExitOrInternet := !isICMP && ((exitID != "" && targetPeer.DeviceID == exitID) || !isMeshSubnetIP(destIP, cleanVIP))
-								needsRelay := !sentTCP && !sentDirect && (!isExitOrInternet || isICMP)
+								directVerified := sentTCP || (sentDirect && targetPeer.DirectP2P && bilateralOK)
+								needsRelay := !directVerified && (!isExitOrInternet || isICMP)
 
 								// 1e. Mesh Userspace TCP Relay Fallback:
 								if needsRelay && !isForceUDP && guiTCPDirectMgr != nil {
@@ -5960,57 +5961,57 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					h4, _ := strconv.ParseUint(h4Str, 10, 32)
 
 					// cfg.WireGuard.AWG.RandomTrailers / DisableCookies могут быть false если
-							// в config.yaml поле не прописано явно (zero-value Go).
-							// Preset awg31_strict всегда требует RandomTrailers=true, DisableCookies=true.
-							// Также сверяемся с cachedAWGParams (мог быть правильно инициализирован при загрузке).
-							rtVal := cfg.WireGuard.AWG.RandomTrailers
-							dcVal := cfg.WireGuard.AWG.DisableCookies
-							if !rtVal && (cfg.WireGuard.AWGPreset == "awg31_strict" || cachedAWGParams.RandomTrailers) {
-								rtVal = true
-							}
-							if !dcVal && (cfg.WireGuard.AWGPreset == "awg31_strict" || cachedAWGParams.DisableCookies) {
-								dcVal = true
-							}
-							s3 := s1
-							s4 := s2
-							cachedAWGParams = wireguard.AWGParams{
-								Enabled:                 true,
-								Version:                 wireguard.AWGVersion31,
-								Jc:                      jc,
-								Jmin:                    jmin,
-								Jmax:                    jmax,
-								S1:                      s1,
-								S2:                      s2,
-								S3:                      s3,
-								S4:                      s4,
-								H1:                      uint32(h1),
-								H2:                      uint32(h2),
-								H3:                      uint32(h3),
-								H4:                      uint32(h4),
-								HeaderProtectionEnabled: cfg.WireGuard.AWG.HeaderProtectionKey != "",
-								RandomTrailers:          rtVal,
-								DisableCookies:          dcVal,
-							}
-							awgParams = &signaling.AWGParams{
-								Jc:                      jc,
-								Jmin:                    jmin,
-								Jmax:                    jmax,
-								S1:                      s1,
-								S2:                      s2,
-								S3:                      s3,
-								S4:                      s4,
-								H1:                      h1Str,
-								H2:                      h2Str,
-								H3:                      h3Str,
-								H4:                      h4Str,
-								Pmax:                    100,
-								Version:                 "3.1",
-								Preset:                  cfg.WireGuard.AWGPreset,
-								HeaderProtectionEnabled: true,
-								RandomTrailers:          rtVal,
-								DisableCookies:          dcVal,
-							}
-					} else if cachedAWGParams.Enabled {
+					// в config.yaml поле не прописано явно (zero-value Go).
+					// Preset awg31_strict всегда требует RandomTrailers=true, DisableCookies=true.
+					// Также сверяемся с cachedAWGParams (мог быть правильно инициализирован при загрузке).
+					rtVal := cfg.WireGuard.AWG.RandomTrailers
+					dcVal := cfg.WireGuard.AWG.DisableCookies
+					if !rtVal && (cfg.WireGuard.AWGPreset == "awg31_strict" || cachedAWGParams.RandomTrailers) {
+						rtVal = true
+					}
+					if !dcVal && (cfg.WireGuard.AWGPreset == "awg31_strict" || cachedAWGParams.DisableCookies) {
+						dcVal = true
+					}
+					s3 := s1
+					s4 := s2
+					cachedAWGParams = wireguard.AWGParams{
+						Enabled:                 true,
+						Version:                 wireguard.AWGVersion31,
+						Jc:                      jc,
+						Jmin:                    jmin,
+						Jmax:                    jmax,
+						S1:                      s1,
+						S2:                      s2,
+						S3:                      s3,
+						S4:                      s4,
+						H1:                      uint32(h1),
+						H2:                      uint32(h2),
+						H3:                      uint32(h3),
+						H4:                      uint32(h4),
+						HeaderProtectionEnabled: cfg.WireGuard.AWG.HeaderProtectionKey != "",
+						RandomTrailers:          rtVal,
+						DisableCookies:          dcVal,
+					}
+					awgParams = &signaling.AWGParams{
+						Jc:                      jc,
+						Jmin:                    jmin,
+						Jmax:                    jmax,
+						S1:                      s1,
+						S2:                      s2,
+						S3:                      s3,
+						S4:                      s4,
+						H1:                      h1Str,
+						H2:                      h2Str,
+						H3:                      h3Str,
+						H4:                      h4Str,
+						Pmax:                    100,
+						Version:                 "3.1",
+						Preset:                  cfg.WireGuard.AWGPreset,
+						HeaderProtectionEnabled: true,
+						RandomTrailers:          rtVal,
+						DisableCookies:          dcVal,
+					}
+				} else if cachedAWGParams.Enabled {
 					awgVer := string(cachedAWGParams.Version)
 					if awgVer == "" {
 						awgVer = "3.1"
@@ -6077,14 +6078,14 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 					pPort = udpPuncher.LocalPort()
 				}
 				payload := &signaling.Payload{
-					DeviceID:         myDevID,
-					Nickname:         myNick,
-					DeviceName:       myNick,
-					VirtualIP:        strings.TrimSpace(strings.Split(myVirtualIP, "/")[0]),
-					PublicKey:        crypto.KeyToHex(myPubKey),
-					PublicIP:         myPublicIP,
-					LocalAddr:        fmt.Sprintf("%s:%d", localIP, pPort),
-					STUNAddr:         mySTUNAddr,
+					DeviceID:   myDevID,
+					Nickname:   myNick,
+					DeviceName: myNick,
+					VirtualIP:  strings.TrimSpace(strings.Split(myVirtualIP, "/")[0]),
+					PublicKey:  crypto.KeyToHex(myPubKey),
+					PublicIP:   myPublicIP,
+					LocalAddr:  fmt.Sprintf("%s:%d", localIP, pPort),
+					STUNAddr:   mySTUNAddr,
 					IPv6Addr: func() string {
 						if network.HasGlobalIPv6() {
 							return network.GetLocalIPv6()
@@ -6109,24 +6110,29 @@ func startLANBroadcastDiscovery(ctx context.Context) {
 						}
 						return ""
 					}(),
-					WGPubKey:         myWGPubKey,
-					WGPort:           pPort,
-					Timestamp:        time.Now(),
-					IsExitNode:       allowExitNode,
-					AdvertisedRoutes: advSubnets,
+					WGPubKey:           myWGPubKey,
+					WGPort:             pPort,
+					Timestamp:          time.Now(),
+					IsExitNode:         allowExitNode,
+					AdvertisedRoutes:   advSubnets,
 					CoordinatorCapable: true,
 					RelayCapable:       cfg != nil && cfg.Network.EnableRelayServer,
-					RelayQuotaGBDay:    func() int { if cfg != nil { return cfg.Network.RelayQuotaGBDay }; return 5 }(),
-					IsMetered:          false,
-					BatteryLow:         false,
-					AWG:              awgParams,
-					OS:               "windows",
-					Platform:         "Windows",
-					Arch:             runtime.GOARCH,
-					Version:          Version,
-					IsKeenetic:       false,
-					NetworkKey:       activeKey,
-					Topic:            activeTopic,
+					RelayQuotaGBDay: func() int {
+						if cfg != nil {
+							return cfg.Network.RelayQuotaGBDay
+						}
+						return 5
+					}(),
+					IsMetered:  false,
+					BatteryLow: false,
+					AWG:        awgParams,
+					OS:         "windows",
+					Platform:   "Windows",
+					Arch:       runtime.GOARCH,
+					Version:    Version,
+					IsKeenetic: false,
+					NetworkKey: activeKey,
+					Topic:      activeTopic,
 				}
 				data, _ := json.Marshal(payload)
 				msg := "NATBYPASS:LAN:" + string(data)
@@ -6289,7 +6295,6 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 func getLocalLANIP() string {
 	return network.GetLocalLANIP()
 }
-
 
 func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, name string) {
 	inCh, err := ch.Receive(ctx)
@@ -6570,7 +6575,7 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					go func(msgText string) {
 						titlePtr, _ := windows.UTF16PtrFromString("NatBypass — Изменение маршрута")
 						textPtr, _ := windows.UTF16PtrFromString(msgText)
-						procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(textPtr)), uintptr(unsafe.Pointer(titlePtr)), 0x00000030 /* MB_ICONWARNING */ | 0x00040000 /* MB_TOPMOST */)
+						procMessageBoxW.Call(hMainWnd, uintptr(unsafe.Pointer(textPtr)), uintptr(unsafe.Pointer(titlePtr)), 0x00000030 /* MB_ICONWARNING */ |0x00040000 /* MB_TOPMOST */)
 					}(alertMsg)
 				}
 
@@ -7153,14 +7158,14 @@ func publishCurrentState(ctx context.Context) {
 	}
 
 	payload := &signaling.Payload{
-		DeviceID:         myDevID,
-		Nickname:         myNick,
-		DeviceName:       myNick,
-		VirtualIP:        myVirtualIP,
-		PublicKey:        crypto.KeyToHex(myPubKey),
-		PublicIP:         ipStr,
-		LocalAddr:        localAddr,
-		STUNAddr:         mySTUNAddr,
+		DeviceID:   myDevID,
+		Nickname:   myNick,
+		DeviceName: myNick,
+		VirtualIP:  myVirtualIP,
+		PublicKey:  crypto.KeyToHex(myPubKey),
+		PublicIP:   ipStr,
+		LocalAddr:  localAddr,
+		STUNAddr:   mySTUNAddr,
 		IPv6Addr: func() string {
 			if network.HasGlobalIPv6() {
 				return network.GetLocalIPv6()
@@ -7211,19 +7216,24 @@ func publishCurrentState(ctx context.Context) {
 			}
 			return false
 		}(),
-		RelayCapable:       cfg != nil && cfg.Network.EnableRelayServer,
-		RelayQuotaGBDay:    func() int { if cfg != nil { return cfg.Network.RelayQuotaGBDay }; return 5 }(),
-		IsMetered:          false,
-		BatteryLow:         false,
-		AWG:              awgParams,
-		OS:               "windows",
-		Platform:         "Windows",
-		Arch:             runtime.GOARCH,
-		Version:          Version,
-		IsKeenetic:       false,
-		CountryFlag:      getMyCountryFlag(ipStr),
-		NetworkKey:       activeKey,
-		Topic:            activeTopic,
+		RelayCapable: cfg != nil && cfg.Network.EnableRelayServer,
+		RelayQuotaGBDay: func() int {
+			if cfg != nil {
+				return cfg.Network.RelayQuotaGBDay
+			}
+			return 5
+		}(),
+		IsMetered:   false,
+		BatteryLow:  false,
+		AWG:         awgParams,
+		OS:          "windows",
+		Platform:    "Windows",
+		Arch:        runtime.GOARCH,
+		Version:     Version,
+		IsKeenetic:  false,
+		CountryFlag: getMyCountryFlag(ipStr),
+		NetworkKey:  activeKey,
+		Topic:       activeTopic,
 	}
 
 	if uiServer != nil {
@@ -7289,7 +7299,6 @@ func publishCurrentState(ctx context.Context) {
 		}(ch, toSend)
 	}
 }
-
 
 func stopEngine() {
 	engineMu.Lock()
@@ -7774,8 +7783,6 @@ func updateData() {
 		flushLogsToUI()
 	}
 }
-
-
 
 func flushLogsToUI() {
 	logsMutex.Lock()
@@ -8709,7 +8716,6 @@ func createFont(name string, height int, weight int) uintptr {
 	return hFont
 }
 
-
 func setControlText(hwnd uintptr, text string) {
 	if hwnd == 0 {
 		return
@@ -8800,5 +8806,3 @@ func calculateChecksum(data []byte) uint16 {
 	}
 	return ^uint16(sum)
 }
-
-

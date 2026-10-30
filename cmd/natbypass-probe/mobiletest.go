@@ -43,8 +43,8 @@ type MobileTestReport struct {
 	Country              string             `json:"country"`
 	PublicIP             string             `json:"public_ip"`
 	LocalIP              string             `json:"local_ip"`
-	InterfaceType        string             `json:"interface_type"` // Cellular, Wi-Fi, Ethernet
-	NATType              string             `json:"nat_type"`       // Cone, Symmetric
+	InterfaceType        string             `json:"interface_type"`  // Cellular, Wi-Fi, Ethernet
+	NATType              string             `json:"nat_type"`        // Cone, Symmetric
 	PortAllocation       string             `json:"port_allocation"` // "sequential" | "fixed_step" | "small_jitter" | "random" | "cone_stable"
 	BaseDelta            int                `json:"base_delta"`
 	Confidence           float64            `json:"confidence"` // 0.0 .. 1.0 (fraction of deltas matching pattern)

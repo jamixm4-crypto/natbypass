@@ -90,4 +90,3 @@ func TestRawUDPPunch(ctx context.Context, myNodeID string, peer *PeerInfo) *UDPP
 	logf("[UDP] %s → %s: FAIL (no response)", myNodeID, peer.NodeID)
 	return result
 }
-

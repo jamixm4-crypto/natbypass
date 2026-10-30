@@ -22,7 +22,7 @@ type AWGHandshakeResult struct {
 	Attempts   int
 	TimeMs     int64
 	Error      string
-	Skipped    bool   // true если тест пропущен (нет прав/инструментов)
+	Skipped    bool // true если тест пропущен (нет прав/инструментов)
 	SkipReason string
 }
 
@@ -39,9 +39,9 @@ type AWGPingResult struct {
 
 // DPIProbeResult — результат DPI fingerprint probe
 type DPIProbeResult struct {
-	PlainWGSuccess   bool   // plain WireGuard (без AWG) прошёл
-	AWGSuccess       bool   // AWG с текущими H прошёл
-	AWGRandomSuccess bool   // AWG с random H прошёл
+	PlainWGSuccess   bool // plain WireGuard (без AWG) прошёл
+	AWGSuccess       bool // AWG с текущими H прошёл
+	AWGRandomSuccess bool // AWG с random H прошёл
 	BlockedByDPI     bool
 	Notes            string
 }

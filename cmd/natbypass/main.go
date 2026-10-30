@@ -20,9 +20,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-
 var (
-	Version   = "1.9.504"
+	Version   = "1.9.505-beta.1"
 	Commit    = "release"
 	BuildDate = "unknown"
 )
@@ -36,7 +35,6 @@ var (
 	uiMode     string
 	noWindow   bool
 )
-
 
 // appendCrashLog appends crashMsg to path, rotating the file to .1 when it exceeds 512 KB.
 func appendCrashLog(path, crashMsg string) {

@@ -119,5 +119,3 @@ func cleanupTrayIcon() {}
 func openAppWindow(port int) {}
 
 func notifyAdminRightsRequired(err error) {}
-
-

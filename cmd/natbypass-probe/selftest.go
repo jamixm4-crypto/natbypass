@@ -31,10 +31,10 @@ type STUNResult struct {
 type SelfTestResult struct {
 	Hostname    string
 	LocalIPs    []string
-	STUNAddr    string      // основной mapped address "ip:port"
-	NATType     string      // full_cone, restricted, symmetric, unknown
-	NATDelta    int         // port delta для symmetric NAT
-	ListenPort  int         // UDP порт probe listener
+	STUNAddr    string // основной mapped address "ip:port"
+	NATType     string // full_cone, restricted, symmetric, unknown
+	NATDelta    int    // port delta для symmetric NAT
+	ListenPort  int    // UDP порт probe listener
 	STUNResults []STUNResult
 }
 
@@ -44,7 +44,6 @@ func RunSelfTest(ctx context.Context, cfg *ProbeConfig, listenPort int) (*SelfTe
 	result := &SelfTestResult{Hostname: hostname, ListenPort: listenPort}
 
 	logf("[SELF] Hostname: %s", hostname)
-
 
 	// Local IPs
 	ifaces, _ := net.Interfaces()
