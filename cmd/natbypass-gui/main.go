@@ -3574,9 +3574,31 @@ func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, 
 }
 
 func connectPeerTCPDirect(targetPeer *peer.Peer) {
+	connectPeerTCPDirectEx(targetPeer, false)
+}
+
+func connectPeerTCPDirectEx(targetPeer *peer.Peer, force bool) {
 	if targetPeer == nil || guiTCPDirectMgr == nil {
 		return
 	}
+	// 1. If peer already has confirmed, fresh direct UDP P2P socket and mode is auto: DO NOT DIAL TCP!
+	if !force && guiTCPDirectMgr.TransportMode() != "force_tcp" {
+		if targetPeer.DirectP2P && !targetPeer.LastDirectSeen.IsZero() && time.Since(targetPeer.LastDirectSeen) < 25*time.Second {
+			return
+		}
+	}
+	// 2. If already connected via TCP:
+	if guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+		return
+	}
+	// 3. If currently dialing or in backoff:
+	if !force && !guiTCPDirectMgr.CanDial(targetPeer.DeviceID) {
+		return
+	}
+	if force {
+		guiTCPDirectMgr.ResetDialBackoff(targetPeer.DeviceID)
+	}
+
 	defaultTCPPort := 8443
 	if cfg != nil {
 		if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
@@ -3590,79 +3612,81 @@ func connectPeerTCPDirect(targetPeer *peer.Peer) {
 		}
 	}
 	if tcpTarget == "" {
-		host := targetPeer.PublicIP
-		if (host == "" || host == "0.0.0.0" || host == "<nil>") && targetPeer.STUNAddr != "" {
-			if h, _, err := net.SplitHostPort(targetPeer.STUNAddr); err == nil && h != "" {
-				host = h
-			}
-		}
-		if (host == "" || host == "0.0.0.0" || host == "<nil>") && targetPeer.ActiveEndpoint != "" {
-			if h, _, err := net.SplitHostPort(targetPeer.ActiveEndpoint); err == nil && h != "" {
-				host = h
-			}
-		}
-		if host != "" && host != "0.0.0.0" && host != "<nil>" && net.ParseIP(host) != nil {
-			tcpTarget = fmt.Sprintf("%s:%d", host, defaultTCPPort)
-		} else if targetPeer.LocalAddr != "" {
-			if localHost, _, err := net.SplitHostPort(targetPeer.LocalAddr); err == nil && localHost != "" && net.ParseIP(localHost) != nil {
-				tcpTarget = fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
-			}
+	host := targetPeer.PublicIP
+	if (host == "" || host == "0.0.0.0" || host == "<nil>") && targetPeer.STUNAddr != "" {
+		if h, _, err := net.SplitHostPort(targetPeer.STUNAddr); err == nil && h != "" {
+			host = h
 		}
 	}
-	if tcpTarget != "" {
-		lPort := guiTCPDirectMgr.Port()
-		if lPort <= 0 && udpPuncher != nil {
-			lPort = udpPuncher.LocalPort()
+	if (host == "" || host == "0.0.0.0" || host == "<nil>") && targetPeer.ActiveEndpoint != "" {
+		if h, _, err := net.SplitHostPort(targetPeer.ActiveEndpoint); err == nil && h != "" {
+			host = h
 		}
-		addLog(fmt.Sprintf("⚡ Запуск Direct TCP ShadowTLS к %s (%s)...", targetPeer.Nickname, tcpTarget))
-		go func(devID, target string, localP int) {
-			if err := guiTCPDirectMgr.ConnectPeer(devID, target, localP); err == nil {
-				addLog(fmt.Sprintf("⚡ Direct TCP с %s успешно установлен!", devID))
-			} else {
+	}
+	if host != "" && host != "0.0.0.0" && host != "<nil>" && net.ParseIP(host) != nil {
+		tcpTarget = fmt.Sprintf("%s:%d", host, defaultTCPPort)
+	} else if targetPeer.LocalAddr != "" {
+		if localHost, _, err := net.SplitHostPort(targetPeer.LocalAddr); err == nil && localHost != "" && net.ParseIP(localHost) != nil {
+			tcpTarget = fmt.Sprintf("%s:%d", localHost, defaultTCPPort)
+		}
+	}
+	}
+	if tcpTarget != "" {
+	lPort := guiTCPDirectMgr.Port()
+	if lPort <= 0 && udpPuncher != nil {
+		lPort = udpPuncher.LocalPort()
+	}
+	addLog(fmt.Sprintf("⚡ Запуск Direct TCP ShadowTLS к %s (%s)...", targetPeer.Nickname, tcpTarget))
+	go func(devID, target string, localP int) {
+		if err := guiTCPDirectMgr.ConnectPeerForce(devID, target, localP, force); err == nil {
+			addLog(fmt.Sprintf("⚡ Direct TCP с %s успешно установлен!", devID))
+		} else {
+			if !strings.Contains(err.Error(), "already in progress") && !strings.Contains(err.Error(), "in backoff") {
 				addLog(fmt.Sprintf("⚠️ Direct TCP ошибка с %s: %v", devID, err))
 			}
-		}(targetPeer.DeviceID, tcpTarget, lPort)
+		}
+	}(targetPeer.DeviceID, tcpTarget, lPort)
 
-		// Send bilateral TCPConnect signal over MQTT for coordinated simultaneous open
-		if len(sigChannels) > 0 {
-			myTCPAddr := ""
-			if udpPuncher != nil && udpPuncher.GetCachedSTUNAddr() != "" {
-				if h, _, err := net.SplitHostPort(udpPuncher.GetCachedSTUNAddr()); err == nil {
-					tcpP := defaultTCPPort
-					if guiTCPDirectMgr != nil && guiTCPDirectMgr.Port() > 0 {
-						tcpP = guiTCPDirectMgr.Port()
-					}
-					myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
+	// Send bilateral TCPConnect signal over MQTT for coordinated simultaneous open
+	if len(sigChannels) > 0 {
+		myTCPAddr := ""
+		if udpPuncher != nil && udpPuncher.GetCachedSTUNAddr() != "" {
+			if h, _, err := net.SplitHostPort(udpPuncher.GetCachedSTUNAddr()); err == nil {
+				tcpP := defaultTCPPort
+				if guiTCPDirectMgr != nil && guiTCPDirectMgr.Port() > 0 {
+					tcpP = guiTCPDirectMgr.Port()
 				}
-			}
-			if myTCPAddr != "" {
-				go func(tDev, myAddr string) {
-					tcpSigPl := &signaling.Payload{
-						DeviceID: myDevID,
-						TCPConnect: &signaling.TCPConnectSignal{
-							SenderDeviceID: myDevID,
-							TargetDeviceID: tDev,
-							SenderTCPAddr:  myAddr,
-							Timestamp:      time.Now().Unix(),
-						},
-						Timestamp: time.Now(),
-					}
-					toSend := tcpSigPl
-					if cfg != nil {
-						if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-							if enc, err := signaling.EncryptPayloadWithKey(tcpSigPl, activeProf.NetworkKey); err == nil && enc != nil {
-								toSend = enc
-							}
-						}
-					}
-					for _, sc := range sigChannels {
-						_ = sc.Send(context.Background(), toSend)
-					}
-				}(targetPeer.DeviceID, myTCPAddr)
+				myTCPAddr = fmt.Sprintf("%s:%d", h, tcpP)
 			}
 		}
-	} else {
-		addLog("⚠️ У узла нет известного TCP/STUN адреса для подключения")
+		if myTCPAddr != "" {
+			go func(tDev, myAddr string) {
+				tcpSigPl := &signaling.Payload{
+					DeviceID: myDevID,
+					TCPConnect: &signaling.TCPConnectSignal{
+						SenderDeviceID: myDevID,
+						TargetDeviceID: tDev,
+						SenderTCPAddr:  myAddr,
+						Timestamp:      time.Now().Unix(),
+					},
+					Timestamp: time.Now(),
+				}
+				toSend := tcpSigPl
+				if cfg != nil {
+					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+						if enc, err := signaling.EncryptPayloadWithKey(tcpSigPl, activeProf.NetworkKey); err == nil && enc != nil {
+							toSend = enc
+						}
+					}
+				}
+				for _, sc := range sigChannels {
+					_ = sc.Send(context.Background(), toSend)
+				}
+			}(targetPeer.DeviceID, myTCPAddr)
+		}
+	}
+	} else if force {
+	addLog("⚠️ У узла нет известного TCP/STUN адреса для подключения")
 	}
 }
 
@@ -3674,7 +3698,7 @@ func handleConnectTCPSelectedPeer() {
 	selIdx, _, _ := procSendMessageW.Call(hListPeers, 0x0188, 0, 0)
 	idx := int(int32(selIdx)) / 2
 	if idx >= 0 && idx < len(peers) {
-		connectPeerTCPDirect(peers[idx])
+		connectPeerTCPDirectEx(peers[idx], true)
 	} else {
 		if hLblPeersDesc != 0 {
 			setControlText(hLblPeersDesc, "⚠️ Сначала выберите узел из списка ниже для подключения Direct TCP")
@@ -3720,7 +3744,7 @@ func handleToggleTransportMode() {
 		addLog("⚡ Принудительный режим Direct TCP (ShadowTLS) активирован! Подключение к узлам...")
 		for _, p := range registry.List() {
 			if p != nil && p.Online && !guiTCPDirectMgr.HasConn(p.DeviceID) {
-				connectPeerTCPDirect(p)
+				connectPeerTCPDirectEx(p, true)
 			}
 		}
 	} else if newMode == "force_udp" {
@@ -3890,7 +3914,7 @@ func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
 	case 6006:
 		handleToggleSubnetRoute()
 	case 6007:
-		connectPeerTCPDirect(targetPeer)
+		connectPeerTCPDirectEx(targetPeer, true)
 	}
 }
 
@@ -5674,9 +5698,10 @@ func startEngineFromConfig(c *config.Config) {
 									}(p.DeviceID)
 								}
 							}
-							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS for ALL peers:
-							needsTCP := isForceTCP || (!isForceUDP && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) && (p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (!p.DirectP2P || p.PingMs == 0 || p.ProbeCount >= 1)))
-							if needsTCP && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) {
+							// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS ONLY if direct UDP is NOT working:
+							isDirectUDPOk := p.DirectP2P && !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 25*time.Second
+							needsTCP := isForceTCP || (!isForceUDP && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) && (p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && !isDirectUDPOk))
+							if needsTCP && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(p.DeviceID) && guiTCPDirectMgr.CanDial(p.DeviceID) {
 								go connectPeerTCPDirect(p)
 							}
 						}
@@ -6173,7 +6198,6 @@ func rebuildSignalingInternal(ctx context.Context, modeText, tgToken, tgChat, mq
 	if len(backupBrokers) == 0 {
 		backupBrokers = []string{
 			"tcp://broker.hivemq.com:1883",
-			"tcp://test.mosquitto.org:1883",
 			"tcp://broker.emqx.io:1883",
 		}
 	}
@@ -6738,10 +6762,14 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					IsKeenetic:        p.IsKeenetic,
 				})
 
-				// Мгновенная попытка Direct TCP соединения при обнаружении узла
+				// Попытка Direct TCP соединения при обнаружении узла ТОЛЬКО если прямой UDP не активен
 				if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() != "force_udp" && !guiTCPDirectMgr.HasConn(p.DeviceID) {
 					if regPeer, ok := registry.Get(p.DeviceID); ok && regPeer != nil {
-						go connectPeerTCPDirect(regPeer)
+						isForceTCP := guiTCPDirectMgr.TransportMode() == "force_tcp"
+						isUDPActive := regPeer.DirectP2P && !regPeer.LastDirectSeen.IsZero() && time.Since(regPeer.LastDirectSeen) < 25*time.Second
+						if (isForceTCP || !isUDPActive) && guiTCPDirectMgr.CanDial(regPeer.DeviceID) {
+							go connectPeerTCPDirect(regPeer)
+						}
 					}
 				}
 
@@ -6978,6 +7006,20 @@ func handleAdvSubnetsChange() {
 			addLog("🏠 Список анонсируемых подсетей сохранён: " + newStr)
 		}
 		triggerPublish()
+	}
+}
+
+var (
+	lastSigErrorGUI = make(map[string]time.Time)
+	lastSigErrorMu  sync.Mutex
+)
+
+func recordSignalingErrorGUI(channelName, errMsg string) {
+	lastSigErrorMu.Lock()
+	defer lastSigErrorMu.Unlock()
+	if time.Since(lastSigErrorGUI[channelName]) > 60*time.Second {
+		lastSigErrorGUI[channelName] = time.Now()
+		addLog(errMsg)
 	}
 }
 
@@ -7293,8 +7335,8 @@ func publishCurrentState(ctx context.Context) {
 				writeDebug(msg)
 			} else {
 				errMsg := fmt.Sprintf("⚠️ [%s] Ошибка отправки: %s", c.Name(), err.Error())
-				addLog(errMsg)
 				writeDebug(errMsg)
+				recordSignalingErrorGUI(c.Name(), errMsg)
 			}
 		}(ch, toSend)
 	}

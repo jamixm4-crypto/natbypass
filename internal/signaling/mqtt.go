@@ -79,6 +79,8 @@ func (d *PacketDedup) Clear() {
 
 type MQTTChannel struct {
 	client        mqtt.Client
+	cooldownMu    sync.RWMutex
+	cooldownUntil time.Time
 	topicMu       sync.RWMutex
 	topic         string
 	name          string
@@ -483,6 +485,13 @@ func (m *MQTTChannel) UpdateTopic(newTopic string) {
 }
 
 func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
+	m.cooldownMu.RLock()
+	inCooldown := time.Now().Before(m.cooldownUntil)
+	m.cooldownMu.RUnlock()
+	if inCooldown {
+		return fmt.Errorf("MQTT broker %s in cooldown after timeout", m.BrokerURL())
+	}
+
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -532,10 +541,19 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 	}
 
 	token := m.client.Publish(targetTopic, 0, false, dataToSend)
-	if !token.WaitTimeout(8 * time.Second) {
+	if !token.WaitTimeout(3500 * time.Millisecond) {
+		m.cooldownMu.Lock()
+		m.cooldownUntil = time.Now().Add(30 * time.Second)
+		m.cooldownMu.Unlock()
 		return fmt.Errorf("MQTT publish timeout (%s)", m.BrokerURL())
 	}
-	return token.Error()
+	if err := token.Error(); err != nil {
+		return err
+	}
+	m.cooldownMu.Lock()
+	m.cooldownUntil = time.Time{}
+	m.cooldownMu.Unlock()
+	return nil
 }
 
 func (m *MQTTChannel) Receive(ctx context.Context) (<-chan *Payload, error) {

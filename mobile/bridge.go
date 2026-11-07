@@ -382,7 +382,6 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 		backupBrokers := []string{
 			"tcp://broker.hivemq.com:1883",
-			"tcp://test.mosquitto.org:1883",
 			"tcp://broker.emqx.io:1883",
 		}
 		mqttTopic := activeProf.MQTTTopic
@@ -1405,9 +1404,10 @@ func StartEngine(configYAML string, tunFd int) string {
 									}(peerItem.DeviceID)
 								}
 							}
-							// Trigger Direct TCP ShadowTLS fallback when UDP is not confirmed or failing ICMP
-							needsTCP := isForceTCP || (!isForceUDP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) && (peerItem.Transport != "tcp_tls" && peerItem.Transport != "tcp_shadowtls" && (!peerItem.DirectP2P || peerItem.PingMs == 0 || peerItem.ProbeCount >= 1)))
-							if needsTCP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) {
+							// Trigger Direct TCP ShadowTLS fallback ONLY if direct UDP is NOT working:
+							isDirectUDPOk := peerItem.DirectP2P && !peerItem.LastDirectSeen.IsZero() && time.Since(peerItem.LastDirectSeen) < 25*time.Second
+							needsTCP := isForceTCP || (!isForceUDP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) && (peerItem.Transport != "tcp_tls" && peerItem.Transport != "tcp_shadowtls" && !isDirectUDPOk))
+							if needsTCP && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(peerItem.DeviceID) && globalTCPDirectMgr.CanDial(peerItem.DeviceID) {
 								defTCPPort := 8443
 								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {
 									defTCPPort = activeProf.TCPPort

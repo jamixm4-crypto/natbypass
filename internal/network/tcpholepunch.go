@@ -97,9 +97,11 @@ func AttemptTCPSimultaneousOpen(ctx context.Context, localPort int, targetAddr s
 
 // TCPDirectManager manages direct P2P TCP streams established via TCP Simultaneous Open or direct TCP dial.
 type TCPDirectManager struct {
-	conns      map[string]net.Conn
-	connecting map[string]time.Time
-	mu         sync.RWMutex
+	conns        map[string]net.Conn
+	connecting   map[string]time.Time
+	dialBackoff  map[string]time.Time
+	dialFailures map[string]int
+	mu           sync.RWMutex
 	ctx        context.Context
 	cancel     context.CancelFunc
 	listener   net.Listener
@@ -120,6 +122,8 @@ func NewTCPDirectManager(ctx context.Context) *TCPDirectManager {
 	return &TCPDirectManager{
 		conns:         make(map[string]net.Conn),
 		connecting:    make(map[string]time.Time),
+		dialBackoff:   make(map[string]time.Time),
+		dialFailures:  make(map[string]int),
 		ctx:           cCtx,
 		cancel:        cancel,
 		sni:           shadowtls.DefaultSNI,
@@ -375,8 +379,45 @@ func (m *TCPDirectManager) acceptLoop(ln net.Listener) {
 	}
 }
 
+// CanDial returns true if a TCP dial to peerID is permitted (not currently dialing, and not in backoff).
+func (m *TCPDirectManager) CanDial(peerID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.conns[peerID]; ok {
+		return false
+	}
+	if lastAttempt, inProgress := m.connecting[peerID]; inProgress && time.Since(lastAttempt) < 25*time.Second {
+		return false
+	}
+	if until, inBackoff := m.dialBackoff[peerID]; inBackoff && time.Now().Before(until) {
+		return false
+	}
+	return true
+}
+
+// IsDialing returns true if a TCP dial to peerID is actively in progress.
+func (m *TCPDirectManager) IsDialing(peerID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lastAttempt, inProgress := m.connecting[peerID]
+	return inProgress && time.Since(lastAttempt) < 25*time.Second
+}
+
+// ResetDialBackoff clears any backoff timer and failure counts for peerID.
+func (m *TCPDirectManager) ResetDialBackoff(peerID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.dialBackoff, peerID)
+	delete(m.dialFailures, peerID)
+}
+
 // ConnectPeer initiates a direct TCP connection or TCP Simultaneous Open to the remote peer.
 func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int) error {
+	return m.ConnectPeerForce(peerID, targetAddr, localPort, false)
+}
+
+// ConnectPeerForce initiates connection with optional override of backoff (for user-triggered actions).
+func (m *TCPDirectManager) ConnectPeerForce(peerID, targetAddr string, localPort int, force bool) error {
 	if targetAddr == "" {
 		return fmt.Errorf("empty target address")
 	}
@@ -386,9 +427,15 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 		m.mu.Unlock()
 		return nil
 	}
-	if lastAttempt, inProgress := m.connecting[peerID]; inProgress && time.Since(lastAttempt) < 6*time.Second {
+	if lastAttempt, inProgress := m.connecting[peerID]; inProgress && time.Since(lastAttempt) < 25*time.Second {
 		m.mu.Unlock()
 		return fmt.Errorf("tcp dial to %s already in progress", peerID)
+	}
+	if !force {
+		if until, inBackoff := m.dialBackoff[peerID]; inBackoff && time.Now().Before(until) {
+			m.mu.Unlock()
+			return fmt.Errorf("tcp dial to %s in backoff (retry after %v)", peerID, time.Until(until).Round(time.Second))
+		}
 	}
 	m.connecting[peerID] = time.Now()
 	m.mu.Unlock()
@@ -440,10 +487,10 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 		conn, err = AttemptTCPSimultaneousOpen(sCtx, localPort, targetAddr)
 	}
 
-	// 4. Stealth Port Hunting: if initial targetAddr (e.g. host:8443) failed/closed, hunt across fallback stealth ports on the same host
+	// 4. Stealth Port Hunting: if initial targetAddr (e.g. host:8443) failed/closed, hunt primary TLS stealth port (443/8443)
 	if (err != nil || conn == nil) && !m.HasConn(peerID) {
 		if host, origPort, splitErr := net.SplitHostPort(targetAddr); splitErr == nil && host != "" {
-			fallbackPorts := []int{8443, 443, 2053, 2083, 2087, 2096, 4443, 8080}
+			fallbackPorts := []int{8443, 443}
 			for _, fbPort := range fallbackPorts {
 				fbAddr := fmt.Sprintf("%s:%d", host, fbPort)
 				if fbAddr == targetAddr || fmt.Sprintf("%d", fbPort) == origPort {
@@ -452,7 +499,7 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 				if m.HasConn(peerID) {
 					return nil
 				}
-				fbDialer := net.Dialer{Timeout: 2 * time.Second}
+				fbDialer := net.Dialer{Timeout: 1500 * time.Millisecond}
 				fbConn, fbErr := fbDialer.DialContext(m.ctx, "tcp4", fbAddr)
 				if fbErr == nil && fbConn != nil {
 					conn = fbConn
@@ -467,6 +514,19 @@ func (m *TCPDirectManager) ConnectPeer(peerID, targetAddr string, localPort int)
 		if m.HasConn(peerID) {
 			return nil
 		}
+		m.mu.Lock()
+		m.dialFailures[peerID]++
+		fails := m.dialFailures[peerID]
+		backoffDuration := 30 * time.Second
+		if fails == 2 {
+			backoffDuration = 60 * time.Second
+		} else if fails == 3 {
+			backoffDuration = 120 * time.Second
+		} else if fails >= 4 {
+			backoffDuration = 300 * time.Second
+		}
+		m.dialBackoff[peerID] = time.Now().Add(backoffDuration)
+		m.mu.Unlock()
 		return fmt.Errorf("tcp connect to %s failed: %w", targetAddr, err)
 	}
 
@@ -616,6 +676,8 @@ func (m *TCPDirectManager) RegisterConn(deviceID string, conn net.Conn, onPacket
 		_ = old.Close()
 	}
 	m.conns[deviceID] = conn
+	delete(m.dialBackoff, deviceID)
+	delete(m.dialFailures, deviceID)
 	m.mu.Unlock()
 
 	go func() {

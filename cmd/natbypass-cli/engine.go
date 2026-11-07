@@ -1985,10 +1985,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 						}
 
-						// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS for ALL peers:
-						// Evaluated on every tick, NOT blocked by UDP probe backoff or ghost DirectP2P status!
-						needsTCP := isForceTCP || (!isForceUDP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && (p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (!p.DirectP2P || p.PingMs == 0 || p.ProbeCount >= 1)))
-						if needsTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+						// Trigger Direct TCP / TCP Simultaneous Open fallback with ShadowTLS ONLY if direct UDP is NOT working:
+						isDirectUDPOk := p.DirectP2P && !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 25*time.Second
+						needsTCP := isForceTCP || (!isForceUDP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && (p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && !isDirectUDPOk))
+						if needsTCP && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) && tcpDirectMgr.CanDial(p.DeviceID) {
 							defaultTCPPort := 8443
 							netKey := ""
 							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
@@ -2298,7 +2298,7 @@ func startSignaling(ctx context.Context, cfg *config.Config, deviceID string) *s
 			}
 		}
 		channels = append(channels, signaling.NewMQTTChannelNamed("mqtt:"+broker, broker, topic, deviceID, "", ""))
-		backups := []string{"tcp://broker.hivemq.com:1883", "tcp://test.mosquitto.org:1883", "tcp://broker.emqx.io:1883"}
+		backups := []string{"tcp://broker.hivemq.com:1883", "tcp://broker.emqx.io:1883"}
 		for _, bURL := range backups {
 			if bURL != broker {
 				channels = append(channels, signaling.NewMQTTChannelNamed("mqtt:backup:"+bURL, bURL, topic, deviceID, "", ""))
@@ -3617,9 +3617,14 @@ func receiveLoop(
 				IsKeenetic:        p.IsKeenetic,
 			})
 
-			// Мгновенная попытка Direct TCP соединения при обнаружении узла
+			// Попытка Direct TCP соединения при обнаружении узла ТОЛЬКО если прямой UDP не активен
 			isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
-			if tcpDirectMgr != nil && !isForceUDP && !tcpDirectMgr.HasConn(p.DeviceID) {
+			isForceTCP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_tcp"
+			isUDPActive := false
+			if regPeer, ok := registry.Get(p.DeviceID); ok && regPeer != nil {
+				isUDPActive = regPeer.DirectP2P && !regPeer.LastDirectSeen.IsZero() && time.Since(regPeer.LastDirectSeen) < 25*time.Second
+			}
+			if tcpDirectMgr != nil && !isForceUDP && !tcpDirectMgr.HasConn(p.DeviceID) && (isForceTCP || !isUDPActive) && tcpDirectMgr.CanDial(p.DeviceID) {
 				defTCPPort := 8443
 				netKey := ""
 				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
