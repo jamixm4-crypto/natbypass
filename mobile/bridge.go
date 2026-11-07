@@ -1870,7 +1870,7 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
+							bilateralOK = targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 							if sentDirect && (targetPeer.DirectP2P || sentTCP) && bilateralOK {
 								targetPeer.RelayedViaDevID = ""
 								targetPeer.RelayedViaName = ""
