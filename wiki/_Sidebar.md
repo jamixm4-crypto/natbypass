@@ -1,26 +1,31 @@
-### [🌐 Главная страница](https://github.com/jamixm4-crypto/natbypass/wiki/Home)
+## 📚 Навигация
 
----
-### 🚀 Старт
-* [🚀 Быстрый старт](https://github.com/jamixm4-crypto/natbypass/wiki/Quick-Start)
-* [🏗️ Архитектура](https://github.com/jamixm4-crypto/natbypass/wiki/Architecture)
+### 🚀 Начало работы
+* [Главная](Home)
+* [Быстрый старт за 5 минут](Quick-Start)
+* [Сценарии использования (Use Cases)](Use-Cases)
 
----
 ### 💻 Платформы
-* [🪟 Windows](https://github.com/jamixm4-crypto/natbypass/wiki/Windows-Guide)
-* [📱 Android](https://github.com/jamixm4-crypto/natbypass/wiki/Android-Setup)
-* [🐧 Linux & Серверы](https://github.com/jamixm4-crypto/natbypass/wiki/Linux-and-Server)
-* [🌐 Keenetic Роутеры](https://github.com/jamixm4-crypto/natbypass/wiki/Keenetic-Routers)
-* [📡 OpenWrt Роутеры](https://github.com/jamixm4-crypto/natbypass/wiki/OpenWrt-Routers)
+* [Keenetic Роутеры](Keenetic-Routers)
+* [OpenWrt Роутеры](OpenWrt-Routers)
+* [Windows (GUI и Служба)](Windows-Guide)
+* [Android Приложение](Android-Setup)
+* [Linux & Серверы](Linux-and-Server)
 
----
-### 🛡️ Протоколы
-* [🛡️ AmneziaWG 3.1 (Миграция)](https://github.com/jamixm4-crypto/natbypass/wiki/AWG-3.1-Migration)
-* [🛡️ AmneziaWG 2.0 (DPI)](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass)
-* [💬 Сигнализация (Telegram, MQTT, DNS)](https://github.com/jamixm4-crypto/natbypass/wiki/Signaling-Telegram-MQTT)
-* [🚀 Дорожная карта (QUIC / Hysteria 2)](https://github.com/jamixm4-crypto/natbypass/wiki/Roadmap-and-Protocols)
+### 🛡️ Руководства и обход DPI
+* [Настройка AmneziaWG (обход DPI)](AmneziaWG-DPI-Bypass)
+* [База пресетов операторов РФ](Operator-Presets)
+* [Многоуровневый NAT Traversal](NAT-Traversal-Explained)
+* [Шлюз выхода в интернет (Exit Node)](Exit-Node-Guide)
+* [Каналы сигнализации (MQTT, TG)](Signaling-Telegram-MQTT)
+* [Обновление и Beta-канал](Updating-and-Beta-Versions)
 
----
-### 🔧 Поддержка
-* [🔧 Диагностика](https://github.com/jamixm4-crypto/natbypass/wiki/Troubleshooting-and-Diagnostics)
-* [📦 Релизы на GitHub](https://github.com/jamixm4-crypto/natbypass/releases)
+### 🔍 Диагностика
+* [Решение проблем (Troubleshooting)](Troubleshooting-and-Diagnostics)
+* [Утилита natbypass-probe](Probe-Diagnostics)
+* [Удаление и сброс настроек](Uninstallation-and-Reset)
+
+### 🏗️ Разработчикам
+* [Архитектура проекта](Architecture)
+* [Участие в разработке](Contributing)
+* [Дорожная карта](Roadmap-and-Protocols)

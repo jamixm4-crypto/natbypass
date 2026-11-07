@@ -1,0 +1,64 @@
+name: "🐛 Bug Report / Ошибка"
+description: "Сообщить об ошибке или сбое в работе NatBypass"
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что помогаете улучшать NatBypass! Перед созданием тикета убедитесь, что вы используете последнюю актуальную версию программы и проверили раздел [Troubleshooting](https://github.com/jamixm4-crypto/natbypass/wiki/Troubleshooting-and-Diagnostics).
+
+  - type: input
+    id: version
+    attributes:
+      label: "Версия NatBypass / Version"
+      description: "Укажите точную версию (например, v1.9.505-beta.1 или вывод команды natbypass version)"
+      placeholder: "v1.9.505-beta.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: "Операционная система / Платформа"
+      description: "На каком устройстве произошла ошибка?"
+      options:
+        - "KeeneticOS (Entware / MIPSle)"
+        - "OpenWrt (MIPS / ARM)"
+        - "Windows 10 / 11 (GUI)"
+        - "Windows Server / Service (CLI)"
+        - "Linux x86_64 (Debian / Ubuntu / Arch)"
+        - "Linux ARM64 (Raspberry Pi / VPS)"
+        - "Android (APK)"
+    validations:
+      required: true
+
+  - type: input
+    id: isp
+    attributes:
+      label: "Провайдер / Сотовый оператор (ISP)"
+      description: "Укажите провайдера интернета и тип подключения (проводной, Wi-Fi, LTE: МТС, МегаФон, Билайн, Tele2 и т.д.)"
+      placeholder: "МТС (LTE) / Ростелеком (PON)"
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "Описание проблемы / Description"
+      description: "Подробно опишите, что произошло, и что ожидалось."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Шаги для воспроизведения / Steps to Reproduce"
+      description: "1. Запустил ...\n2. Нажал ...\n3. Возникла ошибка ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Вывод диагностики или лог / Diag Output or Logs"
+      description: "Вставьте вывод команды `natbypass diag` или строки из `natbypass.log` (секретные ключи автоматически маскируются)"
+      render: shell

@@ -1,0 +1,31 @@
+name: "💡 Feature Request / Предложение"
+description: "Предложить новую функцию, поддержку протокола или улучшение интерфейса"
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        У вас есть идея по улучшению обхода блокировок, пробитию NAT или удобству использования NatBypass? Расскажите о ней!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Связанная проблема / Problem Statement"
+      description: "С какой проблемой или неудобством вы столкнулись?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: "Предлагаемое решение / Proposed Solution"
+      description: "Как, по вашему мнению, должна работать новая возможность?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Альтернативы / Alternatives Considered"
+      description: "Какие альтернативные решения или обходные пути вы рассматривали?"
