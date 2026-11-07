@@ -153,28 +153,22 @@ jobs:
             apk_file=$(find app/build/outputs/apk/ -name "*.apk" | head -n 1)
           fi
           echo "Found Universal APK: $apk_file"
-          cp -f "$apk_file" "../release_apk/NatBypass-${TAG}.apk"
           cp -f "$apk_file" "../release_apk/NatBypass-${TAG}-universal.apk"
 
-          echo "=== 2. Building Architecture-Specific APKs ==="
-          for abi in arm64-v8a armeabi-v7a x86_64; do
-            echo "--- Building APK for $abi ---"
-            set +e
-            ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" -PtargetAbi="$abi" --console=plain --no-daemon > /tmp/gradle_${abi}.log 2>&1
-            gstatus=$?
-            set -e
-            if [ $gstatus -ne 0 ]; then
-              cat /tmp/gradle_${abi}.log | tail -n 80
-              err_line=$(grep -E "What went wrong|Execution failed|Caused by" /tmp/gradle_${abi}.log | head -n 4 | tr '\r\n' '  ')
-              [ -z "$err_line" ] && err_line=$(tail -n 10 /tmp/gradle_${abi}.log | tr '\r\n' '  ')
-              echo "::error title=GradleBuildFail_${abi}::$err_line"
-              exit $gstatus
-            fi
+          echo "=== 2. Building ARM64 APK (Modern Smartphones) ==="
+          abi="arm64-v8a"
+          set +e
+          ./gradlew assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE" -PtargetAbi="$abi" --console=plain --no-daemon > /tmp/gradle_${abi}.log 2>&1
+          gstatus=$?
+          set -e
+          if [ $gstatus -eq 0 ]; then
             abi_apk=$(find app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
             [ -z "$abi_apk" ] && abi_apk=$(find app/build/outputs/apk/ -name "*.apk" | head -n 1)
-            echo "Found $abi APK: $abi_apk"
-            cp -f "$abi_apk" "../release_apk/NatBypass-${TAG}-${abi}.apk"
-          done
+            if [ -n "$abi_apk" ]; then
+              echo "Found ARM64 APK: $abi_apk"
+              cp -f "$abi_apk" "../release_apk/NatBypass-${TAG}-arm64.apk"
+            fi
+          fi
 
           echo "Final release APKs:"
           ls -lh ../release_apk/
