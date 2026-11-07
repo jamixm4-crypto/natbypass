@@ -65,6 +65,16 @@ cmd/natbypass-gui/frontend/node_modules/
 # WebUI authentication sessions
 .sessions.json
 *.sessions.json
-.natbypass_sessions.json
-# Cross-compiled Linux binary
+.natbypass_sessions.json
+
+# Scratch notes, temporary builds, duplicate repos
+scratch/
+wiki_repo/
+
+# Resource compiled objects
+*.syso
+
+# Standalone root binaries
 /natbypass
+/natbypass-*
+/NatBypass*

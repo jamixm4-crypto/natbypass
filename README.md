@@ -4,7 +4,7 @@
 
 [🇷🇺 Русский](README.md) | [🇬🇧 English](README_EN.md)
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![Release](https://img.shields.io/github/v/release/jamixm4-crypto/natbypass?style=flat&logo=github&color=8b5cf6)](https://github.com/jamixm4-crypto/natbypass/releases/latest)
 [![Wiki](https://img.shields.io/badge/Wiki-Documentation-blue?style=flat&logo=gitbook)](https://github.com/jamixm4-crypto/natbypass/wiki)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
@@ -13,18 +13,32 @@
 
 ---
 
-## 📚 [Официальная База Знаний (Wiki)](https://github.com/jamixm4-crypto/natbypass/wiki)
+> [!NOTE]
+> ### 🛡️ Назначение проекта и Дисклеймер безопасности (Security & Anti-Malware Disclaimer)
+> **NatBypass** — это децентрализованный защищённый P2P Mesh VPN, созданный исключительно для обеспечения персональной приватности, объединения личных устройств (роутеров Keenetic/OpenWrt, телефонов Android, домашних ПК, NAS и серверов) в единую защищённую оверлейную сеть и защиты от цензуры DPI.
+> 
+> * **Не является инструментом для пентеста:** NatBypass **НЕ ЯВЛЯЕТСЯ** средством тестирования на проникновение, сканером портов, бэкдором или утилитой несанкционированного доступа. Проект **не имеет никакого отношения** к сторонним инструментам туннелирования (таким как `cw1997/NATBypass`, `lcx` и подобным).
+> * **Сквозное E2EE шифрование:** Весь пользовательский трафик защищён сквозным шифрованием (Noise_IK / ChaCha20-Poly1305 / NaCl Box). Промежуточные узлы сети (**Zero-Knowledge Relays**) не имеют технической возможности расшифровать, просмотреть или модифицировать данные пользователей.
+> * **Подписанные релизы:** Все исполняемые файлы криптографически подписаны ключом **Ed25519** и Sigstore/Cosign. Встроенный автообновлятор отклоняет любые неподписанные файлы, защищая от подмены трафика на прокси/зеркалах.
+> * **Безопасность WebUI:** Панель управления по умолчанию привязывается строго к `127.0.0.1` (кроме роутеров Keenetic для доступа из домашней LAN), защищена токенами, CSRF-защитой и фильтром DNS Rebinding.
 
-Полная документация и пошаговые инструкции доступны в нашей [**NatBypass Wiki**](https://github.com/jamixm4-crypto/natbypass/wiki):
+---
+
+## 📚 Документация и База Знаний
+
 * 🚀 [**Быстрый старт за 5 минут**](https://github.com/jamixm4-crypto/natbypass/wiki/Quick-Start) — подключение первой P2P-пары устройств без консоли.
+* 🎮 [**Практические сценарии использования (Use Cases)**](docs/USE_CASES.md) — сетевые игры с 0 задержкой, доступ к домашнему NAS/Plex без белого IP, свой Exit Node.
+* 📶 [**База пресетов для сотовых операторов (МТС, МегаФон, Билайн, Tele2, Yota)**](docs/OPERATOR_PRESETS.md) — настройки AmneziaWG и портов для преодоления блокировок и CGNAT.
 * 🛡️ [**Обход блокировок (AmneziaWG)**](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass) — тюнинг параметров Jc, Jmin, Jmax, S1, S2, H1..H4 против ТСПУ / DPI.
+* 🔐 [**Модель угроз и безопасность (Threat Model)**](docs/THREAT_MODEL.md) — формальный аудит защищённости, границы доверия и безопасность ретрансляторов.
 * 🌐 [**Роутеры Keenetic (Entware)**](https://github.com/jamixm4-crypto/natbypass/wiki/Keenetic-Routers) & [**OpenWrt**](https://github.com/jamixm4-crypto/natbypass/wiki/OpenWrt-Routers) — установка в 1 команду и автозапуск.
 * 📱 [**Android-руководство**](https://github.com/jamixm4-crypto/natbypass/wiki/Android-Setup) — подключение по QR-коду, отображение QR на экране и системный VpnService.
 * 🪟 [**Windows-руководство**](https://github.com/jamixm4-crypto/natbypass/wiki/Windows-Guide) — нативный UI, трей, Wintun и серверный режим.
 * 🧪 [**Обновление и Тестовые Сборки (Beta)**](https://github.com/jamixm4-crypto/natbypass/wiki/Updating-and-Beta-Versions) — обновление в 1 клик на Windows, Linux, роутерах и Android.
 * 🔧 [**Диагностика и устранение неполадок**](https://github.com/jamixm4-crypto/natbypass/wiki/Troubleshooting-and-Diagnostics) — универсальные скрипты диагностики и сквозной проверки пинга.
-* 🌍 [**natbypass-probe: Межгеографическая диагностика**](docs/PROBE.md) — утилита для тестирования P2P/AWG-соединений между узлами в разных странах (BY, RU, US). Выявляет блокировки UDP, WireGuard-паттерна, DPI/ТСПУ.
+* 🌍 [**natbypass-probe: Межгеографическая диагностика**](docs/PROBE.md) — утилита для тестирования P2P/AWG-соединений между узлами в разных странах (BY, RU, US).
 * ⚡ [**Многоуровневый NAT Traversal**](docs/NAT_TRAVERSAL.md) — 5 уровней преодоления CGNAT мобильных сетей, значки ⚡ Координатор и 🛡️ Relay.
+* 📜 [**Лицензии сторонних библиотек**](THIRD_PARTY_LICENSES.md) — аудит зависимостей (WireGuard, Wintun, NaCl, Pion STUN).
 
 ---
 
@@ -32,6 +46,7 @@
 
 - ⚡ **Pure P2P UDP Mesh:** Прямой датаграммный обмен между узлами через STUN Hole Punching без аренды VPS.
 - 🛡️ **AmneziaWG Obfuscation:** Встроенная защита от Deep Packet Inspection (DPI / ТСПУ) с поддержкой кастомных заголовков (H1..H4), мусорных пакетов (Jc, Jmin, Jmax), защиты заголовков и рандомизации паддинга (S1, S2).
+- 🔄 **Self-Healing Relay Failover:** При невозможности прямого P2P (двойной Symmetric NAT) трафик автоматически направляется через промежуточный узел-ретранслятор (Zero-Knowledge Multi-Hop), а при восстановлении прямого пути бесшовно возвращается на 100% прямой P2P.
 - 🌐 **Шлюз выхода в интернет (Exit Node):** Любой узел сети (Linux, Keenetic, Windows, Android) может выступать защищенным интернет-шлюзом в один клик с изоляцией DNS (`1.1.1.1`, `8.8.8.8`) и обходом локальных провайдерских ограничений.
 - 📡 **Мультиканальная сигнализация:** Обмен пирами и координатами через Telegram Bot API, MQTT, Cloudflare DNS TXT и HTTP Webhook с E2E-шифрованием NaCl/Box (X25519 + XSalsa20-Poly1305).
 - 🚀 **Оптимизация под MIPS / ARM роутеры:** Чистый Go без CGO, пул буферов `sync.Pool`, ограничение сборщика мусора до 48 МБ RAM, асинхронное логирование — стабильная работа даже на роутерах с 64–128 МБ памяти (Keenetic, OpenWrt).
@@ -64,7 +79,7 @@ natbypass diag
 ```powershell
 irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/diag.ps1 | iex
 ```
-*(или через CLI: `.\NatBypass.exe diag`)*
+*(или через CLI: `.\natbypass-cli.exe diag`)*
 
 ### 🌍 Межгеографическая P2P/DPI диагностика (natbypass-probe)
 Автономная утилита для выявления блокировок UDP, WireGuard-паттерна и параметров AmneziaWG между узлами в разных странах (РФ, РБ, США):
@@ -126,6 +141,8 @@ Invoke-WebRequest -Uri "https://github.com/jamixm4-crypto/natbypass/releases/lat
 
 👉 Подробное описание всех 5 уровней: [**docs/NAT_TRAVERSAL.md**](docs/NAT_TRAVERSAL.md).
 
+---
+
 ## 📦 Поддерживаемые платформы
 
 | Платформа | Архитектура | Файл релиза | Описание |
@@ -159,68 +176,21 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/insta
 ```
 *(или через wget: `wget -qO- https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh | sh`)*
 
-Панель управления будет доступна по адресу: `http://<IP_УСТРОЙСТВА>:8080`.
+Панель управления будет доступна по адресу: `http://<IP_УСТРОЙСТВА>:8080` (на Keenetic аутентификация через пароль администратора роутера).
 
-### 🗑️ Удаление и сброс конфигурации (Linux / Keenetic / OpenWrt)
+---
 
-#### 1. Полное удаление программы со всеми файлами и ключами:
+## 🗑️ Удаление и сброс конфигурации (Linux / Keenetic / OpenWrt)
+
+### 1. Полное удаление программы со всеми файлами и ключами:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh -s -- --purge
 ```
-*(Скрипт автоматически остановит службу, удалит бинарники, автозапуск, логи, профили и ключи WireGuard)*.
 
-Если нужно удалить программу, но **сохранить конфигурацию** для будущей повторной установки:
-```bash
-curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh
-```
-
-#### 2. Очистка и сброс конфигурации (Без удаления программы):
-Если нужно очистить настройки, сгенерировать новый DeviceID и чистую пару WireGuard-ключей:
+### 2. Очистка и сброс конфигурации (Без удаления программы):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/uninstall.sh | sh -s -- --reset-config
 ```
-
-#### 3. Ручное удаление или сброс (без интернета):
-* **Роутеры Keenetic (Entware):**
-  ```bash
-  # Полное удаление:
-  /opt/etc/init.d/S99natbypass stop
-  rm -f /opt/etc/init.d/S99natbypass /opt/bin/natbypass /opt/usr/bin/natbypass
-  rm -rf /opt/etc/natbypass /opt/var/log/natbypass.log
-  killall natbypass 2>/dev/null || true
-
-  # Только сброс конфигурации:
-  /opt/etc/init.d/S99natbypass stop
-  rm -rf /opt/etc/natbypass/*
-  /opt/etc/init.d/S99natbypass start
-  ```
-* **Серверы Linux (systemd):**
-  ```bash
-  # Полное удаление:
-  systemctl stop natbypass && systemctl disable natbypass
-  rm -f /etc/systemd/system/natbypass.service && systemctl daemon-reload
-  rm -f /usr/local/bin/natbypass /usr/bin/natbypass
-  rm -rf /etc/natbypass /var/log/natbypass.log
-  killall natbypass 2>/dev/null || true
-
-  # Только сброс конфигурации:
-  systemctl stop natbypass
-  rm -rf /etc/natbypass/*
-  systemctl start natbypass
-  ```
-* **Роутеры OpenWrt:**
-  ```bash
-  # Полное удаление:
-  /etc/init.d/natbypass stop && /etc/init.d/natbypass disable
-  rm -f /etc/init.d/natbypass /usr/bin/natbypass
-  rm -rf /etc/natbypass
-  killall natbypass 2>/dev/null || true
-
-  # Только сброс конфигурации:
-  /etc/init.d/natbypass stop
-  rm -rf /etc/natbypass/*
-  /etc/init.d/natbypass start
-  ```
 
 ---
 
@@ -234,61 +204,19 @@ NatBypass включает поддержку **AmneziaWG** — протокол
 |---|---|---|
 | **`Strict`** | Header Protection + Random Trailers + Disable Cookies + Content Padding + CPS Packets + рандомизация таймеров | **Максимальное пробитие ТСПУ / DPI** |
 | **`Balanced`** | Header Protection + Random Trailers + Cookies + Content Padding + стандартный джиттер | Рекомендуется для всех сетей по умолчанию |
-| **`Anti-TSPU`** | Нестандартный тюнинг параметров (Jc=5, S2=100, случайные H1..H4) | Улучшенная совместимость |
+| **`Anti-TSPU`** | Нестандартный тюнинг параметров (Jc=5, S2=100, случайные H1..H4) | Сотовые сети (МТС, МегаФон, Tele2) |
 | **`Legacy`** | Стандартный WireGuard + мусорные пакеты (Jc=4, S1=48, S2=32) | Старые клиенты |
 
----
-
-## 🌐 Шлюз выхода в интернет (Exit Node)
-
-NatBypass позволяет безопасно направлять весь интернет-трафик клиентов через любой выбранный узел сети (Keenetic, Linux-сервер или домашний ПК):
-1. **Автоматическая маршрутизация:** Клиент получает маршрут `0.0.0.0/0` без потери связи с меш-сетью. Для брокеров сигнализации и STUN автоматически прописываются обходные маршруты `/32` через физический шлюз.
-2. **Защита от утечек DNS:** Все запросы принудительно перенаправляются на безопасные адреса (`1.1.1.1`, `8.8.8.8`) через зашифрованный туннель, исключая слежку со стороны местного интернет-провайдера.
-3. **Управление в 1 клик:** Включение и отключение шлюза доступно как в WebUI, так и в нативном Windows GUI и приложении Android.
+Полная таблица пресетов для сотовых операторов: [**docs/OPERATOR_PRESETS.md**](docs/OPERATOR_PRESETS.md).
 
 ---
 
-## 🧪 Инструкция по обновлению до тестовых (Beta) версий
+## ⚖️ Правовой статус и соблюдение законодательства (Legal Compliance)
 
-Вы можете мгновенно получать новейшие сборки с оптимизациями производительности и новыми фичами на всех клиентах:
-
-### 📱 Android
-1. Откройте **Настройки** приложения -> **Обновления**.
-2. Включите тумблер **🧪 Тестовые сборки (Beta)**.
-3. Нажмите **«Скачать и обновить»** — приложение скачает актуальный APK с GitHub и установит обновление.
-
-### 🌐 WebUI (Keenetic, OpenWrt, Linux, Windows)
-1. Откройте панель `http://<IP_УСТРОЙСТВА>:8080`.
-2. В верхнем правом углу нажмите **🔄 Обновление**.
-3. Включите переключатель **«Тестовые сборки (Beta / Pre-release)»** и нажмите **«Проверить обновления»**.
-4. Нажмите **«Установить обновление»** — демон обновится и перезапустится на лету.
-
-### 🐧 Linux / Keenetic / OpenWrt (Терминал)
-Для быстрого обновления в одну строку:
-```bash
-curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/update.sh | sh -s -- --beta
-```
-или через встроенную команду:
-```bash
-natbypass update --beta
-```
-
-### 🪟 Windows GUI & CLI
-- В окне **NatBypass GUI** кликните правой кнопкой мыши по иконке в трее -> **«Проверить обновления»**.
-- В консоли PowerShell от Администратора:
-```powershell
-irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/update.ps1 | iex -ArgumentList "-Beta"
-```
-
----
-
-## 🗺️ Дорожная карта (Roadmap)
-
-- 🧪 **Исследование и бенчмаркинг резервных протоколов:** В настоящее время ведется тестирование и выбор наиболее стабильных и устойчивых к блокировкам протоколов резервного транспорта (fallback relay) на случай полной изоляции прямого UDP-трафика со стороны провайдеров.
-- 🧩 **Адаптивный транспортный менеджер:** Бесшовное авто-переключение между Direct P2P UDP, AmneziaWG и резервными туннелями на основе телеметрии RTT, джиттера и процента потерь пакетов.
+Проект NatBypass предназначен для защиты личных данных, обеспечения конфиденциальности и безопасного удалённого доступа к собственным устройствам. Пользователи несут персональную ответственность за соблюдение местного законодательства страны своего пребывания при использовании средств криптографии и VPN.
 
 ---
 
 ## 📄 Лицензия
 
-Проект распространяется под открытой лицензией [GNU GPLv3](LICENSE).
+Проект распространяется под открытой лицензией [GNU GPLv3](LICENSE). Лицензии сторонних библиотек и компонентов приведены в [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

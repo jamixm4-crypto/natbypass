@@ -1,107 +1,117 @@
 # ============================================================
-# NatBypass — Makefile для кросс-компиляции
+# NatBypass — Professional Cross-Platform Makefile (Pure Go, Zero CGO)
 # ============================================================
 
 APP      := natbypass
 MODULE   := github.com/natbypass/natbypass
+CMD_MAIN := ./cmd/natbypass
 CMD_CLI  := ./cmd/natbypass-cli
 CMD_GUI  := ./cmd/natbypass-gui
-VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "1.0.0")
-COMMIT   := $(shell git rev-parse --short HEAD 2>/dev/null || echo "release")
-DATE     := $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
-
-LDFLAGS  := -s -w \
-            -X $(MODULE)/cmd/natbypass.Version=$(VERSION) \
-            -X $(MODULE)/cmd/natbypass.Commit=$(COMMIT) \
-            -X $(MODULE)/cmd/natbypass.BuildDate=$(DATE)
-
-GOFLAGS  := CGO_ENABLED=0
-GOBUILD  := go build -trimpath -ldflags="$(LDFLAGS)"
+CMD_PROBE:= ./cmd/natbypass-probe
 DIST     := dist
 BIN      := bin
 
-.PHONY: all clean deps tidy fmt vet test \
-        windows-gui linux-cli router-mips router-mipsle router-arm64 \
-        android-arm64 android-aar android-apk \
-        windows-amd64 release help
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "1.9.505-beta.1")
+COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "release")
+DATE     ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
 
-all: deps linux-cli router-mips router-mipsle router-arm64 android-arm64 windows-amd64
+LDFLAGS  := -s -w \
+            -X main.Version=$(VERSION) \
+            -X main.Commit=$(COMMIT) \
+            -X main.BuildDate=$(DATE)
 
-# Сборка Windows GUI (Wails)
+GOFLAGS  := CGO_ENABLED=0
+GOBUILD  := go build -trimpath -ldflags="$(LDFLAGS)"
+
+.PHONY: all clean deps tidy fmt vet test govulncheck \
+        windows-all windows-gui windows-cli windows-service \
+        linux-amd64 linux-arm64 \
+        router-mipsle router-mips router-armv7 \
+        help
+
+all: windows-all linux-amd64 linux-arm64 router-mipsle router-mips router-armv7
+
+# Windows Builds (Pure Go Native Win32 / Service)
 windows-gui:
-	@echo ">> Сборка Windows GUI (Wails)..."
+	@echo ">> Building Windows Native GUI (Win32, Zero CGO)..."
 	@mkdir -p $(DIST)
-	cd cmd/natbypass-gui && wails build -o natbypass-gui.exe
+	$(GOFLAGS) GOOS=windows GOARCH=amd64 $(GOBUILD) -H=windowsgui -o $(DIST)/NatBypass-GUI.exe $(CMD_GUI)
 
-# Сборка CLI версии для Linux
-linux-cli:
-	@echo ">> Сборка CLI версии для Linux..."
-	@mkdir -p $(BIN) $(DIST)
-	$(GOFLAGS) GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BIN)/natbypass-cli $(CMD_CLI)
-	cp $(BIN)/natbypass-cli $(DIST)/$(APP)-linux-amd64 2>/dev/null || true
+windows-service:
+	@echo ">> Building Windows Background Service / Tray Daemon..."
+	@mkdir -p $(DIST)
+	$(GOFLAGS) GOOS=windows GOARCH=amd64 $(GOBUILD) -H=windowsgui -o $(DIST)/NatBypass.exe $(CMD_MAIN)
 
-# Сборка под роутеры MIPS (Big Endian)
-router-mips:
-	@echo ">> Сборка под MIPS (Big Endian)..."
-	@mkdir -p $(BIN) $(DIST)
-	$(GOFLAGS) GOOS=linux GOARCH=mips GOMIPS=softfloat $(GOBUILD) -o $(BIN)/natbypass-mips $(CMD_CLI)
-	cp $(BIN)/natbypass-mips $(DIST)/$(APP)-linux-mips 2>/dev/null || true
+windows-cli:
+	@echo ">> Building Windows CLI..."
+	@mkdir -p $(DIST)
+	$(GOFLAGS) GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(DIST)/natbypass-cli.exe $(CMD_CLI)
 
-# Сборка под роутеры MIPSLE (Keenetic Start/Mini, Xiaomi)
+windows-all: windows-gui windows-service windows-cli
+
+# Linux Server & Desktop
+linux-amd64:
+	@echo ">> Building Linux x86_64 Daemon..."
+	@mkdir -p $(DIST)
+	$(GOFLAGS) GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST)/natbypass-linux-amd64 $(CMD_MAIN)
+
+linux-arm64:
+	@echo ">> Building Linux ARM64 Daemon (Raspberry Pi / VPS)..."
+	@mkdir -p $(DIST)
+	$(GOFLAGS) GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST)/natbypass-linux-arm64 $(CMD_MAIN)
+
+# Embedded Routers (Keenetic, OpenWrt, Entware)
 router-mipsle:
-	@echo ">> Сборка под MIPSLE (Keenetic)..."
-	@mkdir -p $(BIN) $(DIST)
-	$(GOFLAGS) GOOS=linux GOARCH=mipsle GOMIPS=softfloat $(GOBUILD) -o $(BIN)/natbypass-mipsle $(CMD_CLI)
-	cp $(BIN)/natbypass-mipsle $(DIST)/$(APP)-linux-mipsle 2>/dev/null || true
-
-# Сборка под роутеры ARM64 (Keenetic Ultra/Giga, RPi)
-router-arm64:
-	@echo ">> Сборка под ARM64..."
-	@mkdir -p $(BIN) $(DIST)
-	$(GOFLAGS) GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(BIN)/natbypass-arm64 $(CMD_CLI)
-	cp $(BIN)/natbypass-arm64 $(DIST)/$(APP)-linux-arm64 2>/dev/null || true
-
-# Сборка под Android
-android-arm64:
-	@echo ">> Сборка бинарника под Android ARM64 (Termux/ADB/Root)..."
+	@echo ">> Building Keenetic MIPSle Softfloat (Start, City, Air, Extra, Speedster)..."
 	@mkdir -p $(DIST)
-	$(GOFLAGS) GOOS=android GOARCH=arm64 $(GOBUILD) -o $(DIST)/$(APP)-android-arm64 $(CMD_CLI)
+	$(GOFLAGS) GOOS=linux GOARCH=mipsle GOMIPS=softfloat $(GOBUILD) -o $(DIST)/natbypass-keenetic-mipsle $(CMD_MAIN)
 
-android-aar:
-	@echo ">> Сборка Android AAR библиотеки (Gomobile bind)..."
+router-mips:
+	@echo ">> Building OpenWrt MIPS Big-Endian Softfloat..."
 	@mkdir -p $(DIST)
-	gomobile bind -target=android/arm64,android/arm,android/amd64 -o $(DIST)/$(APP).aar ./pkg/mobile
+	$(GOFLAGS) GOOS=linux GOARCH=mips GOMIPS=softfloat $(GOBUILD) -o $(DIST)/natbypass-router-mips $(CMD_MAIN)
 
-android-apk:
-	@echo ">> Сборка Android APK пакета (Gomobile build)..."
+router-armv7:
+	@echo ">> Building OpenWrt / Keenetic ARMv7 32-bit (Cortex-A7/A9)..."
 	@mkdir -p $(DIST)
-	gomobile build -target=android/arm64 -o $(DIST)/$(APP).apk ./cmd/natbypass-cli
+	$(GOFLAGS) GOOS=linux GOARCH=arm GOARM=7 $(GOBUILD) -o $(DIST)/natbypass-router-armv7 $(CMD_MAIN)
 
-windows-amd64:
-	@echo ">> Сборка Windows x64..."
-	@mkdir -p $(DIST)
-	$(GOFLAGS) GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(DIST)/$(APP)-windows-amd64.exe $(CMD_CLI)
-
+# Quality & Testing
 deps:
-	@echo ">> Загрузка зависимостей..."
+	@echo ">> Downloading Go dependencies..."
 	go mod download
 
 tidy:
-	@echo ">> go mod tidy..."
+	@echo ">> Tidying Go modules..."
 	go mod tidy
 
+fmt:
+	@echo ">> Formatting source files..."
+	go fmt ./...
+
+vet:
+	@echo ">> Running go vet..."
+	go vet ./...
+
+test:
+	@echo ">> Running automated test suite..."
+	go test -v -timeout 180s ./internal/...
+
 clean:
-	@echo ">> Очистка..."
+	@echo ">> Cleaning build outputs..."
 	rm -rf $(DIST) $(BIN)
 
 help:
 	@echo "NatBypass Makefile targets:"
-	@echo "  make windows-gui    - Сборка Windows GUI (Wails)"
-	@echo "  make linux-cli      - Сборка CLI версии для Linux"
-	@echo "  make router-mips    - Сборка под роутеры MIPS"
-	@echo "  make router-mipsle  - Сборка под роутеры MIPSLE"
-	@echo "  make router-arm64   - Сборка под роутеры ARM64"
-	@echo "  make android-arm64  - Сборка бинарника для Android (Termux/ADB)"
-	@echo "  make android-aar    - Сборка AAR библиотеки для Android Studio"
-	@echo "  make android-apk    - Сборка APK пакета (gomobile)"
-	@echo "  make all            - Сборка под все платформы"
+	@echo "  make windows-gui    - Windows Native GUI (Win32, no CGO, 15MB RAM)"
+	@echo "  make windows-service- Windows Background Service / Tray Daemon"
+	@echo "  make windows-cli    - Windows CLI binary"
+	@echo "  make windows-all    - All Windows binaries"
+	@echo "  make linux-amd64    - Linux x86_64 daemon"
+	@echo "  make linux-arm64    - Linux ARM64 daemon"
+	@echo "  make router-mipsle  - Keenetic / MIPSle router binary"
+	@echo "  make router-mips    - OpenWrt / MIPS (big-endian) router binary"
+	@echo "  make router-armv7   - OpenWrt / ARMv7 router binary"
+	@echo "  make all            - Build all platform targets"
+	@echo "  make test           - Run full unit test suite"
+	@echo "  make clean          - Remove all build artifacts"
