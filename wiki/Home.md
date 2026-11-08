@@ -1,4 +1,4 @@
-﻿# 🌐 NatBypass Wiki — База Знаний и Руководство
+# 🌐 NatBypass Wiki — База Знаний и Руководство
 
 Добро пожаловать в официальную базу знаний **NatBypass**! Здесь вы найдёте исчерпывающие инструкции по установке, настройке и решению любых сетевых задач.
 
@@ -28,7 +28,7 @@
 ### 🛡️ Обход блокировок и Протоколы
 * [**🛡️ Обход блокировок через AmneziaWG 2.0**](https://github.com/jamixm4-crypto/natbypass/wiki/AmneziaWG-DPI-Bypass) — тюнинг параметров Jc, S1, S2, H1..H4 для пробития TSPU / DPI.
 * [**💬 Каналы сигнализации (Telegram & MQTT)**](https://github.com/jamixm4-crypto/natbypass/wiki/Signaling-Telegram-MQTT) — настройка собственного Telegram-бота или приватного MQTT брокера.
-* [**🛡️ Hysteria 2 VLESS + XTLS Reality Relay**](https://github.com/jamixm4-crypto/natbypass/wiki/Roadmap-and-Protocols) — ультимативный 4-й уровень резервной связи через маскированный TCP 443.
+* [**🛡️ Резервные каналы и отказоустойчивость**](https://github.com/jamixm4-crypto/natbypass/wiki/Architecture) — 4-уровневый стек эскалации при блокировках UDP и двойном Symmetric NAT.
 
 ---
 

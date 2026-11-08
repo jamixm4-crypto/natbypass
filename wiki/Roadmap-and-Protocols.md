@@ -25,5 +25,6 @@
 |---|---|---|
 | **P2P Data-Plane** | Pure Direct UDP | Прямой обмен сокет-в-сокет через STUN |
 | **DPI Bypass** | AmneziaWG 2.0 | Обфускация Jc, S1, S2, H1..H4 против ТСПУ |
-| **Relay Fallback** | MQTT Datagram Stream | Резервная передача пакетов при блокировке UDP |
-| **Control-Plane** | Telegram, MQTT, DNS TXT, Webhook | E2EE-сигнализация и обмен координатами |
+| **Relay Fallback** | Peer-as-Relay & ShadowTLS v3 | Транзит через доверенный роутер или TLS-поток |
+| **Emergency Fallback** | MQTT Datagram Stream | Резервная передача L3-пакетов через брокер при блокировке любого UDP |
+| **Control-Plane** | Telegram, MQTT Mesh, LAN UDP, DNS TXT | E2EE-сигнализация и обмен координатами |

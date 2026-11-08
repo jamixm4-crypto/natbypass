@@ -34,24 +34,25 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scrip
 4. Нажмите кнопку **💾 Применить и перезапустить**.
 5. Экспортируйте новый конфиг или покажите QR-код для телефона.
 
-### Способ 3: Через CLI-команды
+### Способ 3: Через конфигурационный файл config.yaml
 
-```bash
-# 1. Генерация готового конфига AWG 3.1
-natbypass-cli awg generate --preset awg31_strict --output /etc/natbypass/awg31.conf
+Отредактируйте `/etc/natbypass/config.yaml` (или `config.yaml` рядом с exe):
 
-# 2. Настройка параметров
-natbypass-cli config set wireguard.awg_version "3.1"
-natbypass-cli config set wireguard.awg_preset "awg31_strict"
-natbypass-cli config set wireguard.header_protection_key "$(openssl rand -hex 32)"
-natbypass-cli config set network.preferred_port 443
-
-# 3. Перезапуск службы
-natbypass-cli service restart
-
-# 4. Проверка статуса
-natbypass-cli status
+```yaml
+wireguard:
+  enable_amnezia: true
+  awg_preset: "awg31_strict"
+  # Опционально: кастомный ключ защиты заголовков (32 байта hex)
+  # header_protection_key: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+network:
+  preferred_port: 443
 ```
+
+После изменения перезапустите службу:
+* **Linux:** `systemctl restart natbypass`
+* **Keenetic:** `/opt/etc/init.d/S99natbypass restart`
+* **OpenWrt:** `/etc/init.d/natbypass restart`
+* **Windows:** перезапустите приложение или выполните `natbypass-cli.exe service start`
 
 ---
 
@@ -74,12 +75,13 @@ natbypass-cli status
 
 ---
 
-## 🔄 Откат на AWG 2.0 (Rollback)
+## 🔄 Откат на режим совместимости AWG 2.0 (Rollback)
 
-Если на определенных устройствах требуется вернуться на режим совместимости AWG 2.0:
+Если на определенных устройствах требуется вернуться на режим совместимости AWG 2.0, укажите в `config.yaml`:
 
-```bash
-natbypass-cli config set wireguard.awg_version "2.0"
-natbypass-cli config set wireguard.awg_preset "awg20_legacy"
-natbypass-cli service restart
+```yaml
+wireguard:
+  enable_amnezia: true
+  awg_preset: "anti_tspu"
 ```
+И перезапустите службу (`systemctl restart natbypass` или через WebUI).

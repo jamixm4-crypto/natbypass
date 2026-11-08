@@ -5,7 +5,7 @@
 ---
  
 ## Установка
-1. Скачайте файл **`NatBypass.apk`** со [страницы релизов](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+1. Скачайте актуальный APK-файл (`NatBypass-...-arm64.apk` или `...-universal.apk`) со [страницы релизов](https://github.com/jamixm4-crypto/natbypass/releases/latest).
 2. Разрешите установку из неизвестных источников и откройте приложение.
  
 ---
