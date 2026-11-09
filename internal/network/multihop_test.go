@@ -10,6 +10,7 @@ package network
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 func TestMultiHop_EncodeDecode(t *testing.T) {
@@ -137,5 +138,42 @@ func TestMultiHopRouter_TTLZeroLoopPrevention(t *testing.T) {
 	_, _, drop := router.Stats()
 	if drop != 1 {
 		t.Fatalf("Expected 1 dropped loop, got %d", drop)
+	}
+}
+
+func TestMultiHop_RelayScoring(t *testing.T) {
+	candidates := []RelayCandidate{
+		{
+			DeviceID:      "bad-relay",
+			NATType:       "Symmetric",
+			RelayCapable:  false, // Non-capable must be discarded
+			RTTToSelf:     10 * time.Millisecond,
+			RTTToTarget:   10 * time.Millisecond,
+			PacketLossPct: 0,
+		},
+		{
+			DeviceID:      "slow-relay",
+			NATType:       "Restricted",
+			RelayCapable:  true,
+			RTTToSelf:     150 * time.Millisecond,
+			RTTToTarget:   120 * time.Millisecond,
+			PacketLossPct: 15.0,
+		},
+		{
+			DeviceID:      "best-relay",
+			NATType:       "FullCone",
+			RelayCapable:  true,
+			RTTToSelf:     15 * time.Millisecond,
+			RTTToTarget:   20 * time.Millisecond,
+			PacketLossPct: 0.0,
+		},
+	}
+
+	best := SelectBestRelay(candidates)
+	if best == nil {
+		t.Fatal("expected to find best relay")
+	}
+	if best.DeviceID != "best-relay" {
+		t.Errorf("expected best-relay, got %s", best.DeviceID)
 	}
 }

@@ -80,3 +80,31 @@ func TestTrafficShaper_Profiles(t *testing.T) {
 		t.Errorf("unexpected padZoom: %d", padZoom)
 	}
 }
+
+func TestTrafficShaper_WaveletKeepalive(t *testing.T) {
+	base := 25 * time.Second
+	distinct := make(map[time.Duration]bool)
+
+	for i := 0; i < 50; i++ {
+		ka := GetWaveletResistantKeepalive(base)
+		if ka < 15*time.Second || ka > 35*time.Second {
+			t.Errorf("keepalive out of expected range: %v", ka)
+		}
+		distinct[ka] = true
+	}
+
+	if len(distinct) < 3 {
+		t.Errorf("expected dispersion in keepalive intervals, got only %d distinct values", len(distinct))
+	}
+}
+
+func TestTrafficShaper_MultimodalPadding(t *testing.T) {
+	shaper := NewTrafficShaper(true)
+	shaper.SetProfile(ProfileWebRTC)
+
+	smallPacket := make([]byte, 100)
+	padded := shaper.ApplyMultimodalPadding(smallPacket)
+	if len(padded) <= len(smallPacket) {
+		t.Errorf("expected multimodal padding to expand small packet, got length %d", len(padded))
+	}
+}

@@ -12,8 +12,8 @@ body:
     id: version
     attributes:
       label: "Версия NatBypass / Version"
-      description: "Укажите точную версию (например, v1.9.505-beta.1 или вывод команды natbypass version)"
-      placeholder: "v1.9.505-beta.1"
+      description: "Укажите точную версию (например, v1.9.506-beta.1 или вывод команды natbypass version)"
+      placeholder: "v1.9.506-beta.1"
     validations:
       required: true
 

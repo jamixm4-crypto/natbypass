@@ -252,3 +252,76 @@ func (s *TrafficShaper) ApplyAdaptivePadding(payload []byte) []byte {
 	}
 	return padded
 }
+
+// GetWaveletResistantKeepalive computes a non-linear randomized keepalive interval
+// centered around baseInterval (default 25s if <= 0).
+// Discrete Wavelet Transform (DWT) classifiers (such as FlowFrontiers wavelet-vpn-detection)
+// rely on rigid periodic signals (e.g. strict 25.0s pulses) to detect VPNs with 99% accuracy.
+// Introducing pseudo-random Poisson/Gaussian-like jitter destroys spectral detail coefficients
+// across wavelet decomposition scales without risking NAT session expiration.
+func GetWaveletResistantKeepalive(baseInterval time.Duration) time.Duration {
+	if baseInterval <= 0 {
+		baseInterval = 25 * time.Second
+	}
+
+	// Range: base - 6s to base + 6s with non-linear distribution
+	var entropy [2]byte
+	if _, err := io.ReadFull(rand.Reader, entropy[:]); err != nil {
+		entropy[0] = byte(time.Now().UnixNano() & 0xFF)
+		entropy[1] = byte((time.Now().UnixNano() >> 8) & 0xFF)
+	}
+
+	// Pseudo-Poisson dispersion: sum of 2 independent random variables
+	val := int(entropy[0]%7) + int(entropy[1]%7) - 6 // -6 to +6 seconds
+	result := baseInterval + time.Duration(val)*time.Second
+	if result < 15*time.Second {
+		result = 15 * time.Second
+	}
+	return result
+}
+
+// ApplyMultimodalPadding expands payload with multimodal generative padding,
+// emulating real WebRTC audio/video or Zoom codecs (inspired by aivpn generative distributions).
+func (s *TrafficShaper) ApplyMultimodalPadding(payload []byte) []byte {
+	if len(payload) == 0 {
+		return payload
+	}
+
+	s.mu.RLock()
+	prof := s.profile
+	maxSize := s.maxFrameSize
+	s.mu.RUnlock()
+
+	if maxSize <= 0 {
+		maxSize = 1350
+	}
+
+	// For small packets (< 280 bytes, e.g. control, pings, or audio),
+	// mimic audio codec packets (e.g. Opus/SILK frames 140-260 bytes).
+	if len(payload) < 280 {
+		targetSize := 160
+		switch prof {
+		case ProfileZoom:
+			targetSize = 180
+		case ProfileWebRTC:
+			targetSize = 210
+		}
+
+		if len(payload) < targetSize {
+			var b [1]byte
+			if _, err := io.ReadFull(rand.Reader, b[:]); err == nil {
+				jitter := int(b[0] % 32)
+				needed := (targetSize + jitter) - len(payload)
+				if needed > 0 && len(payload)+needed <= maxSize {
+					padded := make([]byte, len(payload)+needed)
+					copy(padded, payload)
+					_, _ = io.ReadFull(rand.Reader, padded[len(payload):])
+					return padded
+				}
+			}
+		}
+	}
+
+	// Fallback to standard adaptive bin padding
+	return s.ApplyAdaptivePadding(payload)
+}

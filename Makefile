@@ -11,7 +11,7 @@ CMD_PROBE:= ./cmd/natbypass-probe
 DIST     := dist
 BIN      := bin
 
-VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "1.9.505-beta.1")
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "1.9.506-beta.1")
 COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "release")
 DATE     ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
 

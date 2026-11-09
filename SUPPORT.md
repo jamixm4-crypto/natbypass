@@ -41,7 +41,7 @@ If you encountered a bug, panic, or unexpected behavior in the daemon or GUI:
    ```
 2. Open a new issue using our [Bug Report Template](https://github.com/jamixm4-crypto/natbypass/issues/new?template=bug_report.yml).
 3. Include:
-   - NatBypass version (e.g. `v1.9.505-beta.1`).
+   - NatBypass version (e.g. `v1.9.506-beta.1`).
    - OS & architecture (Keenetic MIPSle, OpenWrt ARM, Windows 11 x64, Android 14).
    - Sanitized diagnostic report.
 

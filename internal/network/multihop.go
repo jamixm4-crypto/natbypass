@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -191,4 +192,62 @@ func (r *MultiHopRouter) Stats() (forwarded, delivered, droppedLoops uint32) {
 	return atomic.LoadUint32(&r.forwardedCount),
 		atomic.LoadUint32(&r.deliveredCount),
 		atomic.LoadUint32(&r.droppedLoops)
+}
+
+// RelayCandidate encapsulates the telemetry and capabilities of a candidate peer for multi-hop transit.
+type RelayCandidate struct {
+	DeviceID      string
+	NATType       string
+	RelayCapable  bool
+	RTTToSelf     time.Duration
+	RTTToTarget   time.Duration
+	PacketLossPct float64
+}
+
+// ScoreRelayCandidate computes a multi-hop routing fitness score (higher is better).
+// Inspired by RouteNet / BNN-UPC GNN delay modeling for computer network topologies.
+func ScoreRelayCandidate(c RelayCandidate) float64 {
+	if !c.RelayCapable {
+		return -1.0
+	}
+	score := 100.0
+
+	// Bonus for open / cone NAT
+	switch c.NATType {
+	case "FullCone", "StaticIP", "Open":
+		score += 40.0
+	case "Restricted":
+		score += 20.0
+	case "Symmetric":
+		score -= 30.0
+	}
+
+	// Penalty for two-leg RTT
+	totalRTTMs := float64((c.RTTToSelf + c.RTTToTarget) / time.Millisecond)
+	if totalRTTMs > 0 {
+		score -= totalRTTMs * 0.25
+	}
+
+	// Penalty for observed packet loss
+	score -= c.PacketLossPct * 2.0
+
+	if score < 0 {
+		score = 0
+	}
+	return score
+}
+
+// SelectBestRelay selects the candidate with the highest fitness score.
+func SelectBestRelay(candidates []RelayCandidate) *RelayCandidate {
+	var best *RelayCandidate
+	var bestScore float64 = -1.0
+
+	for i := range candidates {
+		s := ScoreRelayCandidate(candidates[i])
+		if s > bestScore {
+			bestScore = s
+			best = &candidates[i]
+		}
+	}
+	return best
 }

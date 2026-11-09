@@ -6,7 +6,7 @@ Only the latest release and active beta of NatBypass receive security updates. O
 
 | Version | Supported |
 | :--- | :--- |
-| **Latest Beta (`v1.9.505-beta.1`+)** | ✅ Yes |
+| **Latest Beta (`v1.9.506-beta.1`+)** | ✅ Yes |
 | **Latest Stable Release** | ✅ Yes |
 | Older Betas / Legacy Builds | ❌ No |
 
