@@ -55,9 +55,9 @@
 
 | Platform | Architecture | Binary Asset | Description |
 |---|---|---|---|
-| **Windows (GUI)** | x86_64 | [NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass-GUI.exe) | Native Win32 desktop app (tray, Wintun, 15–25 MB RAM) |
-| **Windows (WebUI / Service)** | x86_64 | [NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass.exe) | Background service with WebUI at `http://127.0.0.1:8080` |
-| **Windows (CLI)** | x86_64 | [natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-cli.exe) | Command-line utility for scripts and automation |
+| **Windows (GUI & WebUI)** | x86_64 | [NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass.exe) | Full-featured app in dedicated window (no browser tabs, WebView2 / App Window, tray) |
+| **Windows (Native Win32)** | x86_64 | [NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass-GUI.exe) | Ultra-lightweight native Win32 app (GDI/User32, no browser runtime, 15–25 MB RAM) |
+| **Windows (CLI / Service)** | x86_64 | [natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-cli.exe) | Command-line utility for scripts, automation, and Windows service |
 | **Linux (x86_64)** | amd64 | [natbypass-linux-amd64](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-linux-amd64) | Ubuntu, Debian, CentOS, Fedora, Arch servers |
 | **Linux (ARM64)** | arm64 | [natbypass-linux-arm64](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-linux-arm64) | Raspberry Pi 3/4/5, ARM servers, Orange Pi |
 | **Keenetic (MIPSLE)** | mipsle | [natbypass-keenetic-mipsle](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-keenetic-mipsle) | Keenetic Titan, Hero, Hopper, Speedster, City, Air |
@@ -77,11 +77,17 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/insta
 Web Management UI will be accessible at: `http://<DEVICE_IP>:8080`.
 
 ### 🪟 Windows
-* **[NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass-GUI.exe)** — download and run as Administrator for native Win32 window and system tray.
-* **[NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass.exe)** — run as background service with browser WebUI at `http://localhost:8080`.
+* **[NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass.exe)** — primary Windows application: runs directly **in its own dedicated window** (no browser address bar or tabs), features system tray, interactive topology map, and speed graphs.
+* **[NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/NatBypass-GUI.exe)** — ultra-lightweight classic Win32 edition (pure Windows API, no browser engine, uses only 15–25 MB RAM).
+* **[natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/latest/download/natbypass-cli.exe)** — console utility for automation, scripts, and installing Windows background service.
 
 ### 📱 Android
-Download the APK from the [latest release page](https://github.com/jamixm4-crypto/natbypass/releases/latest) and scan the QR code from WebUI or Windows app for instant onboarding.
+1. **App Installation:**
+   * Scan the **APK download QR code** (select `📱 Download APK` in the QR modal on your PC) using standard phone camera;
+   * Or download the APK manually from the [latest release page](https://github.com/jamixm4-crypto/natbypass/releases/latest).
+2. **Instant Mesh Onboarding:**
+   * Open the installed **NatBypass Android** app.
+   * Tap **"📷 Scan QR"** and point camera at the network profile QR code (`🔒 Profile`) on your PC or router screen — connection activates instantly with all keys and parameters!
 
 ---
 

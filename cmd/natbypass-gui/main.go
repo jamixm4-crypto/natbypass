@@ -439,8 +439,12 @@ var (
 	hBtnProfSave    uintptr
 	hBtnProfDelete  uintptr
 	selectedProfID  string
-	activeQRBitmap  [][]bool
-	activeQRText    string
+	activeQRBitmap        [][]bool
+	activeQRText          string
+	qrOriginalProfileText string
+	qrIsApkMode           bool
+	hDlgSubtitle          uintptr
+	hBtnToggleQR          uintptr
 
 	// Вкладка 3: AmneziaWG 3.1
 	hBtnAwgStd        uintptr
@@ -2927,6 +2931,8 @@ func showQRCodeModal(title, qrText string) {
 
 	activeQRBitmap = qr.Bitmap()
 	activeQRText = qrText
+	qrOriginalProfileText = qrText
+	qrIsApkMode = strings.HasPrefix(qrText, "http")
 	dlgFinished = false
 
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
@@ -2971,11 +2977,19 @@ func showQRCodeModal(title, qrText string) {
 	darkMode := int32(1)
 	procDwmSetWindowAttribute.Call(hDlg, 20, uintptr(unsafe.Pointer(&darkMode)), 4)
 
-	_ = createLabelOn(hDlg, hInstance, title, 20, 16, 360, 22, hFontBold)
-	_ = createLabelOn(hDlg, hInstance, "Отсканируйте камерой в приложении NatBypass на телефоне:", 20, 42, 360, 18, hFontNormal)
+	_ = createLabelOn(hDlg, hInstance, title, 20, 14, 360, 22, hFontBold)
+	hDlgSubtitle = createLabelOn(hDlg, hInstance, "Отсканируйте сканером в приложении NatBypass:", 20, 40, 360, 20, hFontNormal)
+	if qrIsApkMode {
+		setControlText(hDlgSubtitle, "Наведите камеру смартфона для скачивания APK:")
+	}
 
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "📋 Скопировать ссылку", 30, 390, 190, 36, 5001, "primary")
-	_ = createOwnerDrawButtonOn(hDlg, hInstance, "Закрыть", 230, 390, 135, 36, 5002, "normal")
+	toggleLabel := "📱 Скачать APK"
+	if qrIsApkMode {
+		toggleLabel = "🔒 QR сети"
+	}
+	hBtnToggleQR = createOwnerDrawButtonOn(hDlg, hInstance, toggleLabel, 20, 395, 145, 36, 5003, "green")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "📋 Скопировать", 172, 395, 120, 36, 5001, "primary")
+	_ = createOwnerDrawButtonOn(hDlg, hInstance, "Закрыть", 298, 395, 82, 36, 5002, "normal")
 
 	procShowWindow.Call(hDlg, SW_SHOW)
 	procSetForegroundWindow.Call(hDlg)
@@ -3065,6 +3079,33 @@ func qrDlgProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 			return 0
 		} else if id == 5002 { // Закрыть
 			dlgFinished = true
+			return 0
+		} else if id == 5003 { // Переключить QR-код (Сеть <-> Скачать APK)
+			if !qrIsApkMode {
+				qrIsApkMode = true
+				activeQRText = "https://github.com/jamixm4-crypto/natbypass/releases/latest"
+				if qrNew, err := qrcode.New(activeQRText, qrcode.Medium); err == nil {
+					activeQRBitmap = qrNew.Bitmap()
+				}
+				buttonLabels[5003] = "🔒 QR сети"
+				if hDlgSubtitle != 0 {
+					setControlText(hDlgSubtitle, "Наведите камеру смартфона для скачивания APK:")
+				}
+			} else {
+				qrIsApkMode = false
+				activeQRText = qrOriginalProfileText
+				if qrNew, err := qrcode.New(activeQRText, qrcode.Medium); err == nil {
+					activeQRBitmap = qrNew.Bitmap()
+				}
+				buttonLabels[5003] = "📱 Скачать APK"
+				if hDlgSubtitle != 0 {
+					setControlText(hDlgSubtitle, "Отсканируйте сканером в приложении NatBypass:")
+				}
+			}
+			if hBtnToggleQR != 0 {
+				procInvalidateRect.Call(hBtnToggleQR, 0, 1)
+			}
+			procInvalidateRect.Call(hwnd, 0, 1)
 			return 0
 		}
 

@@ -2462,6 +2462,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <button id="btnQrModeProfile" onclick="switchQRMode('profile')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">🔒 Профиль</button>
         <button id="btnQrModeSync" onclick="switchQRMode('sync')" class="seg-btn active" style="flex:1; padding:4px 4px; font-size:0.72rem;">⚡ Sync</button>
         <button id="btnQrModeAwg" onclick="switchQRMode('awg')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">🛡️ AWG</button>
+        <button id="btnQrModeApk" onclick="switchQRMode('apk')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">📱 Скачать APK</button>
         <button id="btnQrModeInvite" onclick="switchQRMode('invite')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">🔗 Инвайт</button>
       </div>
 
@@ -2826,6 +2827,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (btnProf) btnProf.classList.toggle('active', mode === 'profile');
       document.getElementById('btnQrModeSync').classList.toggle('active', mode === 'sync');
       document.getElementById('btnQrModeAwg').classList.toggle('active', mode === 'awg');
+      const btnApk = document.getElementById('btnQrModeApk');
+      if (btnApk) btnApk.classList.toggle('active', mode === 'apk');
       document.getElementById('btnQrModeInvite').classList.toggle('active', mode === 'invite');
 
       let qrPayload = '';
@@ -2892,6 +2895,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         if (!qrPayload) {
           qrPayload = '[Interface]\nPrivateKey = ...\nAddress = 10.200.0.1/24\n';
         }
+      } else if (mode === 'apk') {
+        descEl.innerHTML = 'Наведите <b>обычную камеру смартфона</b> для перехода к скачиванию установочного файла <b>NatBypass Android (.apk)</b> со страницы релизов.';
+        qrPayload = 'https://github.com/jamixm4-crypto/natbypass/releases/latest';
       } else {
         descEl.innerHTML = 'Универсальное приглашение в P2P сеть NatBypass для других компьютеров и телефонов.';
         if (currentActiveProfile) {
