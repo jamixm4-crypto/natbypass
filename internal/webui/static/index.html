@@ -1608,8 +1608,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             </button>
           </div>
         </div>
-        <div style="position:relative; width:100%; height:220px; background:radial-gradient(circle at center, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.95) 100%); border-radius:14px; border:1px solid rgba(255,255,255,0.06); overflow:hidden;">
-          <canvas id="meshTopologyCanvas" width="900" height="220" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
+        <div style="position:relative; width:100%; height:260px; background:radial-gradient(circle at center, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.95) 100%); border-radius:14px; border:1px solid rgba(255,255,255,0.06); overflow:hidden;">
+          <canvas id="meshTopologyCanvas" width="900" height="260" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
           <div id="meshGraphTooltip" style="position:absolute; display:none; pointer-events:none; background:rgba(15,23,42,0.92); border:1px solid rgba(56,189,248,0.4); border-radius:8px; padding:6px 12px; font-size:0.75rem; color:#fff; box-shadow:0 4px 15px rgba(0,0,0,0.5); z-index:10;"></div>
         </div>
       </div>
@@ -3990,7 +3990,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         const json = await res.json();
         if (json.ok && json.data) {
           const d = json.data;
-          const totalPeers = d.total_peers || 0;
+          const totalPeers = (d.total_peers !== undefined) ? d.total_peers : (d.peer_count || 0);
+          const onlinePeers = (d.online_peers !== undefined) ? d.online_peers : totalPeers;
           const p2pActive = d.p2p_active || 0;
           const avgLat = d.avg_latency_ms || 0;
 
@@ -4246,7 +4247,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     }
 
     let currentSelectedExitNode = '';
+    let currentActiveExitVIP = '';
     let currentActiveSubnetRoutes = [];
+    let failedRefreshAttempts = 0;
 
     function renderPeers(peers) {
       const qb = document.getElementById('quickPeersBody');
@@ -4283,6 +4286,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         if (qb) qb.innerHTML = emptyQuick;
         if (fb) fb.innerHTML = emptyFull;
         if (selExit) selExit.innerHTML = '<option value="">🚫 Локальный интернет (Шлюз выключен)</option>';
+        renderMeshTopologyGraph([]);
         return;
       }
 
@@ -4638,8 +4642,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (countEl) countEl.innerText = (pList.length + 1) + ' узлов';
 
       const rect = canvas.getBoundingClientRect();
-      const clientW = (rect.width > 50) ? rect.width : (canvas.parentElement ? canvas.parentElement.clientWidth : 800) || 800;
-      const clientH = 260;
+      const clientW = (rect.width > 50) ? rect.width : (canvas.parentElement ? canvas.parentElement.clientWidth : 900) || 900;
+      const clientH = (rect.height > 50) ? rect.height : 260;
       const dpr = window.devicePixelRatio || 1;
       canvas.width = clientW * dpr;
       canvas.height = clientH * dpr;
@@ -4656,12 +4660,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const cx = clientW / 2;
       const cy = clientH / 2;
 
-      // 1. Self Node (Local device)
+      // 1. Self Node (Local device) - Centered when alone, Anchored on Left when peers exist
+      const defaultSelfX = (pList.length === 0) ? cx : Math.max(90, Math.round(clientW * 0.14));
       const selfNode = {
         id: 'self',
         name: myName,
         vip: myVip,
-        x: (oldPositions['self'] ? oldPositions['self'].x : cx - 120),
+        x: (oldPositions['self'] ? oldPositions['self'].x : defaultSelfX),
         y: (oldPositions['self'] ? oldPositions['self'].y : cy),
         isSelf: true,
         online: true,
@@ -4695,21 +4700,22 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
       });
 
-      // 2. Add Relay Hub Node if any peer is in Relay mode
+      // 2. Add Relay Hub Node (Placed Top Center) if any peer is in Relay mode
       let relayHubNode = null;
       if (hasRelayPeers) {
         relayHubNode = {
           id: 'relay_hub',
           name: '📡 Relay Брокер (WSS / MQTT)',
           vip: 'Транзитный сервер',
-          x: (oldPositions['relay_hub'] ? oldPositions['relay_hub'].x : cx),
-          y: (oldPositions['relay_hub'] ? oldPositions['relay_hub'].y : 45),
+          x: (oldPositions['relay_hub'] ? oldPositions['relay_hub'].x : Math.round(clientW * 0.44)),
+          y: (oldPositions['relay_hub'] ? oldPositions['relay_hub'].y : 42),
           isSelf: false,
           isHub: true,
+          labelAbove: true,
           online: true,
           direct: false,
           ping: 35,
-          radius: 18,
+          radius: 17,
           color: '#c084fc',
           icon: '☁️',
           routeInfo: 'Транзитный сигнальный брокер / WSS релей',
@@ -4735,7 +4741,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           id: 'wan_internet',
           name: '🌐 Интернет',
           vip: '0.0.0.0/0 WAN',
-          x: (oldPositions['wan_internet'] ? oldPositions['wan_internet'].x : clientW - 70),
+          x: (oldPositions['wan_internet'] ? oldPositions['wan_internet'].x : clientW - Math.max(80, Math.round(clientW * 0.12))),
           y: (oldPositions['wan_internet'] ? oldPositions['wan_internet'].y : cy),
           isSelf: false,
           isHub: true,
@@ -4750,20 +4756,23 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         meshNodes.push(internetNode);
       }
 
-      // 3. Автоматическое гармоничное распределение Direct Peers по широкой радиальной дуге
+      // 4. Distribute Direct Peers in Center Space
       const dCount = directPeers.length;
       directPeers.forEach((p, idx) => {
         let posX, posY;
-        const radDist = Math.min(clientW * 0.35, 185);
+        const startX = selfNode.x + 180;
+        const endX = (internetNode ? internetNode.x - 140 : clientW - 120);
+
         if (dCount === 1) {
-          posX = selfNode.x + radDist;
-          posY = cy;
+          posX = (startX + endX) / 2;
+          posY = p.is_exit_node ? (cy + 45) : cy;
         } else {
-          const startAngle = -0.85;
-          const endAngle = 0.85;
-          const angle = startAngle + (idx / (dCount - 1)) * (endAngle - startAngle);
-          posX = selfNode.x + Math.cos(angle) * radDist;
-          posY = cy + Math.sin(angle) * (clientH * 0.38);
+          const stepX = (endX - startX) / Math.max(1, dCount - 1);
+          posX = startX + idx * stepX;
+          posY = (idx % 2 === 0) ? (cy - 35) : (cy + 45);
+          if (p.is_exit_node) {
+            posY = cy + 50;
+          }
         }
 
         const pingMs = (p.latency_ms !== undefined && p.latency_ms !== null && p.latency_ms > 0) ? p.latency_ms : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
@@ -4806,17 +4815,17 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
       });
 
-      // 4. Автоматическое распределение Relay Peers справа вверху от Relay Hub
+      // 5. Distribute Relay Peers in Upper Right Space connected to Relay Hub
       const rCount = relayPeers.length;
       relayPeers.forEach((p, idx) => {
         let posX, posY;
         if (rCount === 1) {
-          posX = (relayHubNode ? relayHubNode.x + 130 : cx + 120);
-          posY = (relayHubNode ? relayHubNode.y + 65 : 85);
+          posX = Math.min(clientW - 130, (relayHubNode ? relayHubNode.x + 190 : cx + 160));
+          posY = 60;
         } else {
-          const stepY = (clientH - 110) / Math.max(1, rCount - 1);
-          posX = clientW * 0.72 + (idx % 2 === 0 ? 0 : 35);
-          posY = 50 + idx * stepY;
+          const stepY = 55;
+          posX = clientW * 0.70 + (idx % 2 === 0 ? 0 : 35);
+          posY = 48 + idx * stepY;
         }
 
         const node = {
@@ -4858,27 +4867,28 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
       });
 
-      // 5. Физический солвер отталкивания коллизий (Anti-Collision Spacing)
-      for (let iter = 0; iter < 10; iter++) {
+      // 6. Anti-Collision Spacing Solver with Text Bounding Box
+      for (let iter = 0; iter < 15; iter++) {
         for (let i = 0; i < meshNodes.length; i++) {
           for (let j = i + 1; j < meshNodes.length; j++) {
             const n1 = meshNodes[i];
             const n2 = meshNodes[j];
             const dx = n2.x - n1.x;
             const dy = n2.y - n1.y;
-            const dist = Math.hypot(dx, dy);
-            const minDist = (n1.radius + n2.radius) + 32;
-            if (dist < minDist && dist > 0.001) {
-              const overlap = (minDist - dist) / 2;
-              const nx = dx / dist;
-              const ny = dy / dist;
+            const minDx = (n1.radius + n2.radius) + 70;
+            const minDy = (n1.radius + n2.radius) + 38;
+            if (Math.abs(dx) < minDx && Math.abs(dy) < minDy) {
+              const overlapX = (minDx - Math.abs(dx)) / 2;
+              const overlapY = (minDy - Math.abs(dy)) / 2;
+              const sx = dx >= 0 ? 1 : -1;
+              const sy = dy >= 0 ? 1 : -1;
               if (!n1.isSelf && !n1.isHub) {
-                n1.x = Math.max(40, Math.min(clientW - 40, n1.x - nx * overlap));
-                n1.y = Math.max(40, Math.min(clientH - 40, n1.y - ny * overlap));
+                n1.x = Math.max(45, Math.min(clientW - 45, n1.x - sx * overlapX * 0.45));
+                n1.y = Math.max(40, Math.min(clientH - 40, n1.y - sy * overlapY * 0.45));
               }
               if (!n2.isSelf && !n2.isHub) {
-                n2.x = Math.max(40, Math.min(clientW - 40, n2.x + nx * overlap));
-                n2.y = Math.max(40, Math.min(clientH - 40, n2.y + ny * overlap));
+                n2.x = Math.max(45, Math.min(clientW - 45, n2.x + sx * overlapX * 0.45));
+                n2.y = Math.max(40, Math.min(clientH - 40, n2.y + sy * overlapY * 0.45));
               }
             }
           }
@@ -4901,6 +4911,38 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (meshNodes.length === 0) {
         ctx.restore();
         return;
+      }
+
+      // If only self node: Draw radar scanning pulse animation
+      if (meshNodes.length === 1 && meshNodes[0].isSelf) {
+        const sn = meshNodes[0];
+        for (let r = 0; r < 3; r++) {
+          const wavePhase = (meshAnimTime * 0.4 + r * 0.33) % 1.0;
+          const rad = 25 + wavePhase * 110;
+          const alpha = (1.0 - wavePhase) * 0.45;
+          ctx.beginPath();
+          ctx.arc(sn.x, sn.y, rad, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(56, 189, 248, ' + alpha + ')';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        ctx.fillStyle = '#0f172a';
+        const msg = 'Поиск устройств в сети...';
+        ctx.font = 'bold 10px sans-serif';
+        const tw = ctx.measureText(msg).width;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(sn.x - tw/2 - 9, sn.y + sn.radius + 33, tw + 18, 20, 6);
+        else ctx.rect(sn.x - tw/2 - 9, sn.y + sn.radius + 33, tw + 18, 20);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(56,189,248,0.35)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = '#38bdf8';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(msg, sn.x, sn.y + sn.radius + 43);
       }
 
       // 1. Draw Edges
@@ -4989,15 +5031,26 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         ctx.textBaseline = 'middle';
         ctx.fillText(node.icon || '⚡', node.x, node.y);
 
-        // Node Name
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(node.name, node.x, node.y + node.radius + 12);
+        // Node Name & Virtual IP
+        if (node.labelAbove) {
+          // Placed Above (e.g. for Relay Hub)
+          ctx.fillStyle = '#f8fafc';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.fillText(node.name, node.x, node.y - node.radius - 14);
 
-        // Virtual IP / Role
-        ctx.fillStyle = node.isHub ? '#c084fc' : '#94a3b8';
-        ctx.font = '9px monospace';
-        ctx.fillText(node.vip, node.x, node.y + node.radius + 24);
+          ctx.fillStyle = '#c084fc';
+          ctx.font = '9px monospace';
+          ctx.fillText(node.vip, node.x, node.y - node.radius - 4);
+        } else {
+          // Placed Below
+          ctx.fillStyle = '#f8fafc';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.fillText(node.name, node.x, node.y + node.radius + 12);
+
+          ctx.fillStyle = node.isHub ? '#c084fc' : '#94a3b8';
+          ctx.font = '9px monospace';
+          ctx.fillText(node.vip, node.x, node.y + node.radius + 24);
+        }
       });
 
       ctx.restore();
@@ -6631,6 +6684,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       checkAuthStatus();
       loadRoutingStatus();
+      initCharts();
+      renderMeshTopologyGraph([]);
       // Мгновенное получение актуальной версии сервера при загрузке
       fetch('/api/status?_t=' + Date.now(), { cache: 'no-store' })
         .then(r => r.json())
