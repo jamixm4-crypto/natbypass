@@ -276,9 +276,49 @@ https://github.com/${REPO}/releases/download/${TAG}/${name}
 
     chmod 0755 "${TMP_BIN}"
 
-    # 4. Atomic Replace Binary
-    mkdir -p "$(dirname "${TARGET_BIN}")"
-    mv -f "${TMP_BIN}" "${TARGET_BIN}"
+    # 4. Stop service and free storage space before binary swap
+    echo ">> Остановка службы для безопасной замены бинарника..."
+    if [ -f /opt/etc/init.d/S99natbypass ]; then
+        /opt/etc/init.d/S99natbypass stop >/dev/null 2>&1 || true
+    elif [ -f /etc/init.d/natbypass ]; then
+        /etc/init.d/natbypass stop >/dev/null 2>&1 || true
+    fi
+    killall -9 natbypass 2>/dev/null || true
+    sleep 1
+
+    # Cleanup leftover artifacts and bloated logs on tight flash storage (common on Keenetic)
+    rm -f "${TARGET_BIN}.old" "${TARGET_BIN}.new" "${TARGET_BIN}.tmp" /opt/bin/*.old /opt/bin/*.new 2>/dev/null || true
+    if [ -f /opt/var/log/natbypass.log ]; then
+        LOG_SIZE_KB=$(du -k /opt/var/log/natbypass.log 2>/dev/null | awk '{print $1}')
+        if [ -n "$LOG_SIZE_KB" ] && [ "$LOG_SIZE_KB" -gt 2048 ]; then
+            tail -n 200 /opt/var/log/natbypass.log > /opt/var/log/natbypass.log.tmp 2>/dev/null && \
+                mv /opt/var/log/natbypass.log.tmp /opt/var/log/natbypass.log 2>/dev/null || true
+        fi
+    fi
+
+    # Free storage check: on embedded routers (Keenetic OPKG flash), /opt may be small.
+    # If free space is less than the new binary size, remove the old binary first.
+    TARGET_DIR="$(dirname "${TARGET_BIN}")"
+    mkdir -p "${TARGET_DIR}"
+    AVAIL_KB=$(df -k "${TARGET_DIR}" 2>/dev/null | awk 'NR>1 {print $(NF-2)}' | tr -dc '0-9')
+    NEW_SIZE_KB=$(du -k "${TMP_BIN}" 2>/dev/null | awk '{print $1}' | tr -dc '0-9')
+    if [ -n "$AVAIL_KB" ] && [ -n "$NEW_SIZE_KB" ]; then
+        if [ "$AVAIL_KB" -lt "$((NEW_SIZE_KB + 1024))" ]; then
+            echo ">> Очистка места: удаление старой версии (${AVAIL_KB} KB свободно, требуется ${NEW_SIZE_KB} KB)..."
+            rm -f "${TARGET_BIN}"
+        fi
+    fi
+
+    # Atomic or direct copy replacement
+    if cp -f "${TMP_BIN}" "${TARGET_BIN}" 2>/dev/null; then
+        rm -f "${TMP_BIN}"
+    else
+        # Fallback to rm + mv if cross-device copy hit space issues
+        rm -f "${TARGET_BIN}"
+        mv -f "${TMP_BIN}" "${TARGET_BIN}"
+    fi
+    chmod 0755 "${TARGET_BIN}"
+
     if [ -f /opt/bin/natbypass ]; then
         mkdir -p /opt/usr/bin 2>/dev/null || true
         ln -sf /opt/bin/natbypass /opt/usr/bin/natbypass 2>/dev/null || true
