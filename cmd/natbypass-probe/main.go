@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var Version = "1.9.506-beta.1"
+var Version = "1.9.507-beta.2"
 
 func main() {
 	var (
