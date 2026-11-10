@@ -19,28 +19,43 @@
   <!-- Zero-latency high-performance local system fonts -->
   <style>
     :root, [data-theme="dark"] {
-      --pc-bg: #07090e;
-      --pc-workspace: #0b0f19;
-      --pc-sidebar: #0e121d;
-      --pc-card-bg: #131927;
-      --pc-card-elevated: #1a2336;
-      --pc-glass-bg: rgba(18, 24, 38, 0.72);
-      --pc-glass-hover: rgba(25, 34, 54, 0.88);
-      --pc-glass-border: rgba(99, 102, 241, 0.25);
-      --pc-glass-glow: 0 0 24px rgba(99, 102, 241, 0.12), inset 0 0 16px rgba(56, 189, 248, 0.06);
+      /* Obsidian Ink Surface Elevation Scale (proarena DESIGN.md) */
+      --surface-0: #08090D; /* Base canvas — deep carbon ink */
+      --surface-1: #0F1117; /* Workspace backgrounds */
+      --surface-2: #161922; /* Cards / Panels default */
+      --surface-3: #1E222E; /* Elevated popovers / Card hover */
+      --surface-4: #282D3D; /* Active borders / input focus */
+
+      --pc-bg: var(--surface-0);
+      --pc-workspace: var(--surface-1);
+      --pc-sidebar: #0C0E14;
+      --pc-card-bg: var(--surface-2);
+      --pc-card-elevated: var(--surface-3);
+      --pc-glass-bg: rgba(22, 25, 34, 0.78);
+      --pc-glass-hover: rgba(30, 34, 46, 0.92);
+      --pc-glass-border: rgba(0, 242, 254, 0.16);
+      --pc-glass-glow: 0 8px 24px -4px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
       --pc-border: rgba(255, 255, 255, 0.08);
       --pc-border-grid: rgba(255, 255, 255, 0.035);
-      --pc-text: #f8fafc;
-      --pc-text-muted: #94a3b8;
-      --pc-text-dim: #64748b;
-      --pc-primary: #6366f1;
-      --pc-primary-hover: #818cf8;
-      --pc-accent: #38bdf8;
-      --pc-success: #10b981;
-      --pc-warning: #f59e0b;
-      --pc-danger: #ef4444;
-      --pc-input-bg: rgba(13, 19, 32, 0.9);
+      --pc-text: #F8FAFC;
+      --pc-text-muted: #94A3B8;
+      --pc-text-dim: #64748B;
+      --pc-primary: #00F2FE;
+      --pc-primary-hover: #38BDF8;
+      --pc-accent: #00F2FE;
+      --pc-purple: #8B5CF6;
+      --pc-success: #10B981;
+      --pc-warning: #F59E0B;
+      --pc-danger: #EF4444;
+      --pc-input-bg: rgba(15, 17, 23, 0.92);
       --pc-input-border: rgba(255, 255, 255, 0.12);
+
+      /* Concentric Radius System (better-ui R_outer = R_inner + padding) */
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+      --radius-2xl: 22px;
 
       /* Compatibility bindings */
       --bg-space: var(--pc-bg);
@@ -54,34 +69,47 @@
       --text-main: var(--pc-text);
       --text-muted: var(--pc-text-muted);
       --text-dim: var(--pc-text-dim);
-      --accent-purple: var(--pc-primary);
+      --accent-purple: var(--pc-purple);
       --accent-cyan: var(--pc-accent);
       --success: var(--pc-success);
     }
 
     [data-theme="light"] {
-      --pc-bg: #eef2f6;
-      --pc-workspace: #f8fafc;
-      --pc-sidebar: #e2e8f0;
-      --pc-card-bg: #ffffff;
-      --pc-card-elevated: #f1f5f9;
-      --pc-glass-bg: rgba(255, 255, 255, 0.92);
+      --surface-0: #F1F5F9;
+      --surface-1: #F8FAFC;
+      --surface-2: #FFFFFF;
+      --surface-3: #EDF2F7;
+      --surface-4: #CBD5E1;
+
+      --pc-bg: #EEF2F6;
+      --pc-workspace: #F8FAFC;
+      --pc-sidebar: #E2E8F0;
+      --pc-card-bg: #FFFFFF;
+      --pc-card-elevated: #F1F5F9;
+      --pc-glass-bg: rgba(255, 255, 255, 0.94);
       --pc-glass-hover: rgba(248, 250, 252, 0.98);
-      --pc-glass-border: rgba(99, 102, 241, 0.3);
+      --pc-glass-border: rgba(14, 165, 233, 0.28);
       --pc-glass-glow: 0 4px 20px rgba(15, 23, 42, 0.06);
-      --pc-border: #cbd5e1;
+      --pc-border: #CBD5E1;
       --pc-border-grid: rgba(15, 23, 42, 0.04);
-      --pc-text: #0f172a;
+      --pc-text: #0F172A;
       --pc-text-muted: #475569;
-      --pc-text-dim: #64748b;
-      --pc-primary: #4f46e5;
-      --pc-primary-hover: #4338ca;
-      --pc-accent: #0284c7;
+      --pc-text-dim: #64748B;
+      --pc-primary: #0284C7;
+      --pc-primary-hover: #0369A1;
+      --pc-accent: #0284C7;
+      --pc-purple: #7C3AED;
       --pc-success: #059669;
-      --pc-warning: #d97706;
-      --pc-danger: #dc2626;
-      --pc-input-bg: #ffffff;
-      --pc-input-border: #cbd5e1;
+      --pc-warning: #D97706;
+      --pc-danger: #DC2626;
+      --pc-input-bg: #FFFFFF;
+      --pc-input-border: #CBD5E1;
+
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+      --radius-2xl: 22px;
 
       --bg-space: var(--pc-bg);
       --bg-workspace: var(--pc-workspace);
@@ -94,9 +122,42 @@
       --text-main: var(--pc-text);
       --text-muted: var(--pc-text-muted);
       --text-dim: var(--pc-text-dim);
-      --accent-purple: var(--pc-primary);
+      --accent-purple: var(--pc-purple);
       --accent-cyan: var(--pc-accent);
       --success: var(--pc-success);
+    }
+
+    /* Keyframe Animations & Micro-Interactions */
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .spin-anim {
+      animation: spin 0.85s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+    }
+
+    @keyframes pulse-emerald {
+      0%, 100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+      50% { transform: scale(1.08); opacity: 0.88; box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+    }
+    .pulse-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10B981;
+      animation: pulse-emerald 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    /* Accessibility: Honor reduced motion preference */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
     }
 
     /* Tabular numbers across networking metrics and tables */
@@ -105,12 +166,23 @@
       font-feature-settings: "tnum" 1;
     }
 
-    /* Tactile physics-based micro-interactions */
-    .btn, .glow-pill, .btn-pill, .seg-btn, .nav-item, .brand-btn {
-      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    /* Tactile physics-based micro-interactions (better-ui scale 0.96 over 150ms) */
+    .btn, .glow-pill, .btn-pill, .seg-btn, .nav-item, .brand-btn, .more-menu-tile {
+      transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease !important;
+      -webkit-tap-highlight-color: transparent;
     }
-    .btn:active, .btn-pill:active, .glow-pill:active, .seg-btn:active {
-      transform: scale(0.97) !important;
+    .btn:active:not(:disabled), .btn-pill:active:not(:disabled), .glow-pill:active, .seg-btn:active:not(.active), .more-menu-tile:active {
+      transform: scale(0.96) !important;
+    }
+    .btn:disabled {
+      transform: none !important;
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    /* Scroll containment for modals & panels */
+    .modal-overlay, .modal-box, #logStream, .table-container {
+      overscroll-behavior: contain;
     }
 
     /* Light mode element overrides */
@@ -464,21 +536,21 @@
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #10b981;
-      box-shadow: 0 0 8px #10b981;
+      background: #10B981;
+      animation: pulse-emerald 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
 
     .glass-card {
-      background: var(--glass-bg);
-      border: 1px solid var(--glass-border);
-      border-radius: 12px;
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      box-shadow: var(--glass-glow);
-      padding: 12px 16px;
+      background: var(--pc-glass-bg);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-xl);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      box-shadow: var(--pc-glass-glow);
+      padding: 14px 18px;
       position: relative;
       overflow: hidden;
-      transition: all 0.25s ease;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
 
     .glass-card::before {
@@ -488,12 +560,12 @@
       left: 0;
       right: 0;
       height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
     }
 
     .glass-card:hover {
-      border-color: rgba(168, 85, 247, 0.5);
-      box-shadow: 0 0 35px rgba(168, 85, 247, 0.25), inset 0 0 25px rgba(56, 189, 248, 0.15);
+      border-color: rgba(0, 242, 254, 0.35);
+      box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 242, 254, 0.12);
     }
 
     .dashboard-grid {
@@ -769,38 +841,41 @@
     .badge {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 20px;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
       font-size: 0.72rem;
       font-weight: 700;
       white-space: nowrap;
     }
 
     .badge-success {
-      background: rgba(16, 185, 129, 0.15);
-      color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.4);
-      box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+      background: rgba(16, 185, 129, 0.12);
+      color: #10B981;
+      border: 1px solid rgba(16, 185, 129, 0.35);
     }
 
     .badge-cyan {
-      background: rgba(168, 85, 247, 0.15);
-      color: #38bdf8;
-      border: 1px solid rgba(14, 165, 233, 0.3);
-      box-shadow: 0 0 10px rgba(14, 165, 233, 0.15);
+      background: rgba(0, 242, 254, 0.12);
+      color: #00F2FE;
+      border: 1px solid rgba(0, 242, 254, 0.35);
     }
 
-    .badge-cyan {
-      background: rgba(56, 189, 248, 0.15);
-      color: #38bdf8;
-      border: 1px solid rgba(56, 189, 248, 0.4);
-      box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+    .badge-warning {
+      background: rgba(245, 158, 11, 0.12);
+      color: #F59E0B;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+    }
+
+    .badge-danger {
+      background: rgba(239, 68, 68, 0.12);
+      color: #EF4444;
+      border: 1px solid rgba(239, 68, 68, 0.35);
     }
 
     .btn {
       padding: 9px 18px;
-      border-radius: 12px;
+      border-radius: var(--radius-md);
       font-weight: 700;
       font-size: 0.84rem;
       border: none;
@@ -808,33 +883,34 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      transition: all 0.2s ease;
       user-select: none;
       text-decoration: none;
     }
 
     .btn-neon {
-      background: linear-gradient(135deg, #a855f7, #6366f1);
-      color: #ffffff;
-      box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: linear-gradient(135deg, #00F2FE 0%, #38BDF8 100%);
+      color: #08090D !important;
+      font-weight: 700;
+      box-shadow: 0 4px 16px -2px rgba(0, 242, 254, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.3);
     }
 
     .btn-neon:hover {
-      box-shadow: 0 0 30px rgba(14, 165, 233, 0.6);
+      box-shadow: 0 6px 24px 0 rgba(0, 242, 254, 0.55);
       transform: translateY(-1px);
     }
 
     .btn-glass {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--pc-border);
       color: var(--text-main);
-      backdrop-filter: blur(10px);
+      backdrop-filter: blur(12px);
+      border-radius: var(--radius-md);
     }
 
     .btn-glass:hover {
-      background: rgba(255, 255, 255, 0.1);
-      border-color: rgba(168, 85, 247, 0.5);
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(0, 242, 254, 0.4);
     }
 
     .form-group { margin-bottom: 16px; }
@@ -849,20 +925,20 @@
 
     .form-input {
       width: 100%;
-      background: rgba(10, 14, 24, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
+      background: var(--pc-input-bg);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-md);
       padding: 10px 14px;
       color: var(--text-main);
       font-family: inherit;
       font-size: 0.86rem;
       outline: none;
-      transition: all 0.2s ease;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
 
     .form-input:focus {
-      border-color: rgba(168, 85, 247, 0.6);
-      box-shadow: 0 0 15px rgba(168, 85, 247, 0.25);
+      border-color: rgba(0, 242, 254, 0.6);
+      box-shadow: 0 0 0 3px rgba(0, 242, 254, 0.15);
     }
 
     .mono { font-family: 'JetBrains Mono', 'Cascadia Code', 'Segoe UI Mono', Consolas, Monaco, monospace; }
@@ -888,11 +964,11 @@
       width: 460px;
       max-width: 95%;
       box-sizing: border-box;
-      background: #111624;
-      border: 1px solid rgba(14, 165, 233, 0.3);
-      border-radius: 20px;
+      background: var(--surface-1);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-2xl);
       padding: 24px;
-      box-shadow: 0 0 40px rgba(168, 85, 247, 0.3);
+      box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 0 24px rgba(0, 242, 254, 0.12);
     }
 
     /* Custom Toggle Switch */
@@ -975,11 +1051,11 @@
       will-change: opacity, transform;
     }
   
-    /* Modern Glassmorphic Login Screen */
+    /* Modern Glassmorphic Login Screen (Obsidian Ink Edition) */
     #authScreen {
       position: fixed;
       inset: 0;
-      background: radial-gradient(circle at center, #0f172a 0%, #07090e 100%);
+      background: radial-gradient(circle at center, #0F1117 0%, #08090D 100%);
       z-index: 100000;
       display: flex;
       align-items: center;
@@ -989,11 +1065,11 @@
     .login-card {
       width: 100%;
       max-width: 440px;
-      background: rgba(18, 24, 38, 0.85);
-      border: 1px solid rgba(14, 165, 233, 0.3);
-      border-radius: 20px;
-      padding: 32px 28px;
-      box-shadow: 0 0 50px rgba(168, 85, 247, 0.25), 0 20px 40px rgba(0, 0, 0, 0.6);
+      background: var(--surface-1);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-2xl);
+      padding: 36px 32px;
+      box-shadow: 0 16px 48px -8px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
       text-align: center;
@@ -1002,34 +1078,37 @@
     .login-logo {
       width: 64px;
       height: 64px;
-      border-radius: 18px;
-      background: linear-gradient(135deg, #a855f7, #38bdf8);
+      border-radius: var(--radius-lg);
+      background: linear-gradient(135deg, #00F2FE 0%, #38BDF8 100%);
       display: inline-flex;
       align-items: center;
       justify-content: center;
       font-size: 1.8rem;
-      margin-bottom: 16px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      margin-bottom: 18px;
+      box-shadow: 0 4px 20px -2px rgba(0, 242, 254, 0.4);
+    }
+    .login-logo svg {
+      stroke: #08090D;
     }
     .login-title {
-      font-size: 1.35rem;
+      font-size: 1.4rem;
       font-weight: 800;
-      color: #ffffff;
+      color: var(--pc-text);
       margin-bottom: 6px;
       letter-spacing: -0.02em;
     }
     .login-subtitle {
       font-size: 0.82rem;
-      color: var(--text-muted);
+      color: var(--pc-text-muted);
       margin-bottom: 24px;
       line-height: 1.5;
     }
     .login-error {
       display: none;
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.4);
-      color: #f87171;
-      border-radius: 12px;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      color: #F87171;
+      border-radius: var(--radius-md);
       padding: 10px 14px;
       font-size: 0.82rem;
       margin-bottom: 18px;
@@ -2687,7 +2766,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <button onclick="closeUpdateModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem;">✕</button>
       </div>
 
-      <div style="background:rgba(14,20,32,0.8); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:14px 16px; margin-bottom:16px;">
+      <div style="background:var(--surface-2); border:1px solid var(--pc-border); border-radius:var(--radius-lg); padding:14px 16px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:10px;">
           <span style="font-size:0.84rem; color:var(--text-dim); flex-shrink:0;">Текущая версия:</span>
           <span id="lblCurrentVer" class="badge badge-cyan mono" style="font-weight:700;">v1.0.0</span>
@@ -2706,7 +2785,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
 
       <!-- Переключатель канала обновлений (Stable / Beta) -->
-      <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.25); border-radius:12px; padding:12px 16px; margin-bottom:16px;">
+      <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.25); border-radius:var(--radius-lg); padding:12px 16px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
           <div style="cursor:pointer; flex:1;" onclick="toggleBetaFromLabel('toggleBetaChannel')">
             <div style="font-size:0.86rem; font-weight:700; color:#fbbf24; display:flex; align-items:center; gap:6px;">
@@ -2738,14 +2817,14 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <span id="updateProgressStatus" style="color:#4ade80;">Скачивание...</span>
           <span id="updateProgressPct" class="mono">0%</span>
         </div>
-        <div style="width:100%; height:8px; background:rgba(255,255,255,0.08); border-radius:4px; overflow:hidden;">
-          <div id="updateProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, #10b981, #06b6d4); transition:width 0.3s ease;"></div>
+        <div style="width:100%; height:8px; background:rgba(255,255,255,0.08); border-radius:var(--radius-sm); overflow:hidden;">
+          <div id="updateProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, #10B981, #00F2FE); transition:width 0.3s ease;"></div>
         </div>
       </div>
 
       <div style="display:flex; gap:10px; justify-content:flex-end;">
         <button onclick="checkUpdateManual()" id="btnCheckUpdate" class="btn btn-glass" style="font-size:0.85rem;">🔍 Проверить заново</button>
-        <button onclick="applyUpdateNow()" id="btnApplyUpdate" class="btn btn-neon" style="display:none; font-size:0.85rem; background:linear-gradient(135deg, #10b981, #06b6d4);">⚡ Скачать и обновить</button>
+        <button onclick="applyUpdateNow()" id="btnApplyUpdate" class="btn btn-neon" style="display:none; font-size:0.85rem; background:linear-gradient(135deg, #10B981, #00F2FE); color:#08090D !important;">⚡ Скачать и обновить</button>
       </div>
     </div>
   </div>
@@ -3816,15 +3895,20 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (errBox) errBox.style.display = 'none';
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<span>Проверка реквизитов...</span>';
+        btn.innerHTML = '<svg class="spin-anim" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10"></path></svg> <span>Проверка реквизитов...</span>';
       }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       try {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({username: u, password: p})
+          body: JSON.stringify({username: u, password: p}),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
         const json = await res.json();
         if (json.ok) {
           isUserAuthenticated = true;
@@ -3840,8 +3924,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           }
         }
       } catch (err) {
+        clearTimeout(timeoutId);
         if (errBox) {
-          errBox.innerText = '❌ Ошибка сети: ' + err.message;
+          if (err.name === 'AbortError') {
+            errBox.innerText = '❌ Превышено время ожидания ответа роутера (таймаут 8 сек). Проверьте доступность устройства.';
+          } else {
+            errBox.innerText = '❌ Ошибка сети: ' + err.message;
+          }
           errBox.style.display = 'block';
         }
       } finally {
