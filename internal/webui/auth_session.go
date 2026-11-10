@@ -285,12 +285,22 @@ func (s *Server) checkCredentials(username, password string) bool {
 		}
 	}
 
-	// 2. KeeneticOS: STRICTLY check router system credentials, ZERO fallback to admin/admin
+	// 2. KeeneticOS: check router system credentials, with safe fallback to admin/admin if no custom password set
 	if IsKeeneticOS() {
 		if s.customAuth != nil && s.customAuth(username, password) {
 			return true
 		}
-		return VerifyKeeneticAuth(username, password)
+		if VerifyKeeneticAuth(username, password) {
+			return true
+		}
+		// Fallback: If no custom password configured in config.yaml, allow admin/admin
+		if (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
+			if subtle.ConstantTimeCompare([]byte(username), []byte("admin")) == 1 &&
+				subtle.ConstantTimeCompare([]byte(password), []byte("admin")) == 1 {
+				return true
+			}
+		}
+		return false
 	}
 
 	// 3. Custom external authenticator if provided

@@ -140,13 +140,21 @@ func getKeeneticProbeTargets() []string {
 	}
 
 	seen := map[string]bool{
-		"http://127.0.0.1:80": true,
+		"http://127.0.0.1:80":   true,
 		"https://127.0.0.1:443": true,
 	}
 
 	ifaces, err := net.Interfaces()
 	if err == nil {
 		for _, i := range ifaces {
+			nameLower := strings.ToLower(i.Name)
+			// Skip VPN, mesh, cellular PPP, docker, or wireguard interfaces
+			if strings.Contains(nameLower, "tun") || strings.Contains(nameLower, "wg") ||
+				strings.Contains(nameLower, "awg") || strings.Contains(nameLower, "ppp") ||
+				strings.Contains(nameLower, "docker") {
+				continue
+			}
+
 			addrs, err := i.Addrs()
 			if err != nil {
 				continue
@@ -162,6 +170,15 @@ func getKeeneticProbeTargets() []string {
 				if ip == nil || ip.IsLoopback() || ip.To4() == nil {
 					continue
 				}
+				// Strictly RFC 1918 private LAN addresses
+				if !ip.IsPrivate() {
+					continue
+				}
+				// Skip NatBypass VIP subnet 10.1.x.x
+				if ip[0] == 10 && ip[1] == 1 {
+					continue
+				}
+
 				ipStr := ip.String()
 				u1 := "http://" + ipStr + ":80"
 				u2 := "https://" + ipStr + ":443"
@@ -172,6 +189,9 @@ func getKeeneticProbeTargets() []string {
 				if !seen[u2] {
 					seen[u2] = true
 					targets = append(targets, u2)
+				}
+				if len(targets) >= 4 {
+					return targets
 				}
 			}
 		}
@@ -195,15 +215,18 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 		wg.Add(1)
 		go func(tgt string) {
 			defer wg.Done()
+			if atomic.LoadInt32(&authSuccess) == 1 {
+				return
+			}
 
 			jar, _ := cookiejar.New(nil)
 			client := &http.Client{
 				Jar:     jar,
-				Timeout: 1200 * time.Millisecond,
+				Timeout: 600 * time.Millisecond,
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 					DialContext: (&net.Dialer{
-						Timeout: 1200 * time.Millisecond,
+						Timeout: 500 * time.Millisecond,
 					}).DialContext,
 				},
 			}
@@ -235,21 +258,20 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 
 			realmsToTry := []string{}
 			if realm != "" {
+				// Exact realm returned directly by router /auth endpoint
 				realmsToTry = append(realmsToTry, realm)
-			}
-			realmsToTry = append(realmsToTry, "Keenetic", "KeeneticOS", "NDMS", "Router")
-
-			if keeneticHostnameCache != "" {
-				realmsToTry = append(realmsToTry, keeneticHostnameCache)
-			}
-			if keeneticModelCache != "" {
-				realmsToTry = append(realmsToTry, keeneticModelCache)
-			}
-			if hn, err := os.Hostname(); err == nil && hn != "" {
-				realmsToTry = append(realmsToTry, hn)
+			} else {
+				realmsToTry = append(realmsToTry, "Keenetic", "KeeneticOS")
+				if keeneticHostnameCache != "" {
+					realmsToTry = append(realmsToTry, keeneticHostnameCache)
+				}
 			}
 
 			for _, r := range realmsToTry {
+				if atomic.LoadInt32(&authSuccess) == 1 {
+					return
+				}
+
 				// Official Keenetic RCI:
 				// 1. md5_hash = hex(md5(username:realm:password))
 				// 2. auth_hash = hex(sha256(challenge + md5_hash))
@@ -317,32 +339,41 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 // verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
 func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	client := &http.Client{
-		Timeout: 1200 * time.Millisecond,
+		Timeout: 500 * time.Millisecond,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			DialContext: (&net.Dialer{
-				Timeout: 1200 * time.Millisecond,
+				Timeout: 400 * time.Millisecond,
 			}).DialContext,
 		},
 	}
 
 	targets := getKeeneticProbeTargets()
+	var wg sync.WaitGroup
+	var success int32
 
 	for _, target := range targets {
-		req, err := http.NewRequest("GET", target+"/rci/show/version", nil)
-		if err == nil {
-			req.SetBasicAuth(username, password)
-			if resp, err := client.Do(req); err == nil {
-				_, _ = io.Copy(io.Discard, resp.Body)
-				resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
-					return true
+		wg.Add(1)
+		go func(tgt string) {
+			defer wg.Done()
+			if atomic.LoadInt32(&success) == 1 {
+				return
+			}
+			req, err := http.NewRequest("GET", tgt+"/rci/show/version", nil)
+			if err == nil {
+				req.SetBasicAuth(username, password)
+				if resp, err := client.Do(req); err == nil {
+					_, _ = io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					if resp.StatusCode == http.StatusOK {
+						atomic.StoreInt32(&success, 1)
+					}
 				}
 			}
-		}
+		}(target)
 	}
-
-	return false
+	wg.Wait()
+	return atomic.LoadInt32(&success) == 1
 }
 
 // GetKeeneticUsers parses KeeneticOS configuration files and returns discovered users.
