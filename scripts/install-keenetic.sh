@@ -402,6 +402,9 @@ start() {
         return 0
     fi
     mkdir -p /opt/etc/natbypass /opt/var/log /var/run 2>/dev/null || true
+    if [ -f "$LOGFILE" ] && [ "$(wc -c < "$LOGFILE" 2>/dev/null || echo 0)" -gt 524288 ]; then
+        tail -n 200 "$LOGFILE" > "${LOGFILE}.tmp" 2>/dev/null && mv -f "${LOGFILE}.tmp" "$LOGFILE" 2>/dev/null || true
+    fi
     if [ ! -c /dev/net/tun ]; then
         modprobe tun 2>/dev/null || insmod /lib/modules/$(uname -r)/tun.ko 2>/dev/null || insmod /lib/modules/tun.ko 2>/dev/null || true
         mkdir -p /dev/net 2>/dev/null || true

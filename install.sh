@@ -385,8 +385,8 @@ start() {
         return 0
     fi
     mkdir -p /opt/etc/natbypass /opt/var/log /var/run 2>/dev/null || true
-    if [ -f "$LOGFILE" ] && [ "$(wc -c < "$LOGFILE" 2>/dev/null || echo 0)" -gt 2097152 ]; then
-        tail -n 500 "$LOGFILE" > "${LOGFILE}.tmp" 2>/dev/null && mv "${LOGFILE}.tmp" "$LOGFILE" 2>/dev/null || true
+    if [ -f "$LOGFILE" ] && [ "$(wc -c < "$LOGFILE" 2>/dev/null || echo 0)" -gt 524288 ]; then
+        tail -n 200 "$LOGFILE" > "${LOGFILE}.tmp" 2>/dev/null && mv -f "${LOGFILE}.tmp" "$LOGFILE" 2>/dev/null || true
     fi
     $BIN start --config "$CONFIG" > "$LOGFILE" 2>&1 &
     echo $! > "$PIDFILE"

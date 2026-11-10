@@ -434,55 +434,24 @@ func GetKeeneticUsers() []KeeneticUser {
 		}
 	}
 
-	// 2. ndmq CLI queries
+	// 2. ndmq CLI query (official Keenetic IPC query tool)
 	if len(users) == 0 {
-		ndmqPaths := []string{"ndmq", "/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq"}
-		for _, ndmq := range ndmqPaths {
-			// A. show running-config
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			out, err := exec.CommandContext(ctx, ndmq, "-p", "show running-config").Output()
-			cancel()
-			if err == nil && len(out) > 0 {
-				parsed, hn := parseKeeneticConfigFile(bytes.NewReader(out))
-				if hn != "" {
-					keeneticHostnameCache = hn
-				}
-				for _, u := range parsed {
-					if !seen[strings.ToLower(u.Username)] {
-						users = append(users, u)
-						seen[strings.ToLower(u.Username)] = true
-					}
-				}
-				if len(users) > 0 {
+		var resolvedNdmq string
+		for _, p := range []string{"/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq", "ndmq"} {
+			if p == "ndmq" {
+				if lp, err := exec.LookPath(p); err == nil {
+					resolvedNdmq = lp
 					break
 				}
-			}
-
-			// B. show users
-			ctx2, cancel2 := context.WithTimeout(context.Background(), 1*time.Second)
-			out2, err2 := exec.CommandContext(ctx2, ndmq, "-p", "show users").Output()
-			cancel2()
-			if err2 == nil && len(out2) > 0 {
-				parsed, _ := parseKeeneticConfigFile(bytes.NewReader(out2))
-				for _, u := range parsed {
-					if !seen[strings.ToLower(u.Username)] {
-						users = append(users, u)
-						seen[strings.ToLower(u.Username)] = true
-					}
-				}
-				if len(users) > 0 {
-					break
-				}
+			} else if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+				resolvedNdmq = p
+				break
 			}
 		}
-	}
 
-	// 3. ndmc CLI queries
-	if len(users) == 0 {
-		ndmcPaths := []string{"ndmc", "/bin/ndmc", "/usr/bin/ndmc", "/opt/bin/ndmc"}
-		for _, ndmc := range ndmcPaths {
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			out, err := exec.CommandContext(ctx, ndmc, "-c", "show running-config").Output()
+		if resolvedNdmq != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+			out, err := exec.CommandContext(ctx, resolvedNdmq, "-p", "show running-config").Output()
 			cancel()
 			if err == nil && len(out) > 0 {
 				parsed, hn := parseKeeneticConfigFile(bytes.NewReader(out))
@@ -494,9 +463,6 @@ func GetKeeneticUsers() []KeeneticUser {
 						users = append(users, u)
 						seen[strings.ToLower(u.Username)] = true
 					}
-				}
-				if len(users) > 0 {
-					break
 				}
 			}
 		}

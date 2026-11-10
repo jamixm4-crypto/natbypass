@@ -3278,6 +3278,7 @@ func (s *Server) handleLogsClear(w http.ResponseWriter, r *http.Request) {
 				cleared = true
 			}
 		}
+		_ = os.Remove(p + ".1")
 	}
 	if cleared {
 		s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "Файл журнала natbypass.log успешно очищен (0 байт)"}, "")

@@ -285,7 +285,16 @@ func (s *Server) checkCredentials(username, password string) bool {
 		}
 	}
 
-	// 2. KeeneticOS: check router system credentials, with safe fallback to admin/admin if no custom password set
+	// 2. Default fallback when no custom password set in config: admin / admin
+	// Check this immediately in 0ms BEFORE slow network/RCI probes on routers!
+	if (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
+		if subtle.ConstantTimeCompare([]byte(username), []byte("admin")) == 1 &&
+			subtle.ConstantTimeCompare([]byte(password), []byte("admin")) == 1 {
+			return true
+		}
+	}
+
+	// 3. KeeneticOS: check router system credentials
 	if IsKeeneticOS() {
 		if s.customAuth != nil && s.customAuth(username, password) {
 			return true
@@ -293,27 +302,12 @@ func (s *Server) checkCredentials(username, password string) bool {
 		if VerifyKeeneticAuth(username, password) {
 			return true
 		}
-		// Fallback: If no custom password configured in config.yaml, allow admin/admin
-		if (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
-			if subtle.ConstantTimeCompare([]byte(username), []byte("admin")) == 1 &&
-				subtle.ConstantTimeCompare([]byte(password), []byte("admin")) == 1 {
-				return true
-			}
-		}
 		return false
 	}
 
-	// 3. Custom external authenticator if provided
+	// 4. Custom external authenticator if provided
 	if s.customAuth != nil && s.customAuth(username, password) {
 		return true
-	}
-
-	// 4. Default fallback when no custom password set in config: admin / admin
-	if (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
-		if subtle.ConstantTimeCompare([]byte(username), []byte("admin")) == 1 &&
-			subtle.ConstantTimeCompare([]byte(password), []byte("admin")) == 1 {
-			return true
-		}
 	}
 
 	return false

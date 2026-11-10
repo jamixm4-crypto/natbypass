@@ -74,58 +74,7 @@
       --success: var(--pc-success);
     }
 
-    [data-theme="light"] {
-      --surface-0: #F1F5F9;
-      --surface-1: #F8FAFC;
-      --surface-2: #FFFFFF;
-      --surface-3: #EDF2F7;
-      --surface-4: #CBD5E1;
 
-      --pc-bg: #EEF2F6;
-      --pc-workspace: #F8FAFC;
-      --pc-sidebar: #E2E8F0;
-      --pc-card-bg: #FFFFFF;
-      --pc-card-elevated: #F1F5F9;
-      --pc-glass-bg: rgba(255, 255, 255, 0.94);
-      --pc-glass-hover: rgba(248, 250, 252, 0.98);
-      --pc-glass-border: rgba(14, 165, 233, 0.28);
-      --pc-glass-glow: 0 4px 20px rgba(15, 23, 42, 0.06);
-      --pc-border: #CBD5E1;
-      --pc-border-grid: rgba(15, 23, 42, 0.04);
-      --pc-text: #0F172A;
-      --pc-text-muted: #475569;
-      --pc-text-dim: #64748B;
-      --pc-primary: #0284C7;
-      --pc-primary-hover: #0369A1;
-      --pc-accent: #0284C7;
-      --pc-purple: #7C3AED;
-      --pc-success: #059669;
-      --pc-warning: #D97706;
-      --pc-danger: #DC2626;
-      --pc-input-bg: #FFFFFF;
-      --pc-input-border: #CBD5E1;
-
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --radius-lg: 14px;
-      --radius-xl: 18px;
-      --radius-2xl: 22px;
-
-      --bg-space: var(--pc-bg);
-      --bg-workspace: var(--pc-workspace);
-      --bg-sidebar: var(--pc-sidebar);
-      --border-grid: var(--pc-border-grid);
-      --glass-bg: var(--pc-glass-bg);
-      --glass-hover: var(--pc-glass-hover);
-      --glass-border: var(--pc-glass-border);
-      --glass-glow: var(--pc-glass-glow);
-      --text-main: var(--pc-text);
-      --text-muted: var(--pc-text-muted);
-      --text-dim: var(--pc-text-dim);
-      --accent-purple: var(--pc-purple);
-      --accent-cyan: var(--pc-accent);
-      --success: var(--pc-success);
-    }
 
     /* Keyframe Animations & Micro-Interactions */
     @keyframes spin {
@@ -185,28 +134,7 @@
       overscroll-behavior: contain;
     }
 
-    /* Light mode element overrides */
-    [data-theme="light"] ::-webkit-scrollbar-track { background: rgba(226, 232, 240, 0.6); }
-    [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.4); }
-    [data-theme="light"] .topbar { background: rgba(248, 250, 252, 0.96) !important; border-bottom: 1px solid rgba(203, 213, 225, 0.8) !important; }
-    [data-theme="light"] .glass-card { background: var(--pc-card-bg); border-color: rgba(203, 213, 225, 0.85); box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05); }
-    [data-theme="light"] table th { background: rgba(241, 245, 249, 0.95); color: #334155; }
-    [data-theme="light"] table td { border-bottom-color: rgba(226, 232, 240, 0.8); color: #0f172a; }
-    [data-theme="light"] .form-input, [data-theme="light"] .form-select { background: #ffffff; color: #0f172a; border-color: #cbd5e1; }
-    [data-theme="light"] .metric-val { color: #0f172a; text-shadow: none; }
-    [data-theme="light"] .sidebar { border-right-color: #cbd5e1; }
-    [data-theme="light"] .nav-item { color: #64748b; }
-    [data-theme="light"] .nav-item:hover { color: #0f172a; background: rgba(0, 0, 0, 0.05); }
-    [data-theme="light"] .nav-item.active { color: #ffffff; background: var(--pc-primary); }
-    [data-theme="light"] .nav-item::after { background: #0f172a; color: #ffffff; }
-    [data-theme="light"] .user-pill { background: rgba(255, 255, 255, 0.9); border-color: #cbd5e1; }
-    [data-theme="light"] .segmented-group { background: rgba(226, 232, 240, 0.8); border-color: #cbd5e1; }
-    [data-theme="light"] .seg-btn { color: #475569; }
-    [data-theme="light"] .seg-btn:hover { color: #0f172a; }
-    [data-theme="light"] .seg-btn.active { background: #ffffff; color: var(--pc-primary); border-color: var(--pc-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-    [data-theme="light"] .modal-content, [data-theme="light"] .modal-box { background: #ffffff !important; color: #0f172a !important; border-color: #cbd5e1 !important; box-shadow: 0 20px 50px rgba(0,0,0,0.15) !important; }
-    [data-theme="light"] .more-menu-tile { background: #f8fafc; border-color: #e2e8f0; color: #0f172a; }
-    [data-theme="light"] .more-menu-tile:hover { background: #f1f5f9; border-color: var(--pc-primary); }
+
 
     * { 
       box-sizing: border-box; 
@@ -427,109 +355,156 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 18px !important;
-      padding: 14px 0 12px 0 !important;
+      flex-wrap: wrap;
+      gap: 10px;
+      row-gap: 8px;
+      margin-bottom: 14px !important;
+      padding: 10px 0 !important;
       position: sticky !important;
       top: 0 !important;
       flex-shrink: 0 !important;
-      background: rgba(11, 15, 25, 0.98) !important;
+      background: var(--surface-1) !important;
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
       z-index: 50;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      overflow-x: auto;
-      scrollbar-width: none;
+      border-bottom: 1px solid var(--pc-border);
+      width: 100%;
     }
-    .topbar::-webkit-scrollbar { display: none; }
 
-    .glow-pill {
-      background: rgba(168, 85, 247, 0.12);
-      border: 1px solid rgba(168, 85, 247, 0.35);
-      border-radius: 16px;
-      padding: 5px 11px;
+    .topbar-left, .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .header-pill, .glow-pill {
+      background: var(--surface-2);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-sm);
+      padding: 4px 10px;
       display: inline-flex;
       align-items: center;
       gap: 6px;
       font-size: 0.76rem;
       font-weight: 600;
       color: var(--text-main);
-      box-shadow: 0 0 15px rgba(168, 85, 247, 0.15);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
       cursor: pointer;
-      backdrop-filter: blur(12px);
-      transition: all 0.2s ease;
+      user-select: none;
       white-space: nowrap;
-      flex-shrink: 0;
+      transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    }
+    .header-pill:hover, .glow-pill:hover {
+      border-color: rgba(0, 242, 254, 0.35);
+      background: var(--surface-3);
+    }
+    .header-pill:active, .glow-pill:active {
+      transform: scale(0.96);
+    }
+    .header-pill.vip-pill {
+      border-color: rgba(0, 242, 254, 0.28);
+      color: var(--pc-accent);
+    }
+    .header-pill.health-pill {
+      cursor: default;
     }
 
-    .glow-pill:hover {
-      border-color: rgba(14, 165, 233, 0.6);
-      box-shadow: 0 0 20px rgba(168, 85, 247, 0.35);
+    .header-btn, .btn-pill {
+      background: var(--surface-2);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-sm);
+      padding: 4px 12px;
+      font-weight: 700;
+      font-size: 0.76rem;
+      color: var(--text-main);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+      transition: all 0.15s ease;
+    }
+    .header-btn:hover, .btn-pill:hover {
+      background: var(--surface-3);
+      border-color: rgba(0, 242, 254, 0.4);
+      color: #FFFFFF;
+    }
+    .header-btn:active, .btn-pill:active {
+      transform: scale(0.96);
+    }
+    .header-btn.btn-update {
+      border-color: rgba(16, 185, 129, 0.35);
+      color: #10B981;
+    }
+    .header-btn.btn-update:hover {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: #10B981;
+      color: #34D399;
     }
 
     .segmented-group {
       display: flex;
-      background: rgba(15, 20, 32, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
-      padding: 4px;
+      background: var(--surface-1);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-md);
+      padding: 3px;
       gap: 4px;
     }
 
     .seg-btn {
-      padding: 7px 16px;
-      border-radius: 8px;
-      font-size: 0.8rem;
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 0.78rem;
       font-weight: 600;
       color: var(--text-muted);
       background: transparent;
       border: 1px solid transparent;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: all 0.15s ease;
       display: flex;
       align-items: center;
       gap: 6px;
     }
 
-    .seg-btn:hover { color: #ffffff; }
+    .seg-btn:hover { color: #FFFFFF; }
 
     .seg-btn.active {
-      background: rgba(14, 165, 233, 0.15);
-      border: 1px solid rgba(168, 85, 247, 0.5);
-      color: #ffffff;
-      box-shadow: 0 0 15px rgba(168, 85, 247, 0.3);
+      background: var(--surface-3);
+      border: 1px solid rgba(0, 242, 254, 0.4);
+      color: var(--pc-accent);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
     }
 
     .user-pill {
       display: flex;
       align-items: center;
-      gap: 10px;
-      background: rgba(18, 24, 38, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 5px 14px 5px 6px;
-      border-radius: 24px;
+      gap: 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--pc-border);
+      padding: 3px 10px 3px 4px;
+      border-radius: var(--radius-sm);
       cursor: pointer;
-      backdrop-filter: blur(10px);
-      transition: all 0.2s ease;
+      transition: all 0.15s ease;
     }
 
     .user-pill:hover {
-      border-color: rgba(56, 189, 248, 0.5);
-      box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+      border-color: rgba(0, 242, 254, 0.35);
+      background: var(--surface-3);
     }
 
     .user-avatar {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #a855f7, #38bdf8);
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      background: linear-gradient(135deg, #00F2FE 0%, #38BDF8 100%);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: 700;
-      font-size: 0.8rem;
-      color: #ffffff;
-      box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+      font-weight: 800;
+      font-size: 0.72rem;
+      color: #08090D;
     }
 
     .online-dot {
@@ -1438,70 +1413,57 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     <!-- Top Bar -->
     <div class="topbar">
-      <!-- Left: Network IP, STUN & Profile -->
-      <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-        <div class="glow-pill" onclick="copyText(document.getElementById('topVipLabel').innerText)" title="Ваш виртуальный IP в P2P сети (нажмите чтобы скопировать)" style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; cursor: pointer; padding: 4px 10px; border-radius: 14px;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
-          <span style="font-size:0.75rem; font-weight:700; opacity:0.85;">VIP:</span>
-          <span id="topVipLabel" class="mono" style="font-weight:700; color:#ffffff; font-size:0.8rem;">10.200.0.1</span>
+      <!-- Left: Network IP, Profile & Telemetry -->
+      <div class="topbar-left">
+        <div class="header-pill vip-pill" onclick="copyText(document.getElementById('topVipLabel').innerText)" title="Ваш виртуальный IP в P2P сети (нажмите чтобы скопировать)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+          <span style="opacity:0.85; font-size:0.72rem;">VIP:</span>
+          <span id="topVipLabel" class="mono" style="font-weight:700; color:#FFFFFF;">10.200.0.1</span>
         </div>
 
-        <!-- TUN Adapter Status Badge -->
-        <div class="glow-pill" id="topTunBadge" title="Статус сетевого адаптера TUN" style="background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); color: #4ade80; padding: 4px 10px; border-radius: 14px; display: flex; align-items: center; gap: 5px;">
-          <span id="topTunDot" style="width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px #4ade80; display: inline-block;"></span>
-          <span style="font-size:0.75rem; font-weight:700; opacity:0.85;">TUN:</span>
-          <span id="topTunStatusLabel" class="mono" style="font-weight:700; color:#4ade80; font-size:0.8rem;">nb0 OK</span>
+        <div class="header-pill" onclick="openProfileModal()" title="Управление профилями сети">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <span style="opacity:0.85; font-size:0.72rem;">Сеть:</span>
+          <span id="topProfileLabel" style="font-weight:700; color:#FFFFFF; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Основная сеть</span>
+          <span style="font-size:0.68rem; opacity:0.6;">▾</span>
         </div>
 
-        <div class="glow-pill" onclick="openRenameModal()" title="Текущий внешний сокет NAT Hole Punching" style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); padding: 4px 10px; border-radius: 14px; font-size:0.76rem;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="m10 15 5-3-5-3v6Z"></path></svg>
-          <span id="topStunLabel" style="font-size:0.76rem; max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">STUN: Определение...</span>
+        <div class="header-pill health-pill" id="topMetricsPill" title="Статус сетевого адаптера TUN и ресурсов">
+          <span id="topTunDot" class="pulse-dot"></span>
+          <span id="topTunStatusLabel" class="mono" style="color:#10B981; font-weight:700;">nb0 OK</span>
+          <span style="opacity:0.25;">|</span>
+          <span style="opacity:0.8; font-size:0.72rem;">CPU:</span>
+          <span id="topCpuVal" class="mono" style="font-weight:700; color:#FFFFFF;">—%</span>
+          <span style="opacity:0.25;">|</span>
+          <span style="opacity:0.8; font-size:0.72rem;">RAM:</span>
+          <span id="topRamVal" class="mono" style="font-weight:700; color:#FFFFFF;">— MB</span>
         </div>
 
-        <div class="glow-pill" onclick="openProfileModal()" title="Управление профилями сети (нажмите для переключения или создания)" style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.35); color: #818cf8; cursor: pointer; padding: 4px 10px; border-radius: 14px;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-          <span style="font-size:0.75rem; font-weight:700; opacity:0.85;">Сеть:</span>
-          <span id="topProfileLabel" style="font-weight:700; color:#ffffff; font-size:0.8rem; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Основная сеть</span>
-          <span style="font-size:0.7rem; opacity:0.7;">▾</span>
-        </div>
-
-        <!-- System Metrics (CPU / RAM) Badge -->
-        <div class="glow-pill" id="topMetricsPill" title="Загрузка процессора и оперативной памяти узла" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); color: #34d399; padding: 4px 10px; border-radius: 14px; display: flex; align-items: center; gap: 5px;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>
-          <span style="font-size:0.75rem; font-weight:700; opacity:0.85;">CPU:</span>
-          <span id="topCpuVal" class="mono" style="font-weight:700; color:#ffffff; font-size:0.8rem;">—%</span>
-          <span style="opacity:0.35; margin: 0 1px;">|</span>
-          <span style="font-size:0.75rem; font-weight:700; opacity:0.85;">RAM:</span>
-          <span id="topRamVal" class="mono" style="font-weight:700; color:#ffffff; font-size:0.8rem;">— MB</span>
+        <div class="header-pill" onclick="openRenameModal()" title="Текущий внешний сокет NAT Hole Punching" style="display:none;" id="pillStunContainer">
+          <span id="topStunLabel" style="font-size:0.74rem;">STUN: Определение...</span>
         </div>
       </div>
 
-      <!-- Right: Action Buttons & User Profile -->
-      <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-        <button id="btnTopUpdate" onclick="openUpdateModal()" class="btn-pill" style="background: rgba(34, 197, 94, 0.12); border: 1px solid rgba(34, 197, 94, 0.35); color: #4ade80; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Проверить обновления NatBypass">
+      <!-- Right: Action Buttons & User Device -->
+      <div class="topbar-right">
+        <button id="btnTopUpdate" onclick="openUpdateModal()" class="header-btn btn-update" title="Проверить обновления NatBypass">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
           <span id="topUpdateLabel">Обновления</span>
         </button>
 
-        <button onclick="openQRModal()" class="btn-pill" style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.35); color: #38bdf8; padding: 4px 10px; border-radius: 14px; font-weight: 700; font-size: 0.76rem; cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all 0.2s;" title="Показать QR-код для подключения">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        <button onclick="openQRModal()" class="header-btn" title="Показать QR-код для подключения">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2.2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
           <span>QR-код</span>
         </button>
 
-        <!-- Theme Switcher (Dark / Light) -->
-        <button id="btnThemeToggle" onclick="toggleTheme()" class="btn-pill" style="padding: 4px 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--pc-border); color: var(--text-main); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" title="Переключить тему (Светлая / Тёмная)">
-          <svg id="themeIconSun" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" style="display:none;"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
-          <svg id="themeIconMoon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
-        </button>
-
-        <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство" style="padding: 3px 10px 3px 4px; border-radius: 18px;">
-          <div class="user-avatar" id="userAvatar" style="width:24px; height:24px; font-size:0.7rem;">N</div>
+        <div class="user-pill" onclick="openRenameModal()" title="Нажмите, чтобы переименовать устройство">
+          <div class="user-avatar" id="userAvatar">N</div>
           <span id="userNameLabel" style="font-size:0.78rem; font-weight:700; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Мой компьютер</span>
-          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.7rem; font-weight:700; padding:2px 6px; margin-left:4px;"></span>
+          <span id="userVersionBadge" class="badge badge-cyan mono" style="font-size:0.68rem; font-weight:700;"></span>
           <div class="online-dot"></div>
         </div>
 
-        <button id="btnTopLogout" onclick="doLogout()" class="btn-pill" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; padding: 4px 12px; border-radius: 14px; font-weight: 700; font-size: 0.78rem; cursor: pointer; align-items: center; gap: 5px; transition: all 0.2s;" title="Выйти из системы (Logout)">
+        <button id="btnTopLogout" onclick="doLogout()" class="header-btn" style="display: none; border-color: rgba(239, 68, 68, 0.4); color: #F87171;" title="Выйти из системы (Logout)">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           <span>Выйти</span>
         </button>
@@ -1562,26 +1524,27 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <button onclick="toggleClientExitNode(currentSelectedExitNode, currentActiveExitVIP, false)" class="btn-pill" style="background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.4); color:#f87171; padding:3px 10px; font-weight:700; font-size:0.74rem; cursor:pointer;">🔌 Отключить шлюз</button>
       </div>
       <div class="dashboard-grid">
-        <!-- Card 1: Top-Left (Number + Donut Ring) -->
-        <div class="glass-card card-top-left">
-          <div>
-            <div class="metric-val" id="statPeersCount">0</div>
-            <div class="metric-label" id="statPeersLabel">Устройств в Mesh сети</div>
-            <div style="margin-top: 14px;">
-              <span class="badge badge-cyan" id="statP2PCount">⚡ 0 Direct P2P</span>
+        <!-- Card 1: Top-Left (Hardware Telemetry Panel) -->
+        <div class="glass-card card-top-left" style="display:flex; flex-direction:column; justify-content:space-between;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+              <div class="metric-val" id="statPeersCount">0</div>
+              <div class="metric-label" id="statPeersLabel">Устройств в Mesh-сети</div>
+            </div>
+            <div style="text-align:right;">
+              <span class="badge badge-cyan" id="statMeshStatus" style="font-size:0.72rem; font-weight:700;">Mesh Активен</span>
             </div>
           </div>
-          <div class="donut-ring">
-            <svg viewBox="0 0 100 100">
-              <circle class="donut-bg" cx="50" cy="50" r="40" />
-              <circle class="donut-fill" id="donutFill" cx="50" cy="50" r="40" />
-            </svg>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:14px;">
+            <span class="badge badge-cyan" id="statP2PCount" style="font-size:0.75rem; font-weight:700;">⚡ 0 Direct P2P</span>
+            <span class="badge badge-indigo" id="statRelayCount" style="font-size:0.75rem; font-weight:700;">☁️ 0 Relay</span>
+            <span class="badge" id="statOfflineCount" style="background:rgba(255,255,255,0.06); color:var(--text-dim); border:1px solid rgba(255,255,255,0.1); font-size:0.75rem; font-weight:600;">0 Offline</span>
           </div>
         </div>
 
         <!-- Card 2: Bottom-Left (P2P Channel Throughput / Speed) -->
-        <div class="glass-card card-bottom-left">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div class="glass-card card-bottom-left" style="display:flex; flex-direction:column; justify-content:space-between;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
             <div>
               <div style="font-size:1.8rem; font-weight:800; color:#38bdf8;" class="mono" id="statThroughput">—</div>
               <div class="metric-label">Загрузка P2P канала</div>
@@ -1590,74 +1553,86 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           </div>
 
           <!-- Dynamic Smooth 60fps Canvas for P2P Throughput -->
-          <div class="wave-container" style="height:70px; margin-top:8px; border-radius:8px; overflow:hidden; background:rgba(15,23,42,0.6); border:1px solid rgba(51,65,85,0.4);">
+          <div class="wave-container" style="height:65px; margin-top:8px; border-radius:8px; overflow:hidden; background:rgba(15,23,42,0.6); border:1px solid rgba(51,65,85,0.4);">
             <canvas id="canvasThroughput" style="width:100%; height:100%; display:block;"></canvas>
           </div>
         </div>
 
         <!-- Card 3: Right Large (RTT & Full Traffic Flow) -->
-        <div class="glass-card card-right-large">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div class="glass-card card-right-large" style="display:flex; flex-direction:column; justify-content:space-between;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
             <div>
               <div class="metric-val" id="statAvgLatency" style="color: #38bdf8;">0 ms</div>
               <div class="metric-label">Средняя задержка Direct P2P</div>
             </div>
             <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
-              <div style="display:flex; gap:6px; align-items:center;">
-                <span class="badge badge-success" id="statTunBadge">🔌 TUN: OK</span>
-                <span class="badge badge-success" id="statAwgBadge">🛡️ AWG 3.1 Активен</span>
+              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+                <span class="badge badge-success" id="statTunBadge">TUN: OK</span>
+                <span class="badge badge-success" id="statAwgBadge">AWG 3.1 Активен</span>
               </div>
               <span style="font-size:0.75rem; color:var(--text-dim);" id="statUptime">Uptime: 0m</span>
             </div>
           </div>
 
           <!-- Dynamic Smooth 60fps Canvas for Real-Time Latency -->
-          <div class="wave-container" style="height:90px; margin:8px 0; border-radius:8px; overflow:hidden; background:rgba(15,23,42,0.6); border:1px solid rgba(51,65,85,0.4);">
+          <div class="wave-container" style="height:80px; margin:8px 0; border-radius:8px; overflow:hidden; background:rgba(15,23,42,0.6); border:1px solid rgba(51,65,85,0.4);">
             <canvas id="canvasLatency" style="width:100%; height:100%; display:block;"></canvas>
           </div>
 
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-            <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
-              <span style="font-size:0.8rem; color:var(--text-muted);" id="lblNatStatus">P2P пробитие NAT: <b style="color:#34d399;" id="txtNatType">Определяется...</b></span>
-              <span style="font-size:0.8rem; color:var(--text-muted);" id="lblTunStatus">TUN адаптер: <b style="color:#34d399;" id="txtTunStatus">Определяется...</b></span>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+              <span style="font-size:0.8rem; color:var(--text-muted);" id="lblNatStatus">NAT: <b style="color:#34d399;" id="txtNatType">Определяется...</b></span>
+              <span style="font-size:0.8rem; color:var(--text-muted);" id="lblTunStatus">Адаптер: <b style="color:#34d399;" id="txtTunStatus">Определяется...</b></span>
             </div>
-            <button onclick="switchTab('devices')" class="btn btn-glass" style="padding:6px 12px; font-size:0.78rem;">Все узлы ➔</button>
+            <button onclick="switchTab('devices')" class="btn btn-glass" style="padding:5px 12px; font-size:0.78rem;">Все узлы ➔</button>
           </div>
         </div>
       </div>
 
-      
       <!-- Mesh Health & Network Topology Visualizer -->
       <div class="glass-card" style="margin-bottom: 20px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; flex-wrap:wrap; gap:8px;">
           <div>
             <h3 style="font-size: 1.05rem; font-weight: 800; display:flex; align-items:center; gap:8px;">
-              <span>🕸️ ТОПОЛОГИЯ И ЗДОРОВЬЕ MESH-СЕТИ</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2.2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+              <span>Топология и здоровье Mesh-сети</span>
               <span class="badge badge-cyan" id="badgeMeshNodesCount" style="font-size:0.7rem;">0 узлов</span>
             </h3>
-            <p style="font-size: 0.78rem; color: var(--text-muted);">Интерактивный граф сокет-в-сокет соединений в реальном времени</p>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top:2px;">Интерактивный граф сокет-в-сокет соединений в реальном времени</p>
           </div>
-          <div style="display:flex; gap:8px; align-items:center;">
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <span style="font-size:0.75rem; color:var(--text-muted);"><span style="color:#34d399;">●</span> Direct P2P &nbsp; <span style="color:#38bdf8;">●</span> Relay &nbsp; <span style="color:#f87171;">●</span> Offline</span>
-            <button onclick="renderMeshTopologyGraph()" class="btn btn-glass" style="font-size: 0.75rem; padding:4px 10px;">🔄 Обновить граф</button>
+            <button onclick="renderMeshTopologyGraph()" class="btn btn-glass" style="font-size: 0.75rem; padding:4px 10px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Обновить граф</span>
+            </button>
           </div>
         </div>
-        <div style="position:relative; width:100%; height:260px; background:radial-gradient(circle at center, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.95) 100%); border-radius:14px; border:1px solid rgba(255,255,255,0.06); overflow:hidden;">
-          <canvas id="meshTopologyCanvas" width="900" height="260" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
+        <div style="position:relative; width:100%; height:220px; background:radial-gradient(circle at center, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.95) 100%); border-radius:14px; border:1px solid rgba(255,255,255,0.06); overflow:hidden;">
+          <canvas id="meshTopologyCanvas" width="900" height="220" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
           <div id="meshGraphTooltip" style="position:absolute; display:none; pointer-events:none; background:rgba(15,23,42,0.92); border:1px solid rgba(56,189,248,0.4); border-radius:8px; padding:6px 12px; font-size:0.75rem; color:#fff; box-shadow:0 4px 15px rgba(0,0,0,0.5); z-index:10;"></div>
         </div>
       </div>
 
       <!-- Quick Peer Table -->
       <div class="glass-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px; flex-wrap:wrap; gap:8px;">
           <div>
-            <h3 style="font-size: 1.05rem; font-weight: 800; white-space: normal;">👥 ПОИСК УСТРОЙСТВ В СЕТИ & ПИРЫ MESH</h3>
-            <p style="font-size: 0.78rem; color: var(--text-muted);">Прямая связь сокет-в-сокет без промежуточных серверов</p>
+            <h3 style="font-size: 1.05rem; font-weight: 800; display:flex; align-items:center; gap:8px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pc-primary)" stroke-width="2.2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>ПОИСК УСТРОЙСТВ В СЕТИ & Пиры Mesh</span>
+            </h3>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top:2px;">Прямая связь сокет-в-сокет без промежуточных серверов</p>
           </div>
-          <div style="display:flex; gap:8px;">
-            <button onclick="clearPeersCache()" class="btn btn-glass" style="font-size: 0.78rem; border-color: rgba(239, 68, 68, 0.4); color: #f87171;" title="Сбросить кэш старых устройств и опросить только текущий топик">🧹 Очистить кэш</button>
-            <button onclick="refreshData()" class="btn btn-glass" style="font-size: 0.78rem;">⚡ Синхронизация</button>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button onclick="clearPeersCache()" class="btn btn-glass" style="font-size: 0.78rem; border-color: rgba(239, 68, 68, 0.4); color: #f87171;" title="Сбросить кэш старых устройств и опросить только текущий топик">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              <span>Очистить кэш</span>
+            </button>
+            <button onclick="refreshData()" class="btn btn-glass" style="font-size: 0.78rem;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              <span>Синхронизация</span>
+            </button>
           </div>
         </div>
         <div class="table-wrap">
@@ -1731,7 +1706,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         </h2>
         <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 20px;">Выберите активный режим передачи маяков между узлами сети</p>
 
-        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">
           <div class="glass-card" id="cardChanMqtt" onclick="switchChannelMode('mqtt')" style="cursor:pointer; padding:20px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <h3 style="font-size:0.95rem; font-weight:700;">Только MQTT</h3>
@@ -1768,20 +1743,26 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         </h2>
         <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 20px;">Выходите в интернет через удалённый узел или сделайте этот ПК шлюзом для других</p>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
           <div class="glass-card" style="padding: 20px;">
-            <h3 style="font-size: 0.92rem; font-weight: 700; margin-bottom: 12px;">📤 Раздача интернета (Сервер)</h3>
+            <h3 style="font-size: 0.92rem; font-weight: 700; margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2.2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              <span>Раздача интернета (Сервер)</span>
+            </h3>
             <label style="display:flex; align-items:center; gap: 10px; cursor:pointer; font-weight:600; font-size:0.85rem;">
-              <input type="checkbox" id="chkAllowExitNode" onchange="toggleExitNodeServing(this.checked)" style="width: 18px; height: 18px; accent-color: #a855f7;">
+              <input type="checkbox" id="chkAllowExitNode" onchange="toggleExitNodeServing(this.checked)" style="width: 18px; height: 18px; accent-color: var(--pc-primary);">
               <span>Разрешить выход в интернет через меня</span>
             </label>
             <p style="color: var(--text-dim); font-size: 0.76rem; margin-top: 8px;">Автоматически включает Windows IP Forwarding и Wintun NAT.</p>
           </div>
 
           <div class="glass-card" style="padding: 20px;">
-            <h3 style="font-size: 0.92rem; font-weight: 700; margin-bottom: 12px;">📥 Выбор удалённого шлюза (Клиент)</h3>
+            <h3 style="font-size: 0.92rem; font-weight: 700; margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--pc-primary)" stroke-width="2.2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+              <span>Выбор удалённого шлюза (Клиент)</span>
+            </h3>
             <select id="selRemoteExitNode" class="form-input" onchange="setRemoteExitNode(this.value)" style="margin-bottom: 8px;">
-              <option value="">🚫 Локальный интернет (Шлюз выключен)</option>
+              <option value="">Локальный интернет (Шлюз выключен)</option>
             </select>
             <p style="color: var(--text-dim); font-size: 0.76rem;">Трафик пойдет через выбранный узел сети.</p>
           </div>
@@ -1789,12 +1770,21 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
 
       <div class="glass-card">
-        <h3 style="font-size: 0.98rem; font-weight: 700; margin-bottom: 6px;">🏠 Доступ к локальным подсетям (Site-to-Site LAN)</h3>
+        <h3 style="font-size: 0.98rem; font-weight: 700; margin-bottom: 6px; display:flex; align-items:center; gap:8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2.2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          <span>Доступ к локальным подсетям (Site-to-Site LAN)</span>
+        </h3>
         <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 14px;">Расшаривайте свои подсети (например, 192.168.1.0/24) для доступа к роутерам, принтерам и NAS</p>
-        <div style="display:flex; gap: 12px; align-items: center;">
-          <input type="text" id="txtAdvSubnets" class="form-input mono" placeholder="192.168.1.0/24, 10.0.0.0/24" style="flex:1;">
-          <button onclick="autoDetectSubnets()" class="btn btn-glass" style="white-space: nowrap;">🔍 Автоопределение</button>
-          <button onclick="saveSubnets()" class="btn btn-neon" style="white-space: nowrap;">💾 Применить</button>
+        <div style="display:flex; gap: 10px; align-items: center; flex-wrap:wrap;">
+          <input type="text" id="txtAdvSubnets" class="form-input mono" placeholder="192.168.1.0/24, 10.0.0.0/24" style="flex:1; min-width:220px;">
+          <button onclick="autoDetectSubnets()" class="btn btn-glass" style="white-space: nowrap;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Автоопределение</span>
+          </button>
+          <button onclick="saveSubnets()" class="btn btn-neon" style="white-space: nowrap;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            <span>Применить</span>
+          </button>
         </div>
       </div>
     </div>
@@ -1802,30 +1792,36 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     <!-- TAB 5: AMNEZIAWG 3.1 -->
     <div id="tab-awg" class="tab-pane">
       <div class="glass-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; flex-wrap:wrap; gap:10px;">
           <div>
-            <h2 style="font-size: 1.15rem; font-weight: 800;">🛡️ AmneziaWG 3.1 — Поведенческая Anti-DPI Защита</h2>
-            <p style="color: var(--text-muted); font-size: 0.8rem;">Header Protection (ChaCha20), Random Trailers, Content Padding и диапазоны таймеров против AI-анализа ТСПУ</p>
+            <h2 style="font-size: 1.15rem; font-weight: 800; display:flex; align-items:center; gap:8px;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span>AmneziaWG 3.1 — Поведенческая Anti-DPI Защита</span>
+            </h2>
+            <p style="color: var(--text-muted); font-size: 0.8rem; margin-top:2px;">Header Protection (ChaCha20), Random Trailers, Content Padding и диапазоны таймеров против AI-анализа ТСПУ</p>
           </div>
           <div style="display:flex; gap: 8px; flex-wrap: wrap;">
-            <button onclick="selectAWGPreset('carrier_mobile')" class="btn btn-neon">📱 Mobile РФ</button>
-            <button onclick="selectAWGPreset('carrier_fixed')" class="btn btn-glass">🏠 Fixed РФ</button>
-            <button onclick="selectAWGPreset('awg31_strict')" class="btn btn-glass">🔒 AWG 3.1</button>
-            <button onclick="selectAWGPreset('awg31_balanced')" class="btn btn-glass">⚖️ Balanced</button>
-            <button onclick="rotateAWGParams()" class="btn btn-glass" style="border-color: #f59e0b; color: #f59e0b;" title="Сменить заголовки и обфускацию для всех узлов сети">🔄 Ротация</button>
+            <button onclick="selectAWGPreset('carrier_mobile')" class="btn btn-neon">Mobile РФ</button>
+            <button onclick="selectAWGPreset('carrier_fixed')" class="btn btn-glass">Fixed РФ</button>
+            <button onclick="selectAWGPreset('awg31_strict')" class="btn btn-glass">AWG 3.1</button>
+            <button onclick="selectAWGPreset('awg31_balanced')" class="btn btn-glass">Balanced</button>
+            <button onclick="rotateAWGParams()" class="btn btn-glass" style="border-color: #f59e0b; color: #f59e0b;" title="Сменить заголовки и обфускацию для всех узлов сети">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Ротация</span>
+            </button>
           </div>
         </div>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 16px;">
           <div class="form-group">
             <label class="form-label" for="awgPreset">Пресет протокола (Protocol Preset):</label>
             <select id="awgPreset" class="form-input mono" onchange="updateAWGSettings()" style="background: rgba(15,23,42,0.9); color: #fff;">
-              <option value="carrier_mobile" selected>📱 Carrier Mobile (МТС, МегаФон, Tele2, Yota — MTU 1280, Jc 3, CPS)</option>
-              <option value="carrier_fixed">🏠 Carrier Fixed (Ростелеком, Дом.ru — Jc 5, QUIC+DNS CPS)</option>
-              <option value="awg31_strict">🔒 AWG 3.1 Strict (Максимальное пробитие ТСПУ / DPI)</option>
-              <option value="awg31_balanced">⚖️ AWG 3.1 Balanced (рекомендуется для стабильных сетей)</option>
-              <option value="anti_tspu">🛡️ AWG 2.0 Anti-TSPU (тюнинг мусорных пакетов и S2=100)</option>
-              <option value="awg20_legacy">📜 AWG 2.0 Legacy (совместимость со старыми версиями)</option>
+              <option value="carrier_mobile" selected>Carrier Mobile (МТС, МегаФон, Tele2, Yota — MTU 1280, Jc 3, CPS)</option>
+              <option value="carrier_fixed">Carrier Fixed (Ростелеком, Дом.ru — Jc 5, QUIC+DNS CPS)</option>
+              <option value="awg31_strict">AWG 3.1 Strict (Максимальное пробитие ТСПУ / DPI)</option>
+              <option value="awg31_balanced">AWG 3.1 Balanced (рекомендуется для стабильных сетей)</option>
+              <option value="anti_tspu">AWG 2.0 Anti-TSPU (тюнинг мусорных пакетов и S2=100)</option>
+              <option value="awg20_legacy">AWG 2.0 Legacy (совместимость со старыми версиями)</option>
             </select>
             <small style="color: var(--text-muted); font-size: 0.76rem; display: block; margin-top: 4px;">
               ⚠️ AWG 3.1 использует Header Protection и несовместим с AWG 2.0. Все узлы сети должны обновиться.
@@ -1850,8 +1846,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
         <!-- AWG 3.1 Advanced Settings -->
         <div id="awg31Advanced" style="background: rgba(10, 15, 30, 0.7); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 12px; padding: 14px; margin-bottom: 16px;">
-          <div style="font-weight: 700; font-size: 0.88rem; color: #93c5fd; margin-bottom: 10px;">⚙️ Расширенные механизмы AWG 3.1</div>
-          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px;">
+          <div style="font-weight: 700; font-size: 0.88rem; color: #93c5fd; margin-bottom: 10px; display:flex; align-items:center; gap:6px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>Расширенные механизмы AWG 3.1</span>
+          </div>
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.84rem;">
               <input type="checkbox" id="headerProtection" checked>
               <span>Header Protection (ChaCha20)</span>
@@ -2095,13 +2094,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom: 14px;">
           <div>
             <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 4px; display:flex; align-items:center; gap:8px;">
-              <span style="color:#4ade80;">🚀</span> Автообновление системы (GitHub Releases)
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Автообновление системы (GitHub Releases)</span>
             </h2>
             <p style="font-size: 0.8rem; color: var(--text-muted); margin:0;">Проверка новых релизов с авто-загрузкой и мгновенным перезапуском</p>
           </div>
           <div style="display:flex; align-items:center; gap:10px;">
-            <button onclick="openUpdateModal()" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #06b6d4); font-size:0.85rem; padding:8px 16px;">
-              🔄 Проверить и обновить
+            <button onclick="openUpdateModal()" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #06b6d4); font-size:0.85rem; padding:8px 16px; display:inline-flex; align-items:center; gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Проверить и обновить</span>
             </button>
           </div>
         </div>
@@ -2110,8 +2111,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:10px; padding:14px 16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
             <div style="cursor:pointer; flex:1;" onclick="toggleBetaFromLabel('toggleBetaSettings')">
-              <div style="font-size:0.88rem; font-weight:700; color:#fbbf24; display:flex; align-items:center; gap:6px;">
-                <span>🧪 Тестовые сборки (Beta / Pre-release)</span>
+              <div style="font-size:0.88rem; font-weight:700; color:#fbbf24; display:flex; align-items:center; gap:8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2.2"><path d="M10 2v7.31L4.25 19.9a2 2 0 0 0 1.75 3.1h12a2 2 0 0 0 1.75-3.1L14 9.31V2"/></svg>
+                <span>Тестовые сборки (Beta / Pre-release)</span>
                 <span id="badgeBetaSettings" class="badge badge-warning" style="display:none; font-size:0.65rem;">АКТИВНО</span>
               </div>
               <div style="font-size:0.76rem; color:var(--text-muted); margin-top:3px;">
@@ -2130,61 +2132,70 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
 
       <div class="glass-card" style="margin-bottom: 24px;">
-        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px;">🏷️ Основные параметры & Система</h2>
+        <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 16px; display:flex; align-items:center; gap:8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Основные параметры & Система</span>
+        </h2>
         
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 16px;">
           <div class="form-group">
-            <label class="form-label">🏷️ Имя вашего устройства (Никнейм):</label>
-            <input type="text" id="cfgNick" class="form-input" placeholder="Имя, которое увидят другие устройства в сети"><small style="color:var(--text-muted); font-size:0.75rem; margin-top:4px; display:block;">Имя, которое увидят другие устройства в сети</small>
+            <label class="form-label">Имя устройства (Никнейм):</label>
+            <input type="text" id="cfgNick" class="form-input" placeholder="Имя, которое увидят другие устройства в сети">
+            <small style="color:var(--text-muted); font-size:0.75rem; margin-top:4px; display:block;">Отображается в адресной книге пиров Mesh-сети</small>
           </div>
 
           <div class="form-group">
-            <label class="form-label">⏱️ Интервал маяков (сек):</label>
+            <label class="form-label">Интервал маяков (сек):</label>
             <input type="number" id="cfgInterval" class="form-input mono" value="8" min="3" max="60">
+            <small style="color:var(--text-muted); font-size:0.75rem; margin-top:4px; display:block;">Частота сигнального оповещения (по умолчанию 8 сек)</small>
           </div>
         </div>
 
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
           <label id="lblAutoStart" style="display:none; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
-            <input type="checkbox" id="chkAutoStart" style="accent-color:#a855f7; width:16px; height:16px;">
+            <input type="checkbox" id="chkAutoStart" style="accent-color:var(--pc-primary); width:16px; height:16px;">
             <span>Запускать вместе с Windows (Автозагрузка)</span>
           </label>
           <label id="lblAutoOpenBrowser" style="display:none; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
-            <input type="checkbox" id="chkAutoOpenBrowser" style="accent-color:#a855f7; width:16px; height:16px;" checked>
+            <input type="checkbox" id="chkAutoOpenBrowser" style="accent-color:var(--pc-primary); width:16px; height:16px;" checked>
             <span>Открывать окно приложения при запуске (WebUI)</span>
           </label>
           <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
-            <input type="checkbox" id="chkSaveLogs" onchange="saveAllSettings()" style="accent-color:#a855f7; width:16px; height:16px;">
+            <input type="checkbox" id="chkSaveLogs" onchange="saveAllSettings()" style="accent-color:var(--pc-primary); width:16px; height:16px;">
             <span>Сохранять логи на диск (natbypass.log)</span>
           </label>
           <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
-            <input type="checkbox" id="chkShowDiag" onchange="toggleDiagVisibility(this.checked); saveAllSettings();" style="accent-color:#a855f7; width:16px; height:16px;">
+            <input type="checkbox" id="chkShowDiag" onchange="toggleDiagVisibility(this.checked); saveAllSettings();" style="accent-color:var(--pc-primary); width:16px; height:16px;">
             <span>Включить пункт «Диагностика» в меню</span>
           </label>
           <label style="display:flex; align-items:center; gap: 8px; font-size:0.84rem; cursor:pointer;">
-            <input type="checkbox" id="chkUpnp" style="accent-color:#a855f7; width:16px; height:16px;">
+            <input type="checkbox" id="chkUpnp" style="accent-color:var(--pc-primary); width:16px; height:16px;">
             <span>UPnP автоматический проброс порта на роутере</span>
           </label>
         </div>
 
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top: 1px solid rgba(255,255,255,0.06);">
-          <button type="button" onclick="saveAllSettings()" class="btn btn-neon" style="padding: 9px 20px; font-size:0.88rem;">
-            💾 Применить настройки
+          <button type="button" onclick="saveAllSettings()" class="btn btn-neon" style="padding: 9px 20px; font-size:0.88rem; display:inline-flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            <span>Применить настройки</span>
           </button>
           <a href="/api/logs/download" class="btn btn-glass" style="padding: 9px 16px; font-size:0.85rem; color:#38bdf8; border-color:rgba(56,189,248,0.3); text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
-            📥 Скачать natbypass.log
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Скачать natbypass.log</span>
           </a>
           <button type="button" onclick="clearDiskLog()" class="btn btn-glass" style="padding: 9px 14px; font-size:0.85rem; color:#f87171; border-color:rgba(248,113,113,0.3); display:inline-flex; align-items:center; gap:6px;">
-            🗑️ Очистить лог
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <span>Очистить лог</span>
           </button>
-          <span style="font-size:0.75rem; color:var(--text-muted);">Файл лога сохраняется на накопителе устройства</span>
+          <span style="font-size:0.75rem; color:var(--text-muted);">Лог с авто-ротацией (макс. 512 КБ на роутере / 4 МБ на ПК)</span>
         </div>
       </div>
 
       <!-- Admin Password Change Card -->
       <div id="cardAdminPassword" class="glass-card" style="margin-bottom: 24px;">
         <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 6px; display:flex; align-items:center; gap:8px;">
-          <span>🔑</span> Смена пароля администратора WebUI
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2.2"><path d="M21 2l-2 2m-1.5 1.5L14 9l-1.5-1.5-3 3L8 9 6.5 10.5 5 9 3 11l4 4 10-10z"/><circle cx="7.5" cy="16.5" r="3.5"/></svg>
+          <span>Смена пароля администратора WebUI</span>
         </h2>
         <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 16px;">
           Задайте новый пароль для доступа к веб-панели управления NatBypass на этом устройстве.
@@ -2205,8 +2216,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           </div>
         </div>
 
-        <button type="button" onclick="changeAdminPassword()" class="btn btn-primary" style="background: linear-gradient(135deg, #a855f7, #6366f1); font-size:0.88rem; padding: 10px 20px;">
-          🔒 Обновить пароль администратора
+        <button type="button" onclick="changeAdminPassword()" class="btn btn-primary" style="background: linear-gradient(135deg, #6366f1, #0284c7); font-size:0.88rem; padding: 10px 20px; display:inline-flex; align-items:center; gap:6px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span>Обновить пароль администратора</span>
         </button>
       </div>
 
@@ -2788,8 +2800,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.25); border-radius:var(--radius-lg); padding:12px 16px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
           <div style="cursor:pointer; flex:1;" onclick="toggleBetaFromLabel('toggleBetaChannel')">
-            <div style="font-size:0.86rem; font-weight:700; color:#fbbf24; display:flex; align-items:center; gap:6px;">
-              <span>🧪 Тестовые сборки (Beta / Pre-release)</span>
+            <div style="font-size:0.86rem; font-weight:700; color:#fbbf24; display:flex; align-items:center; gap:8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2.2"><path d="M10 2v7.31L4.25 19.9a2 2 0 0 0 1.75 3.1h12a2 2 0 0 0 1.75-3.1L14 9.31V2"/></svg>
+              <span>Тестовые сборки (Beta / Pre-release)</span>
               <span id="badgeBetaTag" class="badge badge-warning" style="display:none; font-size:0.65rem;">BETA</span>
             </div>
             <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
@@ -3899,7 +3912,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       try {
         const res = await fetch('/api/auth/login', {
@@ -3927,7 +3940,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         clearTimeout(timeoutId);
         if (errBox) {
           if (err.name === 'AbortError') {
-            errBox.innerText = '❌ Превышено время ожидания ответа роутера (таймаут 8 сек). Проверьте доступность устройства.';
+            errBox.innerText = '❌ Время ожидания ответа истекло (15 сек). Попробуйте логин admin / пароль admin или повторите попытку.';
           } else {
             errBox.innerText = '❌ Ошибка сети: ' + err.message;
           }
@@ -3964,31 +3977,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
     }
 
-    function initTheme() {
-      const saved = localStorage.getItem('natbypass_theme');
-      const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const theme = saved ? saved : (prefersDark ? 'dark' : 'dark');
-      setTheme(theme);
-    }
-
-    function setTheme(theme) {
-      document.documentElement.setAttribute('data-theme', theme);
-      localStorage.setItem('natbypass_theme', theme);
-      const sun = document.getElementById('themeIconSun');
-      const moon = document.getElementById('themeIconMoon');
-      if (theme === 'light') {
-        if (sun) sun.style.display = 'block';
-        if (moon) moon.style.display = 'none';
-      } else {
-        if (sun) sun.style.display = 'none';
-        if (moon) moon.style.display = 'block';
-      }
-    }
-
-    function toggleTheme() {
-      const cur = document.documentElement.getAttribute('data-theme') || 'dark';
-      setTheme(cur === 'dark' ? 'light' : 'dark');
-    }
+    // Obsidian Ink Canonical Theme
+    try {
+      localStorage.removeItem('natbypass_theme');
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
 
     // Live Dashboard Fetch
     async function refreshData() {
@@ -4084,12 +4077,18 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             }
           }
 
-          // Donut Ring Calculation
-          const donutFill = document.getElementById('donutFill');
-          if (donutFill) {
-            const ratio = totalPeers > 0 ? (p2pActive / totalPeers) : 1;
-            const offset = 283 - (283 * ratio);
-            donutFill.style.strokeDashoffset = offset;
+          // Update Peer Breakdown Badges
+          const p2pCountEl = document.getElementById('statP2PCount');
+          if (p2pCountEl) p2pCountEl.innerText = '⚡ ' + p2pActive + ' Direct P2P';
+          const relayCountEl = document.getElementById('statRelayCount');
+          if (relayCountEl) {
+            const relayPeers = Math.max(0, onlinePeers - p2pActive);
+            relayCountEl.innerText = '☁️ ' + relayPeers + ' Relay';
+          }
+          const offlineCountEl = document.getElementById('statOfflineCount');
+          if (offlineCountEl) {
+            const offlinePeers = Math.max(0, totalPeers - onlinePeers);
+            offlineCountEl.innerText = offlinePeers + ' Offline';
           }
 
           // Live Wave Updates
@@ -6618,7 +6617,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-      initTheme();
       // Ensure all sidebar nav items have direct click bindings
       document.querySelectorAll('.nav-item').forEach(item => {
         const id = item.id;
