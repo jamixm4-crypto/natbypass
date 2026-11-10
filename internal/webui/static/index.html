@@ -2095,7 +2095,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <a href="/api/logs/download" class="btn btn-glass" style="padding: 9px 16px; font-size:0.85rem; color:#38bdf8; border-color:rgba(56,189,248,0.3); text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
             📥 Скачать natbypass.log
           </a>
-          <span style="font-size:0.75rem; color:var(--text-muted);">Файл лога сохраняется рядом с config.yaml</span>
+          <button type="button" onclick="clearDiskLog()" class="btn btn-glass" style="padding: 9px 14px; font-size:0.85rem; color:#f87171; border-color:rgba(248,113,113,0.3); display:inline-flex; align-items:center; gap:6px;">
+            🗑️ Очистить лог
+          </button>
+          <span style="font-size:0.75rem; color:var(--text-muted);">Файл лога сохраняется на накопителе устройства</span>
         </div>
       </div>
 
@@ -5044,6 +5047,21 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     function copyLogs() {
       const ls = document.getElementById('logStream');
       copyToClipboard(ls.innerText, '✓ Журнал событий скопирован в буфер обмена!');
+    }
+
+    async function clearDiskLog() {
+      if (!confirm('Вы уверены, что хотите очистить файл natbypass.log на диске роутера?')) return;
+      try {
+        const res = await fetch('/api/logs/clear', { method: 'POST' });
+        const json = await res.json();
+        if (json.ok) {
+          showToast('✓ ' + (json.message || 'Журнал успешно очищен'));
+        } else {
+          showToast('⚠️ ' + (json.error || 'Ошибка очистки лога'));
+        }
+      } catch (e) {
+        showToast('⚠️ Ошибка сети: ' + e.message);
+      }
     }
 
     function openNodeInfoModal() {

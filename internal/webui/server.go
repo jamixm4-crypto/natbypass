@@ -470,6 +470,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/settings/save", s.handleSettingsSave)
 	mux.HandleFunc("/api/logs/download", s.handleLogsDownload)
+	mux.HandleFunc("/api/logs/clear", s.handleLogsClear)
 	// Автоматическое обновление
 	mux.HandleFunc("/api/update/check", s.handleUpdateCheck)
 	mux.HandleFunc("/api/update/apply", s.handleUpdateApply)
@@ -3226,14 +3227,9 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": msg}, "")
 }
 
-// handleLogsDownload — GET /api/logs/download — скачивание файла natbypass.log с диска
-func (s *Server) handleLogsDownload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
-		return
-	}
-
-	candidates := make([]string, 0, 5)
+// getLogCandidates возвращает возможные пути к файлу natbypass.log на диске (включая Entware на роутерах)
+func (s *Server) getLogCandidates() []string {
+	candidates := make([]string, 0, 6)
 	if s.configPath != "" {
 		candidates = append(candidates, filepath.Join(filepath.Dir(s.configPath), "natbypass.log"))
 	}
@@ -3242,10 +3238,19 @@ func (s *Server) handleLogsDownload(w http.ResponseWriter, r *http.Request) {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "natbypass.log"))
 	}
 	if runtime.GOOS == "linux" {
-		candidates = append(candidates, "/var/log/natbypass.log")
+		candidates = append(candidates, "/opt/var/log/natbypass.log", "/var/log/natbypass.log")
+	}
+	return candidates
+}
+
+// handleLogsDownload — GET /api/logs/download — скачивание файла natbypass.log с диска
+func (s *Server) handleLogsDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
 	}
 
-	for _, p := range candidates {
+	for _, p := range s.getLogCandidates() {
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 0 {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.Header().Set("Content-Disposition", "attachment; filename=\"natbypass.log\"")
@@ -3257,6 +3262,28 @@ func (s *Server) handleLogsDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("Файл natbypass.log пока пуст или сохранение логов на диск ещё не производилось.\nВключите опцию «Сохранять логи на диск» в настройках WebUI и нажмите «Применить настройки».\n"))
+}
+
+// handleLogsClear — POST /api/logs/clear — очистка (обнуление) файла natbypass.log на диске роутера/ПК
+func (s *Server) handleLogsClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.jsonResponse(w, http.StatusMethodNotAllowed, nil, "метод не поддерживается")
+		return
+	}
+
+	cleared := false
+	for _, p := range s.getLogCandidates() {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			if err := os.WriteFile(p, []byte(""), 0644); err == nil {
+				cleared = true
+			}
+		}
+	}
+	if cleared {
+		s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "Файл журнала natbypass.log успешно очищен (0 байт)"}, "")
+	} else {
+		s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "Журнал на диске не найден или уже пуст"}, "")
+	}
 }
 
 // handlePeersClear — POST /api/peers/clear — принудительный сброс кэша устройств
