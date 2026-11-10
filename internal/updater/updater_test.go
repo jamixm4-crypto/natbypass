@@ -8,6 +8,7 @@
 package updater
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
@@ -207,6 +208,23 @@ func TestUpdaterTransport_TLSAndCertPool(t *testing.T) {
 	client := NewUpdaterHTTPClient(10 * time.Second)
 	if client == nil || client.Transport == nil {
 		t.Fatalf("expected client with custom transport")
+	}
+}
+
+func TestResolveHostWithFallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 1. IP address passthrough
+	ips, err := resolveHostWithFallback(ctx, "1.2.3.4")
+	if err != nil || len(ips) != 1 || ips[0] != "1.2.3.4" {
+		t.Errorf("expected direct IP passthrough, got %v, err=%v", ips, err)
+	}
+
+	// 2. Real domain resolution
+	domainIPs, err := resolveHostWithFallback(ctx, "github.com")
+	if err != nil || len(domainIPs) == 0 {
+		t.Logf("DNS resolution for github.com: %v (err: %v)", domainIPs, err)
 	}
 }
 

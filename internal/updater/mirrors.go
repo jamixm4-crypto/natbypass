@@ -318,7 +318,7 @@ func GetMirrorAssetURLs(m *MirrorManifest, assetKey string) []string {
 func IsMirrorURL(urlStr string) bool {
 	// Если это GitHub-прокси, строго проверяем,
 	// что запрос направлен исключительно к нашему официальному репозиторию!
-	proxyDomains := []string{"gh-proxy.com", "ghfast.top", "ghproxy.net", "ghproxy.cc", "mirror.ghproxy.com"}
+	proxyDomains := []string{"gh-proxy.com", "ghfast.top", "ghproxy.net"}
 	for _, pd := range proxyDomains {
 		if strings.Contains(urlStr, pd) {
 			return strings.Contains(urlStr, "/"+GithubRepo+"/releases/download/")

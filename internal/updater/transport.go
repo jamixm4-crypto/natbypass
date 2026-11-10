@@ -8,6 +8,7 @@
 package updater
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -149,14 +150,91 @@ func getUpdaterTLSConfig() *tls.Config {
 	}
 }
 
-// NewUpdaterTransport creates an http.Transport configured with robust TLS, connection pooling, and reasonable dial timeouts.
+// fallbackDNSBootstrap lists reliable public DNS IP:port combinations used when
+// the local router resolver (e.g., 127.0.0.1:53) is unresponsive or times out.
+var fallbackDNSBootstrap = []string{
+	"77.88.8.8:53", // Yandex Public DNS (Primary RU)
+	"1.1.1.1:53",    // Cloudflare Public DNS
+	"77.88.8.1:53", // Yandex Public DNS (Secondary RU)
+	"8.8.8.8:53",    // Google Public DNS
+}
+
+// resolveHostWithFallback resolves a hostname to IP addresses.
+// It first attempts system resolution with a fast timeout (1500ms).
+// If the local resolver times out or fails (e.g. 127.0.0.1:53 on Keenetic/OpenWrt),
+// it queries fallback public DNS resolvers directly via pure-Go UDP queries.
+func resolveHostWithFallback(ctx context.Context, host string) ([]string, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []string{host}, nil
+	}
+
+	// 1. Try system resolver with 1500ms timeout
+	sysCtx, sysCancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	ips, err := net.DefaultResolver.LookupHost(sysCtx, host)
+	sysCancel()
+	if err == nil && len(ips) > 0 {
+		return ips, nil
+	}
+
+	// 2. Fallback to public bootstrap DNS
+	for _, dnsServer := range fallbackDNSBootstrap {
+		r := &net.Resolver{
+			PreferGo: true,
+			Dial: func(dialCtx context.Context, network, address string) (net.Conn, error) {
+				var d net.Dialer
+				d.Timeout = 1500 * time.Millisecond
+				return d.DialContext(dialCtx, "udp", dnsServer)
+			},
+		}
+		fbCtx, fbCancel := context.WithTimeout(ctx, 2*time.Second)
+		fbIPs, fbErr := r.LookupHost(fbCtx, host)
+		fbCancel()
+		if fbErr == nil && len(fbIPs) > 0 {
+			return fbIPs, nil
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("failed to resolve %s across system and fallback DNS", host)
+}
+
+// NewUpdaterTransport creates an http.Transport configured with robust TLS, connection pooling,
+// resilient DNS fallback for routers (127.0.0.1:53 timeout guard), and reasonable dial timeouts.
 func NewUpdaterTransport() *http.Transport {
+	baseDialer := &net.Dialer{
+		Timeout:   12 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   12 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return baseDialer.DialContext(ctx, network, addr)
+			}
+
+			ips, err := resolveHostWithFallback(ctx, host)
+			if err != nil || len(ips) == 0 {
+				return baseDialer.DialContext(ctx, network, addr)
+			}
+
+			var lastDialErr error
+			for _, ip := range ips {
+				target := net.JoinHostPort(ip, port)
+				conn, dialErr := baseDialer.DialContext(ctx, network, target)
+				if dialErr == nil {
+					return conn, nil
+				}
+				lastDialErr = dialErr
+			}
+			if lastDialErr != nil {
+				return nil, lastDialErr
+			}
+			return baseDialer.DialContext(ctx, network, addr)
+		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          50,
 		IdleConnTimeout:       90 * time.Second,
