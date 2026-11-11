@@ -4399,8 +4399,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
         let exitBadge = '—';
         let exitBtn = '';
-        if (p.is_exit_node) {
-          const isExitActive = (currentSelectedExitNode === p.device_id || (currentActiveExitVIP && currentActiveExitVIP === vIP));
+        const isExitActive = Boolean(currentSelectedExitNode && (currentSelectedExitNode === p.device_id || currentSelectedExitNode === vIP)) ||
+                             Boolean(currentActiveExitVIP && currentActiveExitVIP === vIP);
+        const canBeExit = Boolean(p.is_exit_node || isExitActive);
+
+        if (canBeExit) {
           if (isExitActive) {
             exitBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" title="Нажмите чтобы отключить шлюз">✅ Активный интернет-шлюз</span>`;
             exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-weight:700; padding:3px 9px; font-size:0.72rem;" title="Отключить шлюз и восстановить прямой интернет">🔌 Отключить шлюз</button>`;
@@ -4512,10 +4515,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           </tr>
         `;
 
-        // Только узлы, разрешившие раздачу интернета
-        if (p.is_exit_node) {
+        // Только узлы, разрешившие раздачу интернета или текущий активный шлюз
+        if (canBeExit) {
           exitNodesFound++;
-          const isSel = (p.device_id === curVal) ? 'selected' : '';
+          const isSel = (p.device_id === curVal || vIP === curVal || isExitActive) ? 'selected' : '';
           exitOptions += `<option value="${p.device_id}" ${isSel}>🌐 ${name} (${vIP})</option>`;
         }
       });
@@ -4762,15 +4765,17 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         let posX, posY;
         const startX = selfNode.x + 180;
         const endX = (internetNode ? internetNode.x - 140 : clientW - 120);
+        const nodeVIP = (p.virtual_ip || '').split('/')[0].trim();
+        const isNodeExit = Boolean(p.is_exit_node || (currentSelectedExitNode && (currentSelectedExitNode === p.device_id || currentSelectedExitNode === nodeVIP)) || (currentActiveExitVIP && currentActiveExitVIP === nodeVIP));
 
         if (dCount === 1) {
           posX = (startX + endX) / 2;
-          posY = p.is_exit_node ? (cy + 45) : cy;
+          posY = isNodeExit ? (cy + 45) : cy;
         } else {
           const stepX = (endX - startX) / Math.max(1, dCount - 1);
           posX = startX + idx * stepX;
           posY = (idx % 2 === 0) ? (cy - 35) : (cy + 45);
-          if (p.is_exit_node) {
+          if (isNodeExit) {
             posY = cy + 50;
           }
         }
@@ -4786,9 +4791,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           online: p.online,
           direct: true,
           ping: pingMs,
-          radius: p.is_exit_node ? 20 : 16,
+          radius: isNodeExit ? 20 : 16,
           color: p.awg_mismatch ? '#ef4444' : (pingMs < 100 ? '#10b981' : (pingMs < 300 ? '#fbbf24' : '#f87171')),
-          icon: p.awg_mismatch ? '⚠️' : (p.is_exit_node ? '⭐' : '⚡'),
+          icon: p.awg_mismatch ? '⚠️' : (isNodeExit ? '⭐' : '⚡'),
           routeInfo: '⚡ Прямой P2P сокет (' + (p.active_endpoint || 'UDP') + ')',
           endpoint: p.active_endpoint || p.stun_addr || p.public_ip || '—'
         };
@@ -4803,7 +4808,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           ping: pingMs
         });
 
-        if (p.is_exit_node && internetNode) {
+        if (isNodeExit && internetNode) {
           meshEdges.push({
             from: node,
             to: internetNode,
@@ -4828,6 +4833,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           posY = 48 + idx * stepY;
         }
 
+        const nodeVIP = (p.virtual_ip || '').split('/')[0].trim();
+        const isNodeExit = Boolean(p.is_exit_node || (currentSelectedExitNode && (currentSelectedExitNode === p.device_id || currentSelectedExitNode === nodeVIP)) || (currentActiveExitVIP && currentActiveExitVIP === nodeVIP));
+
         const node = {
           id: p.device_id,
           name: p.nickname ? p.nickname : (p.device_name ? p.device_name : p.device_id.substring(0, 10)),
@@ -4838,13 +4846,24 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           online: p.online,
           direct: false,
           ping: 0,
-          radius: p.is_exit_node ? 20 : 16,
+          radius: isNodeExit ? 20 : 16,
           color: !p.online ? '#ef4444' : '#c084fc',
-          icon: p.is_exit_node ? '⭐' : (p.online ? '📡' : '❌'),
+          icon: isNodeExit ? '⭐' : (p.online ? '📡' : '❌'),
           routeInfo: p.online ? '🌐 Подключен через Relay Брокер (Fallback)' : '🔴 Узел оффлайн',
           endpoint: p.active_endpoint || p.stun_addr || p.public_ip || 'Через MQTT/WSS'
         };
         meshNodes.push(node);
+
+        if (isNodeExit && internetNode) {
+          meshEdges.push({
+            from: node,
+            to: internetNode,
+            type: 'exit',
+            color: '#22c55e',
+            label: 'NAT Выход',
+            ping: 15
+          });
+        }
 
         if (relayHubNode) {
           meshEdges.push({

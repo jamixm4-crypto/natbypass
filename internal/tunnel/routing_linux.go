@@ -311,6 +311,10 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-p", "icmp", "-j", "ACCEPT")
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "iif", "nb0", "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "iif", "nb0", "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanSubnet, "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", cleanSubnet, "lookup", "main")
 	}
 
 	// 5. Bi-directional TCP MSS Clamping to 1220 bytes (prevents PMTU Blackhole under tunnel encapsulation)
@@ -693,19 +697,36 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 // setLinuxExitNodeDNS настраивает DNS серверы при активации exit node на Linux.
 // R2: Без этого DNS запросы могут идти мимо VPN-тоннеля (DNS leak).
 func setLinuxExitNodeDNS() {
-	// Метод 1: systemd-resolved через resolvectl (127.0.0.1 DoH, 1.1.1.1 fallback)
-	if err := exec.Command("resolvectl", "dns", "nb0", "127.0.0.1", "1.1.1.1").Run(); err == nil {
+	dohActive := false
+	if conn, err := net.DialTimeout("udp", "127.0.0.1:53", 100*time.Millisecond); err == nil {
+		_ = conn.Close()
+		dohActive = true
+	}
+
+	primaryDNS := "1.1.1.1"
+	secDNS := "8.8.8.8"
+	if dohActive {
+		primaryDNS = "127.0.0.1"
+		secDNS = "1.1.1.1"
+	}
+
+	// Метод 1: systemd-resolved через resolvectl
+	if err := exec.Command("resolvectl", "dns", "nb0", primaryDNS, secDNS).Run(); err == nil {
 		_ = exec.Command("resolvectl", "domain", "nb0", "~.").Run()
 		return
 	}
 	// Метод 2: через nmcli (NetworkManager)
-	if err := exec.Command("nmcli", "dev", "mod", "nb0", "ipv4.dns", "127.0.0.1 1.1.1.1").Run(); err == nil {
+	if err := exec.Command("nmcli", "dev", "mod", "nb0", "ipv4.dns", primaryDNS+" "+secDNS).Run(); err == nil {
 		return
 	}
-	// Метод 3: Прямая правка /etc/resolv.conf (fallback для OpenWrt/Keenetic)
-	const dnsContent = "# NatBypass exit node DoH DNS\nnameserver 127.0.0.1\nnameserver 1.1.1.1\n"
+	// Метод 3: Прямая правка /etc/resolv.conf (fallback для OpenWrt/Keenetic с бэкапом!)
+	if _, err := os.Stat("/etc/resolv.conf.natbypass.bak"); os.IsNotExist(err) {
+		if origData, readErr := os.ReadFile("/etc/resolv.conf"); readErr == nil {
+			_ = os.WriteFile("/etc/resolv.conf.natbypass.bak", origData, 0644)
+		}
+	}
+	dnsContent := fmt.Sprintf("# NatBypass exit node DNS\nnameserver %s\nnameserver %s\n", primaryDNS, secDNS)
 	if err := os.WriteFile("/etc/resolv.conf", []byte(dnsContent), 0644); err != nil {
-		// /etc/resolv.conf может быть симлинком — игнорируем
 		_ = err
 	}
 }
@@ -718,6 +739,12 @@ func restoreLinuxDNS() {
 	}
 	// Метод 2: nmcli сброс
 	_ = exec.Command("nmcli", "dev", "mod", "nb0", "ipv4.dns", "").Run()
+
+	// Метод 3: Восстановление исходного /etc/resolv.conf из бэкапа
+	if bakData, err := os.ReadFile("/etc/resolv.conf.natbypass.bak"); err == nil {
+		_ = os.WriteFile("/etc/resolv.conf", bakData, 0644)
+		_ = os.Remove("/etc/resolv.conf.natbypass.bak")
+	}
 }
 
 // DisableExitNodeRouting removes def1 routes and bypass routes.

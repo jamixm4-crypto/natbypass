@@ -722,3 +722,90 @@ func TestPeer_PunchMethodMerge(t *testing.T) {
 		t.Errorf("expected demoted PunchMethod 'relay_mqtt', got %s", demoted.PunchMethod)
 	}
 }
+
+func TestExitNodePreservationAcrossProbes(t *testing.T) {
+	reg := NewRegistry()
+
+	// Initial registration from signaling: Keenetic router with exit node and advertised LAN
+	reg.Upsert(&Peer{
+		DeviceID:         "keenetic-home",
+		Nickname:         "Keenetic Giga",
+		VirtualIP:        "10.11.12.1/24",
+		Online:           true,
+		IsExitNode:       true,
+		AdvertisedRoutes: []string{"192.168.1.0/24"},
+		LastSeen:         time.Now(),
+	})
+
+	p, ok := reg.Get("keenetic-home")
+	if !ok || !p.IsExitNode {
+		t.Fatalf("expected keenetic-home to have IsExitNode=true")
+	}
+
+	// Incoming NAT probe or ping response (which does NOT carry IsExitNode flag)
+	probeUpdate := &Peer{
+		DeviceID:       "keenetic-home",
+		ActiveEndpoint: "198.51.100.5:47832",
+		DirectP2P:      true,
+		LastSeen:       time.Now(),
+		Online:         true,
+	}
+	reg.Upsert(probeUpdate)
+
+	pAfter, _ := reg.Get("keenetic-home")
+	if !pAfter.IsExitNode {
+		t.Fatalf("CRITICAL: IsExitNode was wiped out by partial probe update!")
+	}
+	if len(pAfter.AdvertisedRoutes) == 0 || pAfter.AdvertisedRoutes[0] != "192.168.1.0/24" {
+		t.Fatalf("CRITICAL: AdvertisedRoutes was wiped out by partial probe update!")
+	}
+
+	// Explicit revocation: user on router turns off exit node
+	revokeUpdate := &Peer{
+		DeviceID:    "keenetic-home",
+		ExitRevoked: true,
+		LastSeen:    time.Now(),
+		Online:      true,
+	}
+	reg.Upsert(revokeUpdate)
+
+	pRevoked, _ := reg.Get("keenetic-home")
+	if pRevoked.IsExitNode {
+		t.Fatalf("expected IsExitNode=false after explicit ExitRevoked=true")
+	}
+}
+
+func TestRegistry_GetByIDOrVIP(t *testing.T) {
+	reg := NewRegistry()
+	reg.Upsert(&Peer{
+		DeviceID:   "device-pc-1",
+		Nickname:   "My Work PC",
+		VirtualIP:  "10.11.12.5/24",
+		Online:     true,
+		IsExitNode: true,
+		LastSeen:   time.Now(),
+	})
+
+	// 1. Lookup by Device ID
+	p1, ok1 := reg.GetByIDOrVIP("device-pc-1")
+	if !ok1 || p1 == nil || p1.DeviceID != "device-pc-1" {
+		t.Fatalf("lookup by DeviceID failed")
+	}
+
+	// 2. Lookup by clean Virtual IP
+	p2, ok2 := reg.GetByIDOrVIP("10.11.12.5")
+	if !ok2 || p2 == nil || p2.DeviceID != "device-pc-1" {
+		t.Fatalf("lookup by clean VIP failed")
+	}
+
+	// 3. Lookup by VIP with CIDR mask
+	p3, ok3 := reg.GetByIDOrVIP("10.11.12.5/24")
+	if !ok3 || p3 == nil || p3.DeviceID != "device-pc-1" {
+		t.Fatalf("lookup by VIP with /24 mask failed")
+	}
+
+	// 4. Non-existent ID or VIP
+	if _, ok4 := reg.GetByIDOrVIP("10.11.12.99"); ok4 {
+		t.Fatalf("expected non-existent VIP to return false")
+	}
+}

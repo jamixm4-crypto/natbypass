@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.3"
+	Version = "1.9.507-beta.4"
 	Commit  = "release"
 )
 
@@ -6616,8 +6616,10 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 					nick = p.DeviceName
 				}
 
-				// Automatic Route Revocation & Safety Notification
-				if activeExitNodeID != "" && p.DeviceID == activeExitNodeID && (p.ExitRevoked || !p.IsExitNode) {
+				// Automatic Route Revocation & Safety Notification (only on explicit ExitRevoked)
+				cleanVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+				isActiveExit := activeExitNodeID != "" && (p.DeviceID == activeExitNodeID || (activeExitVIP != "" && cleanVIP == activeExitVIP))
+				if isActiveExit && p.ExitRevoked {
 					if activeExitVIP != "" {
 						_ = tunnel.DisableExitNodeRouting(activeExitVIP)
 					}
@@ -7575,8 +7577,8 @@ func updateData() {
 
 		// Автоматическая проверка состояния выбранного Exit Node
 		if activeExitNodeID != "" {
-			peer, ok := registry.Get(activeExitNodeID)
-			if !ok || !peer.Online || !peer.IsExitNode {
+			peer, ok := registry.GetByIDOrVIP(activeExitNodeID)
+			if !ok || !peer.Online || peer.ExitRevoked {
 				if activeExitVIP != "" {
 					_ = tunnel.DisableExitNodeRouting(activeExitVIP)
 				}

@@ -2383,8 +2383,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}(),
 		"active_exit_vip": func() string {
 			if cfg != nil && cfg.Network.SelectedExitNode != "" && s.registry != nil {
-				if p, ok := s.registry.Get(cfg.Network.SelectedExitNode); ok && p != nil {
-					return p.VirtualIP
+				if p, ok := s.registry.GetByIDOrVIP(cfg.Network.SelectedExitNode); ok && p != nil {
+					return strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 				}
 			}
 			return ""
@@ -4133,8 +4133,8 @@ func (s *Server) handleRoutingStatus(w http.ResponseWriter, r *http.Request) {
 	activeExitVIP := ""
 	activeExitName := ""
 	if cfg.Network.SelectedExitNode != "" && s.registry != nil {
-		if p, ok := s.registry.Get(cfg.Network.SelectedExitNode); ok && p != nil {
-			activeExitVIP = p.VirtualIP
+		if p, ok := s.registry.GetByIDOrVIP(cfg.Network.SelectedExitNode); ok && p != nil {
+			activeExitVIP = strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 			activeExitName = p.DeviceName
 			if activeExitName == "" {
 				activeExitName = p.Nickname
@@ -4191,8 +4191,13 @@ func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Requ
 
 	if req.Enabled {
 		var remoteEPs []string
+		myDevID := ""
+		if s.state != nil {
+			myDevID = s.state.DeviceID
+		}
+
 		if s.registry != nil {
-			if p, ok := s.registry.Get(req.PeerID); ok && p != nil {
+			if p, ok := s.registry.GetByIDOrVIP(req.PeerID); ok && p != nil {
 				if req.GatewayVIP == "" {
 					req.GatewayVIP = p.VirtualIP
 				}
@@ -4205,6 +4210,33 @@ func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Requ
 				if p.PublicIP != "" {
 					remoteEPs = append(remoteEPs, p.PublicIP)
 				}
+				if p.LocalAddr != "" {
+					remoteEPs = append(remoteEPs, p.LocalAddr)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" {
+						remoteEPs = append(remoteEPs, cand)
+					}
+				}
+			}
+
+			// Также обходим эндпоинты всех остальных пиров в меш-сети, чтобы не разорвать P2P и служебный трафик
+			for _, p := range s.registry.List() {
+				if p == nil || (myDevID != "" && p.DeviceID == myDevID) {
+					continue
+				}
+				if p.ActiveEndpoint != "" {
+					remoteEPs = append(remoteEPs, p.ActiveEndpoint)
+				}
+				if p.STUNAddr != "" {
+					remoteEPs = append(remoteEPs, p.STUNAddr)
+				}
+				if p.PublicIP != "" {
+					remoteEPs = append(remoteEPs, p.PublicIP)
+				}
+				if p.LocalAddr != "" {
+					remoteEPs = append(remoteEPs, p.LocalAddr)
+				}
 				for _, cand := range p.Candidates {
 					if cand != "" {
 						remoteEPs = append(remoteEPs, cand)
@@ -4213,7 +4245,7 @@ func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Requ
 			}
 		}
 
-		// Also bypass critical signaling infrastructure (MQTT broker, STUN servers, WSS relay)
+		// Обход сигнальной инфраструктуры: STUN-серверы, MQTT-брокер профиля, Telegram, Relay
 		if cfg != nil {
 			for _, st := range cfg.Network.StunServers {
 				remoteEPs = append(remoteEPs, st)
@@ -4223,17 +4255,26 @@ func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Requ
 					remoteEPs = append(remoteEPs, ch.Params["broker"])
 				}
 			}
+			if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+				if activeProf.MQTTBroker != "" {
+					remoteEPs = append(remoteEPs, activeProf.MQTTBroker)
+				}
+				if activeProf.TGToken != "" {
+					remoteEPs = append(remoteEPs, "api.telegram.org")
+				}
+			}
 			if cfg.Relay.Server != "" {
 				remoteEPs = append(remoteEPs, cfg.Relay.Server)
 			}
 		}
 
-		if req.GatewayVIP == "" {
+		cleanVIP := strings.TrimSpace(strings.Split(req.GatewayVIP, "/")[0])
+		if cleanVIP == "" {
 			s.jsonResponse(w, http.StatusBadRequest, nil, "не указан виртуальный IP шлюза")
 			return
 		}
 
-		if err := tunnel.EnableExitNodeRouting(req.GatewayVIP, remoteEPs...); err != nil {
+		if err := tunnel.EnableExitNodeRouting(cleanVIP, remoteEPs...); err != nil {
 			s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка настройки шлюза: "+err.Error())
 			return
 		}
@@ -4246,9 +4287,10 @@ func (s *Server) handleRoutingExitNodeToggle(w http.ResponseWriter, r *http.Requ
 		if s.onConfigChange != nil {
 			s.onConfigChange()
 		}
-		s.AddEvent("info", "Активирован интернет-шлюз", "Весь интернет перенаправлен через "+req.GatewayVIP)
+		s.AddEvent("info", "Активирован интернет-шлюз", "Весь интернет перенаправлен через "+cleanVIP)
 	} else {
-		_ = tunnel.DisableExitNodeRouting(req.GatewayVIP)
+		cleanVIP := strings.TrimSpace(strings.Split(req.GatewayVIP, "/")[0])
+		_ = tunnel.DisableExitNodeRouting(cleanVIP)
 		cfg.Network.SelectedExitNode = ""
 		_ = config.Save(cfg, s.configPath, false)
 		if s.cfg != nil {

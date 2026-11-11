@@ -332,6 +332,39 @@ func (existing *Peer) MergeFrom(newer *Peer) {
 	if !newer.IsKeenetic && existing.IsKeenetic {
 		newer.IsKeenetic = existing.IsKeenetic
 	}
+	// Exit Node & Route propagation preservation across probes/pings:
+	if newer.IsExitNode {
+		newer.ExitRevoked = false
+	} else if existing.IsExitNode && !newer.ExitRevoked {
+		newer.IsExitNode = existing.IsExitNode
+	}
+	if !newer.ExitRevoked && existing.ExitRevoked {
+		newer.ExitRevoked = existing.ExitRevoked
+	}
+	if len(newer.AdvertisedRoutes) == 0 && len(existing.AdvertisedRoutes) > 0 {
+		newer.AdvertisedRoutes = existing.AdvertisedRoutes
+	}
+	if !newer.CoordinatorCapable && existing.CoordinatorCapable {
+		newer.CoordinatorCapable = existing.CoordinatorCapable
+	}
+	if !newer.RelayCapable && existing.RelayCapable {
+		newer.RelayCapable = existing.RelayCapable
+	}
+	if newer.RelayQuotaGBDay == 0 && existing.RelayQuotaGBDay > 0 {
+		newer.RelayQuotaGBDay = existing.RelayQuotaGBDay
+	}
+	if newer.CountryFlag == "" && existing.CountryFlag != "" {
+		newer.CountryFlag = existing.CountryFlag
+	}
+	if newer.PublicKey == "" && existing.PublicKey != "" {
+		newer.PublicKey = existing.PublicKey
+	}
+	if newer.WGPubKey == "" && existing.WGPubKey != "" {
+		newer.WGPubKey = existing.WGPubKey
+	}
+	if newer.WGPort == 0 && existing.WGPort != 0 {
+		newer.WGPort = existing.WGPort
+	}
 	if newer.OS == "" && existing.OS != "" {
 		newer.OS = existing.OS
 	}
@@ -887,6 +920,21 @@ func (r *Registry) GetByVirtualIP(vip string) (*Peer, bool) {
 		return bestPeer, true
 	}
 	return nil, false
+}
+
+// GetByIDOrVIP retrieves a peer by DeviceID or VirtualIP (with or without CIDR mask).
+func (r *Registry) GetByIDOrVIP(idOrVIP string) (*Peer, bool) {
+	if idOrVIP == "" {
+		return nil, false
+	}
+	clean := strings.TrimSpace(strings.Split(idOrVIP, "/")[0])
+	r.mu.RLock()
+	p, ok := r.peers[clean]
+	r.mu.RUnlock()
+	if ok && p != nil {
+		return p, true
+	}
+	return r.GetByVirtualIP(clean)
 }
 
 

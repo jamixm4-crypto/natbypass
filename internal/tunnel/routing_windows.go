@@ -176,19 +176,53 @@ func DisableHostIPForwarding() error {
 }
 
 var (
-	bypassedMu             sync.Mutex
+	bypassedMu              sync.Mutex
 	lastBypassedEndpointIPs []string
+	cachedPhysGW            string
+	cachedPhysGWTime        time.Time
 )
 
 // getPhysicalGatewayWindows finds the current primary physical default gateway IP
 func getPhysicalGatewayWindows() string {
-	psScript := `(Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.InterfaceAlias -notlike '*NatBypass*' } | Sort-Object RouteMetric | Select-Object -First 1).NextHop`
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	bypassedMu.Lock()
+	if cachedPhysGW != "" && time.Since(cachedPhysGWTime) < 10*time.Second {
+		gw := cachedPhysGW
+		bypassedMu.Unlock()
+		return gw
+	}
+	bypassedMu.Unlock()
+
+	// 1. Fast path: "route print 0.0.0.0" via cmd.exe (~70ms vs 1500ms powershell)
+	cmd := exec.Command("cmd", "/c", "route print 0.0.0.0")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-	out, err := cmd.Output()
-	if err == nil {
+	if out, err := cmd.Output(); err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			fields := strings.Fields(line)
+			if len(fields) >= 5 && fields[0] == "0.0.0.0" && fields[1] == "0.0.0.0" {
+				gw := fields[2]
+				if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() && !ip.IsLoopback() && !isMeshIPWindows(gw) {
+					bypassedMu.Lock()
+					cachedPhysGW = gw
+					cachedPhysGWTime = time.Now()
+					bypassedMu.Unlock()
+					return gw
+				}
+			}
+		}
+	}
+
+	// 2. Fallback: PowerShell Get-NetRoute
+	psScript := `(Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.InterfaceAlias -notlike '*NatBypass*' } | Sort-Object RouteMetric | Select-Object -First 1).NextHop`
+	psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	psCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	if out, err := psCmd.Output(); err == nil {
 		gw := strings.TrimSpace(string(out))
-		if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
+		if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() && !isMeshIPWindows(gw) {
+			bypassedMu.Lock()
+			cachedPhysGW = gw
+			cachedPhysGWTime = time.Now()
+			bypassedMu.Unlock()
 			return gw
 		}
 	}
@@ -328,10 +362,22 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		return fmt.Errorf("failed to add default route 128.0.0.0/1 via %s: %w", cleanVIP, err)
 	}
 
-	// 3. Configure DoH DNS on NatBypass adapter to prevent DNS leaks and ISP hijacking (127.0.0.1 primary, 1.1.1.1 fallback)
+	// 3. Configure DNS on NatBypass adapter: use local DoH (127.0.0.1) ONLY if port 53 is responsive,
+	// otherwise fall back directly to public resolvers (1.1.1.1, 8.8.8.8) routed via tunnel.
 	adapterName := getNatBypassAdapterNameWindows()
-	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "127.0.0.1", "register=primary", "validate=no")
-	_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=1.1.1.1", "index=2", "validate=no")
+	dohActive := false
+	if conn, err := net.DialTimeout("udp", "127.0.0.1:53", 100*time.Millisecond); err == nil {
+		_ = conn.Close()
+		dohActive = true
+	}
+
+	if dohActive {
+		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "127.0.0.1", "register=primary", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=1.1.1.1", "index=2", "validate=no")
+	} else {
+		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "1.1.1.1", "register=primary", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=8.8.8.8", "index=2", "validate=no")
+	}
 
 	return nil
 }

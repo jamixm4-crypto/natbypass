@@ -853,20 +853,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 					selStr := strings.TrimSpace(strings.Split(sel, "/")[0])
 					var exitPeer *peer.Peer
-					if p, ok := registry.Get(selStr); ok && p != nil {
+					if p, ok := registry.GetByIDOrVIP(selStr); ok && p != nil {
 						exitPeer = p
-					} else {
-						for _, item := range registry.List() {
-							itemVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
-							if item.DeviceID == selStr || itemVIP == selStr {
-								exitPeer = item
-								break
-							}
-						}
 					}
 
-					// Health criteria: peer exists, is online, and seen within last PeerOfflineThreshold (45s)
-					peerHealthy := exitPeer != nil && exitPeer.Online && time.Since(exitPeer.LastSeen) < constants.PeerOfflineThreshold
+					// Health criteria: peer exists, is online, seen within last PeerOfflineThreshold (45s), and hasn't revoked exit
+					peerHealthy := exitPeer != nil && exitPeer.Online && !exitPeer.ExitRevoked && time.Since(exitPeer.LastSeen) < constants.PeerOfflineThreshold
 
 					exitRoutingMu.Lock()
 					if peerHealthy {
@@ -1438,20 +1430,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 					// 3. Fallback to Selected Exit Node for default Internet routing (0.0.0.0/0)
 					if (!found || p == nil) && cfg.Network.SelectedExitNode != "" {
-						if exitPeer, ok := registry.Get(cfg.Network.SelectedExitNode); ok && exitPeer != nil {
+						if exitPeer, ok := registry.GetByIDOrVIP(cfg.Network.SelectedExitNode); ok && exitPeer != nil {
 							p = exitPeer
 							found = true
-						} else {
-							for _, item := range registry.List() {
-								// F4: VirtualIP хранится с маской (e.g. "10.11.12.5/24"), SelectedExitNode — без. Обрезаем маску.
-								itemVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
-								selStr := strings.TrimSpace(strings.Split(cfg.Network.SelectedExitNode, "/")[0])
-								if item.DeviceID == selStr || itemVIP == selStr {
-									p = item
-									found = true
-									break
-								}
-							}
 						}
 					}
 
@@ -1614,7 +1595,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						// Dual-Path Shadow Relay Rule: ONLY if direct transmission completely failed AND NOT internet traffic!
 						// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
 						directVerified := sentTCP || (sentDirect && p.DirectP2P && bilateralOK)
-						needsRelay := !directVerified && (!isForwardedInternet || isICMP)
+						needsRelay := !directVerified
+						needsMQTTRelay := needsRelay && (!isForwardedInternet || isICMP)
 
 						// 1e. Mesh Userspace Multi-Hop Relay Fallback:
 						if needsRelay && !isForceUDP {
@@ -1664,7 +1646,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 
 						// 1g. MQTT L3 Tunnel Fallback (Level 2)
-						if needsRelay && !sentDirect && !sentTCP && sigMgr != nil {
+						if needsMQTTRelay && !sentDirect && !sentTCP && sigMgr != nil {
 							dataToSend := pkt
 							if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
 								cKey := crypto.DeriveKey(activeProf.NetworkKey)
