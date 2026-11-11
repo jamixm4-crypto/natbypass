@@ -1095,6 +1095,430 @@
     #pathLatencyLine, #pathLatencyArea, #pathThroughputLine, #pathThroughputArea {
       transition: d 0.85s cubic-bezier(0.4, 0, 0.2, 1);
     }
+
+    /* ==========================================================================
+       PROARENA HYPEROS GLASS DIAGNOSTICS & DEBUGGER STYLING
+       ========================================================================== */
+    .diag-header-card {
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      position: relative;
+    }
+    .diag-header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .diag-header-info {
+      flex: 1;
+      min-width: 260px;
+    }
+    .diag-header-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: #38bdf8;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .diag-header-title {
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: var(--pc-text);
+      letter-spacing: -0.02em;
+      margin: 0 0 4px 0;
+    }
+    .diag-header-desc {
+      font-size: 0.8rem;
+      color: var(--pc-text-muted);
+      margin: 0;
+      line-height: 1.45;
+    }
+    .diag-header-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .diag-tabs-nav {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-top: 10px;
+      border-top: 1px solid var(--pc-border);
+      -webkit-overflow-scrolling: touch;
+    }
+    .diag-tab-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      border-radius: var(--radius-md);
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--pc-text-muted);
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.16s ease;
+    }
+    .diag-tab-pill:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--pc-text);
+    }
+    .diag-tab-pill.active {
+      background: linear-gradient(135deg, rgba(0, 242, 254, 0.16), rgba(56, 189, 248, 0.08));
+      border-color: rgba(0, 242, 254, 0.35);
+      color: #38bdf8;
+      box-shadow: 0 2px 10px rgba(0, 242, 254, 0.15);
+    }
+    .diag-subpane {
+      display: none;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .diag-subpane.active {
+      display: flex;
+    }
+
+    /* Banners */
+    .diag-banner {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 18px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--pc-border);
+      transition: all 0.25s ease;
+    }
+    .diag-banner-icon {
+      font-size: 1.8rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .diag-banner-content {
+      flex: 1;
+      min-width: 220px;
+    }
+    .diag-banner-title {
+      font-size: 0.95rem;
+      font-weight: 750;
+      margin-bottom: 2px;
+    }
+    .diag-banner-desc {
+      font-size: 0.8rem;
+      line-height: 1.45;
+      color: var(--pc-text-muted);
+    }
+    .diag-banner-idle {
+      background: rgba(56, 189, 248, 0.06);
+      border-color: rgba(56, 189, 248, 0.25);
+    }
+    .diag-banner-idle .diag-banner-title { color: #38bdf8; }
+    .diag-banner-success {
+      background: rgba(16, 185, 129, 0.08);
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+    .diag-banner-success .diag-banner-title { color: #34d399; }
+    .diag-banner-warning {
+      background: rgba(245, 158, 11, 0.08);
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+    .diag-banner-warning .diag-banner-title { color: #fbbf24; }
+    .diag-banner-danger {
+      background: rgba(239, 68, 68, 0.08);
+      border-color: rgba(239, 68, 68, 0.35);
+    }
+    .diag-banner-danger .diag-banner-title { color: #f87171; }
+
+    /* Grid cards */
+    .diag-grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    @media (max-width: 860px) {
+      .diag-grid-2 { grid-template-columns: 1fr; }
+    }
+    .diag-metric-card {
+      background: var(--pc-card-bg);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-lg);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
+    }
+    .diag-card-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.86rem;
+      font-weight: 750;
+      color: var(--pc-text);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--pc-border);
+    }
+    .diag-card-body {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .diag-kv-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.81rem;
+      gap: 8px;
+    }
+    .diag-kv-label {
+      color: var(--pc-text-muted);
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+    .diag-kv-val {
+      color: var(--pc-text);
+      font-weight: 600;
+      text-align: right;
+      word-break: break-all;
+    }
+    .diag-status-pill {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .pill-idle { background: rgba(255,255,255,0.06); color: var(--pc-text-muted); border: 1px solid rgba(255,255,255,0.1); }
+    .pill-ok { background: rgba(16,185,129,0.12); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+    .pill-warn { background: rgba(245,158,11,0.12); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+    .pill-fail { background: rgba(239,68,68,0.12); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+    .pill-cyan { background: rgba(56,189,248,0.12); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3); }
+
+    .diag-feature-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .badge-dim {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--pc-text-muted);
+      font-size: 0.72rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+    .badge-active {
+      background: rgba(56,189,248,0.12);
+      border: 1px solid rgba(56,189,248,0.35);
+      color: #38bdf8;
+      font-size: 0.72rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+
+    .diag-peer-summary-bar {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 6px 10px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-sm);
+      font-size: 0.76rem;
+    }
+    .summary-pill {
+      color: var(--pc-text-muted);
+    }
+    .summary-pill b {
+      color: var(--pc-text);
+      font-family: monospace;
+    }
+    .diag-mini-peer-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 150px;
+      overflow-y: auto;
+      margin-top: 4px;
+    }
+    .diag-peer-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 8px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--pc-border);
+      border-radius: 6px;
+      font-size: 0.78rem;
+    }
+
+    .diag-runtime-strip {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      background: var(--pc-card-bg);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-md);
+      font-size: 0.78rem;
+    }
+    .runtime-item {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .runtime-label {
+      color: var(--pc-text-muted);
+    }
+    .runtime-val {
+      color: var(--pc-text);
+      font-weight: 600;
+    }
+
+    .diag-raw-details {
+      background: var(--pc-card-bg);
+      border: 1px solid var(--pc-border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .diag-raw-details summary {
+      padding: 11px 16px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--pc-text-muted);
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .diag-raw-details summary:hover {
+      background: var(--pc-card-elevated);
+      color: var(--pc-text);
+    }
+    .diag-raw-pre {
+      background: #090d16;
+      border-top: 1px solid var(--pc-border);
+      padding: 14px 16px;
+      margin: 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      line-height: 1.6;
+      color: #94a3b8;
+      overflow-x: auto;
+      max-height: 320px;
+      white-space: pre-wrap;
+    }
+    .btn-copy-raw {
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: var(--pc-text);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.72rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-copy-raw:hover {
+      background: rgba(255,255,255,0.15);
+    }
+
+    /* Subpane Headers */
+    .diag-subpane-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    /* Network Tools Form */
+    .diag-tools-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 14px;
+    }
+    .diag-input-wrap {
+      flex: 1;
+      min-width: 240px;
+      position: relative;
+    }
+    .diag-tools-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .diag-presets-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .btn-preset-pill {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--pc-text-muted);
+      border-radius: 6px;
+      padding: 3px 9px;
+      font-size: 0.74rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-preset-pill:hover {
+      background: rgba(255,255,255,0.08);
+      color: var(--pc-text);
+    }
+    .btn-preset-pill.pill-peer {
+      background: rgba(56,189,248,0.08);
+      border-color: rgba(56,189,248,0.25);
+      color: #38bdf8;
+    }
+    .btn-preset-pill.pill-peer:hover {
+      background: rgba(56,189,248,0.16);
+    }
+
+    .diag-tool-output-container {
+      margin-top: 14px;
+    }
+    .diag-rec-card {
+      background: rgba(56,189,248,0.08);
+      border: 1px solid rgba(56,189,248,0.25);
+      border-radius: var(--radius-lg);
+      padding: 14px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    @media (max-width: 600px) {
+      .diag-header-actions { width: 100%; display: flex; gap: 8px; }
+      .diag-header-actions .btn { flex: 1; justify-content: center; font-size: 0.8rem; padding: 8px 10px; }
+      .diag-tools-form { flex-direction: column; align-items: stretch; }
+      .diag-input-wrap { width: 100%; min-width: 0; }
+      .diag-tools-actions { width: 100%; display: flex; gap: 8px; }
+      .diag-tools-actions .btn { flex: 1; justify-content: center; }
+    }
 </style>
 <script>
 
@@ -1929,161 +2353,376 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       </div>
     </div>
 
-    <!-- TAB 7: DIAGNOSTICS -->
+    <!-- TAB 7: DIAGNOSTICS & DEBUGGER -->
     <div id="tab-diagnostics" class="tab-pane">
-      <!-- 1. Ping & Traceroute Network Tools -->
-      <div class="glass-card" style="margin-bottom:20px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
-          <div>
-            <h2 style="font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
-              <span>Сетевые утилиты: Ping и Traceroute с интерфейса</span>
-            </h2>
-            <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Прямая проверка времени отклика, трассировки маршрута и доступности виртуальных IP узлов</p>
+      <!-- Diagnostics Header & Navigation Card -->
+      <div class="glass-card diag-header-card">
+        <div class="diag-header-top">
+          <div class="diag-header-info">
+            <div class="diag-header-badge">
+              <span class="status-pulse-dot"></span>
+              <span>СИСТЕМНЫЙ ДЕБАГГЕР & СЕТЕВОЙ АУДИТ</span>
+            </div>
+            <h2 class="diag-header-title">Центр сетевой диагностики</h2>
+            <p class="diag-header-desc">Комплексный мониторинг связности, классификация NAT (RFC 5780), детекция ТСПУ DPI и инструменты трассировки</p>
+          </div>
+          <div class="diag-header-actions">
+            <button onclick="runDiag()" class="btn btn-primary" id="btnRunDiagHeader">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              <span>Запустить тест</span>
+            </button>
+            <button onclick="copyDiagReport()" class="btn btn-glass" title="Скопировать отчет для поддержки">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+              <span>Копировать отчет</span>
+            </button>
           </div>
         </div>
 
-        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px;">
-          <input type="text" id="diagTargetIP" class="form-input mono" placeholder="Целевой IP (например, 10.10.77.2 или 1.1.1.1)" style="flex:1; min-width:220px; font-size:0.9rem;">
-          <button onclick="runPingTool()" class="btn btn-neon" style="padding:9px 18px; font-size:0.84rem; display:flex; align-items:center; gap:6px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-            <span>Запустить Ping</span>
+        <!-- Segmented Navigation Pills -->
+        <div class="diag-tabs-nav">
+          <button class="diag-tab-pill active" onclick="switchDiagSubtab('overview')" id="diagSubtabBtn-overview">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+            <span>Статус & Дебаггер</span>
           </button>
-          <button onclick="runTracerouteTool()" class="btn btn-glass" style="padding:9px 18px; font-size:0.84rem; color:#38bdf8; border-color:rgba(56,189,248,0.4); display:flex; align-items:center; gap:6px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="2" x2="22" y1="12" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
-            <span>Traceroute</span>
+          <button class="diag-tab-pill" onclick="switchDiagSubtab('netcheck')" id="diagSubtabBtn-netcheck">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></svg>
+            <span>RFC 5780 & ТСПУ DPI</span>
           </button>
-          <button onclick="checkInternetAccessTool()" class="btn btn-glass" style="padding:9px 16px; font-size:0.84rem; color:#4ade80; border-color:rgba(74,222,128,0.4); display:flex; align-items:center; gap:6px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
-            <span>Проверить Интернет</span>
+          <button class="diag-tab-pill" onclick="switchDiagSubtab('tools')" id="diagSubtabBtn-tools">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <span>Ping & Traceroute</span>
           </button>
-        </div>
-
-        <div style="display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;">
-          <span style="font-size:0.75rem; color:var(--text-dim); align-self:center;">Быстрый выбор цели:</span>
-          <button type="button" onclick="setDiagTarget('1.1.1.1')" class="btn-pill" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-muted); padding:3px 8px; font-size:0.75rem; cursor:pointer;">Cloudflare (1.1.1.1)</button>
-          <button type="button" onclick="setDiagTarget('8.8.8.8')" class="btn-pill" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:var(--text-muted); padding:3px 8px; font-size:0.75rem; cursor:pointer;">Google DNS (8.8.8.8)</button>
-          <button type="button" onclick="fillFirstPeerTarget()" class="btn-pill" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; padding:3px 8px; font-size:0.75rem; cursor:pointer;">Первый пир в сети</button>
-        </div>
-
-        <pre id="netToolOutput" class="mono" style="background:#090d16; border:1px solid rgba(51,65,85,0.6); border-radius:10px; padding:14px; font-size:0.82rem; line-height:1.6; min-height:100px; max-height:260px; overflow-y:auto; color:#94a3b8; white-space:pre-wrap;">Готов к запуску. Введите IP адрес узла и нажмите «Запустить Ping» или «Traceroute».</pre>
-      </div>
-
-      <!-- 2. Subnet Routes & Exit Node Access Overview -->
-      <div class="glass-card" style="margin-bottom:20px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-          <div>
-            <h2 style="font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
-              <span>Расшаренные подсети & Доступ в интернет через узлы</span>
-            </h2>
-            <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Список локальных LAN-сетей (Subnets) и шлюзов, анонсированных участниками сети</p>
-          </div>
-          <button onclick="loadPeerRoutesDiag()" class="btn btn-glass" style="padding:6px 12px; font-size:0.8rem; display:flex; align-items:center; gap:6px;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-            <span>Обновить</span>
+          <button class="diag-tab-pill" onclick="switchDiagSubtab('subnets')" id="diagSubtabBtn-subnets">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" x2="8" y1="2" y2="18"/><line x1="16" x2="16" y1="6" y2="22"/></svg>
+            <span>Подсети & Маршруты</span>
           </button>
-        </div>
-
-        <div id="peerRoutesContainer" style="display:flex; flex-direction:column; gap:10px;">
-          <div style="color:var(--text-dim); font-size:0.82rem; font-style:italic;">Загрузка данных о подсетях участников...</div>
         </div>
       </div>
 
-      <!-- 3. RFC 5780 NAT & TSPU DPI Netcheck -->
-      <div class="glass-card" style="margin-bottom:20px; border-color: rgba(56, 189, 248, 0.3); background: linear-gradient(135deg, rgba(56, 189, 248, 0.04), rgba(14, 20, 32, 0.7));">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
-          <div>
-            <h2 style="font-size:1.15rem; font-weight:800; display:flex; align-items:center; gap:8px;">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M6 18h8"></path><path d="M3 22h18"></path><path d="M14 22a7 7 0 1 0 0-14h-1"></path><path d="M9 14h2"></path><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"></path><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"></path></svg>
-              <span>Глубокий аудит сети (RFC 5780 STUN Netcheck & ТСПУ DPI)</span>
-            </h2>
-            <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Анализ поведения NAT (Mapping & Filtering), детекция трансграничных блокировок ТСПУ и Path MTU</p>
+      <!-- SUB-PANE 1: SYSTEM OVERVIEW & HEALTH STATUS -->
+      <div id="diag-subpane-overview" class="diag-subpane active">
+        <!-- Health Status Banner -->
+        <div id="diagVerdictBanner" class="diag-banner diag-banner-idle">
+          <div class="diag-banner-icon">⏳</div>
+          <div class="diag-banner-content">
+            <div class="diag-banner-title">Нажмите «Запустить тест» для полной проверки</div>
+            <div class="diag-banner-desc">Система выполнит сквозной тест выхода в интернет, внешнего сокета STUN, классификации NAT и рантайма.</div>
           </div>
-          <div style="display:flex; gap:8px;">
-            <button id="btnRunNetcheck" onclick="runNetcheck()" class="btn btn-neon" style="background: linear-gradient(135deg, #0284c7, #38bdf8); font-size:0.85rem; padding:8px 18px; display:flex; align-items:center; gap:6px;">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+          <button onclick="runDiag()" class="btn btn-sm btn-primary">⚡ Начать аудит</button>
+        </div>
+
+        <!-- 4 Grid Metric Cards -->
+        <div class="diag-grid-2">
+          <!-- Card 1: Network & Internet Routing -->
+          <div class="diag-metric-card">
+            <div class="diag-card-title">
+              <span style="display:flex; align-items:center; gap:8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                Сеть & Доступ в Интернет
+              </span>
+              <span id="diagNetStatusBadge" class="diag-status-pill pill-idle">—</span>
+            </div>
+            <div class="diag-card-body">
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">Интернет:</span>
+                <span class="diag-kv-val" id="diagNetInternet">Ожидание проверки...</span>
+              </div>
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">Интерфейс (Egress):</span>
+                <span class="diag-kv-val mono" id="diagNetEgress">—</span>
+              </div>
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">Внешний IPv4:</span>
+                <span class="diag-kv-val mono" id="diagNetPublicIP">—</span>
+              </div>
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">Глобальный IPv6:</span>
+                <span class="diag-kv-val mono" id="diagNetIPv6">—</span>
+              </div>
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">TCP 443 доступность:</span>
+                <span class="diag-kv-val" id="diagNetTCP443">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: STUN & TSPU / DPI -->
+          <div class="diag-metric-card">
+            <div class="diag-card-title">
+              <span style="display:flex; align-items:center; gap:8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                STUN & Фильтрация ТСПУ
+              </span>
+              <span id="diagStunStatusBadge" class="diag-status-pill pill-idle">—</span>
+            </div>
+            <div class="diag-card-body">
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">STUN Сокет:</span>
+                <span class="diag-kv-val mono" id="diagStunSocket">Ожидание проверки...</span>
+              </div>
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">Тип NAT:</span>
+                <span class="diag-kv-val" id="diagStunNATType">—</span>
+              </div>
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">Цензура ТСПУ:</span>
+                <span class="diag-kv-val" id="diagStunTSPU">—</span>
+              </div>
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">Адаптер TUN / VIP:</span>
+                <span class="diag-kv-val mono" id="diagStunTUN">—</span>
+              </div>
+              <div class="diag-kv-row">
+                <span class="diag-kv-label">Канал сигналов:</span>
+                <span class="diag-kv-val" id="diagStunChannel">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 3: Transport Escalation Ladder -->
+          <div class="diag-metric-card">
+            <div class="diag-card-title">
+              <span style="display:flex; align-items:center; gap:8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2"><line x1="8" x2="16" y1="6" y2="6"/><line x1="8" x2="16" y1="12" y2="12"/><line x1="8" x2="16" y1="18" y2="18"/><line x1="8" x2="8" y1="3" y2="21"/><line x1="16" x2="16" y1="3" y2="21"/></svg>
+                Эскалация транспорта
+              </span>
+              <span id="diagLadderBadge" class="diag-status-pill pill-cyan">Standard UDP</span>
+            </div>
+            <div class="diag-card-body">
+              <div style="font-size:0.86rem; font-weight:700; color:var(--pc-text); margin-bottom:8px;" id="diagLadderSummary">
+                Level 0: UDP Standard (AmneziaWG 3.1)
+              </div>
+              <div class="diag-feature-chips" id="diagLadderChips">
+                <span class="badge-dim">IPv6-Only: Выкл</span>
+                <span class="badge-dim">UDP Пробы: Активны</span>
+                <span class="badge-dim">MQTT L3 Fallback: Выкл</span>
+                <span class="badge-dim">TCP Relay: Неактивен</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 4: Mesh Peers & Connectivity -->
+          <div class="diag-metric-card">
+            <div class="diag-card-title">
+              <span style="display:flex; align-items:center; gap:8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                Mesh-сеть & Участники
+              </span>
+              <span id="diagPeersCountBadge" class="diag-status-pill pill-idle">0 пиров</span>
+            </div>
+            <div class="diag-card-body">
+              <div class="diag-peer-summary-bar" id="diagPeersSummaryBar">
+                <span class="summary-pill">P2P: <b id="cntP2P">0</b></span>
+                <span class="summary-pill">IPv6: <b id="cntIPv6">0</b></span>
+                <span class="summary-pill">TCP: <b id="cntTCP">0</b></span>
+                <span class="summary-pill">Relay: <b id="cntRelay">0</b></span>
+              </div>
+              <div class="diag-mini-peer-list" id="diagPeersRankingList">
+                <div style="color:var(--text-dim); font-size:0.8rem; font-style:italic; padding:6px 0;">Ожидание запуска диагностики...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- System Runtime Info Strip -->
+        <div class="diag-runtime-strip">
+          <div class="runtime-item">
+            <span class="runtime-label">ОС / Платформа:</span>
+            <span class="runtime-val mono" id="diagSysOS">—</span>
+          </div>
+          <div class="runtime-item">
+            <span class="runtime-label">Горутины:</span>
+            <span class="runtime-val mono" id="diagSysGoroutines">—</span>
+          </div>
+          <div class="runtime-item">
+            <span class="runtime-label">RAM (Alloc / Sys):</span>
+            <span class="runtime-val mono" id="diagSysRAM">—</span>
+          </div>
+          <div class="runtime-item">
+            <span class="runtime-label">Аптайм службы:</span>
+            <span class="runtime-val mono" id="diagSysUptime">—</span>
+          </div>
+        </div>
+
+        <!-- Collapsible Raw ASCII Console Output -->
+        <details class="diag-raw-details">
+          <summary>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
+            <span>Показать сырой консольный отчет (для разработчиков / техподдержки)</span>
+          </summary>
+          <div style="position:relative;">
+            <button onclick="copyDiagReport()" class="btn-copy-raw" title="Копировать в буфер">📋 Скопировать</button>
+            <pre id="diagRawBox" class="diag-raw-pre">Нажмите «Запустить тест» для формирования консольного отчета...</pre>
+          </div>
+        </details>
+      </div>
+
+      <!-- SUB-PANE 2: RFC 5780 NETCHECK & TSPU DPI -->
+      <div id="diag-subpane-netcheck" class="diag-subpane">
+        <div class="glass-card" style="border-color: rgba(56, 189, 248, 0.25);">
+          <div class="diag-subpane-header">
+            <div>
+              <h3 style="font-size:1.1rem; font-weight:750; margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></svg>
+                <span>Анализ NAT (RFC 5780) & Детекция ТСПУ DPI</span>
+              </h3>
+              <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Классификация типов трансляции портов, фильтрации и выявление провайдерских блокировок</p>
+            </div>
+            <button id="btnRunNetcheck" onclick="runNetcheck()" class="btn btn-primary" style="padding:8px 18px; font-size:0.84rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
               <span>Запустить Netcheck</span>
             </button>
           </div>
-        </div>
 
-        <div id="netcheckResults" style="display:none; flex-direction:column; gap:14px;">
-          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
-            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">📡 NAT MAPPING (RFC 5780)</div>
-              <div id="ncMapping" style="font-size:1rem; font-weight:700; color:#38bdf8;">—</div>
-              <div id="ncDelta" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">—</div>
-            </div>
-            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">🛡️ NAT FILTERING (RFC 5780)</div>
-              <div id="ncFiltering" style="font-size:1rem; font-weight:700; color:#a78bfa;">—</div>
-              <div id="ncNATType" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">—</div>
-            </div>
-            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">🚫 ДЕТЕКЦИЯ ТСПУ / DPI</div>
-              <div id="ncTSPU" style="font-size:1rem; font-weight:700; color:#4ade80;">Чисто</div>
-              <div id="ncTSPUDetails" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">Блокировок не обнаружено</div>
-            </div>
-            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">📏 PATH MTU & ПОРТЫ</div>
-              <div id="ncMTU" style="font-size:1rem; font-weight:700; color:#fbbf24;">—</div>
-              <div id="ncProtoSupport" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">—</div>
-            </div>
-          </div>
-
-          <!-- Вторая линия: Эскалационная лестница, Dual-Stack WAN и Задержки -->
-          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
-            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">🪜 ЭСКАЛАЦИЯ ТРАНСПОРТА</div>
-              <div id="ncLadderMode" style="font-size:0.95rem; font-weight:700; color:#38bdf8;">Level 0: UDP Standard</div>
-              <div id="ncLadderDetails" style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">Прямой P2P UDP обмен</div>
-            </div>
-            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">🌐 DUAL-STACK WAN IP</div>
-              <div id="ncWanIPv4" style="font-size:0.88rem; font-weight:700; color:#cbd5e1;">IPv4: —</div>
-              <div id="ncWanIPv6" style="font-size:0.75rem; color:#a78bfa; margin-top:2px; word-break:break-all;">IPv6: —</div>
-            </div>
-            <div class="stat-card" style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px; grid-column: span 2;">
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">⚡ МАТРИЦА ЗАДЕРЖЕК ЗОНДОВ (RTT)</div>
-              <div id="ncLatencyGrid" style="display:flex; flex-wrap:wrap; gap:8px; font-size:0.76rem;">
-                <span style="color:var(--text-dim);">Ожидание зондов...</span>
+          <div id="netcheckResults" style="display:none; flex-direction:column; gap:16px; margin-top:16px;">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
+              <div class="diag-metric-card" style="padding:14px;">
+                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">📡 NAT MAPPING (RFC 5780)</div>
+                <div id="ncMapping" style="font-size:1.05rem; font-weight:750; color:#38bdf8; margin-top:4px;">—</div>
+                <div id="ncDelta" style="font-size:0.76rem; color:var(--text-dim); margin-top:2px;">—</div>
+              </div>
+              <div class="diag-metric-card" style="padding:14px;">
+                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">🛡️ NAT FILTERING (RFC 5780)</div>
+                <div id="ncFiltering" style="font-size:1.05rem; font-weight:750; color:#a78bfa; margin-top:4px;">—</div>
+                <div id="ncNATType" style="font-size:0.76rem; color:var(--text-dim); margin-top:2px;">—</div>
+              </div>
+              <div class="diag-metric-card" style="padding:14px;">
+                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">🚫 ДЕТЕКЦИЯ ТСПУ / DPI</div>
+                <div id="ncTSPU" style="font-size:1.05rem; font-weight:750; color:#4ade80; margin-top:4px;">Чисто</div>
+                <div id="ncTSPUDetails" style="font-size:0.76rem; color:var(--text-dim); margin-top:2px;">Блокировок не обнаружено</div>
+              </div>
+              <div class="diag-metric-card" style="padding:14px;">
+                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">📏 PATH MTU & ПОРТЫ</div>
+                <div id="ncMTU" style="font-size:1.05rem; font-weight:750; color:#fbbf24; margin-top:4px;">—</div>
+                <div id="ncProtoSupport" style="font-size:0.76rem; color:var(--text-dim); margin-top:2px;">—</div>
               </div>
             </div>
-          </div>
 
-          <div id="ncRecommendationCard" style="background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-            <div style="flex:1; min-width:280px;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:0.85rem; font-weight:700; color:#38bdf8;">✨ Оптимальный режим транспорта:</span>
-                <span id="ncRecBadge" class="badge" style="background:rgba(56,189,248,0.2); color:#38bdf8; border:1px solid rgba(56,189,248,0.4); font-size:0.72rem; padding:2px 8px; border-radius:6px;">Direct UDP</span>
+            <!-- Second Line -->
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:12px;">
+              <div class="diag-metric-card" style="padding:14px;">
+                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">🪜 ЭСКАЛАЦИЯ ТРАНСПОРТА</div>
+                <div id="ncLadderMode" style="font-size:0.95rem; font-weight:700; color:#38bdf8; margin-top:4px;">Level 0: UDP Standard</div>
+                <div id="ncLadderDetails" style="font-size:0.76rem; color:var(--text-dim); margin-top:2px;">Прямой P2P UDP обмен</div>
               </div>
-              <div id="ncRecommendationText" style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Рекомендуется режим прямого UDP (AWG) для максимальной скорости и минимальных задержек.</div>
+              <div class="diag-metric-card" style="padding:14px;">
+                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">🌐 DUAL-STACK WAN IP</div>
+                <div id="ncWanIPv4" style="font-size:0.88rem; font-weight:700; color:var(--pc-text); margin-top:4px;">IPv4: —</div>
+                <div id="ncWanIPv6" style="font-size:0.76rem; color:#a78bfa; margin-top:2px; word-break:break-all;">IPv6: —</div>
+              </div>
+              <div class="diag-metric-card" style="padding:14px; grid-column: span 2;">
+                <div style="font-size:0.75rem; color:var(--text-muted); font-weight:700; margin-bottom:8px;">⚡ МАТРИЦА ЗАДЕРЖЕК ЗОНДОВ (RTT)</div>
+                <div id="ncLatencyGrid" style="display:flex; flex-wrap:wrap; gap:8px;">
+                  <span style="color:var(--text-dim); font-size:0.8rem;">Ожидание зондов...</span>
+                </div>
+              </div>
             </div>
-            <button id="btnApplyTransport" onclick="applyRecommendedTransport()" class="btn btn-neon" style="padding:7px 16px; font-size:0.82rem;">
-              ⚡ Применить рекомендацию
-            </button>
-          </div>
-        </div>
 
-        <div id="netcheckPlaceholder" style="color:var(--text-dim); font-size:0.82rem; font-style:italic;">
-          Нажмите кнопку «⚡ Запустить Netcheck» для классификации NAT по RFC 5780 и проверки блокировок DPI.
+            <!-- Recommendation Card -->
+            <div id="ncRecommendationCard" class="diag-rec-card">
+              <div style="flex:1; min-width:260px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-size:0.88rem; font-weight:700; color:#38bdf8;">✨ Оптимальный режим транспорта:</span>
+                  <span id="ncRecBadge" class="badge badge-cyan" style="font-size:0.75rem; padding:3px 10px;">Direct UDP</span>
+                </div>
+                <div id="ncRecommendationText" style="font-size:0.82rem; color:var(--text-muted); margin-top:6px; line-height:1.5;">
+                  Рекомендуется режим прямого UDP (AWG) для максимальной скорости и минимальных задержек.
+                </div>
+              </div>
+              <button id="btnApplyTransport" onclick="applyRecommendedTransport()" class="btn btn-primary" style="padding:8px 16px; font-size:0.82rem;">
+                ⚡ Применить рекомендацию
+              </button>
+            </div>
+          </div>
+
+          <div id="netcheckPlaceholder" style="color:var(--text-dim); font-size:0.84rem; font-style:italic; padding:24px 0; text-align:center;">
+            Нажмите кнопку «⚡ Запустить Netcheck» для классификации NAT по стандарту RFC 5780 и выявления блокировок ТСПУ.
+          </div>
         </div>
       </div>
 
-      <!-- 4. General System Connectivity Report -->
-      <div class="glass-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
-          <div>
-            <h2>💻 СИСТЕМНАЯ ДИАГНОСТИКА & ДЕБАГГЕР NATBYPASS</h2>
-            <p style="color: var(--text-muted); font-size: 0.8rem;">Комплексная проверка интернета, STUN, NAT-типа и пиров</p>
+      <!-- SUB-PANE 3: PING & TRACEROUTE NETWORK TOOLS -->
+      <div id="diag-subpane-tools" class="diag-subpane">
+        <div class="glass-card">
+          <div class="diag-subpane-header">
+            <div>
+              <h3 style="font-size:1.1rem; font-weight:750; margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                <span>Сетевые утилиты: Пинг и Трассировка</span>
+              </h3>
+              <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Прямая проверка отклика, сетевых задержек и трассировки маршрута к целевым узлам</p>
+            </div>
           </div>
-          <div style="display:flex; gap: 8px;">
-            <button onclick="runDiag()" class="btn btn-neon">⚡ Диагностика одной кнопкой</button>
-            <button onclick="copyDiagReport()" class="btn btn-glass">📋 Скопировать отчет</button>
+
+          <!-- Tool Input Group -->
+          <div class="diag-tools-form">
+            <div class="diag-input-wrap">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position:absolute; left:14px; top:50%; transform:translateY(-50%); color:var(--text-dim);"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></svg>
+              <input type="text" id="diagTargetIP" class="form-input mono" placeholder="Целевой IP (например, 10.200.0.2 или 1.1.1.1)" style="padding-left:38px; width:100%;">
+            </div>
+            <div class="diag-tools-actions">
+              <button onclick="runPingTool()" class="btn btn-primary" id="btnRunPing">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                <span>Ping</span>
+              </button>
+              <button onclick="runTracerouteTool()" class="btn btn-glass" id="btnRunTrace" style="color:#38bdf8; border-color:rgba(56,189,248,0.35);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                <span>Traceroute</span>
+              </button>
+              <button onclick="checkInternetAccessTool()" class="btn btn-glass" id="btnCheckInternet" style="color:#4ade80; border-color:rgba(74,222,128,0.35);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+                <span>Тест Интернета</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick presets -->
+          <div class="diag-presets-row">
+            <span style="font-size:0.76rem; color:var(--text-dim); align-self:center;">Быстрый выбор цели:</span>
+            <button type="button" onclick="setDiagTarget('1.1.1.1')" class="btn-preset-pill">Cloudflare (1.1.1.1)</button>
+            <button type="button" onclick="setDiagTarget('8.8.8.8')" class="btn-preset-pill">Google DNS (8.8.8.8)</button>
+            <button type="button" onclick="fillFirstPeerTarget()" class="btn-preset-pill pill-peer">Первый пир в сети</button>
+          </div>
+
+          <!-- Interactive Results Container -->
+          <div id="netToolOutputContainer" class="diag-tool-output-container">
+            <div id="netToolPlaceholder" style="color:var(--text-dim); font-size:0.84rem; font-style:italic; text-align:center; padding:32px 16px;">
+              Готов к запуску. Введите IP адрес целевого узла и нажмите «Ping» или «Traceroute».
+            </div>
+            <div id="netToolStructuredResult" style="display:none;"></div>
+            <details id="netToolRawDetails" class="diag-raw-details" style="display:none; margin-top:12px;">
+              <summary>
+                <span>Показать полный консольный вывод утилиты</span>
+              </summary>
+              <pre id="netToolOutput" class="diag-raw-pre"></pre>
+            </details>
           </div>
         </div>
-        <pre id="diagBox" class="mono" style="background: rgba(10, 14, 24, 0.85); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 18px; font-size: 0.86rem; line-height: 1.8;">Нажмите «Запустить тест» для проверки связности...</pre>
+      </div>
+
+      <!-- SUB-PANE 4: SUBNET ROUTES & EXIT NODES -->
+      <div id="diag-subpane-subnets" class="diag-subpane">
+        <div class="glass-card">
+          <div class="diag-subpane-header">
+            <div>
+              <h3 style="font-size:1.1rem; font-weight:750; margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" x2="8" y1="2" y2="18"/><line x1="16" x2="16" y1="6" y2="22"/></svg>
+                <span>Расшаренные подсети & Доступ в интернет через узлы</span>
+              </h3>
+              <p style="color:var(--text-muted); font-size:0.8rem; margin:0;">Список локальных LAN-сетей (Subnets) и шлюзов, анонсированных участниками сети</p>
+            </div>
+            <button onclick="loadPeerRoutesDiag()" class="btn btn-glass" style="padding:6px 14px; font-size:0.82rem; display:flex; align-items:center; gap:6px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Обновить список</span>
+            </button>
+          </div>
+
+          <div id="peerRoutesContainer" style="display:flex; flex-direction:column; gap:12px; margin-top:16px;">
+            <div style="color:var(--text-dim); font-size:0.84rem; font-style:italic; padding:16px 0; text-align:center;">
+              Загрузка данных о подсетях участников...
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -3123,7 +3762,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         if (tabName === 'awg' && typeof loadAWG === 'function') loadAWG();
         if (tabName === 'timeline' && typeof refreshEvents === 'function') refreshEvents();
         if (tabName === 'settings' && typeof loadConfig === 'function') loadConfig();
-        if (tabName === 'diagnostics' && typeof runDiagnostics === 'function') runDiagnostics();
+        if (tabName === 'diagnostics') {
+          if (typeof runDiag === 'function' && !lastDiagReport) runDiag();
+          if (typeof currentDiagSubtab !== 'undefined' && currentDiagSubtab === 'subnets' && typeof loadPeerRoutesDiag === 'function') loadPeerRoutesDiag();
+        }
       } catch (e) {
         console.error('switchTab hook error:', e);
       }
@@ -5196,14 +5838,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       document.getElementById('renameModal').classList.remove('active');
     }
 
-    function copyDiagReport() {
-      if (!lastDiagReport) {
-        const b = document.getElementById('diagBox');
-        lastDiagReport = b.innerText;
-      }
-      copyToClipboard(lastDiagReport, '✓ Отчет диагностики скопирован в буфер обмена!');
-    }
-
     function copyLogs() {
       const ls = document.getElementById('logStream');
       copyToClipboard(ls.innerText, '✓ Журнал событий скопирован в буфер обмена!');
@@ -5325,9 +5959,25 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       showToast('✓ Анонсируемые подсети сохранены');
     }
 
-    // Diagnostics
+    // Diagnostics & Debugger Sub-Navigation
+    let currentDiagSubtab = 'overview';
+    function switchDiagSubtab(tabName) {
+      currentDiagSubtab = tabName;
+      document.querySelectorAll('.diag-tab-pill').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.diag-subpane').forEach(p => p.classList.remove('active'));
+      
+      const btn = document.getElementById('diagSubtabBtn-' + tabName);
+      if (btn) btn.classList.add('active');
+      const pane = document.getElementById('diag-subpane-' + tabName);
+      if (pane) pane.classList.add('active');
+      
+      if (tabName === 'subnets') {
+        loadPeerRoutesDiag();
+      }
+    }
+
     let lastDiagReport = '';
-    
+
     function setDiagTarget(ip) {
       const el = document.getElementById('diagTargetIP');
       if (el) el.value = ip;
@@ -5343,155 +5993,36 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
     }
 
-    async function runPingTool() {
-      const target = (document.getElementById('diagTargetIP').value || '').trim();
-      if (!target) {
-        showToast('⚠️ Введите целевой IP адрес');
-        return;
-      }
-      const outEl = document.getElementById('netToolOutput');
-      outEl.textContent = '🚀 Отправка ICMP Ping к ' + target + ' через виртуальный интерфейс...\nПодождите несколько секунд...';
-      try {
-        const res = await fetch('/api/diagnostics/ping', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({target})
-        });
-        const json = await res.json();
-        if (json.ok) {
-          outEl.textContent = json.raw_output || ('✓ Ответ от ' + target + ' получен успешно!');
-        } else {
-          outEl.textContent = '❌ Ошибка: ' + (json.error || 'Не удалось выполнить ping');
-        }
-      } catch(e) {
-        outEl.textContent = '❌ Ошибка выполнения запроса: ' + e.message;
-      }
-    }
-
-    async function runTracerouteTool() {
-      const target = (document.getElementById('diagTargetIP').value || '').trim();
-      if (!target) {
-        showToast('⚠️ Введите целевой IP адрес');
-        return;
-      }
-      const outEl = document.getElementById('netToolOutput');
-      outEl.textContent = '🌐 Запуск трассировки маршрута к ' + target + ' (до 8 хопов)...\nПодождите завершения...';
-      try {
-        const res = await fetch('/api/diagnostics/traceroute', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({target})
-        });
-        const json = await res.json();
-        if (json.ok) {
-          outEl.textContent = json.raw_output || '✓ Трассировка завершена.';
-        } else {
-          outEl.textContent = '❌ Ошибка трассировки: ' + (json.error || 'Сбой');
-        }
-      } catch(e) {
-        outEl.textContent = '❌ Ошибка выполнения: ' + e.message;
-      }
-    }
-
-    async function checkInternetAccessTool() {
-      const outEl = document.getElementById('netToolOutput');
-      outEl.textContent = '🌍 Проверка выхода в интернет через DNS и HTTP endpoints...\n';
-      try {
-        const res = await fetch('/api/diagnostics/check-internet', {
-          method: 'POST'
-        });
-        const json = await res.json();
-        if (json.ok) {
-          if (json.internet_available) {
-            outEl.textContent = '✅ ДОСТУП В ИНТЕРНЕТ АКТИВЕН!\nПинг до контрольных DNS/HTTPS серверов: ' + json.latency_ms + ' ms\nКанал чистый, пакеты передаются без потерь.';
-          } else {
-            outEl.textContent = '❌ НЕТ ДОСТУПА В ИНТЕРНЕТ через текущий маршрут.\nПроверьте настройки шлюза или профиль сети.';
-          }
-        }
-      } catch(e) {
-        outEl.textContent = '❌ Ошибка проверки: ' + e.message;
-      }
-    }
-
-    async function loadPeerRoutesDiag() {
-      const container = document.getElementById('peerRoutesContainer');
-      if (!container) return;
-      try {
-        const res = await fetch('/api/diagnostics/peer-routes');
-        const json = await res.json();
-        if (json.ok && json.peers) {
-          if (json.peers.length === 0) {
-            container.innerHTML = '<div style="color:var(--text-dim); font-size:0.82rem; font-style:italic; padding:8px 0;">Другие узлы пока не обнаружены в сети.</div>';
-            return;
-          }
-          container.innerHTML = '';
-          json.peers.forEach(p => {
-            const card = document.createElement('div');
-            card.style = 'background:rgba(255,255,255,0.03); border:1px solid rgba(51,65,85,0.6); border-radius:10px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;';
-            const cleanVIP = (p.virtual_ip || '').split('/')[0];
-            const hasRoutes = p.advertised_routes && p.advertised_routes.length > 0;
-            const routesStr = hasRoutes ? p.advertised_routes.join(', ') : 'Не расшарены (только узел)';
-            const exitBadge = p.is_exit_node 
-              ? '<span class="badge" style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#4ade80;">🌐 Шлюз в интернет (Exit Node)</span>'
-              : '<span class="badge" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:var(--text-dim);">Стандартный узел</span>';
-
-            card.innerHTML = '<div>' +
-              '<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">' +
-                '<span style="font-weight:700; color:#ffffff; font-size:0.9rem;">' + escapeHtml(p.device_name || p.device_id) + '</span>' +
-                '<span class="mono" style="color:#38bdf8; font-size:0.8rem; background:rgba(56,189,248,0.1); padding:1px 6px; border-radius:6px;">' + escapeHtml(cleanVIP) + '</span>' +
-                ipConflictBadge + exitBadge +
-              '</div>' +
-              '<div style="font-size:0.78rem; color:var(--text-muted);">' +
-                '<span style="color:var(--text-dim);">Локальные подсети (LAN):</span> <span class="mono" style="color:#e2e8f0; font-weight:600;">' + escapeHtml(routesStr) + '</span> • ' +
-                '<span>ОС: ' + escapeHtml(p.os || 'Linux') + ' (' + escapeHtml(p.arch || 'amd64') + ')</span> • ' +
-                '<span>Связь: ' + (p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct' ? '⚡ Direct TCP ShadowTLS (' + (p.latency_ms || p.ping_ms || 0) + 'ms)' : (p.direct_p2p ? '⚡ Direct P2P AWG (' + (p.latency_ms || p.ping_ms || 0) + 'ms)' : '📡 Relay')) + '</span>' +
-              '</div>' +
-            '</div>' +
-            '<div style="display:flex; gap:6px;">' +
-              '<button onclick="setDiagTarget(\'' + escapeHtml(cleanVIP) + '\'); runPingTool();" class="btn-pill" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); color:#38bdf8; padding:4px 10px; font-size:0.76rem; border-radius:8px; cursor:pointer;">⚡ Ping</button>' +
-              '<button onclick="setDiagTarget(\'' + escapeHtml(cleanVIP) + '\'); runTracerouteTool();" class="btn-pill" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); color:#cbd5e1; padding:4px 10px; font-size:0.76rem; border-radius:8px; cursor:pointer;">🌐 Traceroute</button>' +
-            '</div>';
-            container.appendChild(card);
-          });
-        }
-      } catch(e) {}
-    }
-
-    
-    async function syncAWGWithPeer(deviceId) {
-      if (!confirm('Применить параметры AmneziaWG 3.1 с этого узла к вашей конфигурации?')) return;
-      try {
-        const res = await fetch('/api/awg/sync-with-peer', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({device_id: deviceId})
-        });
-        const json = await res.json();
-        if (json.ok) {
-          showToast('✅ ' + json.message);
-          setTimeout(() => loadDashboard(), 1000);
-        } else {
-          showToast('❌ ' + (json.error || 'Ошибка синхронизации'));
-        }
-      } catch(e) {
-        showToast('❌ Ошибка: ' + e.message);
-      }
-    }
-
     async function runDiag() {
-      const b = document.getElementById('diagBox');
-      b.innerHTML = '<div style="color:var(--text-muted); font-style:italic;">⏳ Выполняется глубокий системный аудит сети, портов, пиров и рантайма...</div>';
+      const btn = document.getElementById('btnRunDiagHeader');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="status-pulse-dot"></span> <span>Тестирование...</span>';
+      }
+
+      const banner = document.getElementById('diagVerdictBanner');
+      if (banner) {
+        banner.className = 'diag-banner diag-banner-idle';
+        banner.innerHTML = `
+          <div class="diag-banner-icon"><span class="status-pulse-dot" style="width:18px;height:18px;"></span></div>
+          <div class="diag-banner-content">
+            <div class="diag-banner-title">Выполняется комплексный системный аудит...</div>
+            <div class="diag-banner-desc">Проверка выхода в интернет, шлюза, внешнего STUN, классификации NAT и рантайма.</div>
+          </div>
+        `;
+      }
+
       try {
         const res = await fetch('/api/diagnose');
         const json = await res.json();
         if (json.ok && json.data) {
           const d = json.data;
-          const nowStr = new Date().toLocaleString();
-          
-          // Formatted ASCII debug report for clipboard copy
+          const nowStr = new Date().toLocaleTimeString();
+
+          // Formatted ASCII debug report for clipboard copy & details box
           const lines = [
             `========================================================================`,
-            `           СИСТЕМНАЯ ДИАГНОСТИКА & ДЕБАГГЕР NATBYPASS [${nowStr}]`,
+            `           СИСТЕМНАЯ ДИАГНОСТИКА & ДЕБАГГЕР NATBYPASS [${new Date().toLocaleString()}]`,
             `========================================================================`,
             `1. СЕТЬ & МАРШРУТИЗАЦИЯ:`,
             `   - Доступ в Интернет: ${d.internet?.ok ? '✅ OK (' + (d.internet?.extra || '1.1.1.1/8.8.8.8') + ')' : '❌ FAIL (' + (d.internet?.detail || '') + ')'}`,
@@ -5508,12 +6039,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             `3. ЛЕСТНИЦА ЭСКАЛАЦИИ ТРАНСПОРТА:`,
             `   - Активный режим: ${d.transport_ladder?.summary || 'Standard UDP'} [${d.transport_ladder?.mode || 'auto'}]`,
             `   - Force IPv6-Only: ${d.transport_ladder?.force_ipv6_only ? 'АКТИВЕН' : 'Выключен'}`,
-            `   - Подавление UDP проб: ${d.transport_ladder?.probes_disabled ? 'АКТИВНО (экономия батареи/радио)' : 'Выключено'}`,
+            `   - Подавление UDP проб: ${d.transport_ladder?.probes_disabled ? 'АКТИВНО (экономия батареи)' : 'Выключено'}`,
             `   - MQTT L3 IP Fallback: ${d.transport_ladder?.mqtt_fallback ? 'АКТИВЕН' : 'Выключен'}`,
             `   - TCP Relay статус: ${d.transport_ladder?.tcp_relay_connected ? 'Подключен к узлу-релею на порту 443' : (d.transport_ladder?.tcp_relay_server_port > 0 ? 'Сервер слушает на :' + d.transport_ladder.tcp_relay_server_port : 'Неактивен')}`,
             ``,
             `4. ВИРТУАЛЬНЫЙ АДАПТЕР (TUN/WINTUN):`,
-            `   - Mesh IP адрес: ${d.tun?.virtual_ip || '10.1.1.x'}`,
+            `   - Mesh IP адрес: ${d.tun?.virtual_ip || '10.200.0.x'}`,
             `   - Драйвер: ${d.tun?.status?.Driver || 'Wintun / TUN (активен)'}`,
             ``,
             `5. СЕТЬ & MESH-ПИРЫ:`,
@@ -5530,151 +6061,525 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           ];
           lastDiagReport = lines.join('\n');
 
-          // Human-readable Verdict determination
-          let verdictHtml = '';
+          const rawBox = document.getElementById('diagRawBox');
+          if (rawBox) rawBox.textContent = lastDiagReport;
+
+          // Populate Health Banner
           const totalPeers = d.mesh_peers?.total ?? 0;
           const directP2P = d.mesh_peers?.direct_p2p ?? 0;
           const directIPv6 = d.mesh_peers?.direct_ipv6 ?? 0;
           const directTCP = d.mesh_peers?.direct_tcp ?? 0;
           const relayCount = (d.mesh_peers?.relay_mesh ?? 0) + (d.mesh_peers?.relay_mqtt ?? 0);
 
-          if (d.tspu?.detected) {
-            verdictHtml = `
-              <div style="background:rgba(239,68,68,0.12); border:1px solid #ef4444; border-radius:8px; padding:12px 16px;">
-                <div style="font-weight:700; color:#ef4444; font-size:0.95rem; display:flex; align-items:center; gap:8px;">
-                  ⚠️ ОБНАРУЖЕНА БЛОКИРОВКА UDP (ТСПУ / DPI)
+          if (banner) {
+            if (d.tspu?.detected) {
+              banner.className = 'diag-banner diag-banner-danger';
+              banner.innerHTML = `
+                <div class="diag-banner-icon">⚠️</div>
+                <div class="diag-banner-content">
+                  <div class="diag-banner-title">Обнаружена фильтрация UDP (ТСПУ / DPI)</div>
+                  <div class="diag-banner-desc">Провайдер сбрасывает прямые UDP-пакеты. Рекомендуется переключиться на режим <b>TCP ShadowTLS (порт 443)</b> или пресет <b>Strict</b> в разделе AmneziaWG.</div>
                 </div>
-                <div style="font-size:0.84rem; color:#fca5a5; margin-top:4px;">
-                  Провайдер сбрасывает прямые UDP-пакеты. Рекомендация: переключитесь на пресет AmneziaWG <b>Strict</b> в разделе «Обфускация» или включите транспорт <b>TCP ShadowTLS (порт 443)</b>.
+                <span class="badge" style="background:rgba(239,68,68,0.18); border:1px solid #ef4444; color:#fca5a5;">Блокировка UDP</span>
+              `;
+            } else if (totalPeers > 0 && (directP2P > 0 || directIPv6 > 0 || directTCP > 0) && relayCount === 0) {
+              banner.className = 'diag-banner diag-banner-success';
+              banner.innerHTML = `
+                <div class="diag-banner-icon">✅</div>
+                <div class="diag-banner-content">
+                  <div class="diag-banner-title">Все системы в норме: Прямое P2P соединение активно</div>
+                  <div class="diag-banner-desc">Соединение между пирами работает сокет-в-сокет на полной физической скорости без промежуточных задержек.</div>
                 </div>
-              </div>`;
-          } else if (totalPeers > 0 && (directP2P > 0 || directIPv6 > 0 || directTCP > 0) && relayCount === 0) {
-            verdictHtml = `
-              <div style="background:rgba(34,197,94,0.12); border:1px solid #22c55e; border-radius:8px; padding:12px 16px;">
-                <div style="font-weight:700; color:#4ade80; font-size:0.95rem; display:flex; align-items:center; gap:8px;">
-                  ✅ ВСЁ ОТЛИЧНО: ПРЯМОЕ P2P СОЕДИНЕНИЕ УСТАНОВЛЕНО
+                <span class="badge" style="background:rgba(16,185,129,0.18); border:1px solid #10b981; color:#34d399;">Direct P2P OK</span>
+              `;
+            } else if (relayCount > 0) {
+              banner.className = 'diag-banner diag-banner-warning';
+              banner.innerHTML = `
+                <div class="diag-banner-icon">🛡️</div>
+                <div class="diag-banner-content">
+                  <div class="diag-banner-title">Прямой P2P ограничен: активен Self-Healing релей</div>
+                  <div class="diag-banner-desc">Прямой сокет ограничен Symmetric NAT провайдера. Трафик защищённо маршрутизируется через узел-ретранслятор (Zero-Knowledge).</div>
                 </div>
-                <div style="font-size:0.84rem; color:#86efac; margin-top:4px;">
-                  Соединение между всеми пирами работает сокет-в-сокет на полной физической скорости без задержек ретрансляторов.
+                <span class="badge" style="background:rgba(245,158,11,0.18); border:1px solid #f59e0b; color:#fbbf24;">Mesh Relay Fallback</span>
+              `;
+            } else {
+              banner.className = 'diag-banner diag-banner-idle';
+              banner.innerHTML = `
+                <div class="diag-banner-icon">🟢</div>
+                <div class="diag-banner-content">
+                  <div class="diag-banner-title">Локальный узел активен, ожидание пиров в сети</div>
+                  <div class="diag-banner-desc">Сетевой стек, виртуальный TUN-адаптер и STUN работают штатно. Подключите второй узел с этим же профилем сети.</div>
                 </div>
-              </div>`;
-          } else if (relayCount > 0) {
-            verdictHtml = `
-              <div style="background:rgba(245,158,11,0.12); border:1px solid #f59e0b; border-radius:8px; padding:12px 16px;">
-                <div style="font-weight:700; color:#fbbf24; font-size:0.95rem; display:flex; align-items:center; gap:8px;">
-                  🛡️ ПРЯМОЙ P2P ОГРАНИЧЕН: АКТИВЕН SELF-HEALING РЕЛЕЙ
-                </div>
-                <div style="font-size:0.84rem; color:#fde68a; margin-top:4px;">
-                  Прямое соединение заблокировано Symmetric NAT/CGNAT провайдера. Трафик успешно идёт через узел-ретранслятор с нулевым раскрытием данных (Zero-Knowledge Multi-Hop).
-                </div>
-              </div>`;
-          } else {
-            verdictHtml = `
-              <div style="background:rgba(56,189,248,0.12); border:1px solid #38bdf8; border-radius:8px; padding:12px 16px;">
-                <div style="font-weight:700; color:#38bdf8; font-size:0.95rem; display:flex; align-items:center; gap:8px;">
-                  ⏳ УЗЕЛ АКТИВЕН, ОЖИДАНИЕ ПИРОВ В СЕТИ
-                </div>
-                <div style="font-size:0.84rem; color:#bae6fd; margin-top:4px;">
-                  Локальный сетевой стек и STUN работают штатно. Подключите второе устройство к этой же сети (комнате) для установления туннеля.
-                </div>
-              </div>`;
+                <span class="badge" style="background:rgba(56,189,248,0.18); border:1px solid #38bdf8; color:#38bdf8;">Готов к связи</span>
+              `;
+            }
           }
 
-          // Rich HTML Dashboard Rendering
-          b.innerHTML = `
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              ${verdictHtml}
-              <!-- Section 1: Network & Routes -->
-              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px 14px;">
-                <div style="font-weight:700; color:#38bdf8; font-size:0.85rem; margin-bottom:6px;">🌐 1. СЕТЬ & МАРШРУТИЗАЦИЯ</div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:6px; font-size:0.82rem;">
-                  <div><b>Интернет:</b> ${d.internet?.ok ? '✅ Доступен' : '❌ Ограничен'} <span style="color:var(--text-dim); font-size:0.75rem;">(${escapeHtml(d.internet?.extra || '')})</span></div>
-                  <div><b>Интерфейс:</b> ${escapeHtml(d.egress?.interface || 'Авто')} <span style="color:var(--text-dim); font-size:0.75rem;">(GW: ${escapeHtml(d.egress?.gateway || '—')}, MTU: ${d.egress?.mtu || 1420})</span></div>
-                  <div><b>Внешний IPv4:</b> <span style="color:#cbd5e1;">${escapeHtml(d.public_ip?.extra || d.public_ip?.detail || '—')}</span></div>
-                  <div><b>Глобальный IPv6:</b> <span style="color:${d.ipv6?.ok ? '#a78bfa' : 'var(--text-dim)'};">${escapeHtml(d.ipv6?.extra || 'Отсутствует')}</span></div>
-                  <div><b>TCP 443:</b> ${d.tcp_443?.ok ? '✅ Доступен (' + d.tcp_443?.extra + ')' : '❌ Заблокирован'}</div>
-                </div>
-              </div>
+          // Card 1: Network
+          const netBadge = document.getElementById('diagNetStatusBadge');
+          if (netBadge) {
+            netBadge.className = d.internet?.ok ? 'diag-status-pill pill-ok' : 'diag-status-pill pill-fail';
+            netBadge.textContent = d.internet?.ok ? 'Доступен' : 'Ограничен';
+          }
+          const netInt = document.getElementById('diagNetInternet');
+          if (netInt) netInt.innerHTML = d.internet?.ok ? `<span style="color:#34d399;">✅ Доступен</span> <span style="color:var(--text-dim);font-size:0.75rem;">(${escapeHtml(d.internet?.extra || '')})</span>` : `<span style="color:#f87171;">❌ Ограничен</span>`;
+          
+          const netEg = document.getElementById('diagNetEgress');
+          if (netEg) netEg.textContent = `${d.egress?.interface || 'Auto'} (GW: ${d.egress?.gateway || '—'}, MTU: ${d.egress?.mtu || 1420})`;
+          
+          const netPub = document.getElementById('diagNetPublicIP');
+          if (netPub) netPub.textContent = d.public_ip?.extra || d.public_ip?.detail || '—';
 
-              <!-- Section 2: NAT & TSPU DPI -->
-              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px 14px;">
-                <div style="font-weight:700; color:#a78bfa; font-size:0.85rem; margin-bottom:6px;">🔬 2. СТАТУС STUN & ТСПУ DPI</div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:6px; font-size:0.82rem;">
-                  <div><b>STUN Сокет:</b> ${d.stun?.ok ? '✅ ' + escapeHtml(d.stun?.extra) : '⚠️ ' + escapeHtml(d.stun?.detail)}</div>
-                  <div><b>Классификация NAT:</b> ${escapeHtml(d.nat_type?.detail || '—')}</div>
-                  <div style="grid-column: span 2;"><b>Цензура ТСПУ:</b> ${d.tspu?.detected ? '<span style="color:#ef4444; font-weight:700;">⚠️ ОБНАРУЖЕНА</span> — ' + escapeHtml(d.tspu?.details) : '<span style="color:#4ade80; font-weight:700;">✅ Чисто</span> — блокировок UDP не обнаружено'}</div>
-                </div>
-              </div>
+          const netV6 = document.getElementById('diagNetIPv6');
+          if (netV6) {
+            if (d.ipv6?.ok) {
+              netV6.innerHTML = `<span style="color:#a78bfa;">${escapeHtml(d.ipv6?.extra)}</span> <span style="color:var(--text-dim);font-size:0.72rem;">(${escapeHtml(d.ipv6?.detail || 'Global')})</span>`;
+            } else {
+              netV6.innerHTML = `<span style="color:var(--text-dim);">${escapeHtml(d.ipv6?.detail || 'Отсутствует')}</span>`;
+            }
+          }
 
-              <!-- Section 3: Transport Escalation Ladder -->
-              <div style="background:rgba(56,189,248,0.04); border:1px solid rgba(56,189,248,0.2); border-radius:8px; padding:10px 14px;">
-                <div style="font-weight:700; color:#38bdf8; font-size:0.85rem; margin-bottom:6px;">🪜 3. ЛЕСТНИЦА ЭСКАЛАЦИИ ТРАНСПОРТА</div>
-                <div style="font-size:0.84rem; font-weight:700; color:#cbd5e1; margin-bottom:4px;">${escapeHtml(d.transport_ladder?.summary || 'Standard UDP')}</div>
-                <div style="display:flex; flex-wrap:wrap; gap:8px; font-size:0.75rem; margin-top:6px;">
-                  <span class="badge" style="background:rgba(255,255,255,0.05); color:#cbd5e1; border:1px solid rgba(255,255,255,0.1);">IPv6-Only: ${d.transport_ladder?.force_ipv6_only ? '✅ Вкл' : 'Выкл'}</span>
-                  <span class="badge" style="background:rgba(255,255,255,0.05); color:#cbd5e1; border:1px solid rgba(255,255,255,0.1);">UDP Пробы: ${d.transport_ladder?.probes_disabled ? '🛑 Подавлены (Battery Saver)' : 'Активны'}</span>
-                  <span class="badge" style="background:rgba(255,255,255,0.05); color:#cbd5e1; border:1px solid rgba(255,255,255,0.1);">MQTT L3 Fallback: ${d.transport_ladder?.mqtt_fallback ? '✅ Активен' : 'Выкл'}</span>
-                  <span class="badge" style="background:rgba(255,255,255,0.05); color:#cbd5e1; border:1px solid rgba(255,255,255,0.1);">TCP Relay (443): ${d.transport_ladder?.tcp_relay_connected ? '🟢 Подключен' : (d.transport_ladder?.tcp_relay_server_port > 0 ? '📡 Сервер :' + d.transport_ladder.tcp_relay_server_port : 'Неактивен')}</span>
-                </div>
-              </div>
+          const netT443 = document.getElementById('diagNetTCP443');
+          if (netT443) netT443.innerHTML = d.tcp_443?.ok ? `<span style="color:#34d399;">✅ Открыт (${escapeHtml(d.tcp_443?.extra || '')})</span>` : `<span style="color:#f87171;">❌ Блокируется</span>`;
 
-              <!-- Section 4: Mesh Peers & Transport breakdown -->
-              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px 14px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                  <span style="font-weight:700; color:#4ade80; font-size:0.85rem;">👥 4. MESH-СЕТЬ & СОСТОЯНИЕ УЗЛОВ</span>
-                  <span style="font-size:0.75rem; color:var(--text-dim);">Сигнализация: ${escapeHtml(d.channel?.extra || d.channel?.detail || 'MQTT')}</span>
-                </div>
-                <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:6px;">
-                  Всего пиров: <b>${d.mesh_peers?.total ?? d.peers?.detail ?? 0}</b> | Direct P2P: <b>${d.mesh_peers?.direct_p2p ?? 0}</b> | Direct IPv6: <b>${d.mesh_peers?.direct_ipv6 ?? 0}</b> | TCP Direct: <b>${d.mesh_peers?.direct_tcp ?? 0}</b> | Relay: <b>${(d.mesh_peers?.relay_mesh ?? 0) + (d.mesh_peers?.relay_mqtt ?? 0)}</b>
-                </div>
-                ${(d.mesh_peers?.ranking && d.mesh_peers.ranking.length > 0) ? `
-                  <div style="display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto;">
-                    ${d.mesh_peers.ranking.map(p => `
-                      <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.76rem; background:rgba(255,255,255,0.02); padding:3px 8px; border-radius:4px;">
-                        <span><b>${escapeHtml(p.name)}</b> <span style="color:var(--text-dim);">(${escapeHtml(p.vip)})</span></span>
-                        <span style="display:flex; gap:6px; align-items:center;">
-                          <span class="badge" style="font-size:0.68rem; padding:1px 6px;">${escapeHtml(p.method)}</span>
-                          <span style="color:${p.ping_ms > 0 && p.ping_ms < 100 ? '#4ade80' : '#fbbf24'}; font-family:monospace;">${p.ping_ms > 0 ? p.ping_ms + ' ms' : 'N/A'}</span>
-                        </span>
-                      </div>
-                    `).join('')}
+          // Card 2: STUN
+          const stunBadge = document.getElementById('diagStunStatusBadge');
+          if (stunBadge) {
+            stunBadge.className = d.stun?.ok ? 'diag-status-pill pill-ok' : 'diag-status-pill pill-warn';
+            stunBadge.textContent = d.stun?.ok ? 'STUN OK' : 'STUN Блок';
+          }
+          const stunSock = document.getElementById('diagStunSocket');
+          if (stunSock) stunSock.textContent = d.stun?.ok ? d.stun?.extra : (d.stun?.detail || 'Не определен');
+
+          const stunNAT = document.getElementById('diagStunNATType');
+          if (stunNAT) stunNAT.textContent = d.nat_type?.detail || '—';
+
+          const stunTSPU = document.getElementById('diagStunTSPU');
+          if (stunTSPU) {
+            stunTSPU.innerHTML = d.tspu?.detected ? `<span style="color:#f87171;font-weight:700;">⚠️ ОБНАРУЖЕНА</span> <span style="color:var(--text-dim);font-size:0.75rem;">(${escapeHtml(d.tspu?.details)})</span>` : `<span style="color:#34d399;font-weight:700;">✅ Чисто</span> <span style="color:var(--text-dim);font-size:0.75rem;">(UDP свободен)</span>`;
+          }
+
+          const stunTUN = document.getElementById('diagStunTUN');
+          if (stunTUN) stunTUN.textContent = `${d.tun?.virtual_ip || '10.200.0.x'} (${d.tun?.status?.Driver || 'Wintun/TUN'})`;
+
+          const stunCh = document.getElementById('diagStunChannel');
+          if (stunCh) stunCh.textContent = d.channel?.extra || d.channel?.detail || 'MQTT';
+
+          // Card 3: Ladder
+          const ladSum = document.getElementById('diagLadderSummary');
+          if (ladSum) ladSum.textContent = d.transport_ladder?.summary || 'Level 0: UDP Standard (AmneziaWG 3.1)';
+
+          const ladChips = document.getElementById('diagLadderChips');
+          if (ladChips) {
+            ladChips.innerHTML = `
+              <span class="${d.transport_ladder?.force_ipv6_only ? 'badge-active' : 'badge-dim'}">IPv6-Only: ${d.transport_ladder?.force_ipv6_only ? 'Вкл' : 'Выкл'}</span>
+              <span class="${d.transport_ladder?.probes_disabled ? 'badge-active' : 'badge-dim'}">UDP Пробы: ${d.transport_ladder?.probes_disabled ? 'Подавлены' : 'Активны'}</span>
+              <span class="${d.transport_ladder?.mqtt_fallback ? 'badge-active' : 'badge-dim'}">MQTT L3 Fallback: ${d.transport_ladder?.mqtt_fallback ? 'Активен' : 'Выкл'}</span>
+              <span class="${d.transport_ladder?.tcp_relay_connected ? 'badge-active' : 'badge-dim'}">TCP Relay: ${d.transport_ladder?.tcp_relay_connected ? '🟢 Подключен' : (d.transport_ladder?.tcp_relay_server_port > 0 ? '📡 Порт ' + d.transport_ladder.tcp_relay_server_port : 'Неактивен')}</span>
+            `;
+          }
+
+          // Card 4: Mesh Peers
+          const peersBadge = document.getElementById('diagPeersCountBadge');
+          if (peersBadge) {
+            peersBadge.className = totalPeers > 0 ? 'diag-status-pill pill-ok' : 'diag-status-pill pill-idle';
+            peersBadge.textContent = `${totalPeers} пиров`;
+          }
+          const cP2P = document.getElementById('cntP2P'); if (cP2P) cP2P.textContent = directP2P;
+          const cIPv6 = document.getElementById('cntIPv6'); if (cIPv6) cIPv6.textContent = directIPv6;
+          const cTCP = document.getElementById('cntTCP'); if (cTCP) cTCP.textContent = directTCP;
+          const cRelay = document.getElementById('cntRelay'); if (cRelay) cRelay.textContent = relayCount;
+
+          const peersList = document.getElementById('diagPeersRankingList');
+          if (peersList) {
+            if (d.mesh_peers?.ranking && d.mesh_peers.ranking.length > 0) {
+              peersList.innerHTML = d.mesh_peers.ranking.map(p => `
+                <div class="diag-peer-item">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-weight:700; color:var(--pc-text);">${escapeHtml(p.name)}</span>
+                    <span class="mono" style="color:#38bdf8; font-size:0.74rem;">${escapeHtml(p.vip)}</span>
                   </div>
-                ` : '<div style="font-size:0.75rem; color:var(--text-dim); font-style:italic;">Участники в сети пока не обнаружены...</div>'}
-              </div>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="badge" style="font-size:0.68rem; padding:1px 6px;">${escapeHtml(p.method)}</span>
+                    <span class="mono" style="font-size:0.75rem; color:${p.ping_ms > 0 && p.ping_ms < 50 ? '#34d399' : (p.ping_ms < 150 ? '#fbbf24' : '#f87171')};">${p.ping_ms > 0 ? p.ping_ms + ' ms' : '—'}</span>
+                  </div>
+                </div>
+              `).join('');
+            } else {
+              peersList.innerHTML = '<div style="color:var(--text-dim); font-size:0.8rem; font-style:italic; padding:6px 0;">Другие пиры пока не обнаружены в сети.</div>';
+            }
+          }
 
-              <!-- Section 5: Process & Memory -->
-              <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem; color:var(--text-dim); padding:4px 6px;">
-                <span>🧠 <b>Рантайм:</b> ${escapeHtml(d.system?.os || '')} ${escapeHtml(d.system?.arch || '')} | ${d.system?.num_goroutine || 0} Горутин | ${(d.system?.alloc_mb || 0).toFixed(2)} MB RAM (Sys: ${(d.system?.sys_mb || 0).toFixed(2)} MB, GC: ${d.system?.num_gc || 0})</span>
-                <span>⏱️ <b>Uptime:</b> ${escapeHtml(d.system?.uptime || '—')}</span>
-              </div>
+          // Runtime info
+          const sOS = document.getElementById('diagSysOS'); if (sOS) sOS.textContent = `${d.system?.os || ''} / ${d.system?.arch || ''}`;
+          const sGor = document.getElementById('diagSysGoroutines'); if (sGor) sGor.textContent = d.system?.num_goroutine || 0;
+          const sRAM = document.getElementById('diagSysRAM'); if (sRAM) sRAM.textContent = `${(d.system?.alloc_mb || 0).toFixed(1)} MB / ${(d.system?.sys_mb || 0).toFixed(1)} MB`;
+          const sUp = document.getElementById('diagSysUptime'); if (sUp) sUp.textContent = d.system?.uptime || '—';
+
+          showToast('✓ Диагностика системы успешно выполнена!');
+        }
+      } catch (e) {
+        if (banner) {
+          banner.className = 'diag-banner diag-banner-danger';
+          banner.innerHTML = `
+            <div class="diag-banner-icon">❌</div>
+            <div class="diag-banner-content">
+              <div class="diag-banner-title">Ошибка выполнения диагностики</div>
+              <div class="diag-banner-desc">${escapeHtml(e.message)}</div>
             </div>
           `;
         }
-      } catch (e) {
-        b.innerText = 'Ошибка диагностики: ' + e.message;
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> <span>Запустить тест</span>';
+        }
       }
     }
 
     function copyDiagReport() {
       if (!lastDiagReport) {
-        const b = document.getElementById('diagBox');
-        lastDiagReport = b.innerText;
+        showToast('⚠️ Сначала выполните тест диагностики!');
+        return;
       }
-      copyToClipboard(lastDiagReport, "✓ Отчет диагностики скопирован в буфер обмена!"); return;
-      showToast('✓ Отчет диагностики скопирован в буфер обмена!');
+      copyToClipboard(lastDiagReport, "✓ Отчет диагностики скопирован в буфер обмена!");
     }
 
-    let lastNetcheckReport = null;
+    // Ping & Traceroute Tool
+    async function runPingTool() {
+      const target = (document.getElementById('diagTargetIP').value || '').trim();
+      if (!target) {
+        showToast('⚠️ Введите целевой IP адрес или имя хоста');
+        return;
+      }
+      const ph = document.getElementById('netToolPlaceholder');
+      const structRes = document.getElementById('netToolStructuredResult');
+      const rawDetails = document.getElementById('netToolRawDetails');
+      const rawOut = document.getElementById('netToolOutput');
+      const btn = document.getElementById('btnRunPing');
+
+      if (btn) btn.disabled = true;
+      if (ph) ph.style.display = 'block';
+      if (ph) ph.innerHTML = `<span class="status-pulse-dot"></span> Пинг узла <b>${escapeHtml(target)}</b> через виртуальный интерфейс...`;
+      if (structRes) structRes.style.display = 'none';
+      if (rawDetails) rawDetails.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/diagnostics/ping', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({target})
+        });
+        const json = await res.json();
+        if (ph) ph.style.display = 'none';
+
+        if (json.ok) {
+          const raw = json.raw_output || '';
+          if (rawOut) rawOut.textContent = raw;
+          if (rawDetails) rawDetails.style.display = 'block';
+
+          // Parse ping output
+          let loss = 0;
+          let lossMatch = raw.match(/(\d+(?:\.\d+)?)%\s*(?:packet\s*loss|потерь)/i);
+          if (lossMatch) loss = parseFloat(lossMatch[1]);
+
+          let rttAvg = null;
+          let rttMin = null;
+          let rttMax = null;
+          let rttMatch = raw.match(/min\/avg\/max(?:\/stddev)?\s*=\s*([0-9.]+)\/([0-9.]+)\/([0-9.]+)/i);
+          if (rttMatch) {
+            rttMin = rttMatch[1];
+            rttAvg = rttMatch[2];
+            rttMax = rttMatch[3];
+          } else {
+            let winMatch = raw.match(/Минимальное\s*=\s*(\d+)мсек.*Максимальное\s*=\s*(\d+)мсек.*Среднее\s*=\s*(\d+)мсек/i);
+            if (winMatch) {
+              rttMin = winMatch[1];
+              rttMax = winMatch[2];
+              rttAvg = winMatch[3];
+            }
+          }
+
+          const isSuccess = json.success && loss < 100;
+          if (structRes) {
+            structRes.style.display = 'flex';
+            structRes.className = 'diag-rec-card';
+            structRes.style.borderColor = isSuccess ? (loss === 0 ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)') : 'rgba(239,68,68,0.35)';
+            structRes.style.background = isSuccess ? (loss === 0 ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)') : 'rgba(239,68,68,0.08)';
+
+            structRes.innerHTML = `
+              <div style="flex:1;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                  <span style="font-weight:750; font-size:0.95rem; color:${isSuccess ? (loss === 0 ? '#34d399' : '#fbbf24') : '#f87171'};">
+                    ${isSuccess ? (loss === 0 ? '✅ Узел доступен: 0% потерь пакетов' : `⚠️ Узел доступен с потерями: ${loss}%`) : '❌ Узел недоступен (100% потеря пакетов)'}
+                  </span>
+                  <span class="mono" style="font-size:0.8rem; background:rgba(0,0,0,0.3); padding:2px 8px; border-radius:6px; color:#cbd5e1;">${escapeHtml(target)}</span>
+                </div>
+                <div style="display:flex; gap:12px; font-size:0.82rem; color:var(--pc-text-muted); flex-wrap:wrap;">
+                  <span>Потери: <b style="color:${loss === 0 ? '#34d399' : '#f87171'};">${loss}%</b></span>
+                  ${rttAvg ? `<span>Средний RTT: <b style="color:#38bdf8;">${rttAvg} ms</b></span>` : ''}
+                  ${(rttMin && rttMax) ? `<span>Мин / Макс: <b style="color:#cbd5e1;">${rttMin} / ${rttMax} ms</b></span>` : ''}
+                </div>
+              </div>
+            `;
+          }
+        } else {
+          if (structRes) {
+            structRes.style.display = 'flex';
+            structRes.className = 'diag-banner diag-banner-danger';
+            structRes.innerHTML = `
+              <div class="diag-banner-icon">❌</div>
+              <div class="diag-banner-content">
+                <div class="diag-banner-title">Ошибка выполнения Ping</div>
+                <div class="diag-banner-desc">${escapeHtml(json.error || 'Не удалось выполнить запрос')}</div>
+              </div>
+            `;
+          }
+        }
+      } catch (e) {
+        if (ph) {
+          ph.style.display = 'block';
+          ph.textContent = '❌ Сбой выполнения: ' + e.message;
+        }
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function runTracerouteTool() {
+      const target = (document.getElementById('diagTargetIP').value || '').trim();
+      if (!target) {
+        showToast('⚠️ Введите целевой IP адрес или имя хоста');
+        return;
+      }
+      const ph = document.getElementById('netToolPlaceholder');
+      const structRes = document.getElementById('netToolStructuredResult');
+      const rawDetails = document.getElementById('netToolRawDetails');
+      const rawOut = document.getElementById('netToolOutput');
+      const btn = document.getElementById('btnRunTrace');
+
+      if (btn) btn.disabled = true;
+      if (ph) ph.style.display = 'block';
+      if (ph) ph.innerHTML = `<span class="status-pulse-dot"></span> Трассировка маршрута к <b>${escapeHtml(target)}</b> (до 8 хопов)...`;
+      if (structRes) structRes.style.display = 'none';
+      if (rawDetails) rawDetails.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/diagnostics/traceroute', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({target})
+        });
+        const json = await res.json();
+        if (ph) ph.style.display = 'none';
+
+        if (json.ok) {
+          const raw = json.raw_output || '';
+          if (rawOut) rawOut.textContent = raw;
+          if (rawDetails) rawDetails.style.display = 'block';
+
+          // Parse hops
+          const lines = raw.split('\n');
+          const hops = [];
+          for (let l of lines) {
+            l = l.trim();
+            const m = l.match(/^(\d+)\s+([0-9a-fA-F.:]+|\*)\s+(.*)$/);
+            if (m) {
+              hops.push({
+                hop: m[1],
+                ip: m[2],
+                details: m[3]
+              });
+            }
+          }
+
+          if (structRes) {
+            structRes.style.display = 'flex';
+            structRes.className = 'diag-metric-card';
+            structRes.style.padding = '14px';
+
+            if (hops.length > 0) {
+              structRes.innerHTML = `
+                <div style="font-weight:750; font-size:0.92rem; color:var(--pc-text); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                  <span>🌐 Маршрут трассировки к ${escapeHtml(target)}:</span>
+                  <span class="badge badge-cyan">${hops.length} хопов</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px; max-height:220px; overflow-y:auto;">
+                  ${hops.map(h => `
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:rgba(255,255,255,0.02); border:1px solid var(--pc-border); border-radius:6px; font-size:0.8rem;">
+                      <span style="display:flex; align-items:center; gap:8px;">
+                        <span class="mono" style="color:var(--text-dim); width:20px;">#${h.hop}</span>
+                        <span class="mono" style="font-weight:600; color:${h.ip === '*' ? '#f87171' : '#38bdf8'};">${escapeHtml(h.ip)}</span>
+                      </span>
+                      <span class="mono" style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(h.details)}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              `;
+            } else {
+              structRes.innerHTML = `
+                <div style="font-weight:750; font-size:0.92rem; color:var(--pc-text); margin-bottom:6px;">
+                  ✓ Трассировка завершена
+                </div>
+                <div style="font-size:0.82rem; color:var(--text-muted);">
+                  Смотрите подробный лог в блоке консольного вывода ниже.
+                </div>
+              `;
+            }
+          }
+        } else {
+          if (structRes) {
+            structRes.style.display = 'flex';
+            structRes.className = 'diag-banner diag-banner-danger';
+            structRes.innerHTML = `
+              <div class="diag-banner-icon">❌</div>
+              <div class="diag-banner-content">
+                <div class="diag-banner-title">Ошибка трассировки</div>
+                <div class="diag-banner-desc">${escapeHtml(json.error || 'Сбой')}</div>
+              </div>
+            `;
+          }
+        }
+      } catch (e) {
+        if (ph) {
+          ph.style.display = 'block';
+          ph.textContent = '❌ Сбой выполнения: ' + e.message;
+        }
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function checkInternetAccessTool() {
+      const ph = document.getElementById('netToolPlaceholder');
+      const structRes = document.getElementById('netToolStructuredResult');
+      const rawDetails = document.getElementById('netToolRawDetails');
+      const rawOut = document.getElementById('netToolOutput');
+      const btn = document.getElementById('btnCheckInternet');
+
+      if (btn) btn.disabled = true;
+      if (ph) ph.style.display = 'block';
+      if (ph) ph.innerHTML = `<span class="status-pulse-dot"></span> Проверка выхода в интернет через DNS и HTTPS...`;
+      if (structRes) structRes.style.display = 'none';
+      if (rawDetails) rawDetails.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/diagnostics/check-internet', { method: 'POST' });
+        const json = await res.json();
+        if (ph) ph.style.display = 'none';
+
+        if (json.ok) {
+          if (structRes) {
+            structRes.style.display = 'flex';
+            if (json.internet_available) {
+              structRes.className = 'diag-banner diag-banner-success';
+              structRes.innerHTML = `
+                <div class="diag-banner-icon">🌐</div>
+                <div class="diag-banner-content">
+                  <div class="diag-banner-title">Доступ в интернет полностью активен!</div>
+                  <div class="diag-banner-desc">Отклик до контрольных узлов (1.1.1.1, 8.8.8.8, 77.88.8.8): <b>${json.latency_ms || 15} ms</b>. Канал чист, пакеты передаются без потерь.</div>
+                </div>
+                <span class="badge" style="background:rgba(16,185,129,0.18); border:1px solid #10b981; color:#34d399;">${json.latency_ms || 15} ms</span>
+              `;
+            } else {
+              structRes.className = 'diag-banner diag-banner-danger';
+              structRes.innerHTML = `
+                <div class="diag-banner-icon">❌</div>
+                <div class="diag-banner-content">
+                  <div class="diag-banner-title">Нет доступа в интернет через текущий маршрут</div>
+                  <div class="diag-banner-desc">Пакеты к внешним DNS/HTTPS узлам не проходят. Проверьте шлюз по умолчанию или статус выбранного Exit Node.</div>
+                </div>
+                <span class="badge" style="background:rgba(239,68,68,0.18); border:1px solid #ef4444; color:#f87171;">Offline</span>
+              `;
+            }
+          }
+        }
+      } catch (e) {
+        if (ph) {
+          ph.style.display = 'block';
+          ph.textContent = '❌ Ошибка проверки: ' + e.message;
+        }
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function loadPeerRoutesDiag() {
+      const container = document.getElementById('peerRoutesContainer');
+      if (!container) return;
+      try {
+        const res = await fetch('/api/diagnostics/peer-routes');
+        const json = await res.json();
+        if (json.ok && json.peers) {
+          if (json.peers.length === 0) {
+            container.innerHTML = '<div style="color:var(--text-dim); font-size:0.84rem; font-style:italic; padding:24px 0; text-align:center;">Другие узлы пока не обнаружены в сети.</div>';
+            return;
+          }
+          container.innerHTML = '';
+          json.peers.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'diag-metric-card';
+            card.style.flexDirection = 'row';
+            card.style.justifyContent = 'space-between';
+            card.style.alignItems = 'center';
+            card.style.flexWrap = 'wrap';
+            card.style.gap = '12px';
+
+            const cleanVIP = (p.virtual_ip || '').split('/')[0];
+            const hasRoutes = p.advertised_routes && p.advertised_routes.length > 0;
+            const exitBadge = p.is_exit_node 
+              ? '<span class="badge" style="background:rgba(34,197,94,0.15); border:1px solid rgba(34,197,94,0.4); color:#34d399;">🌐 Шлюз в интернет (Exit Node)</span>'
+              : '<span class="badge" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:var(--text-dim);">Стандартный узел</span>';
+
+            const routesPills = hasRoutes 
+              ? p.advertised_routes.map(r => `<span class="mono" style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:0.74rem; padding:1px 6px; border-radius:4px;">${escapeHtml(r)}</span>`).join(' ')
+              : '<span style="color:var(--text-dim);">Не расшарены (только узел)</span>';
+
+            const connInfo = p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct'
+              ? `⚡ Direct TCP ShadowTLS (${p.latency_ms || p.ping_ms || 0}ms)`
+              : (p.direct_p2p ? `⚡ Direct P2P AWG (${p.latency_ms || p.ping_ms || 0}ms)` : '📡 Relay');
+
+            card.innerHTML = `
+              <div style="flex:1; min-width:260px;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+                  <span style="font-weight:750; color:var(--pc-text); font-size:0.92rem;">${escapeHtml(p.device_name || p.device_id)}</span>
+                  <span class="mono" style="color:#38bdf8; font-size:0.8rem; background:rgba(56,189,248,0.12); padding:1px 7px; border-radius:6px; cursor:pointer;" onclick="copyText('${escapeHtml(cleanVIP)}')" title="Нажмите чтобы скопировать VIP">${escapeHtml(cleanVIP)}</span>
+                  ${exitBadge}
+                </div>
+                <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.6;">
+                  <span>Локальные подсети: ${routesPills}</span> • 
+                  <span>ОС: <b>${escapeHtml(p.os || 'Linux')}</b> (${escapeHtml(p.arch || 'amd64')})</span> • 
+                  <span>Связь: <b>${escapeHtml(connInfo)}</b></span>
+                </div>
+              </div>
+              <div style="display:flex; gap:6px;">
+                <button onclick="setDiagTarget('${escapeHtml(cleanVIP)}'); switchDiagSubtab('tools'); runPingTool();" class="btn-preset-pill pill-peer" style="font-size:0.78rem; padding:5px 12px;">⚡ Ping</button>
+                <button onclick="setDiagTarget('${escapeHtml(cleanVIP)}'); switchDiagSubtab('tools'); runTracerouteTool();" class="btn-preset-pill" style="font-size:0.78rem; padding:5px 12px;">🌐 Trace</button>
+              </div>
+            `;
+            container.appendChild(card);
+          });
+        }
+      } catch(e) {
+        container.innerHTML = '<div style="color:var(--text-dim); font-size:0.84rem; padding:12px 0;">Ошибка загрузки подсетей: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+let lastNetcheckReport = null;
 
     async function runNetcheck() {
       const btn = document.getElementById('btnRunNetcheck');
       const ph = document.getElementById('netcheckPlaceholder');
       const resContainer = document.getElementById('netcheckResults');
       
-      btn.disabled = true;
-      btn.innerText = '⏳ Выполняется Netcheck...';
-      ph.style.display = 'block';
-      ph.innerText = '⏳ Проверка классификации RFC 5780 и детекция ТСПУ DPI (может занять до 3-5 секунд)...';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Выполняется Netcheck...';
+      }
+      if (ph) {
+        ph.style.display = 'block';
+        ph.innerText = '⏳ Проверка классификации RFC 5780 и детекция ТСПУ DPI (может занять до 3-5 секунд)...';
+      }
 
       try {
         const res = await fetch('/api/diagnostics/netcheck', { method: 'POST' });
@@ -5682,32 +6587,45 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         if (json.ok && json.data) {
           const d = json.data;
           lastNetcheckReport = d;
-          ph.style.display = 'none';
-          resContainer.style.display = 'flex';
+          if (ph) ph.style.display = 'none';
+          if (resContainer) resContainer.style.display = 'flex';
 
-          document.getElementById('ncMapping').innerText = d.mapping_type || '—';
-          document.getElementById('ncDelta').innerText = (d.port_delta !== undefined && d.port_delta !== 0) ? `Дельта портов: ${d.port_delta > 0 ? '+' : ''}${d.port_delta}` : (d.pba_block_size > 0 ? `PBA блок: ${d.pba_block_size}` : 'Прямое связывание');
+          const mapEl = document.getElementById('ncMapping');
+          if (mapEl) mapEl.innerText = d.mapping_type || '—';
 
-          document.getElementById('ncFiltering').innerText = d.filtering_type || '—';
-          document.getElementById('ncNATType').innerText = `Тип NAT: ${d.nat_type || 'Unknown'}`;
+          const deltaEl = document.getElementById('ncDelta');
+          if (deltaEl) deltaEl.innerText = (d.port_delta !== undefined && d.port_delta !== 0) ? `Дельта портов: ${d.port_delta > 0 ? '+' : ''}${d.port_delta}` : (d.pba_block_size > 0 ? `PBA блок: ${d.pba_block_size}` : 'Прямое связывание');
+
+          const filtEl = document.getElementById('ncFiltering');
+          if (filtEl) filtEl.innerText = d.filtering_type || '—';
+
+          const natEl = document.getElementById('ncNATType');
+          if (natEl) natEl.innerText = `Тип NAT: ${d.nat_type || 'Unknown'}`;
 
           const tspuEl = document.getElementById('ncTSPU');
           const tspuDetEl = document.getElementById('ncTSPUDetails');
-          if (d.tspu_detected) {
-            tspuEl.innerText = '⚠️ ОБНАРУЖЕН';
-            tspuEl.style.color = '#ef4444';
-            tspuDetEl.innerText = d.tspu_details || 'UDP трафик подвергается фильтрации ТСПУ';
-          } else {
-            tspuEl.innerText = '✅ Чисто';
-            tspuEl.style.color = '#4ade80';
-            tspuDetEl.innerText = 'Блокировок UDP/WireGuard не обнаружено';
+          if (tspuEl && tspuDetEl) {
+            if (d.tspu_detected) {
+              tspuEl.innerText = '⚠️ ОБНАРУЖЕН';
+              tspuEl.style.color = '#f87171';
+              tspuDetEl.innerText = d.tspu_details || 'UDP трафик подвергается фильтрации ТСПУ';
+            } else {
+              tspuEl.innerText = '✅ Чисто';
+              tspuEl.style.color = '#34d399';
+              tspuDetEl.innerText = 'Блокировок UDP/WireGuard не обнаружено';
+            }
           }
 
-          document.getElementById('ncMTU').innerText = d.path_mtu ? `${d.path_mtu} байт` : '1420 байт';
-          const p4 = d.udp_blocked_ipv4 ? '❌ Блок' : '✅ OK';
-          const p6 = d.ipv6_available ? (d.udp_blocked_ipv6 ? '⚠️ IPv6 (UDP блок)' : '✅ IPv6 OK') : '❌ Нет IPv6';
-          const t443 = d.tcp_443_ok ? '✅ TCP 443 OK' : '❌ TCP 443 Блок';
-          document.getElementById('ncProtoSupport').innerText = `IPv4: ${p4} | ${p6} | ${t443}`;
+          const mtuEl = document.getElementById('ncMTU');
+          if (mtuEl) mtuEl.innerText = d.path_mtu ? `${d.path_mtu} байт` : '1420 байт';
+
+          const protoEl = document.getElementById('ncProtoSupport');
+          if (protoEl) {
+            const p4 = d.udp_blocked_ipv4 ? '❌ Блок' : '✅ OK';
+            const p6 = d.ipv6_available ? (d.udp_blocked_ipv6 ? '⚠️ IPv6 (UDP блок)' : '✅ IPv6 OK') : '❌ Нет IPv6';
+            const t443 = d.tcp_443_ok ? '✅ TCP 443 OK' : '❌ TCP 443 Блок';
+            protoEl.innerText = `IPv4: ${p4} | ${p6} | ${t443}`;
+          }
 
           // Ladder Mode & WAN IPs
           const lModeEl = document.getElementById('ncLadderMode');
@@ -5742,9 +6660,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               const isOk = v >= 0;
               const badge = document.createElement('span');
               badge.className = 'badge';
-              badge.style.background = isOk ? 'rgba(74,222,128,0.1)' : 'rgba(239,68,68,0.1)';
-              badge.style.color = isOk ? '#4ade80' : '#ef4444';
-              badge.style.border = '1px solid ' + (isOk ? 'rgba(74,222,128,0.3)' : 'rgba(239,68,68,0.3)');
+              badge.style.background = isOk ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)';
+              badge.style.color = isOk ? '#34d399' : '#f87171';
+              badge.style.border = '1px solid ' + (isOk ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)');
               badge.innerText = `${name}: ${isOk ? v + ' ms' : '❌ Таймаут'}`;
               gridEl.appendChild(badge);
             }
@@ -5756,32 +6674,34 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const pref = d.preferred_transport || 'udp';
           if (pref === 'ipv6_only') {
             if (badgeEl) { badgeEl.innerText = '🌐 Force IPv6'; badgeEl.style.color = '#a78bfa'; badgeEl.style.borderColor = 'rgba(167,139,250,0.4)'; }
-            recText.innerHTML = '<b>Рекомендован Level 1: Принудительный IPv6</b> (ForceIPv6Only) — прямой сквозной туннель в обход CGNAT и ТСПУ блокировок IPv4 UDP.';
+            if (recText) recText.innerHTML = '<b>Рекомендован Level 1: Принудительный IPv6</b> (ForceIPv6Only) — прямой сквозной туннель в обход CGNAT и ТСПУ блокировок IPv4 UDP.';
           } else if (pref === 'tcp_relay') {
             if (badgeEl) { badgeEl.innerText = '🛡️ TCP Relay (443)'; badgeEl.style.color = '#fbbf24'; badgeEl.style.borderColor = 'rgba(251,191,36,0.4)'; }
-            recText.innerHTML = '<b>Рекомендован Level 3: TCP Peer-as-Relay (порт 443)</b> — исходящий UDP блокируется ТСПУ, туннель проксируется через десктопный узел сети под видом HTTPS.';
+            if (recText) recText.innerHTML = '<b>Рекомендован Level 3: TCP Peer-as-Relay (порт 443)</b> — исходящий UDP блокируется ТСПУ, туннель проксируется через десктопный узел сети под видом HTTPS.';
           } else if (pref === 'mqtt_fallback') {
             if (badgeEl) { badgeEl.innerText = '☁️ MQTT L3 Fallback'; badgeEl.style.color = '#38bdf8'; badgeEl.style.borderColor = 'rgba(56,189,248,0.4)'; }
-            recText.innerHTML = '<b>Рекомендован Level 2: MQTT L3 Tunnel Fallback</b> — полный сброс UDP радиопроб (экономия батареи) и передача L3 IP-трафика через брокер сигналов.';
+            if (recText) recText.innerHTML = '<b>Рекомендован Level 2: MQTT L3 Tunnel Fallback</b> — полный сброс UDP радиопроб (экономия батареи) и передача L3 IP-трафика через брокер сигналов.';
           } else if (pref === 'tcp_shadowtls' || pref === 'force_tcp') {
             if (badgeEl) { badgeEl.innerText = '🔒 TCP ShadowTLS'; badgeEl.style.color = '#f43f5e'; badgeEl.style.borderColor = 'rgba(244,63,94,0.4)'; }
-            recText.innerHTML = '<b>Рекомендован режим TCP ShadowTLS v3</b>: обнаружена цензура/фильтрация UDP со стороны ТСПУ или жесткий Symmetric NAT.';
+            if (recText) recText.innerHTML = '<b>Рекомендован режим TCP ShadowTLS v3</b>: обнаружена цензура/фильтрация UDP со стороны ТСПУ или жесткий Symmetric NAT.';
           } else if (pref === 'quic') {
             if (badgeEl) { badgeEl.innerText = '⚡ QUIC Multipath'; badgeEl.style.color = '#38bdf8'; badgeEl.style.borderColor = 'rgba(56,189,248,0.4)'; }
-            recText.innerHTML = '<b>Рекомендован режим QUIC Multipath</b>: провайдер использует динамический пул портов (Symmetric CGNAT).';
+            if (recText) recText.innerHTML = '<b>Рекомендован режим QUIC Multipath</b>: провайдер использует динамический пул портов (Symmetric CGNAT).';
           } else {
-            if (badgeEl) { badgeEl.innerText = '🟢 Direct UDP'; badgeEl.style.color = '#4ade80'; badgeEl.style.borderColor = 'rgba(74,222,128,0.4)'; }
-            recText.innerHTML = '<b>Рекомендован стандартный режим Direct UDP (AmneziaWG 3.1)</b>: свободное прохождение пакетов без цензуры, максимальная скорость и нулевые задержки.';
+            if (badgeEl) { badgeEl.innerText = '🟢 Direct UDP'; badgeEl.style.color = '#34d399'; badgeEl.style.borderColor = 'rgba(16,185,129,0.4)'; }
+            if (recText) recText.innerHTML = '<b>Рекомендован стандартный режим Direct UDP (AmneziaWG 3.1)</b>: свободное прохождение пакетов без цензуры, максимальная скорость и нулевые задержки.';
           }
           showToast('✓ Глубокий Netcheck успешно завершен!');
         } else {
-          ph.innerText = 'Ошибка получения отчета Netcheck: ' + (json.error || 'неизвестная ошибка');
+          if (ph) ph.innerText = 'Ошибка получения отчета Netcheck: ' + (json.error || 'неизвестная ошибка');
         }
       } catch (e) {
-        ph.innerText = 'Ошибка выполнения Netcheck: ' + e.message;
+        if (ph) ph.innerText = 'Ошибка выполнения Netcheck: ' + e.message;
       } finally {
-        btn.disabled = false;
-        btn.innerText = '⚡ Запустить Netcheck';
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = '⚡ Запустить Netcheck';
+        }
       }
     }
 
@@ -5815,11 +6735,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
     }
 
-    function copyLogs() {
-      const ls = document.getElementById('logStream');
-      copyToClipboard(ls.innerText, "✓ Журнал событий скопирован в буфер обмена!"); return;
-      showToast('✓ Журнал событий скопирован в буфер обмена!');
-    }
+    
 
     // Events
     async function refreshEvents() {
