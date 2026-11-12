@@ -29,6 +29,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/crypto/md4"
 )
 
 // KeeneticUser holds user credentials discovered from KeeneticOS.
@@ -37,6 +39,7 @@ type KeeneticUser struct {
 	Password     string // Plaintext if available
 	PasswordHash string // Hash if stored as hash
 	HashType     string // "plain", "md5", "sha256", "crypt"
+	NTHash       string // NTLM (MD4) hash from "password nt <hash>"
 }
 
 var (
@@ -91,6 +94,20 @@ func IsKeeneticOS() bool {
 	return false
 }
 
+// computeNTLMHash calculates the Windows NT (NTLM / MD4) hash of a password encoded in UTF-16LE.
+// KeeneticOS stores this hash for every user as "password nt <hex_hash>".
+func computeNTLMHash(password string) string {
+	runes := []rune(password)
+	utf16Bytes := make([]byte, len(runes)*2)
+	for i, r := range runes {
+		utf16Bytes[i*2] = byte(r)
+		utf16Bytes[i*2+1] = byte(r >> 8)
+	}
+	h := md4.New()
+	h.Write(utf16Bytes)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // VerifyKeeneticAuth strictly checks username and password against KeeneticOS credentials.
 func VerifyKeeneticAuth(username, password string) bool {
 	if username == "" || password == "" {
@@ -107,6 +124,14 @@ func VerifyKeeneticAuth(username, password string) bool {
 		// Plaintext match
 		if u.Password != "" {
 			if subtle.ConstantTimeCompare([]byte(u.Password), []byte(password)) == 1 {
+				return true
+			}
+		}
+
+		// NTLM (MD4) match from "password nt <hash>" — standard in KeeneticOS
+		if u.NTHash != "" {
+			ntlm := computeNTLMHash(password)
+			if subtle.ConstantTimeCompare([]byte(strings.ToLower(ntlm)), []byte(strings.ToLower(u.NTHash))) == 1 {
 				return true
 			}
 		}
@@ -137,11 +162,19 @@ func getKeeneticProbeTargets() []string {
 	targets := []string{
 		"http://127.0.0.1:80",
 		"https://127.0.0.1:443",
+		"http://192.168.1.1:80",
+		"https://192.168.1.1:443",
+		"http://192.168.0.1:80",
+		"https://192.168.0.1:443",
 	}
 
 	seen := map[string]bool{
-		"http://127.0.0.1:80":   true,
-		"https://127.0.0.1:443": true,
+		"http://127.0.0.1:80":     true,
+		"https://127.0.0.1:443":   true,
+		"http://192.168.1.1:80":   true,
+		"https://192.168.1.1:443": true,
+		"http://192.168.0.1:80":   true,
+		"https://192.168.0.1:443": true,
 	}
 
 	ifaces, err := net.Interfaces()
@@ -174,8 +207,8 @@ func getKeeneticProbeTargets() []string {
 				if !ip.IsPrivate() {
 					continue
 				}
-				// Skip NatBypass VIP subnet 10.1.x.x
-				if ip[0] == 10 && ip[1] == 1 {
+				// Skip NatBypass VIP subnets (10.1.x.x, 100.64.x.x)
+				if (ip[0] == 10 && ip[1] == 1) || (ip[0] == 100 && (ip[1]&0xC0) == 64) {
 					continue
 				}
 
@@ -184,14 +217,12 @@ func getKeeneticProbeTargets() []string {
 				u2 := "https://" + ipStr + ":443"
 				if !seen[u1] {
 					seen[u1] = true
-					targets = append(targets, u1)
-				}
-				if !seen[u2] {
-					seen[u2] = true
-					targets = append(targets, u2)
-				}
-				if len(targets) >= 4 {
-					return targets
+					// Prioritize router LAN bridge br0
+					if strings.Contains(nameLower, "br") || strings.Contains(nameLower, "lan") {
+						targets = append([]string{u1, u2}, targets...)
+					} else {
+						targets = append(targets, u1, u2)
+					}
 				}
 			}
 		}
@@ -222,11 +253,14 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 			jar, _ := cookiejar.New(nil)
 			client := &http.Client{
 				Jar:     jar,
-				Timeout: 600 * time.Millisecond,
+				Timeout: 1500 * time.Millisecond,
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 					DialContext: (&net.Dialer{
-						Timeout: 500 * time.Millisecond,
+						Timeout: 800 * time.Millisecond,
 					}).DialContext,
 				},
 			}
@@ -239,6 +273,26 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 			resp, err := client.Do(req)
 			if err != nil {
 				return
+			}
+
+			// Handle HTTP to HTTPS redirect on /auth
+			if resp.StatusCode == http.StatusMovedPermanently || resp.StatusCode == http.StatusFound ||
+				resp.StatusCode == http.StatusTemporaryRedirect {
+				loc := resp.Header.Get("Location")
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				if loc != "" {
+					if strings.HasPrefix(loc, "/") {
+						loc = tgt + loc
+					}
+					reqRedir, rErr := http.NewRequest("GET", loc, nil)
+					if rErr == nil {
+						resp, err = client.Do(reqRedir)
+						if err != nil {
+							return
+						}
+					}
+				}
 			}
 
 			challenge := resp.Header.Get("X-NDM-Challenge")
@@ -265,6 +319,9 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 				if keeneticHostnameCache != "" {
 					realmsToTry = append(realmsToTry, keeneticHostnameCache)
 				}
+				if keeneticModelCache != "" {
+					realmsToTry = append(realmsToTry, keeneticModelCache)
+				}
 			}
 
 			for _, r := range realmsToTry {
@@ -290,12 +347,12 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 				if pErr != nil {
 					continue
 				}
-				pReq.Header.Set("Content-Type", "application/json")
+				pReq.Header.Set("Content-Type", "application/json; charset=utf-8")
 				pResp, pErr := client.Do(pReq)
 				if pErr == nil {
 					_, _ = io.Copy(io.Discard, pResp.Body)
 					pResp.Body.Close()
-					if pResp.StatusCode == http.StatusOK {
+					if pResp.StatusCode >= 200 && pResp.StatusCode < 300 {
 						atomic.StoreInt32(&authSuccess, 1)
 						return
 					}
@@ -317,12 +374,12 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 				})
 				pReq2, pErr2 := http.NewRequest("POST", tgt+"/auth", bytes.NewReader(payload2))
 				if pErr2 == nil {
-					pReq2.Header.Set("Content-Type", "application/json")
+					pReq2.Header.Set("Content-Type", "application/json; charset=utf-8")
 					pResp2, pErr2 := client.Do(pReq2)
 					if pErr2 == nil {
 						_, _ = io.Copy(io.Discard, pResp2.Body)
 						pResp2.Body.Close()
-						if pResp2.StatusCode == http.StatusOK {
+						if pResp2.StatusCode >= 200 && pResp2.StatusCode < 300 {
 							atomic.StoreInt32(&authSuccess, 1)
 							return
 						}
@@ -339,11 +396,11 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 // verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
 func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	client := &http.Client{
-		Timeout: 500 * time.Millisecond,
+		Timeout: 1000 * time.Millisecond,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			DialContext: (&net.Dialer{
-				Timeout: 400 * time.Millisecond,
+				Timeout: 600 * time.Millisecond,
 			}).DialContext,
 		},
 	}
@@ -403,14 +460,23 @@ func GetKeeneticUsers() []KeeneticUser {
 	var users []KeeneticUser
 	seen := make(map[string]bool)
 
+	// KeeneticOS stores active configuration in startup-config.draft, startup-config, or startup-config.txt
 	configFiles := []string{
+		"/storage/startup-config.draft",
 		"/storage/startup-config",
+		"/storage/startup-config.txt",
 		"/storage/running-config",
-		"/var/ndm/startup-config",
-		"/var/ndm/running-config",
+		"/opt/etc/ndm/startup-config.draft",
 		"/opt/etc/ndm/startup-config",
 		"/opt/etc/ndm/running-config",
+		"/var/ndm/startup-config.draft",
+		"/var/ndm/startup-config",
+		"/var/ndm/running-config",
+		"/flash/startup-config.draft",
+		"/flash/startup-config",
+		"/etc/ndm/startup-config.draft",
 		"/etc/ndm/startup-config",
+		"/tmp/startup-config.draft",
 		"/tmp/startup-config",
 		"/tmp/running-config",
 	}
@@ -434,7 +500,43 @@ func GetKeeneticUsers() []KeeneticUser {
 		}
 	}
 
-	// 2. ndmq CLI query (official Keenetic IPC query tool)
+	// 2. ndmc CLI query (official Keenetic CLI command runner)
+	if len(users) == 0 {
+		for _, ndmc := range []string{"/bin/ndmc", "/usr/bin/ndmc", "/opt/bin/ndmc", "ndmc"} {
+			var cmdPath string
+			if ndmc == "ndmc" {
+				if lp, err := exec.LookPath(ndmc); err == nil {
+					cmdPath = lp
+				}
+			} else if fi, err := os.Stat(ndmc); err == nil && !fi.IsDir() {
+				cmdPath = ndmc
+			}
+			if cmdPath != "" {
+				ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+				cmd := exec.CommandContext(ctx, cmdPath, "-c", "show running-config")
+				cmd.Stdin = bytes.NewReader(nil)
+				out, err := cmd.Output()
+				cancel()
+				if err == nil && len(out) > 0 {
+					parsed, hn := parseKeeneticConfigFile(bytes.NewReader(out))
+					if hn != "" {
+						keeneticHostnameCache = hn
+					}
+					for _, u := range parsed {
+						if !seen[strings.ToLower(u.Username)] {
+							users = append(users, u)
+							seen[strings.ToLower(u.Username)] = true
+						}
+					}
+				}
+				if len(users) > 0 {
+					break
+				}
+			}
+		}
+	}
+
+	// 3. ndmq CLI query (official Keenetic low-level IPC tool)
 	if len(users) == 0 {
 		var resolvedNdmq string
 		for _, p := range []string{"/bin/ndmq", "/usr/bin/ndmq", "/opt/bin/ndmq", "ndmq"} {
@@ -450,8 +552,10 @@ func GetKeeneticUsers() []KeeneticUser {
 		}
 
 		if resolvedNdmq != "" {
-			ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
-			out, err := exec.CommandContext(ctx, resolvedNdmq, "-p", "show running-config").Output()
+			ctx, cancel := context.WithTimeout(context.Background(), 1000*time.Millisecond)
+			cmd := exec.CommandContext(ctx, resolvedNdmq, "-p", "show running-config")
+			cmd.Stdin = bytes.NewReader(nil)
+			out, err := cmd.Output()
 			cancel()
 			if err == nil && len(out) > 0 {
 				parsed, hn := parseKeeneticConfigFile(bytes.NewReader(out))
@@ -509,10 +613,37 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 	scanner := bufio.NewScanner(r)
 	var currentUser *KeeneticUser
 
+	flushCurrentUser := func() {
+		if currentUser != nil {
+			if currentUser.Password != "" || currentUser.PasswordHash != "" || currentUser.NTHash != "" {
+				users = append(users, *currentUser)
+			}
+			currentUser = nil
+		}
+	}
+
 	for scanner.Scan() {
 		rawLine := scanner.Text()
 		trimmed := strings.TrimSpace(rawLine)
-		if trimmed == "" || strings.HasPrefix(trimmed, "!") || strings.HasPrefix(trimmed, "#") {
+
+		// Check for router model in comments (e.g. "! $$$ Model: Keenetic Titan (KN-1810)" or "! Model: Keenetic Giga")
+		if strings.HasPrefix(trimmed, "!") {
+			lower := strings.ToLower(trimmed)
+			if strings.Contains(lower, "model:") {
+				parts := strings.SplitN(trimmed, ":", 2)
+				if len(parts) == 2 {
+					mName := strings.TrimSpace(parts[1])
+					if mName != "" {
+						keeneticCacheMu.Lock()
+						keeneticModelCache = mName
+						keeneticCacheMu.Unlock()
+					}
+				}
+			}
+			continue
+		}
+
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
@@ -532,11 +663,8 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 		}
 
 		// Single line user definition: "user <name> password ..."
-		if fields[0] == "user" && len(fields) >= 3 && (fields[2] == "password" || fields[2] == "md5") {
-			if currentUser != nil {
-				users = append(users, *currentUser)
-				currentUser = nil
-			}
+		if fields[0] == "user" && len(fields) >= 3 && (fields[2] == "password" || fields[2] == "md5" || fields[2] == "nt") {
+			flushCurrentUser()
 			u := parseSingleUserLine(fields)
 			if u != nil {
 				users = append(users, *u)
@@ -544,11 +672,9 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 			continue
 		}
 
-		// Start of multi-line block: "user <name>"
+		// Start of multi-line user block: "user <name>"
 		if fields[0] == "user" && len(fields) == 2 {
-			if currentUser != nil {
-				users = append(users, *currentUser)
-			}
+			flushCurrentUser()
 			currentUser = &KeeneticUser{
 				Username: fields[1],
 				HashType: "plain",
@@ -556,24 +682,24 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 			continue
 		}
 
-		// Inside multi-line block: "password ..." or "password md5 ..."
-		if currentUser != nil && (fields[0] == "password" || fields[0] == "md5") {
+		// Inside multi-line user block: indented lines with "password ...", "password nt ...", "password md5 ..."
+		if currentUser != nil && (fields[0] == "password" || fields[0] == "md5" || fields[0] == "nt") {
 			extractPasswordFields(currentUser, fields)
-			users = append(users, *currentUser)
-			currentUser = nil
+			continue
+		}
+
+		// Other indented user attributes (tag http, tag cli, etc.): keep currentUser open
+		if currentUser != nil && (strings.HasPrefix(rawLine, " ") || strings.HasPrefix(rawLine, "\t")) {
 			continue
 		}
 
 		// End of submode block if unindented command starts
 		if currentUser != nil && !strings.HasPrefix(rawLine, " ") && !strings.HasPrefix(rawLine, "\t") {
-			users = append(users, *currentUser)
-			currentUser = nil
+			flushCurrentUser()
 		}
 	}
 
-	if currentUser != nil {
-		users = append(users, *currentUser)
-	}
+	flushCurrentUser()
 
 	return users, hostname
 }
@@ -593,11 +719,23 @@ func extractPasswordFields(u *KeeneticUser, fields []string) {
 	}
 
 	// formats:
+	// ["password", "nt", "7921563a..."] -> NTLM hash
+	// ["nt", "7921563a..."]
 	// ["password", "md5", "7815696..."]
+	// ["md5", "7815696..."]
 	// ["password", "hash", "md5", "7815696..."]
 	// ["password", "hash", "sha256", "8c69..."]
 	// ["password", "mypassword"]
-	// ["md5", "7815696..."]
+
+	if fields[0] == "nt" {
+		u.NTHash = cleanHashPrefix(fields[1])
+		return
+	}
+
+	if fields[1] == "nt" && len(fields) >= 3 {
+		u.NTHash = cleanHashPrefix(fields[2])
+		return
+	}
 
 	if fields[0] == "md5" {
 		u.PasswordHash = cleanHashPrefix(fields[1])
@@ -615,8 +753,12 @@ func extractPasswordFields(u *KeeneticUser, fields []string) {
 		if len(fields) >= 4 {
 			hType := strings.ToLower(fields[2])
 			hVal := fields[3]
-			u.PasswordHash = cleanHashPrefix(hVal)
-			u.HashType = hType
+			if hType == "nt" {
+				u.NTHash = cleanHashPrefix(hVal)
+			} else {
+				u.PasswordHash = cleanHashPrefix(hVal)
+				u.HashType = hType
+			}
 		} else {
 			hVal := fields[2]
 			u.PasswordHash = cleanHashPrefix(hVal)
@@ -637,6 +779,9 @@ func cleanHashPrefix(h string) string {
 	}
 	if strings.HasPrefix(strings.ToLower(h), "sha256:") {
 		return h[7:]
+	}
+	if strings.HasPrefix(strings.ToLower(h), "nt:") {
+		return h[3:]
 	}
 	return h
 }
@@ -683,15 +828,23 @@ func verifyKeeneticHash(username, password, storedHash, hashType string) bool {
 
 	keeneticCacheMu.RLock()
 	cachedRealm := keeneticRealmHttp
+	cachedModel := keeneticModelCache
 	keeneticCacheMu.RUnlock()
 	if cachedRealm != "" {
 		realms = append([]string{cachedRealm}, realms...)
 	}
+	if cachedModel != "" {
+		// e.g. "Keenetic Titan (KN-1810)", "Keenetic Titan", "Titan"
+		realms = append([]string{cachedModel}, realms...)
+		trimmed := strings.TrimPrefix(cachedModel, "Keenetic ")
+		realms = append(realms, trimmed)
+		if idx := strings.Index(cachedModel, "("); idx > 0 {
+			base := strings.TrimSpace(cachedModel[:idx])
+			realms = append(realms, base, strings.TrimPrefix(base, "Keenetic "))
+		}
+	}
 	if keeneticHostnameCache != "" {
 		realms = append([]string{keeneticHostnameCache}, realms...)
-	}
-	if keeneticModelCache != "" {
-		realms = append([]string{keeneticModelCache}, realms...)
 	}
 	if hn, err := os.Hostname(); err == nil && hn != "" {
 		realms = append([]string{hn}, realms...)

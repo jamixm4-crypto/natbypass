@@ -20,10 +20,12 @@ import (
 func TestParseKeeneticConfigFile(t *testing.T) {
 	configSample := `
 ! KeeneticOS Configuration File
+! $$$ Model: Keenetic Titan (KN-1810)
 system hostname Keenetic-Hero
 !
 user admin
-    password hash md5 d3bcc0e272f164e15e886cf4cd3e5498
+    password md5 1bb437c31db80974e28e19a1cf221500
+    password nt 7921563aedbe2978b89fbe8ff4b52d93
     tag http
     tag cli
 !
@@ -41,8 +43,7 @@ user singleline password hash sha256 8c6976e5b5410415bde908bd4dee15dfb167a9c873f
 		t.Fatalf("expected 3 users, got %d: %+v", len(users), users)
 	}
 
-
-	if users[0].Username != "admin" || users[0].PasswordHash != "d3bcc0e272f164e15e886cf4cd3e5498" {
+	if users[0].Username != "admin" || users[0].PasswordHash != "1bb437c31db80974e28e19a1cf221500" || users[0].NTHash != "7921563aedbe2978b89fbe8ff4b52d93" {
 		t.Fatalf("unexpected users[0]: %+v", users[0])
 	}
 
@@ -57,9 +58,10 @@ user singleline password hash sha256 8c6976e5b5410415bde908bd4dee15dfb167a9c873f
 
 func TestVerifyKeeneticAuth(t *testing.T) {
 	// Mocked Keenetic users from config
+	ntlmSecret := computeNTLMHash("secret")
 	keeneticCacheTime = time.Now()
 	keeneticUsersCache = []KeeneticUser{
-		{Username: "admin", PasswordHash: "d3bcc0e272f164e15e886cf4cd3e5498", HashType: "md5"}, // "secret" with realm Keenetic
+		{Username: "admin", PasswordHash: "d3bcc0e272f164e15e886cf4cd3e5498", HashType: "md5", NTHash: ntlmSecret}, // "secret" with NTLM
 		{Username: "operator", Password: "MySecret99", HashType: "plain"},
 	}
 

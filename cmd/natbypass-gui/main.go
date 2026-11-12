@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.7"
+	Version = "1.9.507-beta.8"
 	Commit  = "release"
 )
 
@@ -969,7 +969,7 @@ func main() {
 	allowExitNode = cfg.Network.AllowExitNode
 	if allowExitNode {
 		go func() {
-			_ = tunnel.EnableHostIPForwarding()
+			_ = tunnel.EnableHostIPForwardingSubnet(myVirtualIP)
 		}()
 	} else {
 		// Очищаем зависшие маршруты Exit Node от возможных предыдущих аварийных завершений
@@ -1930,7 +1930,7 @@ func handleCommand(id uint16) {
 			buttonLabels[ID_BTN_ALLOW_EXIT] = "🌐 Разрешить выход в интернет через меня: ВКЛ"
 			buttonTypes[ID_BTN_ALLOW_EXIT] = "green"
 			go func() {
-				if err := tunnel.EnableHostIPForwarding(); err != nil {
+				if err := tunnel.EnableHostIPForwardingSubnet(myVirtualIP); err != nil {
 					addLog("⚠️ Ошибка включения IP Forwarding: " + err.Error())
 					writeDebug("EnableHostIPForwarding error: " + err.Error())
 				} else {
@@ -8272,7 +8272,7 @@ func saveConfigFromUI() {
 
 	if allowExitNode {
 		go func() {
-			_ = tunnel.EnableHostIPForwarding()
+			_ = tunnel.EnableHostIPForwardingSubnet(myVirtualIP)
 		}()
 	}
 

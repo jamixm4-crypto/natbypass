@@ -2821,7 +2821,13 @@ func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 		if req.AllowExitNode != nil {
 			cfg.Network.AllowExitNode = *req.AllowExitNode
 			if *req.AllowExitNode {
-				subnet := cfg.Network.Address
+				subnet := ""
+				if s.state != nil && s.state.VirtualIP != "" {
+					subnet = s.state.VirtualIP
+				}
+				if subnet == "" {
+					subnet = cfg.Network.Address
+				}
 				if subnet == "" {
 					subnet = "100.64.200.0/24"
 				}
@@ -3104,7 +3110,14 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		cfg.Network.AdvertisedSubnets = req.AdvertisedSubnets
 	}
 	if req.AllowExitNode || len(req.AdvertisedSubnets) > 0 {
-		_ = tunnel.EnableHostIPForwardingSubnet(cfg.Network.Address)
+		subnet := ""
+		if s.state != nil && s.state.VirtualIP != "" {
+			subnet = s.state.VirtualIP
+		}
+		if subnet == "" {
+			subnet = cfg.Network.Address
+		}
+		_ = tunnel.EnableHostIPForwardingSubnet(subnet)
 	} else {
 		_ = tunnel.DisableHostIPForwarding()
 	}
@@ -4405,7 +4418,14 @@ func (s *Server) handleRoutingHostSettings(w http.ResponseWriter, r *http.Reques
 	_ = config.Save(cfg, s.configPath, false)
 
 	if req.AllowExitNode || len(req.AdvertisedSubnets) > 0 {
-		_ = tunnel.EnableHostIPForwarding()
+		subnet := ""
+		if s.state != nil && s.state.VirtualIP != "" {
+			subnet = s.state.VirtualIP
+		}
+		if subnet == "" {
+			subnet = cfg.Network.Address
+		}
+		_ = tunnel.EnableHostIPForwardingSubnet(subnet)
 		s.AddEvent("info", "Включена роль маршрутизатора/шлюза", "Активирован IP Forwarding и NAT Masquerade")
 	} else {
 		_ = tunnel.DisableHostIPForwarding()

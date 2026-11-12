@@ -64,6 +64,10 @@ func isMeshIPWindows(hostIP string) bool {
 	if ip4[0] == 100 && (ip4[1]&0xC0) == 64 {
 		return true
 	}
+	// 10.0.0.0/8 (Default mesh subnet family)
+	if ip4[0] == 10 {
+		return true
+	}
 	// Проверяем по текущей подсети активного TUN
 	tunStat := GetTUNStatus()
 	if tunStat.Active && tunStat.VirtualIP != "" {
@@ -78,22 +82,43 @@ func isMeshIPWindows(hostIP string) bool {
 	return false
 }
 
+// getMeshSupernet returns a CIDR prefix covering all mesh nodes based on an IP or subnet string.
+func getMeshSupernet(vipOrSubnet string) string {
+	clean := strings.TrimSpace(vipOrSubnet)
+	if strings.Contains(clean, "/") {
+		clean = strings.Split(clean, "/")[0]
+	}
+	ip := net.ParseIP(clean)
+	if ip == nil {
+		return "10.0.0.0/8"
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return "10.0.0.0/8"
+	}
+	if ip4[0] == 10 {
+		return "10.0.0.0/8"
+	}
+	if ip4[0] == 100 && (ip4[1]&0xC0) == 64 {
+		return "100.64.0.0/10"
+	}
+	if ip4[0] == 172 && (ip4[1] >= 16 && ip4[1] <= 31) {
+		return "172.16.0.0/12"
+	}
+	if ip4[0] == 192 && ip4[1] == 168 {
+		return "192.168.0.0/16"
+	}
+	return fmt.Sprintf("%d.%d.%d.0/24", ip4[0], ip4[1], ip4[2])
+}
+
 // EnableHostIPForwardingSubnet sets IP forwarding and activates Windows NetNat for dynamic mesh subnet.
 func EnableHostIPForwardingSubnet(subnet string) error {
-	if subnet == "" {
-		subnet = "100.64.200.0/24"
+	targetSubnet := subnet
+	tunStat := GetTUNStatus()
+	if tunStat.Active && tunStat.VirtualIP != "" {
+		targetSubnet = tunStat.VirtualIP
 	}
-	cleanSubnet := subnet
-	if _, ipNet, err := net.ParseCIDR(subnet); err == nil {
-		cleanSubnet = ipNet.String()
-	} else if !strings.Contains(cleanSubnet, "/") {
-		parts := strings.Split(cleanSubnet, ".")
-		if len(parts) >= 3 {
-			cleanSubnet = fmt.Sprintf("%s.%s.%s.0/24", parts[0], parts[1], parts[2])
-		} else {
-			cleanSubnet = "100.64.200.0/24"
-		}
-	}
+	targetPrefix := getMeshSupernet(targetSubnet)
 
 	adapterName := getNatBypassAdapterNameWindows()
 
@@ -101,32 +126,27 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "interface", adapterName, "forwarding=enabled")
 
 	// 2. Enable IP routing in Windows Registry & NetNat & enable forwarding on all active network adapters
+	// Note: Windows supports only ONE active NetNat instance system-wide.
 	psScript := fmt.Sprintf(`
 		Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'IPEnableRouter' -Value 1 -ErrorAction SilentlyContinue
 		Set-NetIPInterface -AddressFamily IPv4 -Forwarding Enabled -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue
 
-		$subnets = @('%s', '100.64.0.0/10', '10.0.0.0/8')
+		$targetPrefix = '%s'
 		$existingNats = Get-NetNat -ErrorAction SilentlyContinue
 
-		$i = 0
-		foreach ($sub in $subnets) {
-			if ([string]::IsNullOrWhiteSpace($sub)) { continue }
-			$natName = if ($i -eq 0) { 'NatBypassNAT' } else { "NatBypassNAT-$i" }
-			$i++
-
-			$alreadyExists = $false
-			if ($existingNats) {
-				foreach ($en in $existingNats) {
-					if ($en.InternalIPInterfaceAddressPrefix -eq $sub) {
-						$alreadyExists = $true
-						break
-					}
+		$matched = $false
+		if ($existingNats) {
+			foreach ($nat in $existingNats) {
+				if ($nat.InternalIPInterfaceAddressPrefix -eq $targetPrefix) {
+					$matched = $true
+				} elseif ($nat.Name -like 'NatBypassNAT*') {
+					Remove-NetNat -Name $nat.Name -Confirm:$false -ErrorAction SilentlyContinue
 				}
 			}
-			if (-not $alreadyExists) {
-				Remove-NetNat -Name $natName -Confirm:$false -ErrorAction SilentlyContinue
-				New-NetNat -Name $natName -InternalIPInterfaceAddressPrefix $sub -ErrorAction SilentlyContinue
-			}
+		}
+
+		if (-not $matched) {
+			New-NetNat -Name 'NatBypassNAT' -InternalIPInterfaceAddressPrefix $targetPrefix -ErrorAction SilentlyContinue
 		}
 
 		if (-not (Get-NetFirewallRule -Name "NatBypass-Forward-In" -ErrorAction SilentlyContinue)) {
@@ -135,7 +155,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		if (-not (Get-NetFirewallRule -Name "NatBypass-Forward-Out" -ErrorAction SilentlyContinue)) {
 			New-NetFirewallRule -Name "NatBypass-Forward-Out" -DisplayName "NatBypass Forward Outbound" -Direction Outbound -Action Allow -Protocol Any -Profile Any -ErrorAction SilentlyContinue
 		}
-	`, cleanSubnet)
+	`, targetPrefix)
 	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 
 	// 3. Add Windows firewall rules for interface forwarding
@@ -181,11 +201,18 @@ func EnsurePeerHostRoute(peerVIP string) {
 	}
 
 	ifIdx := getNatBypassIfIndexWindows()
-	args := []string{"add", cleanVIP, "mask", "255.255.255.255", myVIP, "metric", "10"}
+	args := []string{"add", cleanVIP, "mask", "255.255.255.255", "0.0.0.0", "metric", "5"}
 	if ifIdx > 0 {
 		args = append(args, "IF", fmt.Sprintf("%d", ifIdx))
 	}
 	_ = runRouteCmd("route", args...)
+	if ifIdx > 0 {
+		psHostRoute := fmt.Sprintf(`
+			Get-NetRoute -InterfaceIndex %d -DestinationPrefix '%s/32' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+			New-NetRoute -InterfaceIndex %d -DestinationPrefix '%s/32' -NextHop '0.0.0.0' -RouteMetric 5 -ErrorAction SilentlyContinue
+		`, ifIdx, cleanVIP, ifIdx, cleanVIP)
+		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psHostRoute)
+	}
 }
 
 // DisableHostIPForwarding disables IP forwarding and cleans up NetNat rule.
@@ -406,19 +433,26 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
 	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
 
-	args0 := []string{"add", "0.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"}
-	args128 := []string{"add", "128.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"}
+	// On Windows Point-to-Point Wintun, the next hop for the def1 routes is 0.0.0.0 (On-link),
+	// binding all default transit traffic unconditionally to the NatBypass Wintun interface.
+	args0 := []string{"add", "0.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "metric", "1"}
+	args128 := []string{"add", "128.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "metric", "1"}
 	if ifIdx > 0 {
 		args0 = append(args0, "IF", fmt.Sprintf("%d", ifIdx))
 		args128 = append(args128, "IF", fmt.Sprintf("%d", ifIdx))
 	}
 
-	if err := runRouteCmd("route", args0...); err != nil {
-		return fmt.Errorf("failed to add default route 0.0.0.0/1 via %s: %w", cleanVIP, err)
-	}
-	if err := runRouteCmd("route", args128...); err != nil {
-		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", cleanVIP)
-		return fmt.Errorf("failed to add default route 128.0.0.0/1 via %s: %w", cleanVIP, err)
+	_ = runRouteCmd("route", args0...)
+	_ = runRouteCmd("route", args128...)
+
+	if ifIdx > 0 {
+		psRoutes := fmt.Sprintf(`
+			Get-NetRoute -InterfaceIndex %d -DestinationPrefix '0.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+			Get-NetRoute -InterfaceIndex %d -DestinationPrefix '128.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+			New-NetRoute -InterfaceIndex %d -DestinationPrefix '0.0.0.0/1' -NextHop '0.0.0.0' -RouteMetric 1 -ErrorAction SilentlyContinue
+			New-NetRoute -InterfaceIndex %d -DestinationPrefix '128.0.0.0/1' -NextHop '0.0.0.0' -RouteMetric 1 -ErrorAction SilentlyContinue
+		`, ifIdx, ifIdx, ifIdx, ifIdx)
+		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psRoutes)
 	}
 
 	// 4. Configure DNS on NatBypass adapter: use local DoH (127.0.0.1) ONLY if port 53 is responsive,
@@ -457,6 +491,13 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	}
 	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
 	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
+	if ifIdx := getNatBypassIfIndexWindows(); ifIdx > 0 {
+		psClean := fmt.Sprintf(`
+			Get-NetRoute -InterfaceIndex %d -DestinationPrefix '0.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+			Get-NetRoute -InterfaceIndex %d -DestinationPrefix '128.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+		`, ifIdx, ifIdx)
+		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psClean)
+	}
 
 	// Remove all bypass routes
 	bypassedMu.Lock()
