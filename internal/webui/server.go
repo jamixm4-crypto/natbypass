@@ -2840,7 +2840,7 @@ func (s *Server) handleRoutingExitNode(w http.ResponseWriter, r *http.Request) {
 				var remoteEPs []string
 				vip := ""
 				if s.registry != nil {
-					if p, ok := s.registry.Get(newExit); ok && p != nil {
+					if p, ok := s.registry.GetByIDOrVIP(newExit); ok && p != nil {
 						vip = p.VirtualIP
 						if p.ActiveEndpoint != "" {
 							remoteEPs = append(remoteEPs, p.ActiveEndpoint)

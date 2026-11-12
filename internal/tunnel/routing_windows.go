@@ -16,11 +16,19 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/natbypass/natbypass/internal/network"
 )
+
+var cachedWintunIfIndex uint32
+
+// SetCachedWintunIfIndex caches the NatBypass Wintun adapter interface index for instant lookups.
+func SetCachedWintunIfIndex(idx uint32) {
+	atomic.StoreUint32(&cachedWintunIfIndex, idx)
+}
 
 // runRouteCmd executes a Windows command without opening a console window.
 func runRouteCmd(name string, args ...string) error {
@@ -75,8 +83,6 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	if subnet == "" {
 		subnet = "100.64.200.0/24"
 	}
-	// F5: Используем net.ParseCIDR для получения правильного сетевого адреса
-	// (например "10.11.12.1/24" → "10.11.12.0/24")
 	cleanSubnet := subnet
 	if _, ipNet, err := net.ParseCIDR(subnet); err == nil {
 		cleanSubnet = ipNet.String()
@@ -97,27 +103,39 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	// 2. Enable IP routing in Windows Registry & NetNat & enable forwarding on all active network adapters
 	psScript := fmt.Sprintf(`
 		Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'IPEnableRouter' -Value 1 -ErrorAction SilentlyContinue
-		Set-Service -Name RemoteAccess -StartupType Automatic -ErrorAction SilentlyContinue
-		Start-Service -Name RemoteAccess -ErrorAction SilentlyContinue
-		netsh interface ipv4 set interface "%s" forwarding=enabled
-		Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
-			netsh interface ipv4 set interface $_.InterfaceAlias forwarding=enabled
-		}
-		$existing = Get-NetNat -ErrorAction SilentlyContinue
-		$matched = $false
-		if ($existing) {
-			foreach ($nat in $existing) {
-				if ($nat.InternalIPInterfaceAddressPrefix -eq '%s') {
-					$matched = $true
-					break
+		Set-NetIPInterface -AddressFamily IPv4 -Forwarding Enabled -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue
+
+		$subnets = @('%s', '100.64.0.0/10', '10.0.0.0/8')
+		$existingNats = Get-NetNat -ErrorAction SilentlyContinue
+
+		$i = 0
+		foreach ($sub in $subnets) {
+			if ([string]::IsNullOrWhiteSpace($sub)) { continue }
+			$natName = if ($i -eq 0) { 'NatBypassNAT' } else { "NatBypassNAT-$i" }
+			$i++
+
+			$alreadyExists = $false
+			if ($existingNats) {
+				foreach ($en in $existingNats) {
+					if ($en.InternalIPInterfaceAddressPrefix -eq $sub) {
+						$alreadyExists = $true
+						break
+					}
 				}
 			}
+			if (-not $alreadyExists) {
+				Remove-NetNat -Name $natName -Confirm:$false -ErrorAction SilentlyContinue
+				New-NetNat -Name $natName -InternalIPInterfaceAddressPrefix $sub -ErrorAction SilentlyContinue
+			}
 		}
-		if (-not $matched) {
-			Remove-NetNat -Name 'NatBypassNAT' -Confirm:$false -ErrorAction SilentlyContinue
-			New-NetNat -Name 'NatBypassNAT' -InternalIPInterfaceAddressPrefix '%s' -ErrorAction SilentlyContinue
+
+		if (-not (Get-NetFirewallRule -Name "NatBypass-Forward-In" -ErrorAction SilentlyContinue)) {
+			New-NetFirewallRule -Name "NatBypass-Forward-In" -DisplayName "NatBypass Forward Inbound" -Direction Inbound -Action Allow -Protocol Any -Profile Any -EdgeTraversalPolicy Allow -ErrorAction SilentlyContinue
 		}
-	`, adapterName, cleanSubnet, cleanSubnet)
+		if (-not (Get-NetFirewallRule -Name "NatBypass-Forward-Out" -ErrorAction SilentlyContinue)) {
+			New-NetFirewallRule -Name "NatBypass-Forward-Out" -DisplayName "NatBypass Forward Outbound" -Direction Outbound -Action Allow -Protocol Any -Profile Any -ErrorAction SilentlyContinue
+		}
+	`, cleanSubnet)
 	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 
 	// 3. Add Windows firewall rules for interface forwarding
@@ -162,15 +180,23 @@ func EnsurePeerHostRoute(peerVIP string) {
 		winPeerRoutes.Store(cleanVIP, now)
 	}
 
-	// route add <cleanVIP> mask 255.255.255.255 <myVIP> metric 10
-	_ = runRouteCmd("route", "add", cleanVIP, "mask", "255.255.255.255", myVIP, "metric", "10")
+	ifIdx := getNatBypassIfIndexWindows()
+	args := []string{"add", cleanVIP, "mask", "255.255.255.255", myVIP, "metric", "10"}
+	if ifIdx > 0 {
+		args = append(args, "IF", fmt.Sprintf("%d", ifIdx))
+	}
+	_ = runRouteCmd("route", args...)
 }
-
 
 // DisableHostIPForwarding disables IP forwarding and cleans up NetNat rule.
 func DisableHostIPForwarding() error {
-	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "interface", "NatBypass", "forwarding=disabled")
-	psScript := `Remove-NetNat -Name 'NatBypassNAT' -Confirm:$false -ErrorAction SilentlyContinue`
+	adapterName := getNatBypassAdapterNameWindows()
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "interface", adapterName, "forwarding=disabled")
+	psScript := `
+		Set-NetIPInterface -InterfaceAlias 'NatBypass*' -AddressFamily IPv4 -Forwarding Disabled -ErrorAction SilentlyContinue
+		Get-NetNat | Where-Object { $_.Name -like 'NatBypassNAT*' } | Remove-NetNat -Confirm:$false -ErrorAction SilentlyContinue
+		Remove-NetFirewallRule -Name 'NatBypass-Forward-*' -ErrorAction SilentlyContinue
+	`
 	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 	return nil
 }
@@ -271,6 +297,28 @@ func extractHostIPs(endpoint string) []string {
 	return res
 }
 
+// isLocalDNSResponding sends a real 12-byte DNS test query to 127.0.0.1:53 to check if DoH proxy is actively responding.
+func isLocalDNSResponding() bool {
+	conn, err := net.DialTimeout("udp", "127.0.0.1:53", 100*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	// Standard DNS query header for localhost: Type A, Class IN
+	query := []byte{
+		0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x09, 'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't', 0x00,
+		0x00, 0x01, 0x00, 0x01,
+	}
+	_ = conn.SetDeadline(time.Now().Add(150 * time.Millisecond))
+	if _, err := conn.Write(query); err != nil {
+		return false
+	}
+	buf := make([]byte, 512)
+	n, err := conn.Read(buf)
+	return err == nil && n >= 12
+}
+
 // getNatBypassAdapterNameWindows returns the actual system interface name for the NatBypass Wintun adapter.
 func getNatBypassAdapterNameWindows() string {
 	ifaces, err := net.Interfaces()
@@ -281,11 +329,14 @@ func getNatBypassAdapterNameWindows() string {
 			}
 		}
 	}
-	return "NatBypass Tunnel"
+	return "NatBypass"
 }
 
 // getNatBypassIfIndexWindows finds the interface index of the NatBypass Wintun adapter.
 func getNatBypassIfIndexWindows() int {
+	if idx := atomic.LoadUint32(&cachedWintunIfIndex); idx > 0 {
+		return int(idx)
+	}
 	ifaces, err := net.Interfaces()
 	if err == nil {
 		for _, iface := range ifaces {
@@ -345,8 +396,16 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		_ = BypassEndpoint(ep)
 	}
 
-	// 2. Add WireGuard def1 /1 routes with NatBypass adapter IF index to avoid interface ambiguity
+	// 2. Ensure /32 host route to the exit gateway VIP exists on NatBypass adapter
+	EnsurePeerHostRoute(cleanVIP)
+
+	// 3. Add WireGuard def1 /1 routes with NatBypass adapter IF index to avoid interface ambiguity
 	ifIdx := getNatBypassIfIndexWindows()
+
+	// Clear existing def1 routes first to avoid duplicate route errors
+	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
+	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
+
 	args0 := []string{"add", "0.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"}
 	args128 := []string{"add", "128.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "5"}
 	if ifIdx > 0 {
@@ -362,21 +421,28 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		return fmt.Errorf("failed to add default route 128.0.0.0/1 via %s: %w", cleanVIP, err)
 	}
 
-	// 3. Configure DNS on NatBypass adapter: use local DoH (127.0.0.1) ONLY if port 53 is responsive,
+	// 4. Configure DNS on NatBypass adapter: use local DoH (127.0.0.1) ONLY if port 53 is responsive,
 	// otherwise fall back directly to public resolvers (1.1.1.1, 8.8.8.8) routed via tunnel.
 	adapterName := getNatBypassAdapterNameWindows()
-	dohActive := false
-	if conn, err := net.DialTimeout("udp", "127.0.0.1:53", 100*time.Millisecond); err == nil {
-		_ = conn.Close()
-		dohActive = true
-	}
+	dohActive := isLocalDNSResponding()
 
 	if dohActive {
 		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "127.0.0.1", "register=primary", "validate=no")
 		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=1.1.1.1", "index=2", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=8.8.8.8", "index=3", "validate=no")
 	} else {
 		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "1.1.1.1", "register=primary", "validate=no")
 		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=8.8.8.8", "index=2", "validate=no")
+	}
+
+	if ifIdx > 0 {
+		var psDNS string
+		if dohActive {
+			psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('127.0.0.1', '1.1.1.1', '8.8.8.8') -ErrorAction SilentlyContinue", ifIdx)
+		} else {
+			psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('1.1.1.1', '8.8.8.8') -ErrorAction SilentlyContinue", ifIdx)
+		}
+		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psDNS)
 	}
 
 	return nil
@@ -388,10 +454,9 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	if gatewayVIP != "" {
 		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", gatewayVIP)
 		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", gatewayVIP)
-	} else {
-		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
-		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
 	}
+	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
+	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
 
 	// Remove all bypass routes
 	bypassedMu.Lock()
@@ -404,6 +469,10 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	// Reset DNS on adapter
 	adapterName := getNatBypassAdapterNameWindows()
 	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "source=dhcp")
+	if ifIdx := getNatBypassIfIndexWindows(); ifIdx > 0 {
+		psScript := fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ResetServerAddresses -ErrorAction SilentlyContinue", ifIdx)
+		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("errors disabling exit node routing: %s", strings.Join(errs, "; "))

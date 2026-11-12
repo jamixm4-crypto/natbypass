@@ -489,7 +489,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 	if uiServer != nil {
 		uiServer.SetTUNStatus(tunnel.GetTUNStatus())
 	}
-	if runtime.GOOS == "linux" && registry != nil {
+	if (runtime.GOOS == "linux" || runtime.GOOS == "windows") && registry != nil {
 		for _, p := range registry.List() {
 			if p.VirtualIP != "" {
 				tunnel.EnsurePeerHostRoute(p.VirtualIP)
@@ -1255,12 +1255,28 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 
 			log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
-			// FIX-A: Ensure Linux kernel has a /32 host route back to peer VIP via nb0
+			// Ensure OS kernel has a /32 host route back to peer VIP via TUN/Wintun
 			// BEFORE writing packet to TUN, so kernel ICMP replies and NAT return packets don't escape via WAN
-			if runtime.GOOS == "linux" && inSrcIP != "" {
+			if inSrcIP != "" {
 				tunnel.EnsurePeerHostRoute(inSrcIP)
 			}
 			if tunDev != nil {
+				// Recalculate IPv4 header checksum so Windows Wintun driver accepts packet unconditionally
+				if len(payload) >= 20 && payload[0]>>4 == 4 {
+					ihl := int(payload[0]&0x0F) * 4
+					if ihl >= 20 && ihl <= len(payload) {
+						payload[10] = 0
+						payload[11] = 0
+						var sum uint32
+						for i := 0; i < ihl; i += 2 {
+							sum += uint32(binary.BigEndian.Uint16(payload[i : i+2]))
+						}
+						for sum > 0xFFFF {
+							sum = (sum & 0xFFFF) + (sum >> 16)
+						}
+						binary.BigEndian.PutUint16(payload[10:12], ^uint16(sum))
+					}
+				}
 				_ = tunDev.WritePacket(payload)
 			}
 		}
@@ -2237,7 +2253,7 @@ func resolveVirtualIP(cfg *config.Config, deviceID string) string {
 func startPeerRegistry(ctx context.Context) *peer.Registry {
 	registry := peer.NewRegistry()
 	registry.StartMonitor(ctx, constants.PeerMonitorInterval)
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" || runtime.GOOS == "windows" {
 		registry.SetOnPeerUpdate(func(p *peer.Peer) {
 			if p != nil && p.VirtualIP != "" {
 				tunnel.EnsurePeerHostRoute(p.VirtualIP)

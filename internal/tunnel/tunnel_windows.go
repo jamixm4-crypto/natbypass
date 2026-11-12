@@ -376,6 +376,7 @@ func CreateAdapter(adapterName, virtualIP string) (retDev *Device, retErr error)
 	var ifIndex uint32
 	procWintunGetAdapterLUID.Call(hAdapter, uintptr(unsafe.Pointer(&luid)))
 	procConvertInterfaceLuidToIndex.Call(uintptr(unsafe.Pointer(&luid)), uintptr(unsafe.Pointer(&ifIndex)))
+	SetCachedWintunIfIndex(ifIndex)
 
 	cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
 	prefix := "100.64.200"
