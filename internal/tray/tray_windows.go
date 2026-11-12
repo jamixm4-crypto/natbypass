@@ -448,7 +448,22 @@ func (t *TrayApp) openInBrowser() {
 		port = 8080
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
-	_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
+
+	procShellExecuteW := modshell32.NewProc("ShellExecuteW")
+	if procShellExecuteW.Find() == nil {
+		verbPtr, _ := windows.UTF16PtrFromString("open")
+		urlPtr, _ := windows.UTF16PtrFromString(url)
+		r, _, _ := procShellExecuteW.Call(0, uintptr(unsafe.Pointer(verbPtr)), uintptr(unsafe.Pointer(urlPtr)), 0, 0, 1 /* SW_SHOWNORMAL */)
+		if r > 32 {
+			return
+		}
+	}
+	cmd := exec.Command("cmd.exe", "/c", "start", "", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
+	_ = cmd.Start()
 }
 
 

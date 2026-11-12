@@ -189,6 +189,25 @@ func cleanupStaleBackups() {
 	_ = os.Remove(filepath.Join(dir, "NatBypass.exe.old"))
 }
 
+// openBrowserURL opens a URL silently without ever flashing a black cmd.exe console window.
+func openBrowserURL(url string) {
+	procShellExecuteW := modshell32Instance.NewProc("ShellExecuteW")
+	if procShellExecuteW.Find() == nil {
+		verbPtr, _ := windows.UTF16PtrFromString("open")
+		urlPtr, _ := windows.UTF16PtrFromString(url)
+		r, _, _ := procShellExecuteW.Call(0, uintptr(unsafe.Pointer(verbPtr)), uintptr(unsafe.Pointer(urlPtr)), 0, 0, 1 /* SW_SHOWNORMAL */)
+		if r > 32 {
+			return
+		}
+	}
+	cmd := exec.Command("cmd.exe", "/c", "start", "", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
+	_ = cmd.Start()
+}
+
 func activateExistingWindow() {
 	port := lastWebUIPort
 	if port <= 0 {
@@ -233,7 +252,7 @@ func activateExistingWindow() {
 			return
 		}
 	}
-	_ = exec.Command("cmd.exe", "/c", "start", "", url).Run()
+	openBrowserURL(url)
 }
 
 // subclassWebViewWindow intercepts WM_CLOSE to minimize to tray instead of exiting
@@ -277,6 +296,11 @@ func isHeadlessOrServerCore() bool {
 func launchNativeWebView(url string, port int) bool {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+
+	// Ensure WebView2 can run with elevated privileges (RunAs Administrator)
+	if os.Getenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") == "" {
+		_ = os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--no-sandbox")
+	}
 
 	modole32 := windows.NewLazySystemDLL("ole32.dll")
 	procOleInitialize := modole32.NewProc("OleInitialize")
@@ -452,7 +476,7 @@ func openAppWindow(port int) {
 
 	// 3. If explicit browser mode requested via CLI flag:
 	if strings.EqualFold(uiMode, "browser") {
-		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
+		openBrowserURL(url)
 		return
 	}
 
@@ -493,7 +517,7 @@ func openAppWindow(port int) {
 		// Tier 4: Fallback to default browser with IE ESC Intranet Zone preconfigured
 		configureLocalIntranetZone()
 		fmt.Printf("Opening WebUI in default browser at %s\n", url)
-		_ = exec.Command("cmd.exe", "/c", "start", "", url).Start()
+		openBrowserURL(url)
 	}()
 }
 

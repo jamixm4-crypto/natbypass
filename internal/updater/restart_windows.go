@@ -24,7 +24,7 @@ func RestartService(execPath string) {
 	RunPreExitHooks()
 
 	escapedPath := strings.ReplaceAll(execPath, "'", "''")
-	isGUI := strings.Contains(strings.ToLower(execPath), "gui")
+	isCLI := strings.Contains(strings.ToLower(execPath), "cli")
 
 	var argList []string
 	hasNoWindow := false
@@ -36,9 +36,10 @@ func RestartService(execPath string) {
 		argList = append(argList, fmt.Sprintf("'%s'", strings.ReplaceAll(arg, "'", "''")))
 	}
 
-	// Для фонового демона/CLI передаем --no-window, чтобы не открывать окно заново.
-	// Для оконного Win32 GUI (NatBypass-GUI.exe) данный флаг НЕ добавляем!
-	if !isGUI && !hasNoWindow {
+	// Только для чисто консольного демона (natbypass-cli.exe) принудительно передаем --no-window.
+	// Для оконных приложений (NatBypass.exe с WebUI/WebView2 и NatBypass-GUI.exe) данный флаг
+	// НИКОГДА не добавляем, чтобы после обновления окно программы сразу открывалось заново!
+	if isCLI && !hasNoWindow {
 		argList = append(argList, "'--no-window'")
 	}
 
