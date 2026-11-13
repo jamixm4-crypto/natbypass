@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.11"
+	Version = "1.9.507-beta.12"
 	Commit  = "release"
 )
 
@@ -2361,6 +2361,96 @@ func handleToggleSubnetRoute() {
 	}
 }
 
+func isLocalSubnetConflict(cidr string) bool {
+	_, targetNet, err := net.ParseCIDR(strings.TrimSpace(cidr))
+	if err != nil {
+		return true
+	}
+	for _, localSub := range tunnel.GetLocalSubnets() {
+		_, localNet, err := net.ParseCIDR(strings.TrimSpace(localSub))
+		if err == nil && (localNet.Contains(targetNet.IP) || targetNet.Contains(localNet.IP)) {
+			return true
+		}
+	}
+	return false
+}
+
+func syncAdvertisedSubnetRoutesGUI(reg *peer.Registry) {
+	if reg == nil {
+		return
+	}
+	peers := reg.List()
+	desiredRoutes := make(map[string]string) // cidr -> peerVIP
+
+	for _, p := range peers {
+		if !p.Online || p.DeviceID == myDevID || len(p.AdvertisedRoutes) == 0 {
+			continue
+		}
+		pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		if pVIP == "" {
+			continue
+		}
+		for _, rawRoute := range p.AdvertisedRoutes {
+			r := strings.TrimSpace(rawRoute)
+			if r == "" || r == "0.0.0.0/0" || r == "::/0" {
+				continue
+			}
+			_, ipNet, err := net.ParseCIDR(r)
+			if err != nil {
+				continue
+			}
+			ones, _ := ipNet.Mask.Size()
+			if ones < 8 {
+				continue
+			}
+			// Security check: never install route that conflicts with local physical adapter subnets!
+			if isLocalSubnetConflict(r) {
+				continue
+			}
+			desiredRoutes[r] = pVIP
+		}
+	}
+
+	activeSubnetRoutesMu.Lock()
+	defer activeSubnetRoutesMu.Unlock()
+
+	hasChanges := false
+
+	// 1. Remove obsolete routes
+	for cidr, vip := range activeSubnetRoutes {
+		if desiredVIP, exists := desiredRoutes[cidr]; !exists || desiredVIP != vip {
+			_ = tunnel.RemoveSubnetRoute(cidr, vip)
+			delete(activeSubnetRoutes, cidr)
+			hasChanges = true
+			addLog(fmt.Sprintf("🏠 Маршрут к подсети %s удален (узел отключился)", cidr))
+		}
+	}
+
+	// 2. Add newly advertised routes
+	for cidr, vip := range desiredRoutes {
+		if _, active := activeSubnetRoutes[cidr]; !active {
+			if err := tunnel.AddSubnetRoute(cidr, vip); err == nil {
+				activeSubnetRoutes[cidr] = vip
+				hasChanges = true
+				addLog(fmt.Sprintf("🟢 Автоматически добавлен маршрут к подсети %s через %s", cidr, vip))
+			}
+		}
+	}
+
+	if hasChanges {
+		if len(activeSubnetRoutes) > 0 {
+			buttonLabels[ID_BTN_TOGGLE_SUBNET] = fmt.Sprintf("🟢 Подсети: %d активных", len(activeSubnetRoutes))
+			buttonTypes[ID_BTN_TOGGLE_SUBNET] = "green"
+		} else {
+			buttonLabels[ID_BTN_TOGGLE_SUBNET] = "🏠 Подключить подсеть пира"
+			buttonTypes[ID_BTN_TOGGLE_SUBNET] = "normal"
+		}
+		if hBtnToggleSubnetRoute != 0 {
+			procInvalidateRect.Call(hBtnToggleSubnetRoute, 0, 1)
+		}
+	}
+}
+
 func showBookmarkDialog(peerID, currentName string) (string, bool) {
 	hInstance, _, _ := procGetModuleHandleW.Call(0)
 	dlgClassName, _ := windows.UTF16PtrFromString("NatBypassBookmarkDlgClass")
@@ -3600,6 +3690,17 @@ func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, 
 		isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(p.DeviceName), "serv") || strings.Contains(strings.ToLower(p.Nickname), "serv")
 		hasConn := (tcpMgr != nil && tcpMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
 		if isServ && hasConn {
+			return p
+		}
+	}
+	// Priority 1.5: Router / Gateway nodes (Keenetic, OpenWrt, Linux routers, Exit Nodes)
+	for _, p := range reg.List() {
+		if p.DeviceID == excludeDevID || !p.Online {
+			continue
+		}
+		isRouter := p.IsKeenetic || p.OS == "linux" || p.IsExitNode || len(p.AdvertisedRoutes) > 0
+		hasConn := (tcpMgr != nil && tcpMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
+		if isRouter && hasConn {
 			return p
 		}
 	}
@@ -4931,6 +5032,8 @@ func startEngineFromConfig(c *config.Config) {
 			triggerPublish()
 		})
 
+		var sendPacketToPeerGUI func(destPeer *peer.Peer, packet []byte) error
+
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
 		onInboundPacket := func(srcAddr *net.UDPAddr, payload []byte, isTCP bool, isRelay bool) {
 			if network.IsMultiHopPacket(payload) {
@@ -5082,7 +5185,34 @@ func startEngineFromConfig(c *config.Config) {
 							}
 						}
 					}
-					// 3. Fallback: relay via MQTT if direct UDP and TCP are not available
+					// 3. Multi-Hop Mesh Relay fallback: route echo reply through mesh relay peer (TCP or UDP P2P)
+					if !sent && targetPeer != nil {
+						if relayPeer := findMeshRelayPeerGUI(registry, guiTCPDirectMgr, targetPeer.DeviceID); relayPeer != nil {
+							if mhPkt, mhErr := network.EncodeMultiHopPacket(myDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, reply); mhErr == nil {
+								if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(relayPeer.DeviceID) {
+									if err := guiTCPDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
+										sent = true
+										if registry != nil {
+											registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+										}
+									}
+								} else if udpPuncher != nil && relayPeer.DirectP2P && relayPeer.ActiveEndpoint != "" {
+									pmin, pmax := 0, 0
+									if relayPeer.AWG != nil {
+										pmin = relayPeer.AWG.Pmin
+										pmax = relayPeer.AWG.Pmax
+									}
+									if err := udpPuncher.SendDataPacketWithPadding(relayPeer.ActiveEndpoint, mhPkt, pmin, pmax); err == nil {
+										sent = true
+										if registry != nil {
+											registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+										}
+									}
+								}
+							}
+						}
+					}
+					// 4. Fallback: relay via MQTT if direct UDP, TCP and Mesh Relay are not available
 					if !sent && targetPeer != nil && len(sigChannels) > 0 {
 						dataToSend := reply
 						if cfg != nil {
@@ -5105,8 +5235,34 @@ func startEngineFromConfig(c *config.Config) {
 			}
 
 			// Mesh Userspace Relay Router:
+			// If packet is destined for another mesh peer or remote advertised subnet, forward directly in userspace
 			if inDstIP != cleanVIP && cleanVIP != "" && registry != nil {
-				if destPeer, ok := registry.GetByVirtualIP(inDstIP); ok && destPeer != nil && destPeer.DeviceID != myDevID {
+				var destPeer *peer.Peer
+				if p, ok := registry.GetByVirtualIP(inDstIP); ok && p != nil {
+					destPeer = p
+				} else {
+					// Check advertised subnets via Longest Prefix Match
+					destIP := net.ParseIP(inDstIP)
+					if destIP != nil {
+						bestPrefix := -1
+						for _, p := range registry.List() {
+							if p.DeviceID == myDevID {
+								continue
+							}
+							for _, r := range p.AdvertisedRoutes {
+								if _, ipNet, err := net.ParseCIDR(strings.TrimSpace(r)); err == nil && ipNet.Contains(destIP) {
+									ones, _ := ipNet.Mask.Size()
+									if ones > bestPrefix {
+										bestPrefix = ones
+										destPeer = p
+									}
+								}
+							}
+						}
+					}
+				}
+
+				if destPeer != nil && destPeer.DeviceID != myDevID {
 					if len(payload) >= 20 && payload[0]>>4 == 4 {
 						ttl := payload[8]
 						if ttl <= 1 {
@@ -5131,10 +5287,8 @@ func startEngineFromConfig(c *config.Config) {
 							return
 						}
 					}
-					if udpPuncher != nil && destPeer.DirectP2P && destPeer.ActiveEndpoint != "" {
-						if err := udpPuncher.SendDataPacketWithPadding(destPeer.ActiveEndpoint, payload, 0, 0); err == nil {
-							return
-						}
+					if err := sendPacketToPeerGUI(destPeer, payload); err == nil {
+						return
 					}
 				}
 			}
@@ -5191,7 +5345,7 @@ func startEngineFromConfig(c *config.Config) {
 			onInboundPacket(srcAddr, payload, true, false)
 		})
 
-		sendPacketToPeerGUI := func(destPeer *peer.Peer, packet []byte) error {
+		sendPacketToPeerGUI = func(destPeer *peer.Peer, packet []byte) error {
 			if destPeer == nil {
 				return fmt.Errorf("nil peer")
 			}
@@ -5506,13 +5660,15 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 
-								// Fallback Relay Rule: ONLY if direct transmission is not bilaterally verified AND NOT Exit Node internet traffic!
-								// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
+								// Fallback Relay Rule:
+								// Mesh Multi-Hop P2P Relay (1e) operates across all packets (including Exit Node and Subnet traffic).
+								// Central MQTT Relay (1f) is restricted to ICMP and mesh overlay traffic to protect broker bandwidth limits.
 								cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 								isICMP := len(packet) >= 20 && packet[9] == 1
 								isExitOrInternet := !isICMP && ((exitID != "" && targetPeer.DeviceID == exitID) || !isMeshSubnetIP(destIP, cleanVIP))
 								directVerified := sentTCP || (sentDirect && targetPeer.DirectP2P && bilateralOK)
-								needsRelay := !directVerified && (!isExitOrInternet || isICMP)
+								needsRelay := !directVerified
+								needsMQTTRelay := needsRelay && (!isExitOrInternet || isICMP)
 
 								// 1e. Mesh Userspace Multi-Hop Relay Fallback (TCP or Direct UDP/AWG):
 								if needsRelay && !isForceUDP {
@@ -5523,14 +5679,23 @@ func startEngineFromConfig(c *config.Config) {
 												if err := guiTCPDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
 													relayed = true
 												}
-											} else if puncher != nil && relayPeer.DirectP2P && relayPeer.ActiveEndpoint != "" {
+											} else if udpPuncher != nil {
 												pmin, pmax := 0, 0
 												if relayPeer.AWG != nil {
 													pmin = relayPeer.AWG.Pmin
 													pmax = relayPeer.AWG.Pmax
 												}
-												if err := puncher.SendDataPacketWithPadding(relayPeer.ActiveEndpoint, mhPkt, pmin, pmax); err == nil {
-													relayed = true
+												targetEP := relayPeer.ActiveEndpoint
+												if targetEP == "" {
+													targetEP = relayPeer.STUNAddr
+												}
+												if targetEP == "" {
+													targetEP = relayPeer.LocalAddr
+												}
+												if targetEP != "" {
+													if err := udpPuncher.SendDataPacketWithPadding(targetEP, mhPkt, pmin, pmax); err == nil {
+														relayed = true
+													}
 												}
 											}
 											if relayed {
@@ -5552,7 +5717,7 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 								// 1f. Parallel/Fallback MQTT relay transmission when direct P2P and Direct TCP are not active:
-								if needsRelay && len(sigChannels) > 0 {
+								if needsMQTTRelay && len(sigChannels) > 0 {
 									pktToRelay := make([]byte, len(packet))
 									copy(pktToRelay, packet)
 									tDevID := targetPeer.DeviceID
@@ -5884,6 +6049,22 @@ func startEngineFromConfig(c *config.Config) {
 				if registry != nil {
 					registry.MarkOffline(constants.PeerOfflineThreshold)
 					registry.Cleanup(24 * time.Hour)
+				}
+			}
+		}
+	}()
+
+	// Фоновый автоматический синхронизатор маршрутов к анонсированным подсетям пиров (каждые 10 секунд)
+	go func() {
+		subnetTicker := time.NewTicker(10 * time.Second)
+		defer subnetTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-subnetTicker.C:
+				if registry != nil {
+					syncAdvertisedSubnetRoutesGUI(registry)
 				}
 			}
 		}

@@ -389,8 +389,8 @@ func BypassEndpoint(endpoint string) error {
 			continue
 		}
 		if ip := net.ParseIP(hostIP); ip != nil {
-			// Do NOT bypass mesh IPs to physical gateway — check dynamically against active TUN subnet
-			if isMeshIPWindows(hostIP) {
+			// Do NOT bypass private, loopback, link-local or mesh IPs to physical gateway
+			if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || isMeshIPWindows(hostIP) {
 				continue
 			}
 		}
@@ -557,26 +557,50 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	return nil
 }
 
-// AddSubnetRoute adds a routing entry for a subnet CIDR via gatewayVIP.
+// AddSubnetRoute adds a routing entry for a subnet CIDR via gatewayVIP and/or Wintun interface index.
 func AddSubnetRoute(subnetCIDR string, gatewayVIP string) error {
 	ipStr, maskStr, err := parseSubnetCIDR(subnetCIDR)
 	if err != nil {
 		return err
 	}
-	if err := runRouteCmd("route", "add", ipStr, "mask", maskStr, gatewayVIP, "metric", "10"); err != nil {
-		return fmt.Errorf("failed to add subnet route %s via %s: %w", subnetCIDR, gatewayVIP, err)
+	ifIdx := getNatBypassIfIndexWindows()
+	cleanVIP := "0.0.0.0"
+	if gatewayVIP != "" {
+		cleanVIP = strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+	}
+
+	args := []string{"add", ipStr, "mask", maskStr, cleanVIP, "metric", "10"}
+	if ifIdx > 0 {
+		args = append(args, "IF", fmt.Sprintf("%d", ifIdx))
+	}
+	_ = runRouteCmd("route", args...)
+
+	if ifIdx > 0 {
+		psCmd := fmt.Sprintf(`
+			Get-NetRoute -InterfaceIndex %d -DestinationPrefix '%s' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+			New-NetRoute -InterfaceIndex %d -DestinationPrefix '%s' -NextHop '0.0.0.0' -RouteMetric 10 -ErrorAction SilentlyContinue
+		`, ifIdx, subnetCIDR, ifIdx, subnetCIDR)
+		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psCmd)
 	}
 	return nil
 }
 
-// RemoveSubnetRoute removes a routing entry for a subnet CIDR via gatewayVIP.
+// RemoveSubnetRoute removes a routing entry for a subnet CIDR via gatewayVIP and Wintun interface index.
 func RemoveSubnetRoute(subnetCIDR string, gatewayVIP string) error {
 	ipStr, maskStr, err := parseSubnetCIDR(subnetCIDR)
 	if err != nil {
 		return err
 	}
-	if err := runRouteCmd("route", "delete", ipStr, "mask", maskStr, gatewayVIP); err != nil {
-		return fmt.Errorf("failed to remove subnet route %s via %s: %w", subnetCIDR, gatewayVIP, err)
+	_ = runRouteCmd("route", "delete", ipStr, "mask", maskStr)
+	if gatewayVIP != "" {
+		cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+		_ = runRouteCmd("route", "delete", ipStr, "mask", maskStr, cleanVIP)
+	}
+	if ifIdx := getNatBypassIfIndexWindows(); ifIdx > 0 {
+		psCmd := fmt.Sprintf(`
+			Get-NetRoute -InterfaceIndex %d -DestinationPrefix '%s' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+		`, ifIdx, subnetCIDR)
+		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psCmd)
 	}
 	return nil
 }

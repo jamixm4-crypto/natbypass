@@ -114,13 +114,13 @@ All cutting-edge fixes, new NAT traversal algorithms, and P2P/AWG improvements a
   irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/install-windows.ps1 | iex -ArgumentList "-Beta"
   ```
 * **Method 3 (Manual Download from GitHub Releases):**
-  Download the latest binaries from the active [**Pre-release (v1.9.507-beta.11)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.11) page:
-  * **[NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.11/NatBypass.exe)** — primary standalone application (App Window / WebUI, system tray, interactive topology map).
-  * **[NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.11/NatBypass-GUI.exe)** — ultra-lightweight native Win32 GUI (15–25 MB RAM).
-  * **[natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.11/natbypass-cli.exe)** — console client and Windows background service.
+  Download the latest binaries from the active [**Pre-release (v1.9.507-beta.12)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.12) page:
+  * **[NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.12/NatBypass.exe)** — primary standalone application (App Window / WebUI, system tray, interactive topology map).
+  * **[NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.12/NatBypass-GUI.exe)** — ultra-lightweight native Win32 GUI (15–25 MB RAM).
+  * **[natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.12/natbypass-cli.exe)** — console client and Windows background service.
 
 ### 📱 Android
-1. Open the [**Pre-release (v1.9.507-beta.11)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.11) page on your phone and download the `NatBypass.apk`.
+1. Open the [**Pre-release (v1.9.507-beta.12)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.12) page on your phone and download the `NatBypass.apk`.
 2. Or in the desktop app, open the "📱 Download APK" tab in the QR modal and scan with your phone camera.
 
 ---

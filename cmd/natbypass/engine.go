@@ -122,6 +122,83 @@ func adaptivePublishInterval(cfgInterval int) time.Duration {
 	return constants.DefaultPublishInterval
 }
 
+var (
+	activeSubnetRoutes   = make(map[string]string)
+	activeSubnetRoutesMu sync.Mutex
+)
+
+func isLocalSubnetConflict(cidr string) bool {
+	_, targetNet, err := net.ParseCIDR(strings.TrimSpace(cidr))
+	if err != nil {
+		return true
+	}
+	for _, localSub := range tunnel.GetLocalSubnets() {
+		_, localNet, err := net.ParseCIDR(strings.TrimSpace(localSub))
+		if err == nil && (localNet.Contains(targetNet.IP) || targetNet.Contains(localNet.IP)) {
+			return true
+		}
+	}
+	return false
+}
+
+func syncAdvertisedSubnetRoutes(reg *peer.Registry, selfID string) {
+	if reg == nil {
+		return
+	}
+	peers := reg.List()
+	desiredRoutes := make(map[string]string)
+
+	for _, p := range peers {
+		if !p.Online || p.DeviceID == selfID || len(p.AdvertisedRoutes) == 0 {
+			continue
+		}
+		pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		if pVIP == "" {
+			continue
+		}
+		for _, rawRoute := range p.AdvertisedRoutes {
+			r := strings.TrimSpace(rawRoute)
+			if r == "" || r == "0.0.0.0/0" || r == "::/0" {
+				continue
+			}
+			_, ipNet, err := net.ParseCIDR(r)
+			if err != nil {
+				continue
+			}
+			ones, _ := ipNet.Mask.Size()
+			if ones < 8 {
+				continue
+			}
+			if isLocalSubnetConflict(r) {
+				continue
+			}
+			desiredRoutes[r] = pVIP
+		}
+	}
+
+	activeSubnetRoutesMu.Lock()
+	defer activeSubnetRoutesMu.Unlock()
+
+	// 1. Remove obsolete routes
+	for cidr, vip := range activeSubnetRoutes {
+		if desiredVIP, exists := desiredRoutes[cidr]; !exists || desiredVIP != vip {
+			_ = tunnel.RemoveSubnetRoute(cidr, vip)
+			delete(activeSubnetRoutes, cidr)
+			log.Info().Str("cidr", cidr).Str("via", vip).Msg("🏠 Advertised subnet route removed")
+		}
+	}
+
+	// 2. Add newly advertised routes
+	for cidr, vip := range desiredRoutes {
+		if _, active := activeSubnetRoutes[cidr]; !active {
+			if err := tunnel.AddSubnetRoute(cidr, vip); err == nil {
+				activeSubnetRoutes[cidr] = vip
+				log.Info().Str("cidr", cidr).Str("via", vip).Msg("🟢 Advertised subnet route auto-installed")
+			}
+		}
+	}
+}
+
 // findMeshRelayPeer finds an online peer capable of acting as an L3 mesh relay.
 // Priority is given to public VPS/servers (e.g. DSTR_Serv_RUS / 10.1.1.102 / public IP nodes)
 // with either an active Direct TCP connection OR a confirmed Direct UDP P2P link.
@@ -145,6 +222,17 @@ func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectM
 		isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(p.DeviceName), "serv") || strings.Contains(strings.ToLower(p.Nickname), "serv")
 		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
 		if isServ && hasConn {
+			return p
+		}
+	}
+	// Priority 1.5: Router / Gateway nodes (Keenetic, OpenWrt, Linux routers, Exit Nodes)
+	for _, p := range registry.List() {
+		if p.DeviceID == excludeDevID || !p.Online {
+			continue
+		}
+		isRouter := p.IsKeenetic || p.OS == "linux" || p.IsExitNode || len(p.AdvertisedRoutes) > 0
+		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
+		if isRouter && hasConn {
 			return p
 		}
 	}
@@ -611,13 +699,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				if tcpDirectMgr != nil && tcpDirectMgr.HasConn(destPeer.DeviceID) {
 					return tcpDirectMgr.SendPacket(destPeer.DeviceID, packet)
 				}
-				if puncher != nil && destPeer.DirectP2P && destPeer.ActiveEndpoint != "" {
+				if puncher != nil {
 					pmin, pmax := 0, 0
 					if destPeer.AWG != nil {
 						pmin = destPeer.AWG.Pmin
 						pmax = destPeer.AWG.Pmax
 					}
-					return puncher.SendDataPacketWithPadding(destPeer.ActiveEndpoint, packet, pmin, pmax)
+					targetEP := destPeer.ActiveEndpoint
+					if targetEP == "" {
+						targetEP = destPeer.STUNAddr
+					}
+					if targetEP == "" {
+						targetEP = destPeer.LocalAddr
+					}
+					if targetEP != "" {
+						return puncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax)
+					}
 				}
 			}
 			if wssClient != nil && wssClient.IsConnected() {
@@ -843,8 +940,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						exitRoutingActive = false
 					}
 					exitRoutingMu.Unlock()
+					activeSubnetRoutesMu.Lock()
+					for cidr, vip := range activeSubnetRoutes {
+						_ = tunnel.RemoveSubnetRoute(cidr, vip)
+					}
+					activeSubnetRoutes = make(map[string]string)
+					activeSubnetRoutesMu.Unlock()
 					return
 				case <-ticker.C:
+					// Synchronize advertised subnet routes from online peers
+					if registry != nil {
+						syncAdvertisedSubnetRoutes(registry, deviceID)
+					}
+
 					sel := cfg.Network.SelectedExitNode
 					if sel == "" {
 						exitRoutingMu.Lock()
@@ -1262,7 +1370,32 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// Mesh Userspace Relay Router:
 			// If destination is NOT my Virtual IP, forward directly to destination peer over active TCP/UDP connection
 			if inDstIP != cleanMyVIP && cleanMyVIP != "" && registry != nil {
-				if destPeer, ok := registry.GetByVirtualIP(inDstIP); ok && destPeer != nil && destPeer.DeviceID != deviceID {
+				var destPeer *peer.Peer
+				if p, ok := registry.GetByVirtualIP(inDstIP); ok && p != nil {
+					destPeer = p
+				} else {
+					// Check advertised subnets via Longest Prefix Match
+					destIP := net.ParseIP(inDstIP)
+					if destIP != nil {
+						bestPrefix := -1
+						for _, p := range registry.List() {
+							if p.DeviceID == deviceID {
+								continue
+							}
+							for _, r := range p.AdvertisedRoutes {
+								if _, ipNet, err := net.ParseCIDR(strings.TrimSpace(r)); err == nil && ipNet.Contains(destIP) {
+									ones, _ := ipNet.Mask.Size()
+									if ones > bestPrefix {
+										bestPrefix = ones
+										destPeer = p
+									}
+								}
+							}
+						}
+					}
+				}
+
+				if destPeer != nil && destPeer.DeviceID != deviceID {
 					// IPv4 TTL decrement to strictly prevent routing loops
 					if len(payload) >= 20 && payload[0]>>4 == 4 {
 						ttl := payload[8]
@@ -1294,11 +1427,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 					}
 					// 2. Forward over Direct UDP to destination peer
-					if puncher != nil && destPeer.DirectP2P && destPeer.ActiveEndpoint != "" {
-						if err := puncher.SendDataPacketWithPadding(destPeer.ActiveEndpoint, payload, 0, 0); err == nil {
-							log.Debug().Str("from", inSrcIP).Str("to", inDstIP).Str("via_udp", destPeer.DeviceID).Msg("🔀 Mesh Relay: Forwarded packet via Direct UDP")
-							return
-						}
+					if err := sendPacketToPeer(destPeer, payload); err == nil {
+						log.Debug().Str("from", inSrcIP).Str("to", inDstIP).Str("peer", destPeer.DeviceID).Msg("🔀 Mesh Relay: Forwarded packet to peer")
+						return
 					}
 				}
 			}
@@ -3150,7 +3281,7 @@ func publishLoop(
 			AdaptationEpoch:    activeEpoch,
 			DPIPreset:          activeDPI,
 			CoordinatorCapable: (natLabel != "symmetric" && natLabel != "unknown"),
-			RelayCapable:       cfg.Network.EnableRelayServer,
+			RelayCapable:       cfg.Network.EnableRelayServer || tunnel.IsKeeneticDevice() || runtime.GOOS == "linux",
 			RelayQuotaGBDay:    cfg.Network.RelayQuotaGBDay,
 			IsMetered:          false,
 			BatteryLow:         false,

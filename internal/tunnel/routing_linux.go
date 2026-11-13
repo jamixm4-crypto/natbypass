@@ -281,6 +281,8 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	// Use forceInsertIptablesRule to place rules at TOP of chain (position 1), bypassing Docker/UFW drop policies
 	forceInsertIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
 	forceInsertIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
+	forceInsertIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-o", "br0", "-j", "ACCEPT")
+	forceInsertIptablesRule(ipt, "", "FORWARD", "-i", "br0", "-o", "nb0", "-j", "ACCEPT")
 	forceInsertIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-j", "ACCEPT")
 	ensureIptablesRule(ipt, "", "INPUT", "-p", "icmp", "-j", "ACCEPT")
 	ensureIptablesRule(ipt, "", "INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
@@ -306,13 +308,27 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	if isKeeneticDevice() {
 		forceInsertIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "nb0", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "_NDM_FORWARD", "-o", "nb0", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "nb0", "-o", "br0", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "br0", "-o", "nb0", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-i", "nb0", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "icmp", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "tcp", "--dport", "80", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "tcp", "--dport", "443", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "udp", "--dport", "53", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "tcp", "--dport", "53", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "tcp", "--dport", "8443", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-p", "icmp", "-j", "ACCEPT")
+
+		// Redirect incoming requests to Keenetic VIP:80/443/53 to local services (WebUI / DNS)
+		forceInsertIptablesRule(ipt, "nat", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "80")
+		forceInsertIptablesRule(ipt, "nat", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-ports", "443")
+		forceInsertIptablesRule(ipt, "nat", "PREROUTING", "-i", "nb0", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53")
+		forceInsertIptablesRule(ipt, "nat", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53")
+
+		// Remove legacy pref 40 iif nb0 rule that intercepted internet transit packets before WAN lookup!
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "iif", "nb0", "lookup", "main")
-		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "iif", "nb0", "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "iif", "nb0")
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanSubnet, "lookup", "main")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", cleanSubnet, "lookup", "main")
 	}
@@ -640,8 +656,8 @@ func BypassEndpoint(endpoint string) error {
 			continue
 		}
 		if ip := net.ParseIP(hostIP); ip != nil {
-			// Do NOT bypass mesh IPs to physical gateway — check dynamically against active TUN subnet
-			if isMeshIPLinux(hostIP) {
+			// Do NOT bypass private, loopback, link-local or mesh IPs to physical gateway
+			if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || isMeshIPLinux(hostIP) {
 				continue
 			}
 		}
@@ -777,11 +793,12 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 // AddSubnetRoute adds a route for a subnet CIDR via gatewayVIP with dev nb0 onlink.
 func AddSubnetRoute(subnetCIDR string, gatewayVIP string) error {
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
-	err := runLinuxCmd("ip", "route", "add", subnetCIDR, "via", cleanVIP, "dev", "nb0", "onlink")
-	if err != nil {
-		return runLinuxCmd("ip", "route", "add", subnetCIDR, "via", cleanVIP)
+	_ = runLinuxCmd("ip", "route", "replace", subnetCIDR, "dev", "nb0", "table", "main", "onlink")
+	err := runLinuxCmd("ip", "route", "replace", subnetCIDR, "dev", "nb0", "onlink")
+	if err != nil && cleanVIP != "" {
+		return runLinuxCmd("ip", "route", "replace", subnetCIDR, "via", cleanVIP, "dev", "nb0", "onlink")
 	}
-	return nil
+	return err
 }
 
 // RemoveSubnetRoute removes a route for a subnet CIDR via gatewayVIP.
