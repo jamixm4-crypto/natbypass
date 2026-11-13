@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.10"
+	Version = "1.9.507-beta.11"
 	Commit  = "release"
 )
 
@@ -2214,6 +2214,7 @@ func disableExitNode() {
 			_ = tunnel.DisableExitNodeRouting("")
 		}
 		writeDebug("Exit Node disabled, restored default gateway")
+		addLog("✅ Стандартный интернет-шлюз успешно восстановлен, маршруты 0.0.0.0/1 и 128.0.0.0/1 удалены.")
 	}()
 }
 
@@ -4781,18 +4782,25 @@ func startEngineFromConfig(c *config.Config) {
 			}
 			leaderPunchMu.Unlock()
 
-			if isCoord {
-				p.PunchMethod = "coordinated"
-			} else if network.IsPredictedPort(fromAddr, p.STUNAddr) || (p.NATDelta > 0 && fromAddr != p.STUNAddr && !strings.Contains(fromAddr, "[")) {
-				p.PunchMethod = "predicted"
-			} else if strings.Contains(fromAddr, "[") || (strings.Count(fromAddr, ":") > 1) {
-				p.PunchMethod = "direct_ipv6"
-			} else {
-				p.PunchMethod = "direct"
+			isHealthyDirect := p.DirectP2P && p.IsBilateralP2P(15*time.Second) && p.ActiveEndpoint != ""
+			if !isHealthyDirect || fromAddr == p.ActiveEndpoint {
+				if isCoord {
+					p.PunchMethod = "coordinated"
+				} else if network.IsPredictedPort(fromAddr, p.STUNAddr) || (p.NATDelta > 0 && fromAddr != p.STUNAddr && !strings.Contains(fromAddr, "[")) {
+					p.PunchMethod = "predicted"
+				} else if strings.Contains(fromAddr, "[") || (strings.Count(fromAddr, ":") > 1) {
+					p.PunchMethod = "direct_ipv6"
+				} else {
+					p.PunchMethod = "direct"
+				}
 			}
 
+			oldEP := p.ActiveEndpoint
 			if peer.IsValidEndpointForPeer(fromAddr, p, myPubIP) {
-				p.ActiveEndpoint = fromAddr
+				// Prevent transient candidate probes from hijacking a healthy, working Direct P2P endpoint
+				if !isHealthyDirect || fromAddr == p.ActiveEndpoint || (rtt > 0 && p.Latency > 0 && rtt < p.Latency/2) {
+					p.ActiveEndpoint = fromAddr
+				}
 			} else if p.ActiveEndpoint == "" {
 				if p.IPv6Addr != "" && network.HasGlobalIPv6() {
 					p.ActiveEndpoint = p.IPv6Addr
@@ -4805,6 +4813,15 @@ func startEngineFromConfig(c *config.Config) {
 			p.Online = true
 			p.LastSeen = time.Now()
 			registry.Upsert(p)
+			if oldEP != "" && oldEP != p.ActiveEndpoint && puncher != nil {
+				puncher.RemoveKeepAliveTarget(oldEP)
+			}
+			if puncher != nil && p.ActiveEndpoint != "" {
+				puncher.AddKeepAliveTarget(p.ActiveEndpoint)
+			}
+			if activeExitNodeID != "" && (p.DeviceID == activeExitNodeID || p.VirtualIP == activeExitNodeID) && p.ActiveEndpoint != "" {
+				_ = tunnel.BypassEndpoint(p.ActiveEndpoint)
+			}
 			if rtt > 0 {
 				msg := fmt.Sprintf("⚡ [P2P Direct UDP] ПОДТВЕРЖДЕНО! Прямой UDP-пинг до %s (%s): %v! NAT пробит сокет-в-сокет!", remoteDevID, fromAddr, p.Latency.Round(time.Millisecond))
 				addLog(msg)

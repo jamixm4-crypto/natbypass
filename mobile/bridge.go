@@ -40,7 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.10"
+const Version = "1.9.507-beta.11"
 
 type logRing struct {
 	mu    sync.Mutex

@@ -96,18 +96,12 @@ func getMeshSupernet(vipOrSubnet string) string {
 	if ip4 == nil {
 		return "10.0.0.0/8"
 	}
-	if ip4[0] == 10 {
-		return "10.0.0.0/8"
-	}
-	if ip4[0] == 100 && (ip4[1]&0xC0) == 64 {
-		return "100.64.0.0/10"
-	}
-	if ip4[0] == 172 && (ip4[1] >= 16 && ip4[1] <= 31) {
-		return "172.16.0.0/12"
-	}
 	if ip4[0] == 192 && ip4[1] == 168 {
-		return "192.168.0.0/16"
+		return fmt.Sprintf("192.168.%d.0/24", ip4[2])
 	}
+	// Windows NetNAT requires an internal prefix length between /16 and /29.
+	// Large supernets like /8, /10, /12 are rejected by New-NetNat with parameter errors.
+	// Using /24 accurately covers the mesh subnet (e.g. 10.1.2.0/24 or 100.64.200.0/24).
 	return fmt.Sprintf("%d.%d.%d.0/24", ip4[0], ip4[1], ip4[2])
 }
 
@@ -467,22 +461,41 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 
 	if dohActive {
 		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "127.0.0.1", "register=primary", "validate=no")
-		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=1.1.1.1", "index=2", "validate=no")
-		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=8.8.8.8", "index=3", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "77.88.8.8", "index=2", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "9.9.9.9", "index=3", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "1.1.1.1", "index=4", "validate=no")
 	} else {
-		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "1.1.1.1", "register=primary", "validate=no")
-		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address=8.8.8.8", "index=2", "validate=no")
+		// Use Yandex DNS (77.88.8.8) and Quad9 (9.9.9.9) as primary DNS resolvers:
+		// Unlike 1.1.1.1/8.8.8.8 which are often throttled or blocked on UDP port 53 by Russian TSPU/DPI,
+		// 77.88.8.8 resolves reliably and instantly across all Russian and CIS networks.
+		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "77.88.8.8", "register=primary", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "9.9.9.9", "index=2", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "1.1.1.1", "index=3", "validate=no")
 	}
 
 	if ifIdx > 0 {
 		var psDNS string
 		if dohActive {
-			psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('127.0.0.1', '1.1.1.1', '8.8.8.8') -ErrorAction SilentlyContinue", ifIdx)
+			psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('127.0.0.1', '77.88.8.8', '9.9.9.9', '1.1.1.1') -ErrorAction SilentlyContinue", ifIdx)
 		} else {
-			psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('1.1.1.1', '8.8.8.8') -ErrorAction SilentlyContinue", ifIdx)
+			psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('77.88.8.8', '9.9.9.9', '1.1.1.1') -ErrorAction SilentlyContinue", ifIdx)
 		}
 		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psDNS)
 	}
+
+	// 5. Explicitly route public DNS resolvers via NatBypass to guarantee DNS is tunneled through exit node
+	dnsResolvers := []string{"77.88.8.8", "9.9.9.9", "1.1.1.1", "8.8.8.8"}
+	for _, dnsIP := range dnsResolvers {
+		dnsArgs := []string{"add", dnsIP, "mask", "255.255.255.255", "0.0.0.0", "metric", "1"}
+		if ifIdx > 0 {
+			dnsArgs = append(dnsArgs, "IF", fmt.Sprintf("%d", ifIdx))
+		}
+		_ = runRouteCmd("route", dnsArgs...)
+	}
+
+	// 6. Flush Windows DNS cache so any previous failed name lookups don't persist
+	_ = runRouteCmd("ipconfig", "/flushdns")
+	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", "Clear-DnsClientCache -ErrorAction SilentlyContinue")
 
 	return nil
 }
@@ -490,21 +503,37 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 // DisableExitNodeRouting removes the default gateway /1 routes, bypass routes, and restores DNS.
 func DisableExitNodeRouting(gatewayVIP string) error {
 	var errs []string
+
+	// 1. Unconditional removal of WireGuard def1 /1 routes in Windows kernel
+	// Remove without next hop, with 0.0.0.0 on-link next hop, and with gatewayVIP
+	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "0.0.0.0")
+	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "0.0.0.0")
+	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
+	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
 	if gatewayVIP != "" {
 		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", gatewayVIP)
 		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", gatewayVIP)
 	}
-	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
-	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
+
 	if ifIdx := getNatBypassIfIndexWindows(); ifIdx > 0 {
-		psClean := fmt.Sprintf(`
-			Get-NetRoute -InterfaceIndex %d -DestinationPrefix '0.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-			Get-NetRoute -InterfaceIndex %d -DestinationPrefix '128.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-		`, ifIdx, ifIdx)
-		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psClean)
+		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
+		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
 	}
 
-	// Remove all bypass routes
+	// PowerShell unconditional route cleanup across ALL network adapters (def1 routes never belong to physical NICs)
+	psClean := `
+		Get-NetRoute -DestinationPrefix '0.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+		Get-NetRoute -DestinationPrefix '128.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+	`
+	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psClean)
+
+	// 2. Remove tunneled DNS resolver /32 routes
+	dnsResolvers := []string{"77.88.8.8", "9.9.9.9", "1.1.1.1", "8.8.8.8"}
+	for _, dnsIP := range dnsResolvers {
+		_ = runRouteCmd("route", "delete", dnsIP, "mask", "255.255.255.255")
+	}
+
+	// 3. Remove all bypass routes
 	bypassedMu.Lock()
 	for _, hostIP := range lastBypassedEndpointIPs {
 		_ = runRouteCmd("route", "delete", hostIP, "mask", "255.255.255.255")
@@ -512,13 +541,15 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	lastBypassedEndpointIPs = nil
 	bypassedMu.Unlock()
 
-	// Reset DNS on adapter
+	// 4. Reset DNS on NatBypass adapter and restore system defaults
 	adapterName := getNatBypassAdapterNameWindows()
 	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "source=dhcp")
-	if ifIdx := getNatBypassIfIndexWindows(); ifIdx > 0 {
-		psScript := fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ResetServerAddresses -ErrorAction SilentlyContinue", ifIdx)
-		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-	}
+	psResetDNS := `
+		Get-DnsClientServerAddress | Where-Object { $_.InterfaceAlias -like '*NatBypass*' } | Set-DnsClientServerAddress -ResetServerAddresses -ErrorAction SilentlyContinue
+		Clear-DnsClientCache -ErrorAction SilentlyContinue
+	`
+	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psResetDNS)
+	_ = runRouteCmd("ipconfig", "/flushdns")
 
 	if len(errs) > 0 {
 		return fmt.Errorf("errors disabling exit node routing: %s", strings.Join(errs, "; "))

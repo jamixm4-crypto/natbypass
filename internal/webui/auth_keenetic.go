@@ -663,7 +663,7 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 		}
 
 		// Single line user definition: "user <name> password ..."
-		if fields[0] == "user" && len(fields) >= 3 && (fields[2] == "password" || fields[2] == "md5" || fields[2] == "nt") {
+		if fields[0] == "user" && len(fields) >= 3 && (fields[2] == "password" || fields[2] == "md5" || fields[2] == "nt" || fields[2] == "sha256" || fields[2] == "sha" || fields[2] == "encrypted") {
 			flushCurrentUser()
 			u := parseSingleUserLine(fields)
 			if u != nil {
@@ -682,8 +682,8 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 			continue
 		}
 
-		// Inside multi-line user block: indented lines with "password ...", "password nt ...", "password md5 ..."
-		if currentUser != nil && (fields[0] == "password" || fields[0] == "md5" || fields[0] == "nt") {
+		// Inside multi-line user block: indented lines with "password ...", "password nt ...", "password md5 ...", "password sha256 ..."
+		if currentUser != nil && (fields[0] == "password" || fields[0] == "md5" || fields[0] == "nt" || fields[0] == "sha256" || fields[0] == "sha" || fields[0] == "encrypted") {
 			extractPasswordFields(currentUser, fields)
 			continue
 		}
@@ -749,6 +749,28 @@ func extractPasswordFields(u *KeeneticUser, fields []string) {
 		return
 	}
 
+	if fields[0] == "sha256" || fields[0] == "sha" {
+		u.PasswordHash = cleanHashPrefix(fields[1])
+		u.HashType = "sha256"
+		return
+	}
+
+	if (fields[1] == "sha256" || fields[1] == "sha") && len(fields) >= 3 {
+		u.PasswordHash = cleanHashPrefix(fields[2])
+		u.HashType = "sha256"
+		return
+	}
+
+	if fields[0] == "encrypted" || fields[1] == "encrypted" {
+		targetVal := fields[1]
+		if fields[1] == "encrypted" && len(fields) >= 3 {
+			targetVal = fields[2]
+		}
+		u.PasswordHash = cleanHashPrefix(targetVal)
+		u.HashType = detectHashType(u.PasswordHash)
+		return
+	}
+
 	if fields[1] == "hash" && len(fields) >= 3 {
 		if len(fields) >= 4 {
 			hType := strings.ToLower(fields[2])
@@ -767,9 +789,40 @@ func extractPasswordFields(u *KeeneticUser, fields []string) {
 		return
 	}
 
+	// Auto-detect hex hashes and crypt hashes before assuming plaintext
+	cleaned := cleanHashPrefix(fields[1])
+	if len(cleaned) == 64 && isHexString(cleaned) {
+		u.PasswordHash = cleaned
+		u.HashType = "sha256"
+		return
+	}
+	if len(cleaned) == 32 && isHexString(cleaned) {
+		u.PasswordHash = cleaned
+		u.HashType = "md5"
+		return
+	}
+	if strings.HasPrefix(cleaned, "$") {
+		u.PasswordHash = cleaned
+		u.HashType = "crypt"
+		return
+	}
+
 	// Plaintext
 	u.Password = fields[1]
 	u.HashType = "plain"
+}
+
+func isHexString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func cleanHashPrefix(h string) string {

@@ -2524,18 +2524,23 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			}
 			leaderPunchMu.Unlock()
 
-			if isCoord {
-				p.PunchMethod = "coordinated"
-			} else if network.IsPredictedPort(fromAddr, p.STUNAddr) || (p.NATDelta > 0 && fromAddr != p.STUNAddr && !strings.Contains(fromAddr, "[")) {
-				p.PunchMethod = "predicted"
-			} else if strings.Contains(fromAddr, "[") || (strings.Count(fromAddr, ":") > 1) {
-				p.PunchMethod = "direct_ipv6"
-			} else {
-				p.PunchMethod = "direct"
+			isHealthyDirect := p.DirectP2P && p.IsBilateralP2P(15*time.Second) && p.ActiveEndpoint != ""
+			if !isHealthyDirect || targetEP == p.ActiveEndpoint {
+				if isCoord {
+					p.PunchMethod = "coordinated"
+				} else if network.IsPredictedPort(fromAddr, p.STUNAddr) || (p.NATDelta > 0 && fromAddr != p.STUNAddr && !strings.Contains(fromAddr, "[")) {
+					p.PunchMethod = "predicted"
+				} else if strings.Contains(fromAddr, "[") || (strings.Count(fromAddr, ":") > 1) {
+					p.PunchMethod = "direct_ipv6"
+				} else {
+					p.PunchMethod = "direct"
+				}
 			}
 
 			if peer.IsValidEndpointForPeer(targetEP, p, myPubIP) {
-				p.ActiveEndpoint = targetEP
+				if !isHealthyDirect || targetEP == p.ActiveEndpoint || (rtt > 0 && p.Latency > 0 && rtt < p.Latency/2) {
+					p.ActiveEndpoint = targetEP
+				}
 			} else if p.ActiveEndpoint == "" {
 				if p.IPv6Addr != "" && network.HasGlobalIPv6() {
 					p.ActiveEndpoint = p.IPv6Addr
@@ -2552,6 +2557,9 @@ func startNetworkLayer(ctx context.Context, cfg *config.Config, deviceID string,
 			}
 			if puncher != nil && p.ActiveEndpoint != "" {
 				puncher.AddKeepAliveTarget(p.ActiveEndpoint)
+			}
+			if cfg.Network.SelectedExitNode != "" && (p.DeviceID == cfg.Network.SelectedExitNode || p.VirtualIP == cfg.Network.SelectedExitNode) && p.ActiveEndpoint != "" {
+				_ = tunnel.BypassEndpoint(p.ActiveEndpoint)
 			}
 		}
 	})
