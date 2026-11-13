@@ -972,6 +972,47 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 		}()
 
+		sendPacketToPeer := func(destPeer *peer.Peer, packet []byte) error {
+			if destPeer == nil {
+				return fmt.Errorf("nil peer")
+			}
+			if tcpDirectMgr != nil && tcpDirectMgr.HasConn(destPeer.DeviceID) {
+				if err := tcpDirectMgr.SendPacket(destPeer.DeviceID, packet); err == nil {
+					return nil
+				}
+			}
+			targetEP := destPeer.ActiveEndpoint
+			if targetEP == "" {
+				targetEP = destPeer.STUNAddr
+			}
+			if targetEP == "" {
+				targetEP = destPeer.LocalAddr
+			}
+			if puncher != nil && targetEP != "" {
+				pmin := 0
+				pmax := 0
+				if destPeer.AWG != nil {
+					pmin = destPeer.AWG.Pmin
+					pmax = destPeer.AWG.Pmax
+				}
+				return puncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax)
+			}
+			return fmt.Errorf("no route to peer")
+		}
+
+		transitForwarder := tunnel.NewTransitForwarder(myVirtualIP,
+			func(vipOrID string) *peer.Peer {
+				if registry != nil {
+					if p, ok := registry.GetByIDOrVIP(vipOrID); ok {
+						return p
+					}
+				}
+				return nil
+			},
+			sendPacketToPeer,
+		)
+		defer transitForwarder.Close()
+
 		// L3 Data-plane: Inbound packets from UDP Puncher & MQTT Relay -> Write directly to kernel TUN
 		onInboundPacket := func(payload []byte, directAddr *net.UDPAddr, isTCP bool, isRelay bool) {
 			if len(payload) < 6 {
@@ -1255,6 +1296,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 
 			log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
+
+			// Exit Node Userspace Transit Forwarder:
+			// If this node is acting as an exit node, handle ICMP pings and UDP transit in userspace
+			if transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
+				if transitForwarder.HandleTransitPacket(payload) {
+					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace")
+					return
+				}
+			}
+
 			// Ensure OS kernel has a /32 host route back to peer VIP via TUN/Wintun
 			// BEFORE writing packet to TUN, so kernel ICMP replies and NAT return packets don't escape via WAN
 			if inSrcIP != "" {

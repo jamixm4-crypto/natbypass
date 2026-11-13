@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.8"
+	Version = "1.9.507-beta.9"
 	Commit  = "release"
 )
 
@@ -536,6 +536,7 @@ var (
 	activeMQTT              *signaling.MQTTChannel
 	uiServer                *webui.Server
 	tunDev                  *tunnel.Device
+	guiTransitForwarder     *tunnel.TransitForwarder
 	myPubKey                [32]byte
 	myPrivKey               [32]byte
 	myWGPubKey              string
@@ -2096,6 +2097,10 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 	}
 	activeExitNodeID = targetPeer.DeviceID
 	activeExitVIP = targetVIP
+	if cfg != nil {
+		cfg.Network.SelectedExitNode = targetPeer.DeviceID
+		saveConfigFromUI()
+	}
 
 	peerDisplay := targetPeer.Nickname
 	if peerDisplay == "" {
@@ -2189,6 +2194,10 @@ func disableExitNode() {
 	vipToClean := activeExitVIP
 	activeExitNodeID = ""
 	activeExitVIP = ""
+	if cfg != nil {
+		cfg.Network.SelectedExitNode = ""
+		saveConfigFromUI()
+	}
 	buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
 	buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
 	if hBtnExitNodeSelect != 0 {
@@ -5106,6 +5115,15 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}
 
+			// Exit Node Userspace Transit Forwarder:
+			// If this node is acting as an exit node, handle ICMP pings and UDP transit in userspace
+			if guiTransitForwarder != nil && allowExitNode {
+				if guiTransitForwarder.HandleTransitPacket(payload) {
+					atomic.AddUint64(&packetsRecvCount, 1)
+					return
+				}
+			}
+
 			if tunDev != nil {
 				tunnel.EnsurePeerHostRoute(inSrcIP)
 				// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
@@ -5148,6 +5166,45 @@ func startEngineFromConfig(c *config.Config) {
 		guiTCPDirectMgr.SetOnPacket(func(srcAddr *net.UDPAddr, payload []byte) {
 			onInboundPacket(srcAddr, payload, true, false)
 		})
+
+		sendPacketToPeerGUI := func(destPeer *peer.Peer, packet []byte) error {
+			if destPeer == nil {
+				return fmt.Errorf("nil peer")
+			}
+			if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(destPeer.DeviceID) {
+				if err := guiTCPDirectMgr.SendPacket(destPeer.DeviceID, packet); err == nil {
+					return nil
+				}
+			}
+			targetEP := destPeer.ActiveEndpoint
+			if targetEP == "" {
+				targetEP = destPeer.STUNAddr
+			}
+			if targetEP == "" {
+				targetEP = destPeer.LocalAddr
+			}
+			if udpPuncher != nil && targetEP != "" {
+				pmin := 0
+				pmax := 0
+				if destPeer.AWG != nil {
+					pmin = destPeer.AWG.Pmin
+					pmax = destPeer.AWG.Pmax
+				}
+				return udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax)
+			}
+			return fmt.Errorf("no route to peer")
+		}
+		guiTransitForwarder = tunnel.NewTransitForwarder(myVirtualIP,
+			func(vipOrID string) *peer.Peer {
+				if registry != nil {
+					if p, ok := registry.GetByIDOrVIP(vipOrID); ok {
+						return p
+					}
+				}
+				return nil
+			},
+			sendPacketToPeerGUI,
+		)
 	} else {
 		writeDebug("Ошибка создания UDPPuncher: " + err.Error())
 	}
@@ -5250,9 +5307,7 @@ func startEngineFromConfig(c *config.Config) {
 								exitID = cfg.Network.SelectedExitNode
 							}
 							if targetPeer == nil && exitID != "" {
-								if ep, ok := registry.Get(exitID); ok && ep.Online {
-									targetPeer = ep
-								} else if ep, ok := registry.GetByVirtualIP(exitID); ok && ep.Online {
+								if ep, ok := registry.GetByIDOrVIP(exitID); ok && ep != nil {
 									targetPeer = ep
 								} else {
 									cleanExit := strings.TrimSpace(strings.Split(exitID, "/")[0])
@@ -7395,6 +7450,10 @@ func stopEngine() {
 		_ = tunDev.Close()
 		tunDev = nil
 	}
+	if guiTransitForwarder != nil {
+		guiTransitForwarder.Close()
+		guiTransitForwarder = nil
+	}
 	if udpPuncher != nil {
 		_ = udpPuncher.Close()
 	}
@@ -7578,22 +7637,26 @@ func updateData() {
 		// Автоматическая проверка состояния выбранного Exit Node
 		if activeExitNodeID != "" {
 			peer, ok := registry.GetByIDOrVIP(activeExitNodeID)
-			if !ok || !peer.Online || peer.ExitRevoked {
+			if ok && peer != nil && peer.ExitRevoked {
 				if activeExitVIP != "" {
 					_ = tunnel.DisableExitNodeRouting(activeExitVIP)
 				}
 				oldID := activeExitNodeID
 				activeExitNodeID = ""
 				activeExitVIP = ""
+				if cfg != nil {
+					cfg.Network.SelectedExitNode = ""
+					saveConfigFromUI()
+				}
 				buttonLabels[ID_BTN_EXIT_NODE_SELECT] = "🌐 Выход в интернет: Локальный (Отключен)"
 				buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "normal"
 				if hBtnExitNodeSelect != 0 {
 					procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 				}
-				msg := fmt.Sprintf("⚠️ Exit Node [%s] стал недоступен или отключил шлюз. Маршрут сброшен на стандартный интернет.", oldID)
+				msg := fmt.Sprintf("⚠️ Устройство [%s] отозвало разрешение на раздачу интернета. Маршрут возвращен на локальный интернет.", oldID)
 				addLog(msg)
 				writeDebug(msg)
-			} else {
+			} else if ok && peer != nil {
 				addressBookMu.RLock()
 				bm := addressBook[peer.DeviceID]
 				addressBookMu.RUnlock()
@@ -7603,8 +7666,13 @@ func updateData() {
 				} else if peerDisplay == "" {
 					peerDisplay = peer.DeviceID
 				}
-				buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("🟢 Шлюз: [%s] (%s)", peerDisplay, activeExitVIP)
-				buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "green"
+				if peer.Online {
+					buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("🟢 Шлюз: [%s] (%s)", peerDisplay, activeExitVIP)
+					buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "green"
+				} else {
+					buttonLabels[ID_BTN_EXIT_NODE_SELECT] = fmt.Sprintf("🟡 Шлюз (связь...): [%s]", peerDisplay)
+					buttonTypes[ID_BTN_EXIT_NODE_SELECT] = "yellow"
+				}
 				if hBtnExitNodeSelect != 0 {
 					procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 				}

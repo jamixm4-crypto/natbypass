@@ -129,6 +129,8 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	// Note: Windows supports only ONE active NetNat instance system-wide.
 	psScript := fmt.Sprintf(`
 		Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'IPEnableRouter' -Value 1 -ErrorAction SilentlyContinue
+		Set-Service -Name 'RemoteAccess' -StartupType Automatic -ErrorAction SilentlyContinue
+		Start-Service -Name 'RemoteAccess' -ErrorAction SilentlyContinue
 		Set-NetIPInterface -AddressFamily IPv4 -Forwarding Enabled -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue
 
 		$targetPrefix = '%s'
@@ -139,7 +141,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			foreach ($nat in $existingNats) {
 				if ($nat.InternalIPInterfaceAddressPrefix -eq $targetPrefix) {
 					$matched = $true
-				} elseif ($nat.Name -like 'NatBypassNAT*') {
+				} else {
 					Remove-NetNat -Name $nat.Name -Confirm:$false -ErrorAction SilentlyContinue
 				}
 			}
@@ -154,6 +156,9 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		}
 		if (-not (Get-NetFirewallRule -Name "NatBypass-Forward-Out" -ErrorAction SilentlyContinue)) {
 			New-NetFirewallRule -Name "NatBypass-Forward-Out" -DisplayName "NatBypass Forward Outbound" -Direction Outbound -Action Allow -Protocol Any -Profile Any -ErrorAction SilentlyContinue
+		}
+		if (-not (Get-NetFirewallRule -Name "NatBypass-ICMP-In" -ErrorAction SilentlyContinue)) {
+			New-NetFirewallRule -Name "NatBypass-ICMP-In" -DisplayName "NatBypass ICMP Inbound" -Direction Inbound -Action Allow -Protocol ICMPv4 -Profile Any -ErrorAction SilentlyContinue
 		}
 	`, targetPrefix)
 	_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
