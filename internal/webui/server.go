@@ -2406,14 +2406,23 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 // TopologyNode represents a node in the mesh network.
 type TopologyNode struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	VirtualIP  string `json:"vip"`
-	IsSelf     bool   `json:"is_self"`
-	IsExitNode bool   `json:"is_exit_node"`
-	Online     bool   `json:"online"`
-	DirectP2P  bool   `json:"direct_p2p"`
-	Platform   string `json:"platform,omitempty"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Nickname        string `json:"nickname,omitempty"`
+	VirtualIP       string `json:"vip"`
+	IsSelf          bool   `json:"is_self"`
+	IsExitNode      bool   `json:"is_exit_node"`
+	Online          bool   `json:"online"`
+	DirectP2P       bool   `json:"direct_p2p"`
+	DirectTCP       bool   `json:"direct_tcp,omitempty"`
+	Platform        string `json:"platform,omitempty"`
+	RelayedViaDevID string `json:"relayed_via_dev_id,omitempty"`
+	RelayedViaName  string `json:"relayed_via_name,omitempty"`
+	ActiveEndpoint  string `json:"active_endpoint,omitempty"`
+	Transport       string `json:"transport,omitempty"`
+	LossPercent     int    `json:"loss_percent"`
+	PingMs          int64  `json:"ping_ms"`
+	HasAWG          bool   `json:"has_awg"`
 }
 
 // TopologyEdge represents a logical communication channel between two mesh nodes.
@@ -2421,7 +2430,9 @@ type TopologyEdge struct {
 	From              string `json:"from"`
 	To                string `json:"to"`
 	Transport         string `json:"transport"`
-	PathType          string `json:"path_type"` // "direct", "relay", "standby"
+	PathType          string `json:"path_type"` // "direct", "mesh_relay", "relay", "exit"
+	RelayPeerID       string `json:"relay_peer_id,omitempty"`
+	RelayPeerName     string `json:"relay_peer_name,omitempty"`
 	PingMs            int64  `json:"ping_ms"`
 	LossPercent       int    `json:"loss_percent"`
 	ConsecutiveDrops  int    `json:"consecutive_drops"`
@@ -2492,18 +2503,30 @@ func (s *Server) handleMeshTopology(w http.ResponseWriter, r *http.Request) {
 
 			pName := p.DeviceName
 			if pName == "" {
+				pName = p.Nickname
+			}
+			if pName == "" {
 				pName = p.DeviceID
 			}
 
 			pNode := TopologyNode{
-				ID:         p.DeviceID,
-				Name:       pName,
-				VirtualIP:  p.VirtualIP,
-				IsSelf:     false,
-				IsExitNode: p.IsExitNode,
-				Online:     p.Online && time.Since(p.LastSeen) < constants.PeerOfflineThreshold,
-				DirectP2P:  p.DirectP2P,
-				Platform:   p.Platform,
+				ID:              p.DeviceID,
+				Name:            pName,
+				Nickname:        p.Nickname,
+				VirtualIP:       p.VirtualIP,
+				IsSelf:          false,
+				IsExitNode:      p.IsExitNode,
+				Online:          p.Online && time.Since(p.LastSeen) < constants.PeerOfflineThreshold,
+				DirectP2P:       p.DirectP2P,
+				DirectTCP:       p.DirectTCP,
+				Platform:        p.Platform,
+				RelayedViaDevID: p.RelayedViaDevID,
+				RelayedViaName:  p.RelayedViaName,
+				ActiveEndpoint:  p.ActiveEndpoint,
+				Transport:       p.Transport,
+				LossPercent:     p.LossPercent,
+				PingMs:          p.PingMs,
+				HasAWG:          p.AWG != nil,
 			}
 			topo.Nodes = append(topo.Nodes, pNode)
 
@@ -2512,10 +2535,15 @@ func (s *Server) handleMeshTopology(w http.ResponseWriter, r *http.Request) {
 			if p.DirectP2P {
 				pathType = "direct"
 			}
+			if p.RelayedViaDevID != "" && p.RelayedViaDevID != myID {
+				pathType = "mesh_relay"
+			}
 			transport := p.Transport
 			if transport == "" {
 				if p.DirectP2P {
 					transport = "awg"
+				} else if pathType == "mesh_relay" {
+					transport = "relay_mesh"
 				} else {
 					transport = "relay_mqtt"
 				}
@@ -2526,6 +2554,8 @@ func (s *Server) handleMeshTopology(w http.ResponseWriter, r *http.Request) {
 				To:                p.DeviceID,
 				Transport:         transport,
 				PathType:          pathType,
+				RelayPeerID:       p.RelayedViaDevID,
+				RelayPeerName:     p.RelayedViaName,
 				PingMs:            p.PingMs,
 				LossPercent:       p.LossPercent,
 				ConsecutiveDrops:  p.ConsecutiveDrops,

@@ -607,9 +607,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if tcpDirectMgr != nil && tcpDirectMgr.HasConn(dstID) {
 				return tcpDirectMgr.SendPacket(dstID, packet)
 			}
-			if destPeer, ok := registry.Get(dstID); ok && destPeer != nil {
+			if destPeer, ok := registry.GetByIDOrVIP(dstID); ok && destPeer != nil {
+				if tcpDirectMgr != nil && tcpDirectMgr.HasConn(destPeer.DeviceID) {
+					return tcpDirectMgr.SendPacket(destPeer.DeviceID, packet)
+				}
 				if puncher != nil && destPeer.DirectP2P && destPeer.ActiveEndpoint != "" {
-					return puncher.SendDataPacketWithPadding(destPeer.ActiveEndpoint, packet, 0, 0)
+					pmin, pmax := 0, 0
+					if destPeer.AWG != nil {
+						pmin = destPeer.AWG.Pmin
+						pmax = destPeer.AWG.Pmax
+					}
+					return puncher.SendDataPacketWithPadding(destPeer.ActiveEndpoint, packet, pmin, pmax)
 				}
 			}
 			if wssClient != nil && wssClient.IsConnected() {

@@ -2022,19 +2022,30 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               <span>Топология и здоровье Mesh-сети</span>
               <span class="badge badge-cyan" id="badgeMeshNodesCount" style="font-size:0.7rem;">0 узлов</span>
             </h3>
-            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top:2px;">Интерактивный граф сокет-в-сокет соединений в реальном времени</p>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top:2px;">Интерактивный граф P2P соединений, прямого AWG трафика и многоузловых релеев</p>
           </div>
-          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-            <span style="font-size:0.75rem; color:var(--text-muted);"><span style="color:#34d399;">●</span> Direct P2P &nbsp; <span style="color:#38bdf8;">●</span> Relay &nbsp; <span style="color:#f87171;">●</span> Offline</span>
-            <button onclick="renderMeshTopologyGraph()" class="btn btn-glass" style="font-size: 0.75rem; padding:4px 10px;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-              <span>Обновить граф</span>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div style="display:flex; gap:8px; background:rgba(15,23,42,0.65); padding:4px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.08); font-size:0.72rem;">
+              <span style="color:#06b6d4; display:inline-flex; align-items:center; gap:3px;">● Direct AWG</span>
+              <span style="color:#818cf8; display:inline-flex; align-items:center; gap:3px;">● Direct TCP</span>
+              <span style="color:#c084fc; display:inline-flex; align-items:center; gap:3px;">● Mesh Relay</span>
+              <span style="color:#10b981; display:inline-flex; align-items:center; gap:3px;">● WAN Выход</span>
+              <span style="color:#f87171; display:inline-flex; align-items:center; gap:3px;">● Офлайн</span>
+            </div>
+            <button onclick="renderMeshTopologyGraph()" class="btn btn-glass" style="font-size: 0.75rem; padding:5px 12px; display:inline-flex; align-items:center; gap:5px;" title="Обновить топологию сети">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Обновить</span>
             </button>
           </div>
         </div>
-        <div style="position:relative; width:100%; height:260px; background:radial-gradient(circle at center, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.95) 100%); border-radius:14px; border:1px solid rgba(255,255,255,0.06); overflow:hidden;">
-          <canvas id="meshTopologyCanvas" width="900" height="260" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
-          <div id="meshGraphTooltip" style="position:absolute; display:none; pointer-events:none; background:rgba(15,23,42,0.92); border:1px solid rgba(56,189,248,0.4); border-radius:8px; padding:6px 12px; font-size:0.75rem; color:#fff; box-shadow:0 4px 15px rgba(0,0,0,0.5); z-index:10;"></div>
+        <div style="position:relative; width:100%; height:380px; background:radial-gradient(ellipse at center, #0e1726 0%, #070b14 100%); border-radius:14px; border:1px solid rgba(255,255,255,0.08); overflow:hidden; box-shadow:inset 0 0 40px rgba(0,0,0,0.6);">
+          <canvas id="meshTopologyCanvas" width="900" height="380" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
+          <div style="position:absolute; right:12px; top:12px; display:flex; gap:5px; z-index:5;">
+            <button onclick="meshZoom(1.15)" class="btn btn-glass" style="padding:4px 9px; font-size:0.75rem; font-weight:700;" title="Приблизить">+</button>
+            <button onclick="meshZoom(0.85)" class="btn btn-glass" style="padding:4px 9px; font-size:0.75rem; font-weight:700;" title="Отдалить">-</button>
+            <button onclick="meshResetView()" class="btn btn-glass" style="padding:4px 9px; font-size:0.75rem;" title="Сбросить масштаб и положение узлов">⟲ Центр</button>
+          </div>
+          <div id="meshGraphTooltip" style="position:absolute; display:none; pointer-events:none; background:rgba(15,23,42,0.96); backdrop-filter:blur(12px); border:1px solid rgba(56,189,248,0.45); border-radius:10px; padding:8px 14px; font-size:0.76rem; color:#fff; box-shadow:0 8px 30px rgba(0,0,0,0.7); z-index:10; min-width:180px;"></div>
         </div>
       </div>
 
@@ -5176,7 +5187,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       renderMeshTopologyGraph(peers);
     }
 
-    // ── Interactive Real Mesh Topology & Route Graph ──────────────────────────────
+    // ── Interactive Real Mesh Topology & Multi-Hop Route Graph ──────────────────
     let meshNodes = [];
     let meshEdges = [];
     let meshDraggingNode = null;
@@ -5184,6 +5195,24 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     let meshCanvasInitialized = false;
     let meshAnimTime = 0;
     let meshAnimRunning = false;
+    let meshZoomLevel = 1.0;
+    let meshPanOffset = { x: 0, y: 0 };
+    let meshIsPanning = false;
+    let meshPanStart = { x: 0, y: 0 };
+
+    function meshZoom(factor) {
+      meshZoomLevel = Math.max(0.5, Math.min(2.5, meshZoomLevel * factor));
+      drawMeshTopology();
+    }
+
+    function meshResetView() {
+      meshZoomLevel = 1.0;
+      meshPanOffset = { x: 0, y: 0 };
+      if (meshNodes) {
+        meshNodes.forEach(n => { delete n.pinned; });
+      }
+      renderMeshTopologyGraph(cachedPeers || []);
+    }
 
     function initMeshCanvasEvents(canvas) {
       if (meshCanvasInitialized) return;
@@ -5191,41 +5220,66 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       const tooltip = document.getElementById('meshGraphTooltip');
 
+      canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.08 : 0.92;
+        meshZoom(factor);
+      }, { passive: false });
+
       canvas.addEventListener('mousedown', (e) => {
         const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
+        const mouseX = (e.clientX - rect.left - meshPanOffset.x) / meshZoomLevel;
+        const mouseY = (e.clientY - rect.top - meshPanOffset.y) / meshZoomLevel;
 
+        let clickedNode = null;
         for (let i = meshNodes.length - 1; i >= 0; i--) {
           const n = meshNodes[i];
           const dist = Math.hypot(n.x - mouseX, n.y - mouseY);
-          if (dist <= n.radius + 6) {
-            meshDraggingNode = n;
-            meshDragOffset.x = n.x - mouseX;
-            meshDragOffset.y = n.y - mouseY;
-            canvas.style.cursor = 'grabbing';
+          if (dist <= n.radius + 8) {
+            clickedNode = n;
             break;
           }
+        }
+
+        if (clickedNode) {
+          meshDraggingNode = clickedNode;
+          meshDraggingNode.pinned = true;
+          meshDragOffset.x = clickedNode.x - mouseX;
+          meshDragOffset.y = clickedNode.y - mouseY;
+          canvas.style.cursor = 'grabbing';
+        } else {
+          meshIsPanning = true;
+          meshPanStart.x = e.clientX - meshPanOffset.x;
+          meshPanStart.y = e.clientY - meshPanOffset.y;
+          canvas.style.cursor = 'move';
         }
       });
 
       window.addEventListener('mousemove', (e) => {
         const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        if (meshDraggingNode) {
-          meshDraggingNode.x = Math.max(meshDraggingNode.radius, Math.min(rect.width - meshDraggingNode.radius, mouseX + meshDragOffset.x));
-          meshDraggingNode.y = Math.max(meshDraggingNode.radius, Math.min(rect.height - meshDraggingNode.radius, mouseY + meshDragOffset.y));
+        if (meshIsPanning) {
+          meshPanOffset.x = e.clientX - meshPanStart.x;
+          meshPanOffset.y = e.clientY - meshPanStart.y;
+          drawMeshTopology();
           return;
         }
 
-        if (tooltip) {
+        const mouseX = (e.clientX - rect.left - meshPanOffset.x) / meshZoomLevel;
+        const mouseY = (e.clientY - rect.top - meshPanOffset.y) / meshZoomLevel;
+
+        if (meshDraggingNode) {
+          meshDraggingNode.x = mouseX + meshDragOffset.x;
+          meshDraggingNode.y = mouseY + meshDragOffset.y;
+          drawMeshTopology();
+          return;
+        }
+
+        if (tooltip && rect.left <= e.clientX && e.clientX <= rect.right && rect.top <= e.clientY && e.clientY <= rect.bottom) {
           let hovered = null;
           for (let i = meshNodes.length - 1; i >= 0; i--) {
             const n = meshNodes[i];
             const dist = Math.hypot(n.x - mouseX, n.y - mouseY);
-            if (dist <= n.radius + 6) {
+            if (dist <= n.radius + 8) {
               hovered = n;
               break;
             }
@@ -5234,22 +5288,48 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           if (hovered) {
             canvas.style.cursor = 'grab';
             tooltip.style.display = 'block';
-            tooltip.style.left = (e.clientX - rect.left + 15) + 'px';
-            tooltip.style.top = (e.clientY - rect.top - 10) + 'px';
-            tooltip.innerHTML = '<strong style=\"font-size:0.82rem;\">' + hovered.name + '</strong><br>' +
-              '<span style=\"color:#38bdf8; font-weight:700;\">' + hovered.vip + '</span><br>' +
-              '<span style=\"color:' + (hovered.direct ? '#34d399' : '#c084fc') + '\">' + (hovered.routeInfo || (hovered.direct ? '⚡ Direct P2P (' + hovered.ping + 'ms)' : '🌐 Relay через брокер')) + '</span><br>' +
-              '<small style=\"color:#94a3b8\">' + (hovered.endpoint || '') + '</small>';
+            tooltip.style.left = Math.min(rect.width - 240, Math.max(10, e.clientX - rect.left + 16)) + 'px';
+            tooltip.style.top = Math.max(10, Math.min(rect.height - 140, e.clientY - rect.top - 10)) + 'px';
+
+            let tipHtml = `
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:5px;">
+                <strong style="font-size:0.86rem; color:#f8fafc; display:flex; align-items:center; gap:5px;">
+                  <span>${hovered.icon || '⚡'}</span> <span>${hovered.name}</span>
+                </strong>
+                <span class="badge" style="background:${hovered.color}22; color:${hovered.color}; border:1px solid ${hovered.color}55; font-size:0.68rem; padding:2px 6px;">
+                  ${hovered.badge || (hovered.direct ? 'Direct P2P' : 'Relay')}
+                </span>
+              </div>
+              <div style="font-family:monospace; font-weight:700; color:#38bdf8; font-size:0.78rem; margin-bottom:4px;">
+                ${hovered.vip || '—'}
+              </div>
+              <div style="font-size:0.72rem; color:${hovered.color}; margin-bottom:3px; display:flex; align-items:center; gap:4px;">
+                <span>${hovered.routeInfo || ''}</span>
+              </div>
+              <div style="font-size:0.70rem; color:#94a3b8; font-family:monospace;">
+                ${hovered.endpoint ? '📍 ' + hovered.endpoint : ''}
+              </div>
+            `;
+            if (hovered.telemetry) {
+              tipHtml += `<div style="font-size:0.68rem; color:#64748b; margin-top:5px; padding-top:5px; border-top:1px solid rgba(255,255,255,0.06);">${hovered.telemetry}</div>`;
+            }
+            tooltip.innerHTML = tipHtml;
           } else {
             canvas.style.cursor = 'default';
             tooltip.style.display = 'none';
           }
+        } else if (tooltip) {
+          tooltip.style.display = 'none';
         }
       });
 
       window.addEventListener('mouseup', () => {
         if (meshDraggingNode) {
           meshDraggingNode = null;
+          canvas.style.cursor = 'default';
+        }
+        if (meshIsPanning) {
+          meshIsPanning = false;
           canvas.style.cursor = 'default';
         }
       });
@@ -5269,7 +5349,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           }
           const dt = Math.min(elapsed, 0.1);
           lastFrameTime = now;
-          // Плавная скорость: 0.45 цикла/сек вне зависимости от герцовки монитора (60/120/144/240Hz)
           meshAnimTime += dt * 0.45;
           drawMeshTopology();
         }
@@ -5288,7 +5367,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       const rect = canvas.getBoundingClientRect();
       const clientW = (rect.width > 50) ? rect.width : (canvas.parentElement ? canvas.parentElement.clientWidth : 900) || 900;
-      const clientH = (rect.height > 50) ? rect.height : 260;
+      const clientH = (rect.height > 50) ? rect.height : 380;
       const dpr = window.devicePixelRatio || 1;
       canvas.width = clientW * dpr;
       canvas.height = clientH * dpr;
@@ -5297,7 +5376,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const myVip = (document.getElementById('topVipLabel') ? document.getElementById('topVipLabel').innerText : '') || '100.64.200.1';
 
       const oldPositions = {};
-      meshNodes.forEach(n => { oldPositions[n.id] = { x: n.x, y: n.y }; });
+      meshNodes.forEach(n => {
+        if (n.pinned || n.x !== undefined) {
+          oldPositions[n.id] = { x: n.x, y: n.y, pinned: n.pinned };
+        }
+      });
 
       meshNodes = [];
       meshEdges = [];
@@ -5305,55 +5388,165 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const cx = clientW / 2;
       const cy = clientH / 2;
 
-      // 1. Self Node (Local device) - Centered when alone, Anchored on Left when peers exist
-      const defaultSelfX = (pList.length === 0) ? cx : Math.max(90, Math.round(clientW * 0.14));
+      // 1. Self Node (Local device)
+      const defaultSelfX = (pList.length === 0) ? cx : Math.max(90, Math.round(clientW * 0.16));
       const selfNode = {
         id: 'self',
         name: myName,
         vip: myVip,
         x: (oldPositions['self'] ? oldPositions['self'].x : defaultSelfX),
         y: (oldPositions['self'] ? oldPositions['self'].y : cy),
+        pinned: (oldPositions['self'] ? oldPositions['self'].pinned : false),
         isSelf: true,
         online: true,
         direct: true,
         ping: 0,
-        radius: 22,
-        color: '#38bdf8',
+        radius: 24,
+        color: '#06b6d4',
+        badge: 'Локальный узел',
         icon: '🏠',
-        routeInfo: 'Локальный узел (Вы)',
-        endpoint: 'Локальный интерфейс'
+        routeInfo: '🛡️ Виртуальный сетевой адаптер Windows (Wintun TUN)',
+        endpoint: '127.0.0.1 (Вы)',
+        telemetry: 'Шифрование: ChaCha20-Poly1305 • Анти-DPI: AmneziaWG 2.0'
       };
       meshNodes.push(selfNode);
 
-      let hasRelayPeers = false;
-      let hasExitPeers = false;
+      // Map peers by device_id for fast multi-hop route lookup
+      const peerNodeMap = {};
+      let hasCloudRelayPeers = false;
+      let activeExitPeer = null;
 
-      // Classify direct vs relay peers
-      const directPeers = [];
-      const relayPeers = [];
-
+      // Identify active Exit Node if set
       pList.forEach(p => {
-        const isDirect = Boolean((p.direct_p2p && p.active_endpoint) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct');
-        if (isDirect) {
-          directPeers.push(p);
-        } else {
-          relayPeers.push(p);
-          hasRelayPeers = true;
-        }
-        if (p.is_exit_node) {
-          hasExitPeers = true;
+        const vIPClean = (p.virtual_ip || '').split('/')[0].trim();
+        const isExit = Boolean(p.is_exit_node ||
+          (currentSelectedExitNode && (currentSelectedExitNode === p.device_id || currentSelectedExitNode === vIPClean)) ||
+          (currentActiveExitVIP && currentActiveExitVIP === vIPClean));
+        if (isExit && p.online) {
+          activeExitPeer = p;
         }
       });
 
-      // 2. Add Relay Hub Node (Placed Top Center) if any peer is in Relay mode
+      // 2. Build Peer Nodes
+      pList.forEach((p, idx) => {
+        const devID = p.device_id;
+        const vIPClean = (p.virtual_ip || '').split('/')[0].trim();
+        const pName = p.nickname ? p.nickname : (p.device_name ? p.device_name : devID.substring(0, 10));
+        const pingMs = (p.latency_ms !== undefined && p.latency_ms !== null && p.latency_ms > 0)
+          ? p.latency_ms
+          : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
+
+        const isDirectTCP = Boolean(p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct' || p.direct_tcp);
+        const isDirectAWG = Boolean(p.direct_p2p && p.active_endpoint) && !isDirectTCP;
+        const isMeshRelayed = Boolean(p.relayed_via_dev_id || p.relayed_via_name || p.transport === 'relay_mesh');
+        const isExit = (activeExitPeer && activeExitPeer.device_id === devID);
+        const isOffline = !p.online;
+
+        let nodeColor = '#34d399';
+        let nodeIcon = '⚡';
+        let badgeText = 'Direct AWG';
+        let routeDesc = `⚡ Прямой P2P сокет (${p.active_endpoint || 'UDP'})`;
+
+        // Platform detection for glyph
+        const pPlatform = (p.platform || '').toLowerCase();
+        const dNameLower = (p.device_name || '').toLowerCase();
+        if (pPlatform.includes('win') || dNameLower.includes('win')) {
+          nodeIcon = '💻';
+        } else if (pPlatform.includes('android') || dNameLower.includes('phone') || dNameLower.includes('mobile')) {
+          nodeIcon = '📱';
+        } else if (dNameLower.includes('keenetic') || dNameLower.includes('router') || pPlatform.includes('mips')) {
+          nodeIcon = '📡';
+        } else if (dNameLower.includes('serv') || dNameLower.includes('vps') || pPlatform.includes('linux')) {
+          nodeIcon = '🖥️';
+        }
+
+        if (isOffline) {
+          nodeColor = '#f87171';
+          nodeIcon = '⚫';
+          badgeText = 'Офлайн';
+          routeDesc = '🔴 Узел не отвечает по сигналингу и ICMP';
+        } else if (p.awg_mismatch) {
+          nodeColor = '#ef4444';
+          nodeIcon = '⚠️';
+          badgeText = 'AWG Mismatch';
+          routeDesc = '⚠️ Параметры AWG (H1-H4, S1-S2, Jc) не совпадают';
+        } else if (isExit) {
+          nodeColor = '#10b981';
+          nodeIcon = '⭐';
+          badgeText = 'Exit Gateway';
+          routeDesc = '🌐 Выходной шлюз интернета (WinNAT / IP Forwarding)';
+        } else if (isDirectTCP) {
+          nodeColor = '#818cf8';
+          badgeText = 'Direct TCP';
+          routeDesc = '🔒 Direct ShadowTLS 1.3 (SNI обфускация)';
+        } else if (isDirectAWG) {
+          nodeColor = (pingMs > 0 && pingMs < 50) ? '#06b6d4' : '#34d399';
+          badgeText = 'Direct AWG';
+          routeDesc = `⚡ Прямой AWG туннель (RTT: ${pingMs}ms)`;
+        } else if (isMeshRelayed) {
+          nodeColor = '#c084fc';
+          nodeIcon = '🔀';
+          const rName = p.relayed_via_name || p.relayed_via_vip || 'Клиент';
+          badgeText = `Relay via ${rName}`;
+          routeDesc = `🔀 Многоузловой P2P релей через [${rName}]`;
+        } else {
+          nodeColor = '#c084fc';
+          nodeIcon = '☁️';
+          badgeText = 'Cloud Relay';
+          routeDesc = '☁️ Транзитный сигнальный брокер MQTT / WSS';
+          hasCloudRelayPeers = true;
+        }
+
+        // Initial radial placement
+        const totalP = Math.max(1, pList.length);
+        const angleSpread = Math.PI * 0.72; // ~130 degrees cone to the right
+        const startAngle = -angleSpread / 2;
+        const angleStep = totalP > 1 ? angleSpread / (totalP - 1) : 0;
+        const currentAngle = startAngle + idx * angleStep;
+        const radialDist = Math.min(clientW * 0.42, 220 + (idx % 2 === 0 ? 0 : 50));
+
+        const defaultX = selfNode.x + Math.cos(currentAngle) * radialDist;
+        const defaultY = cy + Math.sin(currentAngle) * (clientH * 0.36);
+
+        const node = {
+          id: devID,
+          name: pName,
+          vip: p.virtual_ip || '—',
+          rawPeer: p,
+          x: (oldPositions[devID] ? oldPositions[devID].x : Math.max(60, Math.min(clientW - 60, defaultX))),
+          y: (oldPositions[devID] ? oldPositions[devID].y : Math.max(45, Math.min(clientH - 45, defaultY))),
+          pinned: (oldPositions[devID] ? oldPositions[devID].pinned : false),
+          isSelf: false,
+          online: p.online,
+          direct: (isDirectAWG || isDirectTCP),
+          isExit: isExit,
+          ping: pingMs,
+          radius: isExit ? 21 : 17,
+          color: nodeColor,
+          icon: nodeIcon,
+          badge: badgeText,
+          routeInfo: routeDesc,
+          endpoint: p.active_endpoint || p.stun_addr || p.public_ip || '—',
+          telemetry: `Потери: ${p.loss_percent || 0}% • Дропы: ${p.consecutive_drops || 0} • RTT: ${pingMs > 0 ? pingMs + 'ms' : '—'}`
+        };
+
+        meshNodes.push(node);
+        peerNodeMap[devID] = node;
+        if (vIPClean) {
+          peerNodeMap[vIPClean] = node;
+        }
+      });
+
+      // 3. Add Relay Hub Node if Cloud Broker is needed
       let relayHubNode = null;
-      if (hasRelayPeers) {
+      if (hasCloudRelayPeers) {
         relayHubNode = {
           id: 'relay_hub',
-          name: '📡 Relay Брокер (WSS / MQTT)',
-          vip: 'Транзитный сервер',
-          x: (oldPositions['relay_hub'] ? oldPositions['relay_hub'].x : Math.round(clientW * 0.44)),
-          y: (oldPositions['relay_hub'] ? oldPositions['relay_hub'].y : 42),
+          name: '📡 Cloud Брокер (WSS / MQTT)',
+          vip: 'Сигнальный шлюз',
+          x: (oldPositions['relay_hub'] ? oldPositions['relay_hub'].x : Math.round(clientW * 0.5)),
+          y: (oldPositions['relay_hub'] ? oldPositions['relay_hub'].y : 48),
+          pinned: (oldPositions['relay_hub'] ? oldPositions['relay_hub'].pinned : false),
           isSelf: false,
           isHub: true,
           labelAbove: true,
@@ -5362,9 +5555,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           ping: 35,
           radius: 17,
           color: '#c084fc',
+          badge: 'Cloud Hub',
           icon: '☁️',
-          routeInfo: 'Транзитный сигнальный брокер / WSS релей',
-          endpoint: 'Порт 443 / WSS fallback'
+          routeInfo: 'Транзитный сигнальный брокер для узлов за Symmetric NAT',
+          endpoint: 'Порт 443 / WSS',
+          telemetry: 'Резервный транспорт нулевой конфигурации'
         };
         meshNodes.push(relayHubNode);
 
@@ -5372,188 +5567,191 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         meshEdges.push({
           from: selfNode,
           to: relayHubNode,
-          type: 'relay',
+          type: 'cloud_relay',
           color: '#c084fc',
-          label: 'Relay Hop',
+          particleColor: '#e9d5ff',
+          label: 'Cloud Hop',
           ping: 30
         });
       }
 
-      // 3. Add Internet Gateway Hub if Exit Node is active
+      // 4. Add Internet WAN Node if Exit Gateway is active
       let internetNode = null;
-      if (hasExitPeers) {
+      if (activeExitPeer && peerNodeMap[activeExitPeer.device_id]) {
+        const exitNode = peerNodeMap[activeExitPeer.device_id];
         internetNode = {
           id: 'wan_internet',
-          name: '🌐 Интернет',
-          vip: '0.0.0.0/0 WAN',
-          x: (oldPositions['wan_internet'] ? oldPositions['wan_internet'].x : clientW - Math.max(80, Math.round(clientW * 0.12))),
+          name: '🌐 WAN Интернет',
+          vip: '0.0.0.0/0 Маршрут',
+          x: (oldPositions['wan_internet'] ? oldPositions['wan_internet'].x : clientW - Math.max(70, Math.round(clientW * 0.11))),
           y: (oldPositions['wan_internet'] ? oldPositions['wan_internet'].y : cy),
+          pinned: (oldPositions['wan_internet'] ? oldPositions['wan_internet'].pinned : false),
           isSelf: false,
           isHub: true,
           online: true,
           direct: true,
-          radius: 18,
-          color: '#22c55e',
+          radius: 19,
+          color: '#10b981',
+          badge: '0.0.0.0/0',
           icon: '🌍',
-          routeInfo: 'Глобальный интернет через Exit Node',
-          endpoint: 'Шлюз 0.0.0.0/0'
+          routeInfo: `Глобальный трафик маршрутизируется через ${exitNode.name}`,
+          endpoint: 'Шлюз WAN',
+          telemetry: 'WinNAT / Transit Userspace ICMP & UDP'
         };
         meshNodes.push(internetNode);
+
+        // Edge Exit Node <---> WAN Internet
+        meshEdges.push({
+          from: exitNode,
+          to: internetNode,
+          type: 'exit_wan',
+          color: '#10b981',
+          particleColor: '#34d399',
+          label: 'Шлюз WAN',
+          ping: 8
+        });
       }
 
-      // 4. Distribute Direct Peers in Center Space
-      const dCount = directPeers.length;
-      directPeers.forEach((p, idx) => {
-        let posX, posY;
-        const startX = selfNode.x + 180;
-        const endX = (internetNode ? internetNode.x - 140 : clientW - 120);
-        const nodeVIP = (p.virtual_ip || '').split('/')[0].trim();
-        const isNodeExit = Boolean(p.is_exit_node || (currentSelectedExitNode && (currentSelectedExitNode === p.device_id || currentSelectedExitNode === nodeVIP)) || (currentActiveExitVIP && currentActiveExitVIP === nodeVIP));
+      // 5. Build True Multi-Hop and Direct Edges
+      pList.forEach(p => {
+        const node = peerNodeMap[p.device_id];
+        if (!node) return;
 
-        if (dCount === 1) {
-          posX = (startX + endX) / 2;
-          posY = isNodeExit ? (cy + 45) : cy;
-        } else {
-          const stepX = (endX - startX) / Math.max(1, dCount - 1);
-          posX = startX + idx * stepX;
-          posY = (idx % 2 === 0) ? (cy - 35) : (cy + 45);
-          if (isNodeExit) {
-            posY = cy + 50;
-          }
-        }
+        const isDirectTCP = Boolean(p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct' || p.direct_tcp);
+        const isDirectAWG = Boolean(p.direct_p2p && p.active_endpoint) && !isDirectTCP;
+        const pingMs = node.ping || 0;
 
-        const pingMs = (p.latency_ms !== undefined && p.latency_ms !== null && p.latency_ms > 0) ? p.latency_ms : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
-        const node = {
-          id: p.device_id,
-          name: p.nickname ? p.nickname : (p.device_name ? p.device_name : p.device_id.substring(0, 10)),
-          vip: p.virtual_ip || '—',
-          x: (oldPositions[p.device_id] ? oldPositions[p.device_id].x : Math.max(50, Math.min(clientW - 50, posX))),
-          y: (oldPositions[p.device_id] ? oldPositions[p.device_id].y : Math.max(45, Math.min(clientH - 45, posY))),
-          isSelf: false,
-          online: p.online,
-          direct: true,
-          ping: pingMs,
-          radius: isNodeExit ? 20 : 16,
-          color: p.awg_mismatch ? '#ef4444' : (pingMs < 100 ? '#10b981' : (pingMs < 300 ? '#fbbf24' : '#f87171')),
-          icon: p.awg_mismatch ? '⚠️' : (isNodeExit ? '⭐' : '⚡'),
-          routeInfo: '⚡ Прямой P2P сокет (' + (p.active_endpoint || 'UDP') + ')',
-          endpoint: p.active_endpoint || p.stun_addr || p.public_ip || '—'
-        };
-        meshNodes.push(node);
-
-        meshEdges.push({
-          from: selfNode,
-          to: node,
-          type: 'direct',
-          color: node.color,
-          label: (pingMs > 0 ? pingMs + 'ms' : 'P2P Direct'),
-          ping: pingMs
-        });
-
-        if (isNodeExit && internetNode) {
-          meshEdges.push({
-            from: node,
-            to: internetNode,
-            type: 'exit',
-            color: '#22c55e',
-            label: 'NAT Выход',
-            ping: 5
-          });
-        }
-      });
-
-      // 5. Distribute Relay Peers in Upper Right Space connected to Relay Hub
-      const rCount = relayPeers.length;
-      relayPeers.forEach((p, idx) => {
-        let posX, posY;
-        if (rCount === 1) {
-          posX = Math.min(clientW - 130, (relayHubNode ? relayHubNode.x + 190 : cx + 160));
-          posY = 60;
-        } else {
-          const stepY = 55;
-          posX = clientW * 0.70 + (idx % 2 === 0 ? 0 : 35);
-          posY = 48 + idx * stepY;
-        }
-
-        const nodeVIP = (p.virtual_ip || '').split('/')[0].trim();
-        const isNodeExit = Boolean(p.is_exit_node || (currentSelectedExitNode && (currentSelectedExitNode === p.device_id || currentSelectedExitNode === nodeVIP)) || (currentActiveExitVIP && currentActiveExitVIP === nodeVIP));
-
-        const node = {
-          id: p.device_id,
-          name: p.nickname ? p.nickname : (p.device_name ? p.device_name : p.device_id.substring(0, 10)),
-          vip: p.virtual_ip || '—',
-          x: (oldPositions[p.device_id] ? oldPositions[p.device_id].x : Math.max(60, Math.min(clientW - 60, posX))),
-          y: (oldPositions[p.device_id] ? oldPositions[p.device_id].y : Math.max(45, Math.min(clientH - 45, posY))),
-          isSelf: false,
-          online: p.online,
-          direct: false,
-          ping: 0,
-          radius: isNodeExit ? 20 : 16,
-          color: !p.online ? '#ef4444' : '#c084fc',
-          icon: isNodeExit ? '⭐' : (p.online ? '📡' : '❌'),
-          routeInfo: p.online ? '🌐 Подключен через Relay Брокер (Fallback)' : '🔴 Узел оффлайн',
-          endpoint: p.active_endpoint || p.stun_addr || p.public_ip || 'Через MQTT/WSS'
-        };
-        meshNodes.push(node);
-
-        if (isNodeExit && internetNode) {
-          meshEdges.push({
-            from: node,
-            to: internetNode,
-            type: 'exit',
-            color: '#22c55e',
-            label: 'NAT Выход',
-            ping: 15
-          });
-        }
-
-        if (relayHubNode) {
-          meshEdges.push({
-            from: relayHubNode,
-            to: node,
-            type: 'relay',
-            color: '#c084fc',
-            label: 'Relay Hop',
-            ping: 40
-          });
-        } else {
+        if (isDirectAWG || isDirectTCP) {
+          // Direct Socket Edge Self <---> Peer
           meshEdges.push({
             from: selfNode,
             to: node,
-            type: 'relay',
+            type: isDirectTCP ? 'direct_tcp' : 'direct_awg',
+            color: isDirectTCP ? '#818cf8' : '#06b6d4',
+            particleColor: isDirectTCP ? '#a5b4fc' : '#34d399',
+            label: pingMs > 0 ? `${pingMs}ms` : (isDirectTCP ? 'Direct TCP' : 'Direct AWG'),
+            ping: pingMs
+          });
+        } else if (p.relayed_via_dev_id && peerNodeMap[p.relayed_via_dev_id]) {
+          // True Multi-Hop Mesh Relay: Self <---> RelayPeer <---> Node
+          const relayNode = peerNodeMap[p.relayed_via_dev_id];
+
+          // Ensure Self <---> RelayNode edge exists
+          let hasLinkToRelay = meshEdges.some(e =>
+            (e.from === selfNode && e.to === relayNode) ||
+            (e.from === relayNode && e.to === selfNode)
+          );
+          if (!hasLinkToRelay) {
+            meshEdges.push({
+              from: selfNode,
+              to: relayNode,
+              type: relayNode.direct ? 'direct_awg' : 'mesh_relay_hop',
+              color: '#818cf8',
+              particleColor: '#67e8f9',
+              label: relayNode.ping > 0 ? `${relayNode.ping}ms` : 'Relay Link',
+              ping: relayNode.ping
+            });
+          }
+
+          // RelayNode <---> DestNode transit hop
+          meshEdges.push({
+            from: relayNode,
+            to: node,
+            type: 'mesh_relay_hop',
+            color: '#a855f7',
+            particleColor: '#fbbf24',
+            label: `🔀 Релей: ${relayNode.name}`,
+            ping: pingMs || 45
+          });
+        } else if (relayHubNode) {
+          // Cloud Relay Broker Hop
+          meshEdges.push({
+            from: relayHubNode,
+            to: node,
+            type: 'cloud_relay',
             color: '#c084fc',
-            label: 'Relay',
+            particleColor: '#e9d5ff',
+            label: 'Cloud Hop',
             ping: 40
+          });
+        } else {
+          // Fallback direct probe edge
+          meshEdges.push({
+            from: selfNode,
+            to: node,
+            type: 'cloud_relay',
+            color: '#64748b',
+            particleColor: '#94a3b8',
+            label: 'Поиск сокета',
+            ping: 60
           });
         }
       });
 
-      // 6. Anti-Collision Spacing Solver with Text Bounding Box
-      for (let iter = 0; iter < 15; iter++) {
+      // 6. Anti-Collision Spring Layout Relaxation Solver
+      // Solves positions with spring repulsion and edge attraction
+      const kRep = 4200;
+      const kAtt = 0.04;
+      const targetDist = 140;
+
+      for (let iter = 0; iter < 28; iter++) {
+        // Repulsion between all node pairs
         for (let i = 0; i < meshNodes.length; i++) {
           for (let j = i + 1; j < meshNodes.length; j++) {
             const n1 = meshNodes[i];
             const n2 = meshNodes[j];
             const dx = n2.x - n1.x;
             const dy = n2.y - n1.y;
-            const minDx = (n1.radius + n2.radius) + 70;
-            const minDy = (n1.radius + n2.radius) + 38;
-            if (Math.abs(dx) < minDx && Math.abs(dy) < minDy) {
-              const overlapX = (minDx - Math.abs(dx)) / 2;
-              const overlapY = (minDy - Math.abs(dy)) / 2;
-              const sx = dx >= 0 ? 1 : -1;
-              const sy = dy >= 0 ? 1 : -1;
-              if (!n1.isSelf && !n1.isHub) {
-                n1.x = Math.max(45, Math.min(clientW - 45, n1.x - sx * overlapX * 0.45));
-                n1.y = Math.max(40, Math.min(clientH - 40, n1.y - sy * overlapY * 0.45));
+            const dist = Math.hypot(dx, dy) || 1;
+            const minDist = (n1.radius + n2.radius) + 68;
+
+            if (dist < minDist) {
+              const force = (kRep / (dist * dist)) * 0.45;
+              const fx = (dx / dist) * force;
+              const fy = (dy / dist) * force;
+
+              if (!n1.pinned && !n1.isSelf && !n1.isHub) {
+                n1.x -= fx;
+                n1.y -= fy;
               }
-              if (!n2.isSelf && !n2.isHub) {
-                n2.x = Math.max(45, Math.min(clientW - 45, n2.x + sx * overlapX * 0.45));
-                n2.y = Math.max(40, Math.min(clientH - 40, n2.y + sy * overlapY * 0.45));
+              if (!n2.pinned && !n2.isSelf && !n2.isHub) {
+                n2.x += fx;
+                n2.y += fy;
               }
             }
           }
         }
+
+        // Attraction along edges
+        meshEdges.forEach(e => {
+          const n1 = e.from;
+          const n2 = e.to;
+          if (!n1 || !n2) return;
+          const dx = n2.x - n1.x;
+          const dy = n2.y - n1.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const delta = dist - targetDist;
+          const force = delta * kAtt;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          if (!n1.pinned && !n1.isSelf && !n1.isHub) {
+            n1.x += fx * 0.35;
+            n1.y += fy * 0.35;
+          }
+          if (!n2.pinned && !n2.isSelf && !n2.isHub) {
+            n2.x -= fx * 0.35;
+            n2.y -= fy * 0.35;
+          }
+        });
+
+        // Viewport boundaries clamp
+        meshNodes.forEach(n => {
+          if (!n.pinned) {
+            n.x = Math.max(50, Math.min(clientW - 50, n.x));
+            n.y = Math.max(45, Math.min(clientH - 45, n.y));
+          }
+        });
       }
     }
 
@@ -5574,39 +5772,72 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         return;
       }
 
-      // If only self node: Draw radar scanning pulse animation
+      ctx.save();
+      ctx.translate(meshPanOffset.x, meshPanOffset.y);
+      ctx.scale(meshZoomLevel, meshZoomLevel);
+
+      const sn = meshNodes.find(n => n.isSelf) || meshNodes[0];
+
+      // ── Radar Grid & Coordinate Rings ───────────────────────────
+      if (sn) {
+        const rings = [100, 200, 320, 460];
+        rings.forEach((rad, rIdx) => {
+          ctx.beginPath();
+          ctx.arc(sn.x, sn.y, rad, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.05)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 5]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.fillStyle = 'rgba(148, 163, 184, 0.22)';
+          ctx.font = '8px monospace';
+          ctx.fillText((rIdx + 1) * 25 + 'ms зона', sn.x + rad + 4, sn.y - 4);
+        });
+
+        // Subtle crosshairs
+        ctx.beginPath();
+        ctx.moveTo(sn.x - 480, sn.y);
+        ctx.lineTo(sn.x + 480, sn.y);
+        ctx.moveTo(sn.x, sn.y - 360);
+        ctx.lineTo(sn.x, sn.y + 360);
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.035)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // If only self node: Draw expanding radar pulse animation
       if (meshNodes.length === 1 && meshNodes[0].isSelf) {
-        const sn = meshNodes[0];
         for (let r = 0; r < 3; r++) {
           const wavePhase = (meshAnimTime * 0.4 + r * 0.33) % 1.0;
-          const rad = 25 + wavePhase * 110;
+          const rad = 25 + wavePhase * 120;
           const alpha = (1.0 - wavePhase) * 0.45;
           ctx.beginPath();
           ctx.arc(sn.x, sn.y, rad, 0, Math.PI * 2);
-          ctx.strokeStyle = 'rgba(56, 189, 248, ' + alpha + ')';
+          ctx.strokeStyle = 'rgba(6, 182, 212, ' + alpha + ')';
           ctx.lineWidth = 1.5;
           ctx.setLineDash([4, 4]);
           ctx.stroke();
           ctx.setLineDash([]);
         }
         ctx.fillStyle = '#0f172a';
-        const msg = 'Поиск устройств в сети...';
-        ctx.font = 'bold 10px sans-serif';
+        const msg = 'Поиск устройств в зашифрованной сети...';
+        ctx.font = 'bold 11px sans-serif';
         const tw = ctx.measureText(msg).width;
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(sn.x - tw/2 - 9, sn.y + sn.radius + 33, tw + 18, 20, 6);
-        else ctx.rect(sn.x - tw/2 - 9, sn.y + sn.radius + 33, tw + 18, 20);
+        if (ctx.roundRect) ctx.roundRect(sn.x - tw / 2 - 10, sn.y + sn.radius + 30, tw + 20, 24, 6);
+        else ctx.rect(sn.x - tw / 2 - 10, sn.y + sn.radius + 30, tw + 20, 24);
         ctx.fill();
-        ctx.strokeStyle = 'rgba(56,189,248,0.35)';
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
         ctx.lineWidth = 1;
         ctx.stroke();
         ctx.fillStyle = '#38bdf8';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(msg, sn.x, sn.y + sn.radius + 43);
+        ctx.fillText(msg, sn.x, sn.y + sn.radius + 42);
       }
 
-      // 1. Draw Edges
+      // ── 1. Draw Edges ──────────────────────────────────────────
       meshEdges.forEach((edge, edgeIdx) => {
         const from = edge.from;
         const to = edge.to;
@@ -5616,85 +5847,124 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         ctx.moveTo(from.x, from.y);
         ctx.lineTo(to.x, to.y);
 
-        if (edge.type === 'direct') {
-          ctx.strokeStyle = edge.color + 'aa';
+        if (edge.type === 'direct_awg') {
+          ctx.strokeStyle = 'rgba(6, 182, 212, 0.85)';
           ctx.setLineDash([]);
-          ctx.lineWidth = Math.max(2, 4 - (edge.ping || 0) / 50);
-        } else if (edge.type === 'exit') {
-          ctx.strokeStyle = '#22c55ecc';
+          ctx.lineWidth = 2.5;
+        } else if (edge.type === 'direct_tcp') {
+          ctx.strokeStyle = 'rgba(99, 102, 241, 0.85)';
           ctx.setLineDash([]);
-          ctx.lineWidth = 3;
+          ctx.lineWidth = 2.5;
+        } else if (edge.type === 'exit_wan') {
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.95)';
+          ctx.setLineDash([]);
+          ctx.lineWidth = 3.2;
+        } else if (edge.type === 'mesh_relay_hop') {
+          ctx.strokeStyle = 'rgba(168, 85, 247, 0.85)';
+          ctx.setLineDash([6, 4]);
+          ctx.lineWidth = 2.4;
         } else {
-          // Relay dotted line
-          ctx.strokeStyle = 'rgba(192, 132, 252, 0.7)';
-          ctx.setLineDash([5, 5]);
+          // Cloud Relay dotted
+          ctx.strokeStyle = 'rgba(192, 132, 252, 0.65)';
+          ctx.setLineDash([4, 4]);
           ctx.lineWidth = 2;
         }
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Animated Packet Particle traveling along edge with staggered phase
-        const edgePhase = (edgeIdx || 0) * 0.23;
-        const t = ((meshAnimTime + edgePhase) % 1.0);
-        const px = from.x + (to.x - from.x) * t;
-        const py = from.y + (to.y - from.y) * t;
+        // Animated Photonic Particles with trail
+        const speedMultiplier = 1.0 / Math.max(1, (1 + (edge.ping || 30) / 100));
+        const edgePhase = (edgeIdx || 0) * 0.28;
+        const t1 = ((meshAnimTime * speedMultiplier + edgePhase) % 1.0);
+        const p1x = from.x + (to.x - from.x) * t1;
+        const p1y = from.y + (to.y - from.y) * t1;
+
+        // Leading photon
         ctx.beginPath();
-        ctx.arc(px, py, 3.5, 0, Math.PI * 2);
-        ctx.fillStyle = edge.type === 'direct' ? '#34d399' : (edge.type === 'exit' ? '#4ade80' : '#c084fc');
+        ctx.arc(p1x, p1y, 3.8, 0, Math.PI * 2);
+        ctx.fillStyle = edge.particleColor || '#38bdf8';
         ctx.shadowColor = ctx.fillStyle;
-        ctx.shadowBlur = 8;
+        ctx.shadowBlur = 9;
         ctx.fill();
         ctx.shadowBlur = 0;
 
-        // Edge Label Badge
+        // Trailing tail
+        const tTail = (t1 - 0.035 + 1.0) % 1.0;
+        const pTx = from.x + (to.x - from.x) * tTail;
+        const pTy = from.y + (to.y - from.y) * tTail;
+        ctx.beginPath();
+        ctx.arc(pTx, pTy, 2.2, 0, Math.PI * 2);
+        ctx.fillStyle = edge.particleColor || '#38bdf8';
+        ctx.globalAlpha = 0.45;
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+
+        // Edge Latency Badge
         const mx = (from.x + to.x) / 2;
         const my = (from.y + to.y) / 2;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+        const badgeLabel = edge.label || '';
+        const badgeW = badgeLabel.length * 6.5 + 16;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
         ctx.beginPath();
-        const badgeW = edge.label.length * 6.5 + 14;
         if (ctx.roundRect) {
-          ctx.roundRect(mx - badgeW/2, my - 9, badgeW, 18, 4);
+          ctx.roundRect(mx - badgeW / 2, my - 9, badgeW, 18, 5);
         } else {
-          ctx.rect(mx - badgeW/2, my - 9, badgeW, 18);
+          ctx.rect(mx - badgeW / 2, my - 9, badgeW, 18);
         }
         ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
         ctx.stroke();
 
-        ctx.fillStyle = edge.type === 'direct' ? (edge.ping < 50 ? '#34d399' : '#fbbf24') : (edge.type === 'exit' ? '#22c55e' : '#c084fc');
+        ctx.fillStyle = edge.color;
         ctx.font = 'bold 9px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(edge.label, mx, my);
+        ctx.fillText(badgeLabel, mx, my);
       });
 
-      // 2. Draw Nodes
+      // ── 2. Draw Nodes ──────────────────────────────────────────
       meshNodes.forEach(node => {
-        // Outer halo
+        // Outer pulsing halo
+        const pulse = Math.sin(meshAnimTime * 2.5 + (node.isSelf ? 0 : 1.2)) * 2;
         ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius + 5, 0, Math.PI * 2);
-        ctx.fillStyle = node.color + '22';
+        ctx.arc(node.x, node.y, node.radius + 6 + pulse, 0, Math.PI * 2);
+        ctx.fillStyle = node.color + '1a';
         ctx.fill();
 
-        // Node Circle
+        // Node Circle core
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
         ctx.fillStyle = '#0f172a';
         ctx.fill();
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = node.isSelf ? 3.0 : 2.4;
         ctx.strokeStyle = node.color;
         ctx.stroke();
 
-        // Icon inside circle
+        // Extra corona ring for Exit Node or Self
+        if (node.isExit) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 3, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.55)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else if (node.isSelf) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 3, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(6, 182, 212, 0.55)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+
+        // Glyph inside circle
         ctx.fillStyle = node.color;
-        ctx.font = node.isSelf ? '15px sans-serif' : '12px sans-serif';
+        ctx.font = node.isSelf ? '16px sans-serif' : '13px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(node.icon || '⚡', node.x, node.y);
 
-        // Node Name & Virtual IP
+        // Labels
         if (node.labelAbove) {
-          // Placed Above (e.g. for Relay Hub)
           ctx.fillStyle = '#f8fafc';
           ctx.font = 'bold 11px sans-serif';
           ctx.fillText(node.name, node.x, node.y - node.radius - 14);
@@ -5703,18 +5973,38 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           ctx.font = '9px monospace';
           ctx.fillText(node.vip, node.x, node.y - node.radius - 4);
         } else {
-          // Placed Below
+          // Device Name
           ctx.fillStyle = '#f8fafc';
           ctx.font = 'bold 11px sans-serif';
-          ctx.fillText(node.name, node.x, node.y + node.radius + 12);
+          ctx.fillText(node.name, node.x, node.y + node.radius + 13);
 
+          // Virtual IP
           ctx.fillStyle = node.isHub ? '#c084fc' : '#94a3b8';
           ctx.font = '9px monospace';
-          ctx.fillText(node.vip, node.x, node.y + node.radius + 24);
+          ctx.fillText(node.vip, node.x, node.y + node.radius + 25);
+
+          // Small Transport Badge below VIP
+          if (!node.isHub && node.badge) {
+            const bTxt = node.badge;
+            const bW = bTxt.length * 5.8 + 10;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(node.x - bW / 2, node.y + node.radius + 32, bW, 14, 4);
+            else ctx.rect(node.x - bW / 2, node.y + node.radius + 32, bW, 14);
+            ctx.fill();
+            ctx.strokeStyle = node.color + '55';
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+
+            ctx.fillStyle = node.color;
+            ctx.font = 'bold 8px sans-serif';
+            ctx.fillText(bTxt, node.x, node.y + node.radius + 39);
+          }
         }
       });
 
-      ctx.restore();
+      ctx.restore(); // Restore pan and zoom transform
+      ctx.restore(); // Restore dpr transform
     }
 
 

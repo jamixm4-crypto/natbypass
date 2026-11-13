@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.9"
+	Version = "1.9.507-beta.10"
 	Commit  = "release"
 )
 
@@ -537,6 +537,7 @@ var (
 	uiServer                *webui.Server
 	tunDev                  *tunnel.Device
 	guiTransitForwarder     *tunnel.TransitForwarder
+	guiMultiHopRouter       *network.MultiHopRouter
 	myPubKey                [32]byte
 	myPrivKey               [32]byte
 	myWGPubKey              string
@@ -3584,39 +3585,40 @@ func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, 
 	}
 	// Priority 0 (Level 5 NAT Traversal): Explicit opt-in relay node respecting metered/battery/quota limits
 	if bestRelay := reg.FindBestRelay(excludeDevID); bestRelay != nil {
-		if (tcpMgr != nil && tcpMgr.HasConn(bestRelay.DeviceID)) || (bestRelay.DirectP2P && bestRelay.ActiveEndpoint != "" && bestRelay.LossPercent < 20) {
+		hasConn := (tcpMgr != nil && tcpMgr.HasConn(bestRelay.DeviceID)) || (bestRelay.DirectP2P && bestRelay.ActiveEndpoint != "" && bestRelay.LossPercent < 20)
+		if hasConn {
 			return bestRelay
 		}
 	}
-	if tcpMgr == nil {
-		return nil
-	}
-	// Priority 1: Known VPS / Server nodes
+	// Priority 1: Known VPS / Server nodes (e.g. 10.1.1.102 or name containing Serv)
 	for _, p := range reg.List() {
 		if p.DeviceID == excludeDevID || !p.Online {
 			continue
 		}
 		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 		isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(p.DeviceName), "serv") || strings.Contains(strings.ToLower(p.Nickname), "serv")
-		if isServ && tcpMgr.HasConn(p.DeviceID) {
+		hasConn := (tcpMgr != nil && tcpMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
+		if isServ && hasConn {
 			return p
 		}
 	}
-	// Priority 2: Any peer with public IP and active TCP
+	// Priority 2: Any peer with public IP and active connection (TCP or Direct UDP P2P)
 	for _, p := range reg.List() {
 		if p.DeviceID == excludeDevID || !p.Online {
 			continue
 		}
-		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && tcpMgr.HasConn(p.DeviceID) {
+		hasConn := (tcpMgr != nil && tcpMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
+		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && hasConn {
 			return p
 		}
 	}
-	// Priority 3: Any peer with active TCP
+	// Priority 3: Any online peer with active connection (TCP or Direct UDP P2P)
 	for _, p := range reg.List() {
 		if p.DeviceID == excludeDevID || !p.Online {
 			continue
 		}
-		if tcpMgr.HasConn(p.DeviceID) {
+		hasConn := (tcpMgr != nil && tcpMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
+		if hasConn {
 			return p
 		}
 	}
@@ -4915,6 +4917,11 @@ func startEngineFromConfig(c *config.Config) {
 		// Маршрутизация входящих IP-пакетов туннеля напрямую в виртуальный адаптер Windows
 		onInboundPacket := func(srcAddr *net.UDPAddr, payload []byte, isTCP bool, isRelay bool) {
 			if network.IsMultiHopPacket(payload) {
+				if guiMultiHopRouter != nil {
+					if err := guiMultiHopRouter.Route(payload); err != nil {
+						writeDebug(fmt.Sprintf("⚠️ Multi-hop packet route error: %v", err))
+					}
+				}
 				return
 			}
 			if len(payload) >= 22 && payload[0]>>4 != 4 {
@@ -5205,6 +5212,29 @@ func startEngineFromConfig(c *config.Config) {
 			},
 			sendPacketToPeerGUI,
 		)
+
+		// Initialize Mesh Multi-Hop P2P Router for Windows GUI
+		guiMultiHopRouter = network.NewMultiHopRouter(
+			myDevID,
+			func(dstID string, packet []byte) error {
+				if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(dstID) {
+					return guiTCPDirectMgr.SendPacket(dstID, packet)
+				}
+				if registry != nil {
+					if destPeer, ok := registry.GetByIDOrVIP(dstID); ok && destPeer != nil {
+						return sendPacketToPeerGUI(destPeer, packet)
+					}
+				}
+				if guiWSSClient != nil && guiWSSClient.IsConnected() {
+					return guiWSSClient.SendPacket(dstID, packet)
+				}
+				return fmt.Errorf("no route to peer %s for multi-hop transit", dstID)
+			},
+			func(srcID string, payload []byte) error {
+				onInboundPacket(nil, payload, true, true)
+				return nil
+			},
+		)
 	} else {
 		writeDebug("Ошибка создания UDPPuncher: " + err.Error())
 	}
@@ -5467,12 +5497,30 @@ func startEngineFromConfig(c *config.Config) {
 								directVerified := sentTCP || (sentDirect && targetPeer.DirectP2P && bilateralOK)
 								needsRelay := !directVerified && (!isExitOrInternet || isICMP)
 
-								// 1e. Mesh Userspace TCP Relay Fallback:
-								if needsRelay && !isForceUDP && guiTCPDirectMgr != nil {
+								// 1e. Mesh Userspace Multi-Hop Relay Fallback (TCP or Direct UDP/AWG):
+								if needsRelay && !isForceUDP {
 									if relayPeer := findMeshRelayPeerGUI(registry, guiTCPDirectMgr, targetPeer.DeviceID); relayPeer != nil {
 										if mhPkt, mhErr := network.EncodeMultiHopPacket(myDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, packet); mhErr == nil {
-											if err := guiTCPDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
+											relayed := false
+											if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(relayPeer.DeviceID) {
+												if err := guiTCPDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
+													relayed = true
+												}
+											} else if puncher != nil && relayPeer.DirectP2P && relayPeer.ActiveEndpoint != "" {
+												pmin, pmax := 0, 0
+												if relayPeer.AWG != nil {
+													pmin = relayPeer.AWG.Pmin
+													pmax = relayPeer.AWG.Pmax
+												}
+												if err := puncher.SendDataPacketWithPadding(relayPeer.ActiveEndpoint, mhPkt, pmin, pmax); err == nil {
+													relayed = true
+												}
+											}
+											if relayed {
 												sentDirect = true
+												if registry != nil {
+													registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+												}
 												rName := relayPeer.DeviceName
 												if rName == "" {
 													rName = relayPeer.Nickname
@@ -5481,7 +5529,7 @@ func startEngineFromConfig(c *config.Config) {
 												targetPeer.RelayedViaName = rName
 												targetPeer.RelayedViaVIP = relayPeer.VirtualIP
 												targetPeer.Transport = "relay_mesh"
-												writeDebug(fmt.Sprintf("🔀 Routed packet to %s via Mesh TCP Relay %s", targetPeer.DeviceID, relayPeer.DeviceID))
+												writeDebug(fmt.Sprintf("🔀 Routed packet to %s via Mesh Relay %s (%s)", targetPeer.DeviceID, rName, relayPeer.DeviceID))
 											}
 										}
 									}
