@@ -91,6 +91,41 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/insta
 
 ---
 
+## 🔄 Обновление до Beta-версии (все платформы)
+
+Все свежие исправления, новые сетевые алгоритмы и функции P2P/AWG первыми выходят в канале предварительных сборок (**Beta / Pre-release**).
+
+### 🐧 Роутеры Keenetic, OpenWrt и серверы Linux
+* **Обновление установленной программы до последней Beta-версии в одну строку:**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/update.sh | sh -s -- --beta
+  ```
+* **Установка с нуля сразу Beta-версии:**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh | sh -s -- --beta
+  ```
+* **Через WebUI:** В панели управления роутера (`http://<IP_РОУТЕРА>:8080`) перейдите в **Система / Обновления**, выберите ветку **«Бета-канал»** и нажмите **«Обновить»**.
+
+### 🪟 Windows (ПК и серверы)
+* **Способ 1 (Прямо из запущенной программы):**
+  В окне приложения нажмите кнопку **«⚙️ Обновления»** (или перейдите в WebUI `http://127.0.0.1:8080` → **Система / Обновления**), выберите канал **Beta** и нажмите **«Обновить сейчас»** — приложение автоматически скачает бинарник и перезапустится без потери настроек.
+* **Способ 2 (PowerShell в одну строку):**
+  ```powershell
+  irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/install-windows.ps1 | iex -ArgumentList "-Beta"
+  ```
+* **Способ 3 (Скачать вручную с GitHub Releases):**
+  Скачайте свежие исполняемые файлы со страницы актуального [**Pre-release (v1.9.507-beta.11)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.11):
+  * **[NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.11/NatBypass.exe)** — основное приложение в отдельном окне (App Window / WebUI, трей, интерактивная топология сети).
+  * **[NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.11/NatBypass-GUI.exe)** — сверхлёгкий нативный Win32 GUI (15–25 МБ RAM).
+  * **[natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.11/natbypass-cli.exe)** — консольный клиент и служба.
+
+### 📱 Android
+1. Откройте страницу [**Pre-release (v1.9.507-beta.11)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.11) на смартфоне и скачайте файл APK.
+2. Либо в приложении на ПК откройте вкладку «📱 Скачать APK» в окне QR-кода и наведите камеру смартфона.
+
+
+---
+
 ## 🗑️ Удаление и сброс конфигурации (Linux / Keenetic / OpenWrt)
 
 ### 1. Полное удаление программы со всеми файлами и ключами:

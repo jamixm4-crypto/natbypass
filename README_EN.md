@@ -91,6 +91,40 @@ Web Management UI will be accessible at: `http://<DEVICE_IP>:8080`.
 
 ---
 
+## 🔄 How to Update to the Beta Version (All Platforms)
+
+All cutting-edge fixes, new NAT traversal algorithms, and P2P/AWG improvements are published first on the **Beta (Pre-release)** track.
+
+### 🐧 Keenetic, OpenWrt Routers & Linux Servers
+* **Update existing daemon to the latest Beta in one command:**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/update.sh | sh -s -- --beta
+  ```
+* **Install Beta directly from scratch:**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/install.sh | sh -s -- --beta
+  ```
+* **Via WebUI:** Open router WebUI (`http://<ROUTER_IP>:8080`) → **System / Updates**, switch to the **Beta Channel**, and click **"Check and Update"**.
+
+### 🪟 Windows (PC & Servers)
+* **Method 1 (Directly within running app):**
+  In the app window, click **"⚙️ Updates"** (or visit WebUI `http://127.0.0.1:8080` → **System / Updates**), select the **Beta** channel, and click **"Update Now"** — the app will download and restart seamlessly without losing your configuration.
+* **Method 2 (PowerShell one-liner):**
+  ```powershell
+  irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/install-windows.ps1 | iex -ArgumentList "-Beta"
+  ```
+* **Method 3 (Manual Download from GitHub Releases):**
+  Download the latest binaries from the active [**Pre-release (v1.9.507-beta.11)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.11) page:
+  * **[NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.11/NatBypass.exe)** — primary standalone application (App Window / WebUI, system tray, interactive topology map).
+  * **[NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.11/NatBypass-GUI.exe)** — ultra-lightweight native Win32 GUI (15–25 MB RAM).
+  * **[natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.11/natbypass-cli.exe)** — console client and Windows background service.
+
+### 📱 Android
+1. Open the [**Pre-release (v1.9.507-beta.11)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.11) page on your phone and download the `NatBypass.apk`.
+2. Or in the desktop app, open the "📱 Download APK" tab in the QR modal and scan with your phone camera.
+
+---
+
 ## 🗑️ Uninstallation & Configuration Reset (Linux / Keenetic / OpenWrt)
 
 ### 1. Complete Uninstallation (Purge all binaries, configs, and keys):

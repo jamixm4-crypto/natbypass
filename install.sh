@@ -7,14 +7,38 @@ set -e
 
 main() {
     REPO="jamixm4-crypto/natbypass"
-    DEFAULT_TAG="v1.9.504"
+    DEFAULT_STABLE="v1.9.504"
+    DEFAULT_BETA="v1.9.507-beta.11"
+    BETA_MODE=0
 
-    # Try to resolve latest tag from GitHub API
-    LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-    if [ -n "$LATEST_TAG" ]; then
-        TAG="${LATEST_TAG}"
+    # Parse CLI flags
+    for arg in "$@"; do
+        case "$arg" in
+            --beta|-b|--prerelease)
+                BETA_MODE=1
+                ;;
+            --stable|-s)
+                BETA_MODE=0
+                ;;
+        esac
+    done
+
+    if [ "$BETA_MODE" -eq 1 ]; then
+        # Try to resolve latest beta release tag from mirror or releases API
+        BETA_TAG=$(curl -s "https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+        if [ -n "$BETA_TAG" ]; then
+            TAG="${BETA_TAG}"
+        else
+            TAG="${DEFAULT_BETA}"
+        fi
     else
-        TAG="${DEFAULT_TAG}"
+        # Try to resolve latest tag from GitHub API
+        LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+        if [ -n "$LATEST_TAG" ]; then
+            TAG="${LATEST_TAG}"
+        else
+            TAG="${DEFAULT_STABLE}"
+        fi
     fi
 
     # Color Helpers
