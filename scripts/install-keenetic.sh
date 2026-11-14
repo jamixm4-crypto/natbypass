@@ -8,7 +8,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.14"
+    DEFAULT_BETA="v1.9.507-beta.15"
     BETA_MODE=0
 
     # Parse CLI flags
@@ -513,7 +513,7 @@ if [ "$table" = "nat" ]; then
     # Remove broad 10.0.0.0/8 rule that breaks local LAN (e.g. 10.11.219.0/24)
     iptables -t nat -D POSTROUTING -s 10.0.0.0/8 ! -o nb0 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 172.16.0.0/12 ! -o nb0 -j MASQUERADE 2>/dev/null || true
-    NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}')
+    NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}' | sed -E 's/\.[0-9]+\//.0\//')
     if [ -n "$NB_SUBNET" ]; then
         iptables -t nat -C POSTROUTING -s "$NB_SUBNET" ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s "$NB_SUBNET" ! -o nb0 -j MASQUERADE 2>/dev/null || true
     fi
@@ -522,7 +522,7 @@ fi
 
 ip rule del from 10.0.0.0/8 2>/dev/null || true
 ip rule del to 10.0.0.0/8 2>/dev/null || true
-NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}')
+NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}' | sed -E 's/\.[0-9]+\//.0\//')
 if [ -n "$NB_SUBNET" ]; then
     ip rule add to "$NB_SUBNET" lookup main priority 40 2>/dev/null || true
 fi
@@ -530,7 +530,15 @@ ip rule add to 100.64.200.0/24 lookup main priority 40 2>/dev/null || true
 
 WAN_TABLE=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="table") print $(i+1)}')
 if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
-    for tbl in 1000 1001 1002 1003 100 200 default; do
+    for tbl in $(ip route show table all default 2>/dev/null | grep -v 'nb0' | awk '{for(i=1;i<=NF;i++) if($i=="table") print $(i+1)}'); do
+        if [ "$tbl" != "main" ] && [ "$tbl" != "local" ] && [ "$tbl" != "default" ]; then
+            WAN_TABLE="$tbl"
+            break
+        fi
+    done
+fi
+if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
+    for tbl in 1000 1001 1002 1003 1004 1005 1008 100 200 default; do
         if ip route show table "$tbl" default 2>/dev/null | grep -q 'default'; then
             WAN_TABLE="$tbl"
             break
@@ -546,11 +554,9 @@ if [ -n "$NB_SUBNET" ]; then
 fi
 ip rule add from 100.64.200.0/24 lookup $WAN_TABLE priority 60 2>/dev/null || true
 
-if [ "$WAN_TABLE" != "main" ] && [ "$WAN_TABLE" != "default" ]; then
-    WAN_DEF=$(ip route show table "$WAN_TABLE" default 2>/dev/null | grep -v 'nb0' | head -n1)
-    if [ -n "$WAN_DEF" ]; then
-        ip route replace $WAN_DEF table main 2>/dev/null || true
-    fi
+WAN_DEF=$(ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g')
+if [ -n "$WAN_DEF" ]; then
+    ip route replace $WAN_DEF table main 2>/dev/null || true
 fi
 NDM_EOF
         chmod +x /opt/etc/ndm/netfilter.d/010-natbypass.sh

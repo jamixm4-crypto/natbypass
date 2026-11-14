@@ -440,7 +440,7 @@ if [ "$table" = "nat" ]; then
     iptables -t nat -C POSTROUTING -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 10.0.0.0/8 ! -o nb0 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 172.16.0.0/12 ! -o nb0 -j MASQUERADE 2>/dev/null || true
-    NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}')
+    NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}' | sed -E 's/\.[0-9]+\//.0\//')
     if [ -n "$NB_SUBNET" ]; then
         iptables -t nat -C POSTROUTING -s "$NB_SUBNET" ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s "$NB_SUBNET" ! -o nb0 -j MASQUERADE 2>/dev/null || true
     fi
@@ -449,7 +449,7 @@ fi
 
 ip rule del from 10.0.0.0/8 2>/dev/null || true
 ip rule del to 10.0.0.0/8 2>/dev/null || true
-NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}')
+NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}' | sed -E 's/\.[0-9]+\//.0\//')
 if [ -n "$NB_SUBNET" ]; then
     ip rule add to "$NB_SUBNET" lookup main priority 40 2>/dev/null || true
 fi
@@ -457,7 +457,15 @@ ip rule add to 100.64.200.0/24 lookup main priority 40 2>/dev/null || true
 
 WAN_TABLE=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="table") print $(i+1)}')
 if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
-    for tbl in 1000 1001 1002 1003 100 200 default; do
+    for tbl in $(ip route show table all default 2>/dev/null | grep -v 'nb0' | awk '{for(i=1;i<=NF;i++) if($i=="table") print $(i+1)}'); do
+        if [ "$tbl" != "main" ] && [ "$tbl" != "local" ] && [ "$tbl" != "default" ]; then
+            WAN_TABLE="$tbl"
+            break
+        fi
+    done
+fi
+if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
+    for tbl in 1000 1001 1002 1003 1004 1005 1008 100 200 default; do
         if ip route show table "$tbl" default 2>/dev/null | grep -q 'default'; then
             WAN_TABLE="$tbl"
             break
@@ -473,11 +481,9 @@ if [ -n "$NB_SUBNET" ]; then
 fi
 ip rule add from 100.64.200.0/24 lookup $WAN_TABLE priority 60 2>/dev/null || true
 
-if [ "$WAN_TABLE" != "main" ] && [ "$WAN_TABLE" != "default" ]; then
-    WAN_DEF=$(ip route show table "$WAN_TABLE" default 2>/dev/null | grep -v 'nb0' | head -n1)
-    if [ -n "$WAN_DEF" ]; then
-        ip route replace $WAN_DEF table main 2>/dev/null || true
-    fi
+WAN_DEF=$(ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g')
+if [ -n "$WAN_DEF" ]; then
+    ip route replace $WAN_DEF table main 2>/dev/null || true
 fi
 `
 	_ = os.WriteFile(hookPath, []byte(script), 0755)
@@ -593,21 +599,43 @@ var (
 )
 
 // findLinuxWANTable determines the routing table used for the physical WAN gateway.
-// On KeeneticOS, NDM places WAN routes in dedicated ISP tables (e.g. 1000, 1001), while table main has no default route.
+// On KeeneticOS, NDM places WAN routes in dedicated ISP tables (e.g. 1000, 1001, 1005, 1008), while table main has no default route.
 func findLinuxWANTable() string {
-	// 1. Check known Keenetic NDM / OpenWrt / Linux ISP routing tables directly:
-	candidateTables := []string{"1000", "1001", "1002", "1003", "100", "200", "default"}
-	for _, tbl := range candidateTables {
-		cmdStr := fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)
-		if out, err := exec.Command("sh", "-c", cmdStr).Output(); err == nil {
-			line := strings.TrimSpace(string(out))
-			if strings.HasPrefix(line, "default") {
-				return tbl
+	// 1. Query ip route across all tables for default gateway (catches dynamic Keenetic modem tables e.g. 1004, 1005, 1008)
+	cmdStr := "ip -4 route show table all default 2>/dev/null | grep -v 'nb0'"
+	if out, err := exec.Command("sh", "-c", cmdStr).Output(); err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "default") {
+				continue
+			}
+			fields := strings.Fields(line)
+			for i, f := range fields {
+				if f == "table" && i+1 < len(fields) {
+					tbl := fields[i+1]
+					if tbl != "main" && tbl != "local" && tbl != "default" && tbl != "254" && tbl != "255" {
+						return tbl
+					}
+				}
 			}
 		}
 	}
 
-	// 2. Parse ip rule show for table lookup
+	// 2. Try ip route get 8.8.8.8 (standard kernel FIB query)
+	if out, err := exec.Command("sh", "-c", "ip route get 8.8.8.8 2>/dev/null | head -n1").Output(); err == nil {
+		fields := strings.Fields(string(out))
+		for i, f := range fields {
+			if f == "table" && i+1 < len(fields) {
+				tbl := fields[i+1]
+				if tbl != "main" && tbl != "local" && tbl != "default" {
+					return tbl
+				}
+			}
+		}
+	}
+
+	// 3. Parse ip rule show for table lookup
 	if out, err := exec.Command("sh", "-c", "ip rule show 2>/dev/null").Output(); err == nil {
 		lines := strings.Split(string(out), "\n")
 		for _, line := range lines {
@@ -616,7 +644,7 @@ func findLinuxWANTable() string {
 				for i, f := range fields {
 					if f == "lookup" && i+1 < len(fields) {
 						tbl := fields[i+1]
-						if tbl != "main" && tbl != "local" && tbl != "default" {
+						if tbl != "main" && tbl != "local" && tbl != "default" && tbl != "254" && tbl != "255" {
 							c := fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)
 							if o, e := exec.Command("sh", "-c", c).Output(); e == nil && strings.HasPrefix(strings.TrimSpace(string(o)), "default") {
 								return tbl
@@ -628,17 +656,19 @@ func findLinuxWANTable() string {
 		}
 	}
 
-	// 3. Try ip route get 8.8.8.8 (standard kernel FIB query)
-	if out, err := exec.Command("sh", "-c", "ip route get 8.8.8.8 2>/dev/null | head -n1").Output(); err == nil {
-		fields := strings.Fields(string(out))
-		for i, f := range fields {
-			if f == "table" && i+1 < len(fields) {
-				return fields[i+1]
+	// 4. Check known Keenetic NDM / OpenWrt / Linux ISP routing tables directly:
+	candidateTables := []string{"1000", "1001", "1002", "1003", "1004", "1005", "1006", "1007", "1008", "100", "200"}
+	for _, tbl := range candidateTables {
+		cmdStr := fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)
+		if out, err := exec.Command("sh", "-c", cmdStr).Output(); err == nil {
+			line := strings.TrimSpace(string(out))
+			if strings.HasPrefix(line, "default") {
+				return tbl
 			}
 		}
 	}
 
-	// 4. Fallback: check table main
+	// 5. Fallback: check table main
 	if out, err := exec.Command("sh", "-c", "ip route show table main default 2>/dev/null | grep -v 'nb0' | head -n1").Output(); err == nil {
 		if strings.HasPrefix(strings.TrimSpace(string(out)), "default") {
 			return "main"
@@ -654,29 +684,63 @@ func ensureDefaultRouteInMain(wanTable string) {
 	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
 		return // Table main already has a valid physical default route
 	}
-	tablesToTry := []string{wanTable, "1000", "1001", "1002", "100", "200", "default"}
-	for _, tbl := range tablesToTry {
-		if tbl == "" || tbl == "main" {
-			continue
-		}
-		defOut, defErr := exec.Command("sh", "-c", fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)).Output()
-		if defErr == nil {
-			line := strings.TrimSpace(string(defOut))
-			if strings.HasPrefix(line, "default") {
-				parts := strings.Fields(line)
-				var cleanParts []string
-				for i := 0; i < len(parts); i++ {
-					if parts[i] == "table" {
-						i++ // skip table name
-						continue
-					}
-					cleanParts = append(cleanParts, parts[i])
+
+	// Attempt 1: Copy from detected WAN table
+	if wanTable != "" && wanTable != "main" {
+		defOut, defErr := exec.Command("sh", "-c", fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", wanTable)).Output()
+		if defErr == nil && strings.HasPrefix(strings.TrimSpace(string(defOut)), "default") {
+			parts := strings.Fields(strings.TrimSpace(string(defOut)))
+			var cleanParts []string
+			for i := 0; i < len(parts); i++ {
+				if parts[i] == "table" {
+					i++ // skip table name
+					continue
 				}
-				args := append([]string{"route", "replace"}, cleanParts...)
-				args = append(args, "table", "main")
-				_ = runLinuxCmd("ip", args...)
-				break
+				cleanParts = append(cleanParts, parts[i])
 			}
+			args := append([]string{"route", "replace"}, cleanParts...)
+			args = append(args, "table", "main")
+			_ = runLinuxCmd("ip", args...)
+			return
+		}
+	}
+
+	// Attempt 2: Query across all tables
+	defOut, defErr := exec.Command("sh", "-c", "ip -4 route show table all default 2>/dev/null | grep -v 'nb0' | head -n1").Output()
+	if defErr == nil && strings.HasPrefix(strings.TrimSpace(string(defOut)), "default") {
+		parts := strings.Fields(strings.TrimSpace(string(defOut)))
+		var cleanParts []string
+		for i := 0; i < len(parts); i++ {
+			if parts[i] == "table" {
+				i++
+				continue
+			}
+			cleanParts = append(cleanParts, parts[i])
+		}
+		args := append([]string{"route", "replace"}, cleanParts...)
+		args = append(args, "table", "main")
+		_ = runLinuxCmd("ip", args...)
+		return
+	}
+
+	// Attempt 3: Candidate tables fallback
+	tablesToTry := []string{"1000", "1001", "1002", "1003", "1004", "1005", "1008", "100", "200", "default"}
+	for _, tbl := range tablesToTry {
+		defOut, defErr := exec.Command("sh", "-c", fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)).Output()
+		if defErr == nil && strings.HasPrefix(strings.TrimSpace(string(defOut)), "default") {
+			parts := strings.Fields(strings.TrimSpace(string(defOut)))
+			var cleanParts []string
+			for i := 0; i < len(parts); i++ {
+				if parts[i] == "table" {
+					i++
+					continue
+				}
+				cleanParts = append(cleanParts, parts[i])
+			}
+			args := append([]string{"route", "replace"}, cleanParts...)
+			args = append(args, "table", "main")
+			_ = runLinuxCmd("ip", args...)
+			break
 		}
 	}
 }

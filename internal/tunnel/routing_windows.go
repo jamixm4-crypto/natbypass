@@ -301,7 +301,7 @@ func extractHostIPs(endpoint string) []string {
 	}
 
 	// Resolve domain names (e.g. broker.emqx.io, stun servers)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", host)
 	if err != nil || len(ips) == 0 {
@@ -402,9 +402,16 @@ func BypassEndpoint(endpoint string) error {
 	return nil
 }
 
+var (
+	exitNodeOpMu sync.Mutex
+)
+
 // EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1) via gatewayVIP,
 // with automatic routing-loop prevention and DNS configuration.
 func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
+	exitNodeOpMu.Lock()
+	defer exitNodeOpMu.Unlock()
+
 	if gatewayVIP == "" {
 		return fmt.Errorf("gateway VIP is required")
 	}
@@ -500,6 +507,9 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 
 // DisableExitNodeRouting removes the default gateway /1 routes, bypass routes, and restores DNS.
 func DisableExitNodeRouting(gatewayVIP string) error {
+	exitNodeOpMu.Lock()
+	defer exitNodeOpMu.Unlock()
+
 	var errs []string
 
 	// 1. Fast unconditional removal of WireGuard def1 /1 routes in Windows kernel (10ms)

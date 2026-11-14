@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.14"
+	Version = "1.9.507-beta.15"
 	Commit  = "release"
 )
 
@@ -2088,8 +2088,14 @@ func handleBookmarkPeer() {
 	updateData()
 }
 
+var isSwitchingExitNode atomic.Bool
+
 func setExitNodePeer(targetPeer *peer.Peer) {
 	if targetPeer == nil {
+		return
+	}
+	if !isSwitchingExitNode.CompareAndSwap(false, true) {
+		addLog("⏳ Операция с интернет-шлюзом уже выполняется, подождите...")
 		return
 	}
 	targetVIP := strings.TrimSpace(strings.Split(targetPeer.VirtualIP, "/")[0])
@@ -2114,12 +2120,26 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 	}
 
 	go func() {
+		defer isSwitchingExitNode.Store(false)
 		if activeExitVIP != "" && activeExitVIP != targetVIP {
 			_ = tunnel.DisableExitNodeRouting(activeExitVIP)
 		}
-		bypassIPs := []string{targetPeer.ActiveEndpoint, targetPeer.STUNAddr, targetPeer.PublicIP, targetPeer.LocalAddr}
+		seenBypass := make(map[string]bool)
+		var bypassIPs []string
+		addBypass := func(ep string) {
+			ep = strings.TrimSpace(ep)
+			if ep != "" && !seenBypass[ep] {
+				seenBypass[ep] = true
+				bypassIPs = append(bypassIPs, ep)
+			}
+		}
+
+		addBypass(targetPeer.ActiveEndpoint)
+		addBypass(targetPeer.STUNAddr)
+		addBypass(targetPeer.PublicIP)
+		addBypass(targetPeer.LocalAddr)
 		for _, cand := range targetPeer.Candidates {
-			bypassIPs = append(bypassIPs, cand)
+			addBypass(cand)
 		}
 		// Also bypass endpoints of ALL peers in mesh so UDP hole-punching / keepalives never leak into exit tunnel!
 		if registry != nil {
@@ -2127,22 +2147,12 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 				if p.DeviceID == myDevID {
 					continue
 				}
-				if p.ActiveEndpoint != "" {
-					bypassIPs = append(bypassIPs, p.ActiveEndpoint)
-				}
-				if p.STUNAddr != "" {
-					bypassIPs = append(bypassIPs, p.STUNAddr)
-				}
-				if p.PublicIP != "" {
-					bypassIPs = append(bypassIPs, p.PublicIP)
-				}
-				if p.LocalAddr != "" {
-					bypassIPs = append(bypassIPs, p.LocalAddr)
-				}
+				addBypass(p.ActiveEndpoint)
+				addBypass(p.STUNAddr)
+				addBypass(p.PublicIP)
+				addBypass(p.LocalAddr)
 				for _, cand := range p.Candidates {
-					if cand != "" {
-						bypassIPs = append(bypassIPs, cand)
-					}
+					addBypass(cand)
 				}
 			}
 		}
@@ -2161,13 +2171,13 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 		}
 		if cfg != nil {
 			for _, stunURL := range cfg.Network.StunServers {
-				bypassIPs = append(bypassIPs, stunURL)
+				addBypass(stunURL)
 			}
 			if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.MQTTBroker != "" {
-				bypassIPs = append(bypassIPs, activeProf.MQTTBroker)
+				addBypass(activeProf.MQTTBroker)
 			}
 			if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TGToken != "" {
-				bypassIPs = append(bypassIPs, "api.telegram.org")
+				addBypass("api.telegram.org")
 			}
 		}
 
@@ -2192,6 +2202,10 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 }
 
 func disableExitNode() {
+	if !isSwitchingExitNode.CompareAndSwap(false, true) {
+		addLog("⏳ Операция с интернет-шлюзом уже выполняется, подождите...")
+		return
+	}
 	vipToClean := activeExitVIP
 	activeExitNodeID = ""
 	activeExitVIP = ""
@@ -2208,6 +2222,7 @@ func disableExitNode() {
 	updateData()
 
 	go func() {
+		defer isSwitchingExitNode.Store(false)
 		if vipToClean != "" {
 			_ = tunnel.DisableExitNodeRouting(vipToClean)
 		} else {
@@ -5378,7 +5393,8 @@ func startEngineFromConfig(c *config.Config) {
 					return nil
 				}
 			}
-			// 2. Direct UDP / AWG
+			// 2. Direct UDP / AWG (ONLY if direct P2P is verified and bilateral check passes)
+			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
 				targetEP = destPeer.STUNAddr
@@ -5386,7 +5402,7 @@ func startEngineFromConfig(c *config.Config) {
 			if targetEP == "" {
 				targetEP = destPeer.LocalAddr
 			}
-			if udpPuncher != nil && targetEP != "" {
+			if destPeer.DirectP2P && bilateralOK && udpPuncher != nil && targetEP != "" {
 				pmin := 0
 				pmax := 0
 				if destPeer.AWG != nil {
@@ -5397,7 +5413,8 @@ func startEngineFromConfig(c *config.Config) {
 					return nil
 				}
 			}
-			// 3. Multi-Hop Mesh Relay fallback (route via intermediate peer)
+			// 3. Multi-Hop Mesh Relay fallback (route via intermediate peer e.g. public IP node)
+			// Crucial for peers behind Symmetric NAT or Carrier-Grade NAT (CGNAT) without hairpinning
 			if registry != nil {
 				if relayPeer := findMeshRelayPeerGUI(registry, guiTCPDirectMgr, destPeer.DeviceID); relayPeer != nil {
 					if mhPkt, mhErr := network.EncodeMultiHopPacket(myDevID, destPeer.DeviceID, network.DefaultMaxTTL, 0x00, packet); mhErr == nil {
@@ -5427,6 +5444,18 @@ func startEngineFromConfig(c *config.Config) {
 							}
 						}
 					}
+				}
+			}
+			// 4. Speculative / unverified Direct UDP fallback (when no relay peer or relay send failed)
+			if udpPuncher != nil && targetEP != "" {
+				pmin := 0
+				pmax := 0
+				if destPeer.AWG != nil {
+					pmin = destPeer.AWG.Pmin
+					pmax = destPeer.AWG.Pmax
+				}
+				if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
+					return nil
 				}
 			}
 			// 4. Central MQTT Relay fallback with encryption

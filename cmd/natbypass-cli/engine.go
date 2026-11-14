@@ -1117,7 +1117,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					return nil
 				}
 			}
-			// 2. Direct UDP / AWG
+			// 2. Direct UDP / AWG (ONLY if direct P2P is verified and bilateral check passes)
+			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
 				targetEP = destPeer.STUNAddr
@@ -1125,7 +1126,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if targetEP == "" {
 				targetEP = destPeer.LocalAddr
 			}
-			if puncher != nil && targetEP != "" {
+			if destPeer.DirectP2P && bilateralOK && puncher != nil && targetEP != "" {
 				pmin := 0
 				pmax := 0
 				if destPeer.AWG != nil {
@@ -1136,7 +1137,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					return nil
 				}
 			}
-			// 3. Multi-Hop Mesh Relay fallback (route via intermediate peer)
+			// 3. Multi-Hop Mesh Relay fallback (route via intermediate peer e.g. public IP node)
+			// Crucial for peers behind Symmetric NAT or Carrier-Grade NAT (CGNAT) without hairpinning
 			if registry != nil {
 				if relayPeer := findMeshRelayPeer(registry, tcpDirectMgr, destPeer.DeviceID); relayPeer != nil {
 					if mhPkt, mhErr := network.EncodeMultiHopPacket(deviceID, destPeer.DeviceID, network.DefaultMaxTTL, 0x00, packet); mhErr == nil {
@@ -1166,6 +1168,18 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 					}
+				}
+			}
+			// 4. Speculative / unverified Direct UDP fallback (when no relay peer or relay send failed)
+			if puncher != nil && targetEP != "" {
+				pmin := 0
+				pmax := 0
+				if destPeer.AWG != nil {
+					pmin = destPeer.AWG.Pmin
+					pmax = destPeer.AWG.Pmax
+				}
+				if err := puncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
+					return nil
 				}
 			}
 			// 4. Central MQTT Relay fallback with encryption
@@ -1513,10 +1527,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 
 			// Exit Node Userspace Transit Forwarder:
-			// Userspace transit proxying (ICMP/UDP/TCP) is used on Windows exit nodes
-			// where OS-level NAT (iptables) is absent.
-			// On Linux / Keenetic / OpenWrt, kernel iptables MASQUERADE handles transit traffic natively.
-			if runtime.GOOS == "windows" && transitForwarder != nil && cfg.Network.AllowExitNode {
+			// Userspace transit proxying (ICMP/UDP/TCP) is used on all exit nodes
+			// to guarantee reliable connectivity regardless of host OS NAT limitations or ISP policy routing.
+			if transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
 				if transitForwarder.HandleTransitPacket(payload) {
 					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace")
 					return
