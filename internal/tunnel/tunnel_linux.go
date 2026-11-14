@@ -351,9 +351,9 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	_ = exec.CommandContext(ctx, ipBin, "rule", "del", "pref", "50", "to", prefix+".0/24", "lookup", "main").Run()
 	_ = exec.CommandContext(ctx, ipBin, "rule", "del", "pref", "50", "from", prefix+".0/24", "lookup", "main").Run()
 	_ = exec.CommandContext(ctx, ipBin, "rule", "del", "pref", "50", "iif", d.AdapterName, "lookup", "main").Run()
+	_ = exec.CommandContext(ctx, ipBin, "rule", "del", "pref", "50", "iif", d.AdapterName).Run()
 	_ = exec.CommandContext(ctx, ipBin, "rule", "add", "pref", "50", "to", prefix+".0/24", "lookup", "main").Run()
 	_ = exec.CommandContext(ctx, ipBin, "rule", "add", "pref", "50", "from", prefix+".0/24", "lookup", "main").Run()
-	_ = exec.CommandContext(ctx, ipBin, "rule", "add", "pref", "50", "iif", d.AdapterName, "lookup", "main").Run()
 
 	// 5. Прямая запись в /proc/sys/net/ipv4 (100% совместимо со всеми Linux/Keenetic даже без утилиты sysctl)
 	_ = os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1\n"), 0644)

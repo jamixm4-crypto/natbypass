@@ -23,11 +23,29 @@ import (
 	"github.com/natbypass/natbypass/internal/network"
 )
 
-var cachedWintunIfIndex uint32
+var (
+	cachedWintunIfIndex       uint32
+	cachedWintunAdapterName   string
+	cachedWintunAdapterNameMu sync.RWMutex
+)
 
 // SetCachedWintunIfIndex caches the NatBypass Wintun adapter interface index for instant lookups.
 func SetCachedWintunIfIndex(idx uint32) {
 	atomic.StoreUint32(&cachedWintunIfIndex, idx)
+}
+
+// SetCachedWintunAdapterName caches the NatBypass Wintun adapter alias/name for instant lookups.
+func SetCachedWintunAdapterName(name string) {
+	cachedWintunAdapterNameMu.Lock()
+	cachedWintunAdapterName = name
+	cachedWintunAdapterNameMu.Unlock()
+}
+
+// GetCachedWintunAdapterName returns the cached NatBypass adapter name.
+func GetCachedWintunAdapterName() string {
+	cachedWintunAdapterNameMu.RLock()
+	defer cachedWintunAdapterNameMu.RUnlock()
+	return cachedWintunAdapterName
 }
 
 // runRouteCmd executes a Windows command without opening a console window.
@@ -179,6 +197,10 @@ func EnsurePeerHostRoute(peerVIP string) {
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(peerVIP, "/")[0])
 	if net.ParseIP(cleanVIP) == nil {
+		return
+	}
+	// Strictly restrict host routes to mesh overlay IPs, never arbitrary internet destinations
+	if !isMeshIPWindows(cleanVIP) {
 		return
 	}
 
@@ -340,10 +362,20 @@ func isLocalDNSResponding() bool {
 
 // getNatBypassAdapterNameWindows returns the actual system interface name for the NatBypass Wintun adapter.
 func getNatBypassAdapterNameWindows() string {
+	if name := GetCachedWintunAdapterName(); name != "" {
+		return name
+	}
+	if idx := atomic.LoadUint32(&cachedWintunIfIndex); idx > 0 {
+		if iface, err := net.InterfaceByIndex(int(idx)); err == nil && iface.Name != "" {
+			SetCachedWintunAdapterName(iface.Name)
+			return iface.Name
+		}
+	}
 	ifaces, err := net.Interfaces()
 	if err == nil {
 		for _, iface := range ifaces {
 			if strings.EqualFold(iface.Name, "NatBypass") || strings.Contains(strings.ToLower(iface.Name), "natbypass") {
+				SetCachedWintunAdapterName(iface.Name)
 				return iface.Name
 			}
 		}
@@ -360,6 +392,7 @@ func getNatBypassIfIndexWindows() int {
 	if err == nil {
 		for _, iface := range ifaces {
 			if strings.EqualFold(iface.Name, "NatBypass") || strings.Contains(strings.ToLower(iface.Name), "natbypass") {
+				SetCachedWintunIfIndex(uint32(iface.Index))
 				return iface.Index
 			}
 		}
@@ -423,13 +456,18 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	}
 
 	// 1b. Allow Local LAN traffic (WireGuard/Tailscale LAN access pattern):
-	// Explicitly route physical gateway and RFC1918 LAN subnets via physical gateway
-	// so the user never loses access to the router web UI (e.g. 192.168.1.1) or local network devices.
+	// Explicitly route physical gateway and the user's specific local LAN /24 via physical gateway
+	// so the user never loses access to the local router web UI (e.g. 192.168.11.1) or local network devices,
+	// WITHOUT hijacking other /24 subnets in 192.168.0.0/16 (e.g. remote Keenetic at 192.168.1.1).
 	physGW := getPhysicalGatewayWindows()
 	if physGW != "" {
 		_ = runRouteCmd("route", "add", physGW, "mask", "255.255.255.255", physGW, "metric", "1")
-		_ = runRouteCmd("route", "add", "192.168.0.0", "mask", "255.255.0.0", physGW, "metric", "1")
-		_ = runRouteCmd("route", "add", "172.16.0.0", "mask", "255.240.0.0", physGW, "metric", "1")
+		ip := net.ParseIP(physGW)
+		if ip != nil && ip.To4() != nil {
+			ip4 := ip.To4()
+			localSubnet := fmt.Sprintf("%d.%d.%d.0", ip4[0], ip4[1], ip4[2])
+			_ = runRouteCmd("route", "add", localSubnet, "mask", "255.255.255.0", physGW, "metric", "1")
+		}
 	}
 
 	// 2. Ensure /32 host route to the exit gateway VIP exists on NatBypass adapter
@@ -483,25 +521,6 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	// 6. Fast DNS cache flush (10ms)
 	_ = runRouteCmd("ipconfig", "/flushdns")
 
-	// 7. Non-blocking asynchronous PowerShell safety sync (runs in background without freezing UI)
-	if ifIdx > 0 {
-		go func(idx int, doh bool) {
-			psRoutes := fmt.Sprintf(`
-				New-NetRoute -InterfaceIndex %d -DestinationPrefix '0.0.0.0/1' -NextHop '0.0.0.0' -RouteMetric 1 -ErrorAction SilentlyContinue
-				New-NetRoute -InterfaceIndex %d -DestinationPrefix '128.0.0.0/1' -NextHop '0.0.0.0' -RouteMetric 1 -ErrorAction SilentlyContinue
-			`, idx, idx)
-			_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psRoutes)
-			var psDNS string
-			if doh {
-				psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('127.0.0.1', '77.88.8.8', '9.9.9.9', '1.1.1.1') -ErrorAction SilentlyContinue", idx)
-			} else {
-				psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('77.88.8.8', '9.9.9.9', '1.1.1.1') -ErrorAction SilentlyContinue", idx)
-			}
-			_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psDNS)
-			_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", "Clear-DnsClientCache -ErrorAction SilentlyContinue")
-		}(ifIdx, dohActive)
-	}
-
 	return nil
 }
 
@@ -511,6 +530,8 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	defer exitNodeOpMu.Unlock()
 
 	var errs []string
+
+	ifIdx := getNatBypassIfIndexWindows()
 
 	// 1. Fast unconditional removal of WireGuard def1 /1 routes in Windows kernel (10ms)
 	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "0.0.0.0")
@@ -522,10 +543,11 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", gatewayVIP)
 	}
 
-	ifIdx := getNatBypassIfIndexWindows()
 	if ifIdx > 0 {
 		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
 		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
+		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
+		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
 	}
 
 	// 2. Remove tunneled DNS resolver /32 routes (10ms)
@@ -545,25 +567,32 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	physGW := getPhysicalGatewayWindows()
 	if physGW != "" {
 		_ = runRouteCmd("route", "delete", physGW, "mask", "255.255.255.255")
+		ip := net.ParseIP(physGW)
+		if ip != nil && ip.To4() != nil {
+			ip4 := ip.To4()
+			localSubnet := fmt.Sprintf("%d.%d.%d.0", ip4[0], ip4[1], ip4[2])
+			_ = runRouteCmd("route", "delete", localSubnet, "mask", "255.255.255.0")
+		}
 	}
 	_ = runRouteCmd("route", "delete", "192.168.0.0", "mask", "255.255.0.0")
 	_ = runRouteCmd("route", "delete", "172.16.0.0", "mask", "255.240.0.0")
 
 	// 4. Reset DNS on NatBypass adapter and restore system defaults (20ms)
 	adapterName := getNatBypassAdapterNameWindows()
+	_ = runRouteCmd("netsh", "interface", "ipv4", "delete", "dnsservers", fmt.Sprintf("name=%s", adapterName), "all")
 	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "source=dhcp")
 	_ = runRouteCmd("ipconfig", "/flushdns")
 
 	// 5. Asynchronous PowerShell cleanup (runs in background, zero latency for caller)
-	go func() {
-		psClean := `
+	go func(targetIfIdx int) {
+		psClean := fmt.Sprintf(`
 			Get-NetRoute -DestinationPrefix '0.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 			Get-NetRoute -DestinationPrefix '128.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-			Get-DnsClientServerAddress | Where-Object { $_.InterfaceAlias -like '*NatBypass*' } | Set-DnsClientServerAddress -ResetServerAddresses -ErrorAction SilentlyContinue
+			Get-DnsClientServerAddress | Where-Object { $_.InterfaceAlias -like '*NatBypass*' -or $_.InterfaceAlias -like '*Wintun*' -or $_.InterfaceIndex -eq %d } | Set-DnsClientServerAddress -ResetServerAddresses -ErrorAction SilentlyContinue
 			Clear-DnsClientCache -ErrorAction SilentlyContinue
-		`
+		`, targetIfIdx)
 		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psClean)
-	}()
+	}(ifIdx)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("errors disabling exit node routing: %s", strings.Join(errs, "; "))

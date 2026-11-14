@@ -327,9 +327,11 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "PREROUTING", "-i", "nb0", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53").Run()
 		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53").Run()
 
-		// Remove legacy pref 40 iif nb0 rule that intercepted internet transit packets before WAN lookup!
-		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "iif", "nb0", "lookup", "main")
-		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "iif", "nb0")
+		// Remove legacy pref 40/50 iif nb0 rules that intercepted internet transit packets before WAN lookup!
+		for i := 0; i < 5; i++ {
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "50", "iif", "nb0")
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "iif", "nb0")
+		}
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanSubnet, "lookup", "main")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", cleanSubnet, "lookup", "main")
 	}
@@ -383,7 +385,9 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 
 		// Priority 60: forward mesh internet traffic to real WAN routing table
 		// Packets from mesh enter via nb0 or carry fwmark 0x4e
-		_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
+		for i := 0; i < 5; i++ {
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
+		}
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", wanTable)
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", wanTable)
 		for _, s := range buildMeshSubnetList(cleanSubnet) {
@@ -1019,6 +1023,10 @@ func EnsurePeerHostRoute(peerVIP string) {
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(peerVIP, "/")[0])
 	if net.ParseIP(cleanVIP) == nil {
+		return
+	}
+	// Strictly restrict host routes to mesh overlay IPs, never arbitrary internet destinations
+	if !isMeshIPLinux(cleanVIP) {
 		return
 	}
 

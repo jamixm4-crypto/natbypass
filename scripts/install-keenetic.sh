@@ -8,7 +8,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.15"
+    DEFAULT_BETA="v1.9.507-beta.16"
     BETA_MODE=0
 
     # Parse CLI flags
@@ -522,6 +522,10 @@ fi
 
 ip rule del from 10.0.0.0/8 2>/dev/null || true
 ip rule del to 10.0.0.0/8 2>/dev/null || true
+ip rule del iif nb0 priority 50 2>/dev/null || true
+ip rule del iif nb0 priority 40 2>/dev/null || true
+ip rule del fwmark 0x4e priority 60 2>/dev/null || true
+ip rule del iif nb0 priority 60 2>/dev/null || true
 NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}' | sed -E 's/\.[0-9]+\//.0\//')
 if [ -n "$NB_SUBNET" ]; then
     ip rule add to "$NB_SUBNET" lookup main priority 40 2>/dev/null || true

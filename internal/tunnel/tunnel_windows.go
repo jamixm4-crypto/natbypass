@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -377,6 +378,16 @@ func CreateAdapter(adapterName, virtualIP string) (retDev *Device, retErr error)
 	procWintunGetAdapterLUID.Call(hAdapter, uintptr(unsafe.Pointer(&luid)))
 	procConvertInterfaceLuidToIndex.Call(uintptr(unsafe.Pointer(&luid)), uintptr(unsafe.Pointer(&ifIndex)))
 	SetCachedWintunIfIndex(ifIndex)
+
+	// Ensure adapter is named "NatBypass" in Windows Network Connections and cache name
+	if iface, err := net.InterfaceByIndex(int(ifIndex)); err == nil && iface.Name != "" {
+		SetCachedWintunAdapterName(iface.Name)
+		if iface.Name != "NatBypass" {
+			if errRename := runRouteCmd("netsh", "interface", "set", "interface", fmt.Sprintf("name=%s", iface.Name), "newname=NatBypass"); errRename == nil {
+				SetCachedWintunAdapterName("NatBypass")
+			}
+		}
+	}
 
 	cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
 	prefix := "100.64.200"
