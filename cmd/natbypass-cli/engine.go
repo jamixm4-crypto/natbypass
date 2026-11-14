@@ -1882,10 +1882,23 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 						outSrcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
 						isICMP := len(pkt) >= 20 && pkt[9] == 1
-						isForwardedInternet := !isICMP && (cleanVIP != "" && outSrcIP != cleanVIP && (cfg == nil || cfg.Network.SelectedExitNode == ""))
+
+						// Check if traffic is Internet transit (client -> exit node, or exit node -> client)
+						isExitNodeTraffic := false
+						if cfg != nil && cfg.Network.SelectedExitNode != "" && (p.DeviceID == cfg.Network.SelectedExitNode || p.VirtualIP == cfg.Network.SelectedExitNode) {
+							if registry != nil {
+								if _, ok := registry.GetByVirtualIP(dstIP); !ok {
+									isExitNodeTraffic = true
+								}
+							} else {
+								isExitNodeTraffic = true
+							}
+						}
+						isForwardedInternet := !isICMP && ((cleanVIP != "" && outSrcIP != cleanVIP) || isExitNodeTraffic)
 
 						// Dual-Path Shadow Relay Rule: ONLY if direct transmission completely failed AND NOT internet traffic!
 						// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
+						// Массовый интернет-трафик СТРОГО запрещен к публикации в MQTT, чтобы не вызывать перегрузку брокера и таймауты сигналинга.
 						directVerified := sentTCP || (sentDirect && p.DirectP2P && bilateralOK)
 						needsRelay := !directVerified
 						needsMQTTRelay := needsRelay && (!isForwardedInternet || isICMP)
@@ -1992,11 +2005,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 						// 1f. Encrypted Central Relay Fallback (WSS or MQTT):
-						// Triggered if direct TCP not connected AND direct bilateral UDP failed:
+						// Triggered if direct TCP not connected AND direct bilateral UDP failed.
+						// Strictly guards MQTT fallback to never send bulk internet packets.
 						if needsRelay {
 							if wssClient != nil && wssClient.IsConnected() {
 								_ = wssClient.SendPacket(p.DeviceID, pkt)
-							} else if sigMgr != nil {
+							} else if needsMQTTRelay && sigMgr != nil {
 								pktCopy := make([]byte, len(pkt))
 								copy(pktCopy, pkt)
 								pID := p.DeviceID

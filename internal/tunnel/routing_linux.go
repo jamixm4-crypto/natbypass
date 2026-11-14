@@ -388,12 +388,12 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			}
 		}
 
-		// WireGuard-grade table isolation: populate dedicated table 60 with default route from WAN
+		// WireGuard-grade table isolation: populate dedicated table 60 with default route from WAN with onlink
 		wanDefOut, _ := exec.Command("sh", "-c", "ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g'").Output()
 		if wanDef := strings.TrimSpace(string(wanDefOut)); wanDef != "" {
-			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace %s table 60", wanDef))
+			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace %s onlink table 60 2>/dev/null || ip route replace %s table 60", wanDef, wanDef))
 		} else if wanTable != "" && wanTable != "main" {
-			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace $(ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g') table 60", wanTable))
+			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace $(ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g') onlink table 60 2>/dev/null || true", wanTable))
 		}
 
 		// Priority 60: forward mesh transit traffic to dedicated WAN routing table 60
@@ -469,7 +469,7 @@ fi
 
 ip rule del from 10.0.0.0/8 2>/dev/null || true
 ip rule del to 10.0.0.0/8 2>/dev/null || true
-NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}' | sed -E 's/\.[0-9]+\//.0\//')
+NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}' | sed -E 's/\.[0-9]+(\/[0-9]+)?$/.0\/24/')
 if [ -n "$NB_SUBNET" ]; then
     ip rule add to "$NB_SUBNET" lookup main priority 40 2>/dev/null || true
 fi
@@ -496,7 +496,7 @@ fi
 
 WAN_DEF=$(ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g')
 if [ -n "$WAN_DEF" ]; then
-    ip route replace $WAN_DEF table 60 2>/dev/null || true
+    ip route replace $WAN_DEF onlink table 60 2>/dev/null || ip route replace $WAN_DEF table 60 2>/dev/null || true
 fi
 
 ip rule add fwmark 0x4e lookup 60 priority 60 2>/dev/null || true

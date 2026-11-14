@@ -566,25 +566,11 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		_ = BypassEndpoint(ep)
 	}
 
-	// 1b. Allow Local LAN traffic (WireGuard/Tailscale LAN access pattern):
-	// Explicitly route physical gateway and the user's specific local LAN /24 via physical gateway
-	// so the user never loses access to the local router web UI (e.g. 192.168.1.1) or local network devices.
+	// 1b. Cache physical gateway info for endpoint bypasses
 	if physInfo, err := getPhysicalGatewayWin(); err == nil {
 		bypassedMu.Lock()
 		lastBypassedLUID = physInfo.LUID
 		lastBypassedGW = physInfo.Gateway
-
-		// Add /32 host route for physical gateway
-		gwPrefix := netip.PrefixFrom(physInfo.Gateway, 32)
-		_ = physInfo.LUID.AddRoute(gwPrefix, physInfo.Gateway, 1)
-
-		// Add /24 route for physical local LAN
-		b := physInfo.Gateway.As4()
-		lanAddr := netip.AddrFrom4([4]byte{b[0], b[1], b[2], 0})
-		lanPrefix := netip.PrefixFrom(lanAddr, 24)
-		lastLANSubnet = lanPrefix
-		_ = physInfo.LUID.AddRoute(lanPrefix, physInfo.Gateway, 1)
-
 		bypassedMu.Unlock()
 	}
 
@@ -680,15 +666,11 @@ func disableExitNodeRoutingLocked(gatewayVIP string) error {
 		_ = tunLUID.FlushDNS(windows.AF_INET)
 	}
 
-	// 4. Remove all bypass routes and local LAN routes on physical adapter
+	// 4. Remove remote endpoint bypass routes on physical adapter
 	bypassedMu.Lock()
 	if lastBypassedLUID != 0 && lastBypassedGW.IsValid() {
 		for _, ip := range lastBypassedIPs {
 			_ = lastBypassedLUID.DeleteRoute(netip.PrefixFrom(ip, 32), lastBypassedGW)
-		}
-		_ = lastBypassedLUID.DeleteRoute(netip.PrefixFrom(lastBypassedGW, 32), lastBypassedGW)
-		if lastLANSubnet.IsValid() {
-			_ = lastBypassedLUID.DeleteRoute(lastLANSubnet, lastBypassedGW)
 		}
 	}
 	lastBypassedIPs = nil
