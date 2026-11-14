@@ -479,11 +479,15 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	// Clear existing def1 routes first to avoid duplicate route errors
 	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
 	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
+	if cleanVIP != "" {
+		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", cleanVIP)
+		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", cleanVIP)
+	}
 
-	// On Windows Point-to-Point Wintun, the next hop for the def1 routes is 0.0.0.0 (On-link),
-	// binding all default transit traffic unconditionally to the NatBypass Wintun interface.
-	args0 := []string{"add", "0.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "metric", "1"}
-	args128 := []string{"add", "128.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "metric", "1"}
+	// On Windows Point-to-Point Wintun, the next hop for def1 routes MUST be cleanVIP (the exit gateway VIP),
+	// routing via the /32 peer host route on Wintun without triggering invalid Ethernet on-link ARP resolution.
+	args0 := []string{"add", "0.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "1"}
+	args128 := []string{"add", "128.0.0.0", "mask", "128.0.0.0", cleanVIP, "metric", "1"}
 	if ifIdx > 0 {
 		args0 = append(args0, "IF", fmt.Sprintf("%d", ifIdx))
 		args128 = append(args128, "IF", fmt.Sprintf("%d", ifIdx))
@@ -492,26 +496,29 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	_ = runRouteCmd("route", args0...)
 	_ = runRouteCmd("route", args128...)
 
-	// 4. Configure DNS on NatBypass adapter: use local DoH (127.0.0.1) ONLY if port 53 is responsive,
-	// otherwise fall back directly to public resolvers (77.88.8.8, 9.9.9.9, 1.1.1.1) routed via tunnel.
-	adapterName := getNatBypassAdapterNameWindows()
+	// 4. Configure DNS on NatBypass adapter: use interface index ifIdx where available
+	// (Index syntax is 100% reliable across all language editions, special characters, and unrenamed adapters)
+	adapterIdentifier := getNatBypassAdapterNameWindows()
+	if ifIdx > 0 {
+		adapterIdentifier = fmt.Sprintf("%d", ifIdx)
+	}
 	dohActive := isLocalDNSResponding()
 
 	if dohActive {
-		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "127.0.0.1", "register=primary", "validate=no")
-		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "77.88.8.8", "index=2", "validate=no")
-		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "9.9.9.9", "index=3", "validate=no")
-		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "1.1.1.1", "index=4", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "static", "127.0.0.1", "register=primary", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "address", "77.88.8.8", "index=2", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "address", "9.9.9.9", "index=3", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "address", "1.1.1.1", "index=4", "validate=no")
 	} else {
-		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "static", "77.88.8.8", "register=primary", "validate=no")
-		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "9.9.9.9", "index=2", "validate=no")
-		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterName), "address", "1.1.1.1", "index=3", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "static", "77.88.8.8", "register=primary", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "address", "9.9.9.9", "index=2", "validate=no")
+		_ = runRouteCmd("netsh", "interface", "ipv4", "add", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "address", "1.1.1.1", "index=3", "validate=no")
 	}
 
 	// 5. Explicitly route public DNS resolvers via NatBypass to guarantee DNS is tunneled through exit node
 	dnsResolvers := []string{"77.88.8.8", "9.9.9.9", "1.1.1.1", "8.8.8.8"}
 	for _, dnsIP := range dnsResolvers {
-		dnsArgs := []string{"add", dnsIP, "mask", "255.255.255.255", "0.0.0.0", "metric", "1"}
+		dnsArgs := []string{"add", dnsIP, "mask", "255.255.255.255", cleanVIP, "metric", "1"}
 		if ifIdx > 0 {
 			dnsArgs = append(dnsArgs, "IF", fmt.Sprintf("%d", ifIdx))
 		}
@@ -520,6 +527,19 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 
 	// 6. Fast DNS cache flush (10ms)
 	_ = runRouteCmd("ipconfig", "/flushdns")
+
+	// 7. Non-blocking asynchronous PowerShell safety sync (ensures Windows 11 Dnscache recognizes new DNS immediately)
+	if ifIdx > 0 {
+		go func(idx int, doh bool) {
+			var psDNS string
+			if doh {
+				psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('127.0.0.1', '77.88.8.8', '9.9.9.9', '1.1.1.1') -ErrorAction SilentlyContinue; Clear-DnsClientCache -ErrorAction SilentlyContinue", idx)
+			} else {
+				psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('77.88.8.8', '9.9.9.9', '1.1.1.1') -ErrorAction SilentlyContinue; Clear-DnsClientCache -ErrorAction SilentlyContinue", idx)
+			}
+			_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psDNS)
+		}(ifIdx, dohActive)
+	}
 
 	return nil
 }
@@ -578,9 +598,12 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	_ = runRouteCmd("route", "delete", "172.16.0.0", "mask", "255.240.0.0")
 
 	// 4. Reset DNS on NatBypass adapter and restore system defaults (20ms)
-	adapterName := getNatBypassAdapterNameWindows()
-	_ = runRouteCmd("netsh", "interface", "ipv4", "delete", "dnsservers", fmt.Sprintf("name=%s", adapterName), "all")
-	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterName), "source=dhcp")
+	adapterIdentifier := getNatBypassAdapterNameWindows()
+	if ifIdx > 0 {
+		adapterIdentifier = fmt.Sprintf("%d", ifIdx)
+	}
+	_ = runRouteCmd("netsh", "interface", "ipv4", "delete", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "all")
+	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "source=dhcp")
 	_ = runRouteCmd("ipconfig", "/flushdns")
 
 	// 5. Asynchronous PowerShell cleanup (runs in background, zero latency for caller)
@@ -588,9 +611,10 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 		psClean := fmt.Sprintf(`
 			Get-NetRoute -DestinationPrefix '0.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 			Get-NetRoute -DestinationPrefix '128.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-			Get-DnsClientServerAddress | Where-Object { $_.InterfaceAlias -like '*NatBypass*' -or $_.InterfaceAlias -like '*Wintun*' -or $_.InterfaceIndex -eq %d } | Set-DnsClientServerAddress -ResetServerAddresses -ErrorAction SilentlyContinue
+			if (%d -gt 0) { Set-DnsClientServerAddress -InterfaceIndex %d -ResetServerAddresses -ErrorAction SilentlyContinue }
+			Get-DnsClientServerAddress | Where-Object { $_.InterfaceAlias -like '*NatBypass*' -or $_.InterfaceAlias -like '*Wintun*' } | Set-DnsClientServerAddress -ResetServerAddresses -ErrorAction SilentlyContinue
 			Clear-DnsClientCache -ErrorAction SilentlyContinue
-		`, targetIfIdx)
+		`, targetIfIdx, targetIfIdx)
 		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psClean)
 	}(ifIdx)
 

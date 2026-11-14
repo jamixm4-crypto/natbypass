@@ -205,6 +205,10 @@ func isMeshIPLinux(hostIP string) bool {
 	if ip4 == nil {
 		return false
 	}
+	// 10.0.0.0/8 (Default mesh subnet family)
+	if ip4[0] == 10 {
+		return true
+	}
 	// 100.64.0.0/10 (CGNAT / fallback mesh)
 	if ip4[0] == 100 && (ip4[1]&0xC0) == 64 {
 		return true
@@ -327,9 +331,10 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "PREROUTING", "-i", "nb0", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53").Run()
 		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53").Run()
 
-		// Remove legacy pref 40/50 iif nb0 rules that intercepted internet transit packets before WAN lookup!
+		// Remove legacy pref 40/50 iif nb0 and pref 50 from rules that intercepted internet transit packets before WAN lookup!
 		for i := 0; i < 5; i++ {
 			_ = runLinuxCmd("ip", "rule", "del", "pref", "50", "iif", "nb0")
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "50", "from", cleanSubnet)
 			_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "iif", "nb0")
 		}
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanSubnet, "lookup", "main")

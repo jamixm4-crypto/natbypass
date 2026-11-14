@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.16"
+	Version = "1.9.507-beta.17"
 	Commit  = "release"
 )
 
@@ -6172,75 +6172,94 @@ func startEngineFromConfig(c *config.Config) {
 		}
 	}()
 
-	// Фоновый опрос реального ICMP пинга активных пиров (каждые 20 секунд)
+	// Фоновый параллельный опрос реального ICMP пинга активных пиров
 	go func() {
-		pingTicker := time.NewTicker(20 * time.Second)
+		pollPeerPings := func() {
+			if registry == nil {
+				return
+			}
+			peers := registry.List()
+			var wg sync.WaitGroup
+			for _, p := range peers {
+				if !p.Online || p.DeviceID == myDevID {
+					continue
+				}
+				// Ping peers that have an established connection OR have a valid target endpoint/TCPAddr
+				isDirect := p.DirectP2P || p.DirectTCP || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID))
+				if !isDirect && p.ActiveEndpoint == "" && p.TCPAddr == "" && p.STUNAddr == "" {
+					if p.PingMs > 0 || p.Latency > 0 {
+						p.PingMs = 0
+						p.Latency = 0
+						registry.Upsert(p)
+					}
+					continue
+				}
+				// Skip active ICMP ping if data packet flowed recently (<15s)
+				if !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 15*time.Second {
+					continue
+				}
+				vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+				if vip == "" {
+					continue
+				}
+				wg.Add(1)
+				go func(targetPeer *peer.Peer, targetVIP string) {
+					defer wg.Done()
+					tunnel.EnsurePeerHostRoute(targetVIP)
+					pingCtx, pingCancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+					rtt, err := diagnostic.PingVirtualIP(pingCtx, targetVIP, 900*time.Millisecond)
+					pingCancel()
+					if err == nil && rtt > 0 {
+						targetPeer.ProbeCount = 0
+						if targetPeer.Latency > 0 {
+							targetPeer.Latency = time.Duration(float64(targetPeer.Latency)*0.6 + float64(rtt)*0.4)
+						} else {
+							targetPeer.Latency = rtt
+						}
+						targetPeer.PingMs = targetPeer.Latency.Milliseconds()
+						targetPeer.LastDirectSeen = time.Now()
+						if targetPeer.DirectP2P || targetPeer.Transport == "udp_direct" {
+							targetPeer.LastBilateralSeen = time.Now()
+						}
+						registry.Upsert(targetPeer)
+					} else {
+						// ICMP failure: clear ping and latency
+						targetPeer.ProbeCount++
+						targetPeer.Latency = 0
+						isDirectFresh := !targetPeer.LastDirectSeen.IsZero() && time.Since(targetPeer.LastDirectSeen) < 25*time.Second
+						if !isDirectFresh && (targetPeer.ProbeCount >= 4 || (!targetPeer.LastDirectSeen.IsZero() && time.Since(targetPeer.LastDirectSeen) > 30*time.Second)) {
+							if targetPeer.Transport != "tcp_tls" && targetPeer.Transport != "tcp_shadowtls" && (guiTCPDirectMgr == nil || !guiTCPDirectMgr.HasConn(targetPeer.DeviceID)) {
+								targetPeer.DirectP2P = false
+								targetPeer.Transport = "relay_mqtt"
+							}
+						}
+						registry.Upsert(targetPeer)
+
+						// Immediate reactive TCP ShadowTLS dial on ICMP failure only if UDP is not fresh:
+						if !isDirectFresh && guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() != "force_udp" && !guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+							go connectPeerTCPDirect(targetPeer)
+						}
+					}
+				}(p, vip)
+			}
+			wg.Wait()
+			updateData()
+		}
+
+		// Моментальный опрос при запуске (через 700 мс после инициализации адаптера и сигналов)
+		go func() {
+			time.Sleep(700 * time.Millisecond)
+			pollPeerPings()
+		}()
+
+		pingTicker := time.NewTicker(10 * time.Second)
 		defer pingTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-pingTicker.C:
-				if registry == nil {
-					continue
-				}
-				for _, p := range registry.List() {
-					if !p.Online || p.DeviceID == myDevID {
-						continue
-					}
-					// Ping peers that have an established connection OR have a valid target endpoint/TCPAddr
-					isDirect := p.DirectP2P || p.DirectTCP || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID))
-					if !isDirect && p.ActiveEndpoint == "" && p.TCPAddr == "" && p.STUNAddr == "" {
-						if p.PingMs > 0 || p.Latency > 0 {
-							p.PingMs = 0
-							p.Latency = 0
-							registry.Upsert(p)
-						}
-						continue
-					}
-					// Skip active ICMP ping if data packet flowed recently (<30s)
-					if !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 30*time.Second {
-						continue
-					}
-					vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-					if vip != "" {
-						tunnel.EnsurePeerHostRoute(vip)
-						pingCtx, pingCancel := context.WithTimeout(ctx, 1500*time.Millisecond)
-						rtt, err := diagnostic.PingVirtualIP(pingCtx, vip, 1200*time.Millisecond)
-						pingCancel()
-						if err == nil && rtt > 0 {
-							p.ProbeCount = 0
-							if p.Latency > 0 {
-								p.Latency = time.Duration(float64(p.Latency)*0.6 + float64(rtt)*0.4)
-							} else {
-								p.Latency = rtt
-							}
-							p.PingMs = p.Latency.Milliseconds()
-							p.LastDirectSeen = time.Now()
-							if p.DirectP2P || p.Transport == "udp_direct" {
-								p.LastBilateralSeen = time.Now()
-							}
-							registry.Upsert(p)
-						} else {
-							// ICMP failure: clear ping and latency
-							p.ProbeCount++
-							p.Latency = 0
-							isDirectFresh := !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 25*time.Second
-							if !isDirectFresh && (p.ProbeCount >= 4 || (!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > 30*time.Second)) {
-								if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (guiTCPDirectMgr == nil || !guiTCPDirectMgr.HasConn(p.DeviceID)) {
-									p.DirectP2P = false
-									p.Transport = "relay_mqtt"
-								}
-							}
-							registry.Upsert(p)
-
-							// Immediate reactive TCP ShadowTLS dial on ICMP failure only if UDP is not fresh:
-							if !isDirectFresh && guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() != "force_udp" && !guiTCPDirectMgr.HasConn(p.DeviceID) {
-								go connectPeerTCPDirect(p)
-							}
-						}
-					}
-				}
+				pollPeerPings()
 			}
 		}
 	}()
