@@ -436,7 +436,8 @@ func BypassEndpoint(endpoint string) error {
 }
 
 var (
-	exitNodeOpMu sync.Mutex
+	exitNodeOpMu     sync.Mutex
+	lastActiveExitVIP string
 )
 
 // EnableExitNodeRouting sets up default gateway routing using WireGuard def1 pattern (0.0.0.0/1 and 128.0.0.0/1) via gatewayVIP,
@@ -449,6 +450,12 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		return fmt.Errorf("gateway VIP is required")
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+
+	// 0. Cleanly teardown any prior exit node state before applying new one
+	if lastActiveExitVIP != "" {
+		disableExitNodeRoutingLocked(lastActiveExitVIP)
+	}
+	lastActiveExitVIP = cleanVIP
 
 	// 1. Routing loop prevention: bypass remote endpoints, MQTT broker, STUN servers via physical default gateway
 	for _, ep := range remoteEndpoints {
@@ -548,8 +555,15 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 func DisableExitNodeRouting(gatewayVIP string) error {
 	exitNodeOpMu.Lock()
 	defer exitNodeOpMu.Unlock()
+	return disableExitNodeRoutingLocked(gatewayVIP)
+}
 
-	var errs []string
+func disableExitNodeRoutingLocked(gatewayVIP string) error {
+	vipToClean := gatewayVIP
+	if vipToClean == "" {
+		vipToClean = lastActiveExitVIP
+	}
+	lastActiveExitVIP = ""
 
 	ifIdx := getNatBypassIfIndexWindows()
 
@@ -558,9 +572,9 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "0.0.0.0")
 	_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0")
 	_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0")
-	if gatewayVIP != "" {
-		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", gatewayVIP)
-		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", gatewayVIP)
+	if vipToClean != "" {
+		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", vipToClean)
+		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", vipToClean)
 	}
 
 	if ifIdx > 0 {
@@ -568,12 +582,19 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
 		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
 		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
+		if vipToClean != "" {
+			_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", vipToClean, "IF", fmt.Sprintf("%d", ifIdx))
+			_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", vipToClean, "IF", fmt.Sprintf("%d", ifIdx))
+		}
 	}
 
 	// 2. Remove tunneled DNS resolver /32 routes (10ms)
 	dnsResolvers := []string{"77.88.8.8", "9.9.9.9", "1.1.1.1", "8.8.8.8"}
 	for _, dnsIP := range dnsResolvers {
 		_ = runRouteCmd("route", "delete", dnsIP, "mask", "255.255.255.255")
+		if vipToClean != "" {
+			_ = runRouteCmd("route", "delete", dnsIP, "mask", "255.255.255.255", vipToClean)
+		}
 	}
 
 	// 3. Remove all bypass routes and local LAN routes (10ms)
@@ -586,16 +607,14 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 
 	physGW := getPhysicalGatewayWindows()
 	if physGW != "" {
-		_ = runRouteCmd("route", "delete", physGW, "mask", "255.255.255.255")
+		_ = runRouteCmd("route", "delete", physGW, "mask", "255.255.255.255", physGW)
 		ip := net.ParseIP(physGW)
 		if ip != nil && ip.To4() != nil {
 			ip4 := ip.To4()
 			localSubnet := fmt.Sprintf("%d.%d.%d.0", ip4[0], ip4[1], ip4[2])
-			_ = runRouteCmd("route", "delete", localSubnet, "mask", "255.255.255.0")
+			_ = runRouteCmd("route", "delete", localSubnet, "mask", "255.255.255.0", physGW)
 		}
 	}
-	_ = runRouteCmd("route", "delete", "192.168.0.0", "mask", "255.255.0.0")
-	_ = runRouteCmd("route", "delete", "172.16.0.0", "mask", "255.240.0.0")
 
 	// 4. Reset DNS on NatBypass adapter and restore system defaults (20ms)
 	adapterIdentifier := getNatBypassAdapterNameWindows()
@@ -618,9 +637,6 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psClean)
 	}(ifIdx)
 
-	if len(errs) > 0 {
-		return fmt.Errorf("errors disabling exit node routing: %s", strings.Join(errs, "; "))
-	}
 	return nil
 }
 

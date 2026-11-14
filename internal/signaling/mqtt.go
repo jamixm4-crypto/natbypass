@@ -351,7 +351,7 @@ func (m *MQTTChannel) handleIncoming(msg mqtt.Message) {
 
 		inner, _, err := crypto.VerifyFrame(data, signKey, 24*time.Hour)
 		if err != nil {
-			log.Warn().Err(err).Msg("🛡️ MQTT signaling frame dropped: invalid HMAC signature or replay detected")
+			log.Debug().Err(err).Msg("🛡️ MQTT signaling frame dropped: invalid HMAC signature or replay detected")
 			return
 		}
 		payloadBytes = inner
@@ -672,7 +672,7 @@ func (m *MQTTChannel) handleTunnelPayload(raw []byte) {
 		}
 		inner, _, err := crypto.VerifyFrame(raw, signKey, 24*time.Hour)
 		if err != nil {
-			log.Warn().Err(err).Msg("🛡️ MQTT tunnel frame dropped: invalid HMAC signature or replay detected")
+			log.Debug().Err(err).Msg("🛡️ MQTT tunnel frame dropped: invalid HMAC signature or replay detected")
 			return
 		}
 		// Если NetworkKey активен, расшифровываем полезную нагрузку ключом сети

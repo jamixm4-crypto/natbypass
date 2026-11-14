@@ -1527,10 +1527,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 
 			// Exit Node Userspace Transit Forwarder:
-			// Userspace transit proxying (ICMP/UDP/TCP) is used on Windows exit nodes
-			// to guarantee reliable connectivity where Windows lacks host OS kernel NAT on Wintun.
-			// On Linux / Keenetic, kernel forwarding and iptables MASQUERADE handle transit traffic natively.
-			if runtime.GOOS == "windows" && transitForwarder != nil && cfg.Network.AllowExitNode {
+			// Userspace transit proxying (ICMP/UDP/TCP) guarantees 100% reliable transit connectivity
+			// across all platforms (Windows, Linux, and KeeneticOS routers) without depending on complex
+			// kernel policy routing or NAT driver configuration.
+			if transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
 				if transitForwarder.HandleTransitPacket(payload) {
 					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace")
 					return

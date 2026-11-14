@@ -401,8 +401,9 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			}
 		}
 
-		// Also mirror default route into table main so standard kernel routing finds it
-		ensureDefaultRouteInMain(wanTable)
+		// On KeeneticOS, table main MUST NOT contain a default route, because NDM isolates WAN to table 1000+.
+		// Having an injected default route in table main breaks Keenetic NDM/LAN management and web UI.
+		_ = runLinuxCmd("ip", "route", "del", "default", "table", "main")
 
 		// Ensure persistent KeeneticOS netfilter hook is installed and valid
 		ensureKeeneticNetfilterHook(cleanSubnet)
@@ -608,10 +609,57 @@ var (
 )
 
 // findLinuxWANTable determines the routing table used for the physical WAN gateway.
-// On KeeneticOS, NDM places WAN routes in dedicated ISP tables (e.g. 1000, 1001, 1005, 1008), while table main has no default route.
+// On KeeneticOS, NDM places WAN routes in dedicated ISP tables (e.g. 1000, 1001, 1004, 1005, 1008), while table main has no default route.
 func findLinuxWANTable() string {
-	// 1. Query ip route across all tables for default gateway (catches dynamic Keenetic modem tables e.g. 1004, 1005, 1008)
-	cmdStr := "ip -4 route show table all default 2>/dev/null | grep -v 'nb0'"
+	// 1. Check known Keenetic NDM / OpenWrt / Linux ISP candidate routing tables directly without GNU flags.
+	// This works universally across BusyBox (KeeneticOS, OpenWrt, Alpine) and full iproute2.
+	candidateTables := []string{"1000", "1001", "1002", "1003", "1004", "1005", "1006", "1007", "1008", "100", "200"}
+	for _, tbl := range candidateTables {
+		cmdStr := fmt.Sprintf("ip route show table %s 2>/dev/null | grep '^default' | grep -v 'nb0' | head -n1", tbl)
+		if out, err := exec.Command("sh", "-c", cmdStr).Output(); err == nil {
+			line := strings.TrimSpace(string(out))
+			if strings.HasPrefix(line, "default") {
+				return tbl
+			}
+		}
+	}
+
+	// 2. Parse ip rule show for table lookups (NDM creates: "1000: from all ... lookup 1000")
+	if out, err := exec.Command("sh", "-c", "ip rule show 2>/dev/null").Output(); err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "lookup") {
+				fields := strings.Fields(line)
+				for i, f := range fields {
+					if f == "lookup" && i+1 < len(fields) {
+						tbl := fields[i+1]
+						if tbl != "main" && tbl != "local" && tbl != "default" && tbl != "254" && tbl != "255" {
+							c := fmt.Sprintf("ip route show table %s 2>/dev/null | grep '^default' | grep -v 'nb0' | head -n1", tbl)
+							if o, e := exec.Command("sh", "-c", c).Output(); e == nil && strings.HasPrefix(strings.TrimSpace(string(o)), "default") {
+								return tbl
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Try ip route get 8.8.8.8 (standard kernel FIB query)
+	if out, err := exec.Command("sh", "-c", "ip route get 8.8.8.8 2>/dev/null | head -n1").Output(); err == nil {
+		fields := strings.Fields(string(out))
+		for i, f := range fields {
+			if f == "table" && i+1 < len(fields) {
+				tbl := fields[i+1]
+				if tbl != "main" && tbl != "local" && tbl != "default" {
+					return tbl
+				}
+			}
+		}
+	}
+
+	// 4. Query ip route across all tables for full iproute2
+	cmdStr := "ip route show table all 2>/dev/null | grep '^default' | grep -v 'nb0'"
 	if out, err := exec.Command("sh", "-c", cmdStr).Output(); err == nil {
 		lines := strings.Split(string(out), "\n")
 		for _, line := range lines {
@@ -631,54 +679,8 @@ func findLinuxWANTable() string {
 		}
 	}
 
-	// 2. Try ip route get 8.8.8.8 (standard kernel FIB query)
-	if out, err := exec.Command("sh", "-c", "ip route get 8.8.8.8 2>/dev/null | head -n1").Output(); err == nil {
-		fields := strings.Fields(string(out))
-		for i, f := range fields {
-			if f == "table" && i+1 < len(fields) {
-				tbl := fields[i+1]
-				if tbl != "main" && tbl != "local" && tbl != "default" {
-					return tbl
-				}
-			}
-		}
-	}
-
-	// 3. Parse ip rule show for table lookup
-	if out, err := exec.Command("sh", "-c", "ip rule show 2>/dev/null").Output(); err == nil {
-		lines := strings.Split(string(out), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "lookup") {
-				fields := strings.Fields(line)
-				for i, f := range fields {
-					if f == "lookup" && i+1 < len(fields) {
-						tbl := fields[i+1]
-						if tbl != "main" && tbl != "local" && tbl != "default" && tbl != "254" && tbl != "255" {
-							c := fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)
-							if o, e := exec.Command("sh", "-c", c).Output(); e == nil && strings.HasPrefix(strings.TrimSpace(string(o)), "default") {
-								return tbl
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 4. Check known Keenetic NDM / OpenWrt / Linux ISP routing tables directly:
-	candidateTables := []string{"1000", "1001", "1002", "1003", "1004", "1005", "1006", "1007", "1008", "100", "200"}
-	for _, tbl := range candidateTables {
-		cmdStr := fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)
-		if out, err := exec.Command("sh", "-c", cmdStr).Output(); err == nil {
-			line := strings.TrimSpace(string(out))
-			if strings.HasPrefix(line, "default") {
-				return tbl
-			}
-		}
-	}
-
 	// 5. Fallback: check table main
-	if out, err := exec.Command("sh", "-c", "ip route show table main default 2>/dev/null | grep -v 'nb0' | head -n1").Output(); err == nil {
+	if out, err := exec.Command("sh", "-c", "ip route show 2>/dev/null | grep '^default' | grep -v 'nb0' | head -n1").Output(); err == nil {
 		if strings.HasPrefix(strings.TrimSpace(string(out)), "default") {
 			return "main"
 		}

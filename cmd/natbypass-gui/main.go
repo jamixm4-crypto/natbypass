@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.17"
+	Version = "1.9.507-beta.18"
 	Commit  = "release"
 )
 
@@ -2102,6 +2102,7 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 	if targetVIP == "" {
 		targetVIP = "100.64.200.2"
 	}
+	oldVIP := activeExitVIP
 	activeExitNodeID = targetPeer.DeviceID
 	activeExitVIP = targetVIP
 	if cfg != nil {
@@ -2121,8 +2122,8 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 
 	go func() {
 		defer isSwitchingExitNode.Store(false)
-		if activeExitVIP != "" && activeExitVIP != targetVIP {
-			_ = tunnel.DisableExitNodeRouting(activeExitVIP)
+		if oldVIP != "" && oldVIP != targetVIP {
+			_ = tunnel.DisableExitNodeRouting(oldVIP)
 		}
 		seenBypass := make(map[string]bool)
 		var bypassIPs []string
