@@ -415,6 +415,16 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		_ = BypassEndpoint(ep)
 	}
 
+	// 1b. Allow Local LAN traffic (WireGuard/Tailscale LAN access pattern):
+	// Explicitly route physical gateway and RFC1918 LAN subnets via physical gateway
+	// so the user never loses access to the router web UI (e.g. 192.168.1.1) or local network devices.
+	physGW := getPhysicalGatewayWindows()
+	if physGW != "" {
+		_ = runRouteCmd("route", "add", physGW, "mask", "255.255.255.255", physGW, "metric", "1")
+		_ = runRouteCmd("route", "add", "192.168.0.0", "mask", "255.255.0.0", physGW, "metric", "1")
+		_ = runRouteCmd("route", "add", "172.16.0.0", "mask", "255.240.0.0", physGW, "metric", "1")
+	}
+
 	// 2. Ensure /32 host route to the exit gateway VIP exists on NatBypass adapter
 	EnsurePeerHostRoute(cleanVIP)
 
@@ -514,13 +524,20 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 		_ = runRouteCmd("route", "delete", dnsIP, "mask", "255.255.255.255")
 	}
 
-	// 3. Remove all bypass routes (10ms)
+	// 3. Remove all bypass routes and local LAN routes (10ms)
 	bypassedMu.Lock()
 	for _, hostIP := range lastBypassedEndpointIPs {
 		_ = runRouteCmd("route", "delete", hostIP, "mask", "255.255.255.255")
 	}
 	lastBypassedEndpointIPs = nil
 	bypassedMu.Unlock()
+
+	physGW := getPhysicalGatewayWindows()
+	if physGW != "" {
+		_ = runRouteCmd("route", "delete", physGW, "mask", "255.255.255.255")
+	}
+	_ = runRouteCmd("route", "delete", "192.168.0.0", "mask", "255.255.0.0")
+	_ = runRouteCmd("route", "delete", "172.16.0.0", "mask", "255.240.0.0")
 
 	// 4. Reset DNS on NatBypass adapter and restore system defaults (20ms)
 	adapterName := getNatBypassAdapterNameWindows()

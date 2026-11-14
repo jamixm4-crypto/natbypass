@@ -114,13 +114,13 @@ curl -fsSL https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/insta
   irm https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/scripts/install-windows.ps1 | iex -ArgumentList "-Beta"
   ```
 * **Способ 3 (Скачать вручную с GitHub Releases):**
-  Скачайте свежие исполняемые файлы со страницы актуального [**Pre-release (v1.9.507-beta.13)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.13):
-  * **[NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.13/NatBypass.exe)** — основное приложение в отдельном окне (App Window / WebUI, трей, интерактивная топология сети).
-  * **[NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.13/NatBypass-GUI.exe)** — сверхлёгкий нативный Win32 GUI (15–25 МБ RAM).
-  * **[natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.13/natbypass-cli.exe)** — консольный клиент и служба.
+  Скачайте свежие исполняемые файлы со страницы актуального [**Pre-release (v1.9.507-beta.14)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.14):
+  * **[NatBypass.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.14/NatBypass.exe)** — основное приложение в отдельном окне (App Window / WebUI, трей, интерактивная топология сети).
+  * **[NatBypass-GUI.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.14/NatBypass-GUI.exe)** — сверхлёгкий нативный Win32 GUI (15–25 МБ RAM).
+  * **[natbypass-cli.exe](https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.14/natbypass-cli.exe)** — консольный клиент и служба.
 
 ### 📱 Android
-1. Откройте страницу [**Pre-release (v1.9.507-beta.13)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.13) на смартфоне и скачайте файл APK.
+1. Откройте страницу [**Pre-release (v1.9.507-beta.14)**](https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.14) на смартфоне и скачайте файл APK.
 2. Либо в приложении на ПК откройте вкладку «📱 Скачать APK» в окне QR-кода и наведите камеру смартфона.
 
 

@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -394,10 +395,92 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		// Also mirror default route into table main so standard kernel routing finds it
 		ensureDefaultRouteInMain(wanTable)
 
+		// Ensure persistent KeeneticOS netfilter hook is installed and valid
+		ensureKeeneticNetfilterHook(cleanSubnet)
+
 		StartLinuxNATWatchdog(context.Background(), cleanSubnet)
 	}
 
 	return nil
+}
+
+// ensureKeeneticNetfilterHook ensures /opt/etc/ndm/netfilter.d/010-natbypass.sh is present and updated on KeeneticOS.
+func ensureKeeneticNetfilterHook(subnet string) {
+	hookDir := "/opt/etc/ndm/netfilter.d"
+	if fi, err := os.Stat(hookDir); err != nil || !fi.IsDir() {
+		return
+	}
+	hookPath := filepath.Join(hookDir, "010-natbypass.sh")
+	script := `#!/bin/sh
+[ "$type" = "ip6tables" ] && exit 0
+
+if [ "$table" = "filter" ]; then
+    iptables -C INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i nb0 -j ACCEPT
+    iptables -C FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i nb0 -j ACCEPT
+    iptables -C FORWARD -o nb0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o nb0 -j ACCEPT
+    iptables -C OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -I OUTPUT 1 -o nb0 -j ACCEPT
+    iptables -C _NDM_INPUT -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i nb0 -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_FORWARD -i nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i nb0 -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_FORWARD -o nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -o nb0 -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -I _NDM_OUTPUT 1 -o nb0 -j ACCEPT 2>/dev/null || true
+fi
+
+if [ "$table" = "mangle" ]; then
+    iptables -t mangle -C PREROUTING -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || true
+    iptables -t mangle -C OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o nb0 -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+    iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I POSTROUTING 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+fi
+
+if [ "$table" = "nat" ]; then
+    iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 80 -j REDIRECT --to-ports 80 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 443 -j REDIRECT --to-ports 443 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i nb0 -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
+    iptables -t nat -C POSTROUTING -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s 10.0.0.0/8 ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s 172.16.0.0/12 ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}')
+    if [ -n "$NB_SUBNET" ]; then
+        iptables -t nat -C POSTROUTING -s "$NB_SUBNET" ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s "$NB_SUBNET" ! -o nb0 -j MASQUERADE 2>/dev/null || true
+    fi
+    iptables -t nat -C POSTROUTING -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s 100.64.200.0/24 ! -o nb0 -j MASQUERADE 2>/dev/null || true
+fi
+
+ip rule del from 10.0.0.0/8 2>/dev/null || true
+ip rule del to 10.0.0.0/8 2>/dev/null || true
+NB_SUBNET=$(ip -4 addr show nb0 2>/dev/null | awk '/inet /{print $2}')
+if [ -n "$NB_SUBNET" ]; then
+    ip rule add to "$NB_SUBNET" lookup main priority 40 2>/dev/null || true
+fi
+ip rule add to 100.64.200.0/24 lookup main priority 40 2>/dev/null || true
+
+WAN_TABLE=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="table") print $(i+1)}')
+if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
+    for tbl in 1000 1001 1002 1003 100 200 default; do
+        if ip route show table "$tbl" default 2>/dev/null | grep -q 'default'; then
+            WAN_TABLE="$tbl"
+            break
+        fi
+    done
+fi
+[ -z "$WAN_TABLE" ] && WAN_TABLE="main"
+
+ip rule add fwmark 0x4e lookup $WAN_TABLE priority 60 2>/dev/null || true
+ip rule add iif nb0 lookup $WAN_TABLE priority 60 2>/dev/null || true
+if [ -n "$NB_SUBNET" ]; then
+    ip rule add from "$NB_SUBNET" lookup $WAN_TABLE priority 60 2>/dev/null || true
+fi
+ip rule add from 100.64.200.0/24 lookup $WAN_TABLE priority 60 2>/dev/null || true
+
+if [ "$WAN_TABLE" != "main" ] && [ "$WAN_TABLE" != "default" ]; then
+    WAN_DEF=$(ip route show table "$WAN_TABLE" default 2>/dev/null | grep -v 'nb0' | head -n1)
+    if [ -n "$WAN_DEF" ]; then
+        ip route replace $WAN_DEF table main 2>/dev/null || true
+    fi
+fi
+`
+	_ = os.WriteFile(hookPath, []byte(script), 0755)
 }
 
 var (

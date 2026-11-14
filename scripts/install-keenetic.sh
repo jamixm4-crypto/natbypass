@@ -8,7 +8,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.13"
+    DEFAULT_BETA="v1.9.507-beta.14"
     BETA_MODE=0
 
     # Parse CLI flags
@@ -546,10 +546,10 @@ if [ -n "$NB_SUBNET" ]; then
 fi
 ip rule add from 100.64.200.0/24 lookup $WAN_TABLE priority 60 2>/dev/null || true
 
-if [ \"\$WAN_TABLE\" != \"main\" ] && [ \"\$WAN_TABLE\" != \"default\" ]; then
-    WAN_DEF=\$(ip route show table \$WAN_TABLE default 2>/dev/null | grep -v 'nb0' | head -n1)
-    if [ -n \"\$WAN_DEF\" ]; then
-        ip route replace \$WAN_DEF table main 2>/dev/null || true
+if [ "$WAN_TABLE" != "main" ] && [ "$WAN_TABLE" != "default" ]; then
+    WAN_DEF=$(ip route show table "$WAN_TABLE" default 2>/dev/null | grep -v 'nb0' | head -n1)
+    if [ -n "$WAN_DEF" ]; then
+        ip route replace $WAN_DEF table main 2>/dev/null || true
     fi
 fi
 NDM_EOF

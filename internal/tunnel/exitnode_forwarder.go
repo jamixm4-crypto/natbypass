@@ -10,6 +10,7 @@ package tunnel
 import (
 	"encoding/binary"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,9 +47,40 @@ type udpSessionEntry struct {
 	closed     atomic.Bool
 }
 
-// TransitForwarder performs userspace NAT, ICMP relay, and UDP transit proxying
-// on an Exit Node so that mesh clients can ping external hosts, resolve DNS,
-// and access external UDP/ICMP services without relying on host OS NAT drivers (like Windows WinNAT).
+type tcpSessionKey struct {
+	clientVIPStr string
+	clientPort   uint16
+	dstIPStr     string
+	dstPort      uint16
+}
+
+type tcpSessionEntry struct {
+	conn          net.Conn
+	clientVIP     net.IP
+	clientPort    uint16
+	dstIP         net.IP
+	dstPort       uint16
+	clientISN     uint32
+	serverISN     uint32
+	clientNextSeq atomic.Uint32
+	serverNextSeq atomic.Uint32
+	lastActive    atomic.Int64
+	closed        atomic.Bool
+	closeOnce     sync.Once
+}
+
+func (e *tcpSessionEntry) close() {
+	e.closeOnce.Do(func() {
+		e.closed.Store(true)
+		if e.conn != nil {
+			_ = e.conn.Close()
+		}
+	})
+}
+
+// TransitForwarder performs userspace NAT, ICMP relay, UDP transit proxying, and TCP stream proxying
+// on an Exit Node so that mesh clients can ping external hosts, resolve DNS, and browse web services (HTTP/HTTPS)
+// without relying on host OS NAT drivers (like Windows WinNAT).
 type TransitForwarder struct {
 	mu           sync.RWMutex
 	myVIP        string
@@ -57,6 +89,7 @@ type TransitForwarder struct {
 	icmpConn     net.PacketConn
 	icmpSessions sync.Map // map[icmpSessionKey]icmpSessionEntry
 	udpSessions  sync.Map // map[udpSessionKey]*udpSessionEntry
+	tcpSessions  sync.Map // map[tcpSessionKey]*tcpSessionEntry
 	closed       chan struct{}
 	closeOnce    sync.Once
 }
@@ -95,6 +128,12 @@ func (tf *TransitForwarder) Close() {
 				if entry.conn != nil {
 					_ = entry.conn.Close()
 				}
+			}
+			return true
+		})
+		tf.tcpSessions.Range(func(key, val any) bool {
+			if entry, ok := val.(*tcpSessionEntry); ok && entry != nil {
+				entry.close()
 			}
 			return true
 		})
@@ -150,7 +189,7 @@ func (tf *TransitForwarder) IsTransitPacket(payload []byte) (bool, net.IP, net.I
 	return true, srcIP, destIP
 }
 
-// HandleTransitPacket inspects an inbound packet and forwards ICMP or UDP transit traffic in userspace.
+// HandleTransitPacket inspects an inbound packet and forwards ICMP, UDP, or TCP transit traffic in userspace.
 // Returns true if the packet was successfully intercepted and processed.
 func (tf *TransitForwarder) HandleTransitPacket(payload []byte) bool {
 	isTransit, srcIP, destIP := tf.IsTransitPacket(payload)
@@ -167,11 +206,12 @@ func (tf *TransitForwarder) HandleTransitPacket(payload []byte) bool {
 	switch proto {
 	case 1: // ICMP
 		return tf.handleTransitICMP(payload, ihl, srcIP, destIP)
+	case 6: // TCP
+		return tf.handleTransitTCP(payload, ihl, srcIP, destIP)
 	case 17: // UDP
 		return tf.handleTransitUDP(payload, ihl, srcIP, destIP)
 	}
 
-	// TCP and other protocols flow to the host kernel (Wintun/WinNAT/iptables)
 	return false
 }
 
@@ -418,7 +458,202 @@ func (tf *TransitForwarder) deliverToClient(clientVIP net.IP, packet []byte) {
 	_ = tf.sendToPeer(destPeer, packet)
 }
 
-// cleanupWorker regularly removes expired ICMP sessions.
+// handleTransitTCP transparently proxies outbound TCP connections in userspace.
+// This enables full Internet web browsing (HTTP/HTTPS) through a Windows Exit Node
+// without requiring host OS kernel NAT (which is unsupported on Windows Wintun interfaces).
+func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, destIP net.IP) bool {
+	if len(payload) < ihl+20 {
+		return false
+	}
+	tcpHdr := payload[ihl:]
+	srcPort := binary.BigEndian.Uint16(tcpHdr[0:2])
+	dstPort := binary.BigEndian.Uint16(tcpHdr[2:4])
+	seqNum := binary.BigEndian.Uint32(tcpHdr[4:8])
+	ackNum := binary.BigEndian.Uint32(tcpHdr[8:12])
+	dataOffset := int((tcpHdr[12] >> 4) * 4)
+	if dataOffset < 20 || len(tcpHdr) < dataOffset {
+		return false
+	}
+	flags := tcpHdr[13]
+	tcpData := tcpHdr[dataOffset:]
+
+	key := tcpSessionKey{
+		clientVIPStr: srcIP.String(),
+		clientPort:   srcPort,
+		dstIPStr:     destIP.String(),
+		dstPort:      dstPort,
+	}
+
+	val, found := tf.tcpSessions.Load(key)
+
+	// Case 1: SYN packet (new outbound connection)
+	if (flags & 0x02) != 0 {
+		// If existing session, clean it up
+		if found {
+			if oldEntry, ok := val.(*tcpSessionEntry); ok && oldEntry != nil {
+				oldEntry.close()
+			}
+			tf.tcpSessions.Delete(key)
+		}
+
+		// Asynchronously dial target host to avoid blocking TUN reader
+		go func(cVIP, dIP net.IP, cPort, dPort uint16, cISN uint32, k tcpSessionKey) {
+			targetAddr := net.JoinHostPort(dIP.String(), strconv.Itoa(int(dPort)))
+			conn, err := net.DialTimeout("tcp", targetAddr, 6*time.Second)
+			if err != nil {
+				// Send TCP RST|ACK back to client
+				rstPkt := buildIPv4TCPPacket(dIP, dPort, cVIP, cPort, 0, cISN+1, 0x14, 0, nil)
+				tf.deliverToClient(cVIP, rstPkt)
+				return
+			}
+
+			sISN := uint32(time.Now().UnixNano()) & 0x7FFFFFFF
+			entry := &tcpSessionEntry{
+				conn:       conn,
+				clientVIP:  cVIP,
+				clientPort: cPort,
+				dstIP:      dIP,
+				dstPort:    dPort,
+				clientISN:  cISN,
+				serverISN:  sISN,
+			}
+			entry.clientNextSeq.Store(cISN + 1)
+			entry.serverNextSeq.Store(sISN + 1)
+			entry.lastActive.Store(time.Now().Unix())
+
+			tf.tcpSessions.Store(k, entry)
+
+			// Send SYN|ACK back to client
+			synAckPkt := buildIPv4TCPPacket(dIP, dPort, cVIP, cPort, sISN, cISN+1, 0x12, 64240, nil)
+			tf.deliverToClient(cVIP, synAckPkt)
+
+			// Start reader for this TCP session
+			go tf.tcpSessionReader(k, entry)
+		}(srcIP, destIP, srcPort, dstPort, seqNum, key)
+
+		return true
+	}
+
+	// Case 2: Packet for non-existent session
+	if !found {
+		if (flags & 0x04) != 0 {
+			// Ignore RST on dead session
+			return true
+		}
+		// Return RST to prevent client hanging
+		rstPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, ackNum, seqNum+1, 0x14, 0, nil)
+		tf.deliverToClient(srcIP, rstPkt)
+		return true
+	}
+
+	entry := val.(*tcpSessionEntry)
+	if entry.closed.Load() {
+		tf.tcpSessions.Delete(key)
+		return true
+	}
+	entry.lastActive.Store(time.Now().Unix())
+
+	// Case 3: RST from client
+	if (flags & 0x04) != 0 {
+		entry.close()
+		tf.tcpSessions.Delete(key)
+		return true
+	}
+
+	// Case 4: FIN from client
+	if (flags & 0x01) != 0 {
+		entry.clientNextSeq.Add(1)
+		ackPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x10, 64240, nil)
+		tf.deliverToClient(srcIP, ackPkt)
+		entry.close()
+		tf.tcpSessions.Delete(key)
+		return true
+	}
+
+	// Case 5: Client data packet
+	if len(tcpData) > 0 {
+		_ = entry.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		_, err := entry.conn.Write(tcpData)
+		if err != nil {
+			entry.close()
+			tf.tcpSessions.Delete(key)
+			rstPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x14, 0, nil)
+			tf.deliverToClient(srcIP, rstPkt)
+			return true
+		}
+		entry.clientNextSeq.Store(seqNum + uint32(len(tcpData)))
+		// Send ACK to client
+		ackPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x10, 64240, nil)
+		tf.deliverToClient(srcIP, ackPkt)
+		return true
+	}
+
+	// Case 6: Pure ACK (completing 3-way handshake or acknowledging received data)
+	return true
+}
+
+// tcpSessionReader reads data from the remote TCP connection and delivers it back to the client as TCP packets.
+func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessionEntry) {
+	defer func() {
+		entry.close()
+		tf.tcpSessions.Delete(key)
+	}()
+
+	buf := make([]byte, 1220)
+	for {
+		select {
+		case <-tf.closed:
+			return
+		default:
+		}
+		if entry.closed.Load() {
+			return
+		}
+		_ = entry.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		n, err := entry.conn.Read(buf)
+		if n > 0 {
+			entry.lastActive.Store(time.Now().Unix())
+			curServerSeq := entry.serverNextSeq.Load()
+			curClientSeq := entry.clientNextSeq.Load()
+			entry.serverNextSeq.Add(uint32(n))
+
+			dataPkt := buildIPv4TCPPacket(
+				entry.dstIP, entry.dstPort,
+				entry.clientVIP, entry.clientPort,
+				curServerSeq,
+				curClientSeq,
+				0x18, // PSH | ACK
+				64240,
+				buf[:n],
+			)
+			tf.deliverToClient(entry.clientVIP, dataPkt)
+		}
+		if err != nil {
+			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+				if time.Now().Unix()-entry.lastActive.Load() > 120 {
+					return
+				}
+				continue
+			}
+			// Remote server closed connection: send FIN|ACK to client
+			curServerSeq := entry.serverNextSeq.Load()
+			curClientSeq := entry.clientNextSeq.Load()
+			finPkt := buildIPv4TCPPacket(
+				entry.dstIP, entry.dstPort,
+				entry.clientVIP, entry.clientPort,
+				curServerSeq,
+				curClientSeq,
+				0x11, // FIN | ACK
+				64240,
+				nil,
+			)
+			tf.deliverToClient(entry.clientVIP, finPkt)
+			return
+		}
+	}
+}
+
+// cleanupWorker regularly removes expired ICMP, UDP, and TCP sessions.
 func (tf *TransitForwarder) cleanupWorker() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -433,6 +668,17 @@ func (tf *TransitForwarder) cleanupWorker() {
 				entry := val.(icmpSessionEntry)
 				if entry.createdAt.Before(threshold) {
 					tf.icmpSessions.Delete(key)
+				}
+				return true
+			})
+
+			nowSec := time.Now().Unix()
+			tf.tcpSessions.Range(func(key, val any) bool {
+				if entry, ok := val.(*tcpSessionEntry); ok && entry != nil {
+					if nowSec-entry.lastActive.Load() > 120 || entry.closed.Load() {
+						entry.close()
+						tf.tcpSessions.Delete(key)
+					}
 				}
 				return true
 			})
@@ -485,6 +731,91 @@ func buildIPv4UDPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint
 
 	// UDP Payload
 	copy(pkt[28:], payload)
+	return pkt
+}
+
+// calculateTCPChecksum calculates the 16-bit TCP checksum using IPv4 pseudo-header.
+func calculateTCPChecksum(srcIP, dstIP net.IP, tcpHeader []byte, data []byte) uint16 {
+	src := srcIP.To4()
+	dst := dstIP.To4()
+	if src == nil || dst == nil {
+		return 0
+	}
+	tcpLen := len(tcpHeader) + len(data)
+	var sum uint32
+
+	// Pseudo Header:
+	sum += uint32(binary.BigEndian.Uint16(src[0:2]))
+	sum += uint32(binary.BigEndian.Uint16(src[2:4]))
+	sum += uint32(binary.BigEndian.Uint16(dst[0:2]))
+	sum += uint32(binary.BigEndian.Uint16(dst[2:4]))
+	sum += uint32(6) // Proto TCP
+	sum += uint32(tcpLen)
+
+	// TCP Header (checksum field at 16:18 skipped)
+	for i := 0; i < len(tcpHeader)-1; i += 2 {
+		if i == 16 {
+			continue
+		}
+		sum += uint32(binary.BigEndian.Uint16(tcpHeader[i : i+2]))
+	}
+	if len(tcpHeader)%2 != 0 {
+		sum += uint32(tcpHeader[len(tcpHeader)-1]) << 8
+	}
+
+	// Payload data
+	for i := 0; i < len(data)-1; i += 2 {
+		sum += uint32(binary.BigEndian.Uint16(data[i : i+2]))
+	}
+	if len(data)%2 != 0 {
+		sum += uint32(data[len(data)-1]) << 8
+	}
+
+	for sum > 0xFFFF {
+		sum = (sum & 0xFFFF) + (sum >> 16)
+	}
+
+	return ^uint16(sum)
+}
+
+// buildIPv4TCPPacket constructs an IPv4 packet encapsulating a TCP segment with correct checksums.
+func buildIPv4TCPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, seqNum uint32, ackNum uint32, flags byte, window uint16, payload []byte) []byte {
+	tcpHdrLen := 20
+	totalTCP := tcpHdrLen + len(payload)
+	totalIP := 20 + totalTCP
+
+	pkt := make([]byte, totalIP)
+
+	// IPv4 Header
+	pkt[0] = 0x45
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalIP))
+	pkt[8] = 64
+	pkt[9] = 6 // TCP
+	copy(pkt[12:16], srcIP.To4())
+	copy(pkt[16:20], dstIP.To4())
+	ipCS := CalculateChecksum(pkt[:20])
+	binary.BigEndian.PutUint16(pkt[10:12], ipCS)
+
+	// TCP Header
+	tcpHdr := pkt[20:40]
+	binary.BigEndian.PutUint16(tcpHdr[0:2], srcPort)
+	binary.BigEndian.PutUint16(tcpHdr[2:4], dstPort)
+	binary.BigEndian.PutUint32(tcpHdr[4:8], seqNum)
+	binary.BigEndian.PutUint32(tcpHdr[8:12], ackNum)
+	tcpHdr[12] = 0x50 // Data offset 5 (20 bytes)
+	tcpHdr[13] = flags
+	if window == 0 {
+		window = 64240
+	}
+	binary.BigEndian.PutUint16(tcpHdr[14:16], window)
+
+	if len(payload) > 0 {
+		copy(pkt[40:], payload)
+	}
+
+	tcpCS := calculateTCPChecksum(srcIP, dstIP, tcpHdr, payload)
+	binary.BigEndian.PutUint16(pkt[36:38], tcpCS)
+
 	return pkt
 }
 

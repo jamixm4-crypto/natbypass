@@ -218,30 +218,47 @@ func peerHasConn(tcpDirectMgr *network.TCPDirectManager, p *peer.Peer) bool {
 	return false
 }
 
+func supportsMultiHop(p *peer.Peer) bool {
+	if p == nil || !p.Online {
+		return false
+	}
+	if p.Version != "" {
+		v := strings.TrimPrefix(p.Version, "v")
+		parts := strings.Split(strings.Split(v, "-")[0], ".")
+		if len(parts) >= 3 {
+			major, _ := strconv.Atoi(parts[0])
+			minor, _ := strconv.Atoi(parts[1])
+			patch, _ := strconv.Atoi(parts[2])
+			if major < 1 || (major == 1 && minor < 9) || (major == 1 && minor == 9 && patch < 505) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectManager, excludeDevID string) *peer.Peer {
 	if registry == nil {
 		return nil
 	}
 	// Priority 0 (Level 5 NAT Traversal): Explicit opt-in relay node respecting metered/battery/quota limits
 	if bestRelay := registry.FindBestRelay(excludeDevID); bestRelay != nil {
-		if peerHasConn(tcpDirectMgr, bestRelay) {
+		if supportsMultiHop(bestRelay) && peerHasConn(tcpDirectMgr, bestRelay) {
 			return bestRelay
 		}
 	}
-	// Priority 1: Known VPS / Server nodes (e.g. 10.1.1.102 or name containing Serv)
+	// Priority 1: Nodes with Public IPs (e.g. VPS or servers with direct WAN connectivity)
 	for _, p := range registry.List() {
-		if p.DeviceID == excludeDevID || !p.Online {
+		if p.DeviceID == excludeDevID || !p.Online || !supportsMultiHop(p) {
 			continue
 		}
-		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-		isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(p.DeviceName), "serv") || strings.Contains(strings.ToLower(p.Nickname), "serv")
-		if isServ && peerHasConn(tcpDirectMgr, p) {
+		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && peerHasConn(tcpDirectMgr, p) {
 			return p
 		}
 	}
-	// Priority 1.5: Router / Gateway nodes (Keenetic, OpenWrt, Linux routers, Exit Nodes)
+	// Priority 2: Router / Gateway / Linux server nodes (Keenetic, OpenWrt, Linux routers, Exit Nodes)
 	for _, p := range registry.List() {
-		if p.DeviceID == excludeDevID || !p.Online {
+		if p.DeviceID == excludeDevID || !p.Online || !supportsMultiHop(p) {
 			continue
 		}
 		isRouter := p.IsKeenetic || p.OS == "linux" || p.IsExitNode || len(p.AdvertisedRoutes) > 0
@@ -249,18 +266,9 @@ func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectM
 			return p
 		}
 	}
-	// Priority 2: Any peer with a public IP that has active TCP connection or Direct UDP P2P
+	// Priority 3: Any online peer with active connection (TCP or Direct UDP P2P) that supports Multi-Hop
 	for _, p := range registry.List() {
-		if p.DeviceID == excludeDevID || !p.Online {
-			continue
-		}
-		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && peerHasConn(tcpDirectMgr, p) {
-			return p
-		}
-	}
-	// Priority 3: Any peer with active TCP connection or Direct UDP P2P
-	for _, p := range registry.List() {
-		if p.DeviceID == excludeDevID || !p.Online {
+		if p.DeviceID == excludeDevID || !p.Online || !supportsMultiHop(p) {
 			continue
 		}
 		if peerHasConn(tcpDirectMgr, p) {
@@ -1505,8 +1513,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 
 			// Exit Node Userspace Transit Forwarder:
-			// If this node is acting as an exit node, handle ICMP pings and UDP transit in userspace
-			if transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
+			// Userspace transit proxying (ICMP/UDP/TCP) is used on Windows exit nodes
+			// where OS-level NAT (iptables) is absent.
+			// On Linux / Keenetic / OpenWrt, kernel iptables MASQUERADE handles transit traffic natively.
+			if runtime.GOOS == "windows" && transitForwarder != nil && cfg.Network.AllowExitNode {
 				if transitForwarder.HandleTransitPacket(payload) {
 					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace")
 					return

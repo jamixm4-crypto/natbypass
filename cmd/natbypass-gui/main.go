@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.13"
+	Version = "1.9.507-beta.14"
 	Commit  = "release"
 )
 
@@ -3681,30 +3681,47 @@ func peerHasConnGUI(tcpMgr *network.TCPDirectManager, p *peer.Peer) bool {
 	return false
 }
 
+func supportsMultiHopGUI(p *peer.Peer) bool {
+	if p == nil || !p.Online {
+		return false
+	}
+	if p.Version != "" {
+		v := strings.TrimPrefix(p.Version, "v")
+		parts := strings.Split(strings.Split(v, "-")[0], ".")
+		if len(parts) >= 3 {
+			major, _ := strconv.Atoi(parts[0])
+			minor, _ := strconv.Atoi(parts[1])
+			patch, _ := strconv.Atoi(parts[2])
+			if major < 1 || (major == 1 && minor < 9) || (major == 1 && minor == 9 && patch < 505) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, excludeDevID string) *peer.Peer {
 	if reg == nil {
 		return nil
 	}
 	// Priority 0 (Level 5 NAT Traversal): Explicit opt-in relay node respecting metered/battery/quota limits
 	if bestRelay := reg.FindBestRelay(excludeDevID); bestRelay != nil {
-		if peerHasConnGUI(tcpMgr, bestRelay) {
+		if supportsMultiHopGUI(bestRelay) && peerHasConnGUI(tcpMgr, bestRelay) {
 			return bestRelay
 		}
 	}
-	// Priority 1: Known VPS / Server nodes (e.g. 10.1.1.102 or name containing Serv)
+	// Priority 1: Nodes with Public IPs (e.g. VPS or servers with direct WAN connectivity)
 	for _, p := range reg.List() {
-		if p.DeviceID == excludeDevID || !p.Online {
+		if p.DeviceID == excludeDevID || !p.Online || !supportsMultiHopGUI(p) {
 			continue
 		}
-		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-		isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(p.DeviceName), "serv") || strings.Contains(strings.ToLower(p.Nickname), "serv")
-		if isServ && peerHasConnGUI(tcpMgr, p) {
+		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && peerHasConnGUI(tcpMgr, p) {
 			return p
 		}
 	}
-	// Priority 1.5: Router / Gateway nodes (Keenetic, OpenWrt, Linux routers, Exit Nodes)
+	// Priority 2: Router / Gateway / Linux server nodes (Keenetic, OpenWrt, Linux routers, Exit Nodes)
 	for _, p := range reg.List() {
-		if p.DeviceID == excludeDevID || !p.Online {
+		if p.DeviceID == excludeDevID || !p.Online || !supportsMultiHopGUI(p) {
 			continue
 		}
 		isRouter := p.IsKeenetic || p.OS == "linux" || p.IsExitNode || len(p.AdvertisedRoutes) > 0
@@ -3712,18 +3729,9 @@ func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, 
 			return p
 		}
 	}
-	// Priority 2: Any peer with public IP and active connection (TCP or Direct UDP P2P)
+	// Priority 3: Any online peer with active connection (TCP or Direct UDP P2P) that supports Multi-Hop
 	for _, p := range reg.List() {
-		if p.DeviceID == excludeDevID || !p.Online {
-			continue
-		}
-		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && peerHasConnGUI(tcpMgr, p) {
-			return p
-		}
-	}
-	// Priority 3: Any online peer with active connection (TCP or Direct UDP P2P)
-	for _, p := range reg.List() {
-		if p.DeviceID == excludeDevID || !p.Online {
+		if p.DeviceID == excludeDevID || !p.Online || !supportsMultiHopGUI(p) {
 			continue
 		}
 		if peerHasConnGUI(tcpMgr, p) {
