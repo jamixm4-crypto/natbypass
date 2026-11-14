@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.12"
+	Version = "1.9.507-beta.13"
 	Commit  = "release"
 )
 
@@ -2224,6 +2224,12 @@ func handleExitNodeSelect() {
 		return
 	}
 
+	// 1. Если выход в интернет через узел уже активен — одиночный клик немедленно отключает шлюз!
+	if activeExitNodeID != "" || activeExitVIP != "" {
+		disableExitNode()
+		return
+	}
+
 	var exitNodes []*peer.Peer
 	for _, p := range registry.List() {
 		if p.Online && p.IsExitNode {
@@ -2232,30 +2238,19 @@ func handleExitNodeSelect() {
 	}
 
 	if len(exitNodes) == 0 {
-		if activeExitNodeID != "" {
-			disableExitNode()
-			addLog("🌐 В сети нет доступных Exit Node устройств. Маршрут сброшен на локальный.")
-		} else {
-			addLog("💡 В сети пока нет устройств с включенным Exit Node. Включите Exit Node на удаленном устройстве.")
-		}
+		addLog("💡 В сети пока нет устройств с включенным Exit Node. Включите Exit Node на удаленном устройстве.")
 		return
 	}
 
-	currIdx := -1
-	for i, en := range exitNodes {
-		if en.DeviceID == activeExitNodeID {
-			currIdx = i
+	// 2. Автоматический выбор наилучшего интернет-шлюза (приоритет: роутер Keenetic или Linux-сервер)
+	var target *peer.Peer = exitNodes[0]
+	for _, en := range exitNodes {
+		if en.IsKeenetic || en.OS == "linux" {
+			target = en
 			break
 		}
 	}
-
-	if currIdx == len(exitNodes)-1 {
-		disableExitNode()
-		return
-	}
-
-	nextIdx := currIdx + 1
-	setExitNodePeer(exitNodes[nextIdx])
+	setExitNodePeer(target)
 }
 
 func handleToggleSubnetRoute() {
@@ -3670,14 +3665,29 @@ func handlePingTargetPeer(p *peer.Peer) {
 	}()
 }
 
+func peerHasConnGUI(tcpMgr *network.TCPDirectManager, p *peer.Peer) bool {
+	if p == nil || !p.Online {
+		return false
+	}
+	if tcpMgr != nil && tcpMgr.HasConn(p.DeviceID) {
+		return true
+	}
+	if p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 50 {
+		return true
+	}
+	if p.ActiveEndpoint != "" || p.STUNAddr != "" || p.LocalAddr != "" {
+		return true
+	}
+	return false
+}
+
 func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, excludeDevID string) *peer.Peer {
 	if reg == nil {
 		return nil
 	}
 	// Priority 0 (Level 5 NAT Traversal): Explicit opt-in relay node respecting metered/battery/quota limits
 	if bestRelay := reg.FindBestRelay(excludeDevID); bestRelay != nil {
-		hasConn := (tcpMgr != nil && tcpMgr.HasConn(bestRelay.DeviceID)) || (bestRelay.DirectP2P && bestRelay.ActiveEndpoint != "" && bestRelay.LossPercent < 20)
-		if hasConn {
+		if peerHasConnGUI(tcpMgr, bestRelay) {
 			return bestRelay
 		}
 	}
@@ -3688,8 +3698,7 @@ func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, 
 		}
 		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 		isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(p.DeviceName), "serv") || strings.Contains(strings.ToLower(p.Nickname), "serv")
-		hasConn := (tcpMgr != nil && tcpMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
-		if isServ && hasConn {
+		if isServ && peerHasConnGUI(tcpMgr, p) {
 			return p
 		}
 	}
@@ -3699,8 +3708,7 @@ func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, 
 			continue
 		}
 		isRouter := p.IsKeenetic || p.OS == "linux" || p.IsExitNode || len(p.AdvertisedRoutes) > 0
-		hasConn := (tcpMgr != nil && tcpMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
-		if isRouter && hasConn {
+		if isRouter && peerHasConnGUI(tcpMgr, p) {
 			return p
 		}
 	}
@@ -3709,8 +3717,7 @@ func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, 
 		if p.DeviceID == excludeDevID || !p.Online {
 			continue
 		}
-		hasConn := (tcpMgr != nil && tcpMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
-		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && hasConn {
+		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && peerHasConnGUI(tcpMgr, p) {
 			return p
 		}
 	}
@@ -3719,8 +3726,7 @@ func findMeshRelayPeerGUI(reg *peer.Registry, tcpMgr *network.TCPDirectManager, 
 		if p.DeviceID == excludeDevID || !p.Online {
 			continue
 		}
-		hasConn := (tcpMgr != nil && tcpMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
-		if hasConn {
+		if peerHasConnGUI(tcpMgr, p) {
 			return p
 		}
 	}
@@ -5098,61 +5104,70 @@ func startEngineFromConfig(c *config.Config) {
 					}
 				}
 
-				if targetPeer != nil && !isRelay {
-					var myPubIP string
-					if udpPuncher != nil {
-						if cachedSTUN := udpPuncher.GetCachedSTUNAddr(); cachedSTUN != "" {
-							if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
-								myPubIP = h
-							} else {
-								myPubIP = cachedSTUN
+				if targetPeer != nil {
+					if !isRelay {
+						var myPubIP string
+						if udpPuncher != nil {
+							if cachedSTUN := udpPuncher.GetCachedSTUNAddr(); cachedSTUN != "" {
+								if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
+									myPubIP = h
+								} else {
+									myPubIP = cachedSTUN
+								}
 							}
 						}
-					}
-					if isTCP {
-						targetPeer.DirectP2P = true
-						targetPeer.Transport = "tcp_tls"
-						targetPeer.RelayedViaDevID = ""
-						targetPeer.RelayedViaName = ""
-						targetPeer.RelayedViaVIP = ""
-						targetPeer.LastBilateralSeen = time.Now()
-					} else {
-						// For UDP: verified inbound L3 packet from peer over direct socket.
-						targetPeer.DirectP2P = true
-						if targetPeer.Transport == "" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "mqtt" || targetPeer.Transport == "relay_mesh" {
-							targetPeer.Transport = "udp_direct"
+						if isTCP {
+							targetPeer.DirectP2P = true
+							targetPeer.Transport = "tcp_tls"
 							targetPeer.RelayedViaDevID = ""
 							targetPeer.RelayedViaName = ""
 							targetPeer.RelayedViaVIP = ""
+							targetPeer.LastBilateralSeen = time.Now()
+						} else {
+							// For UDP: verified inbound L3 packet from peer over direct socket.
+							targetPeer.DirectP2P = true
+							if targetPeer.Transport == "" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "mqtt" || targetPeer.Transport == "relay_mesh" {
+								targetPeer.Transport = "udp_direct"
+								targetPeer.RelayedViaDevID = ""
+								targetPeer.RelayedViaName = ""
+								targetPeer.RelayedViaVIP = ""
+							}
+							targetPeer.LastBilateralSeen = time.Now()
 						}
-						targetPeer.LastBilateralSeen = time.Now()
-					}
-					if srcAddr != nil {
-						fromAddrStr := srcAddr.String()
-						if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
-							targetPeer.ActiveEndpoint = fromAddrStr
-						} else if targetPeer.ActiveEndpoint == "" {
-							if targetPeer.STUNAddr != "" {
-								targetPeer.ActiveEndpoint = targetPeer.STUNAddr
-							} else if targetPeer.LocalAddr != "" {
-								targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+						if srcAddr != nil {
+							fromAddrStr := srcAddr.String()
+							if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
+								targetPeer.ActiveEndpoint = fromAddrStr
+							} else if targetPeer.ActiveEndpoint == "" {
+								if targetPeer.STUNAddr != "" {
+									targetPeer.ActiveEndpoint = targetPeer.STUNAddr
+								} else if targetPeer.LocalAddr != "" {
+									targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+								}
+							}
+						}
+						targetPeer.LastDirectSeen = time.Now()
+						targetPeer.ProbeCount = 0
+						if guiMagicSock != nil && targetPeer.ActiveEndpoint != "" {
+							guiMagicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
+						}
+						if udpPuncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
+							udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
+							if !targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second) {
+								_ = udpPuncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
+							}
+						}
+					} else {
+						// Inbound traffic received via Relay (Mesh Multi-Hop or Central MQTT)
+						if !targetPeer.DirectP2P {
+							if targetPeer.Transport == "" || targetPeer.Transport == "udp_direct" || targetPeer.Transport == "offline" {
+								targetPeer.Transport = "relay"
 							}
 						}
 					}
 					targetPeer.Online = true
 					targetPeer.LastSeen = time.Now()
-					targetPeer.LastDirectSeen = time.Now()
-					targetPeer.ProbeCount = 0
 					registry.Upsert(targetPeer)
-					if guiMagicSock != nil && targetPeer.ActiveEndpoint != "" {
-						guiMagicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
-					}
-					if udpPuncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
-						udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
-						if !targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second) {
-							_ = udpPuncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
-						}
-					}
 				}
 			}
 
@@ -5349,11 +5364,13 @@ func startEngineFromConfig(c *config.Config) {
 			if destPeer == nil {
 				return fmt.Errorf("nil peer")
 			}
+			// 1. Direct TCP ShadowTLS stream
 			if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(destPeer.DeviceID) {
 				if err := guiTCPDirectMgr.SendPacket(destPeer.DeviceID, packet); err == nil {
 					return nil
 				}
 			}
+			// 2. Direct UDP / AWG
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
 				targetEP = destPeer.STUNAddr
@@ -5368,9 +5385,62 @@ func startEngineFromConfig(c *config.Config) {
 					pmin = destPeer.AWG.Pmin
 					pmax = destPeer.AWG.Pmax
 				}
-				return udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax)
+				if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
+					return nil
+				}
 			}
-			return fmt.Errorf("no route to peer")
+			// 3. Multi-Hop Mesh Relay fallback (route via intermediate peer)
+			if registry != nil {
+				if relayPeer := findMeshRelayPeerGUI(registry, guiTCPDirectMgr, destPeer.DeviceID); relayPeer != nil {
+					if mhPkt, mhErr := network.EncodeMultiHopPacket(myDevID, destPeer.DeviceID, network.DefaultMaxTTL, 0x00, packet); mhErr == nil {
+						if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(relayPeer.DeviceID) {
+							if err := guiTCPDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
+								registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+								return nil
+							}
+						} else if udpPuncher != nil {
+							rEP := relayPeer.ActiveEndpoint
+							if rEP == "" {
+								rEP = relayPeer.STUNAddr
+							}
+							if rEP == "" {
+								rEP = relayPeer.LocalAddr
+							}
+							if rEP != "" {
+								pmin, pmax := 0, 0
+								if relayPeer.AWG != nil {
+									pmin = relayPeer.AWG.Pmin
+									pmax = relayPeer.AWG.Pmax
+								}
+								if err := udpPuncher.SendDataPacketWithPadding(rEP, mhPkt, pmin, pmax); err == nil {
+									registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+									return nil
+								}
+							}
+						}
+					}
+				}
+			}
+			// 4. Central MQTT Relay fallback with encryption
+			if len(sigChannels) > 0 {
+				dataToSend := packet
+				if cfg != nil {
+					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+						cKey := crypto.DeriveKey(activeProf.NetworkKey)
+						if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
+							dataToSend = enc
+						}
+					}
+				}
+				for _, ch := range sigChannels {
+					if mq, ok := ch.(*signaling.MQTTChannel); ok && mq != nil && mq.IsConnected() {
+						if err := mq.PublishTunnelData(destPeer.DeviceID, dataToSend); err == nil {
+							return nil
+						}
+					}
+				}
+			}
+			return fmt.Errorf("no route to peer %s", destPeer.DeviceID)
 		}
 		guiTransitForwarder = tunnel.NewTransitForwarder(myVirtualIP,
 			func(vipOrID string) *peer.Peer {
@@ -5553,11 +5623,6 @@ func startEngineFromConfig(c *config.Config) {
 								}
 								if targetEP == "" {
 									targetEP = targetPeer.LocalAddr
-								}
-
-								// B1: Динамический обход физического шлюза для Exit Node / roaming peer в GUI
-								if targetEP != "" && (exitID != "" || activeExitNodeID != "") {
-									_ = tunnel.BypassEndpoint(targetEP)
 								}
 
 								pmin := 0

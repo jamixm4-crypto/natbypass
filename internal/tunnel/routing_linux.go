@@ -320,11 +320,11 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		forceInsertIptablesRule(ipt, "", "_NDM_INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "INPUT", "-i", "nb0", "-p", "icmp", "-j", "ACCEPT")
 
-		// Redirect incoming requests to Keenetic VIP:80/443/53 to local services (WebUI / DNS)
-		forceInsertIptablesRule(ipt, "nat", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "80")
-		forceInsertIptablesRule(ipt, "nat", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-ports", "443")
-		forceInsertIptablesRule(ipt, "nat", "PREROUTING", "-i", "nb0", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53")
-		forceInsertIptablesRule(ipt, "nat", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53")
+		// Clean up any legacy broad REDIRECT rules on nb0 that hijacked internet traffic (ports 80, 443, 53)
+		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "80").Run()
+		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-ports", "443").Run()
+		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "PREROUTING", "-i", "nb0", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53").Run()
+		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "PREROUTING", "-i", "nb0", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-ports", "53").Run()
 
 		// Remove legacy pref 40 iif nb0 rule that intercepted internet transit packets before WAN lookup!
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "iif", "nb0", "lookup", "main")
@@ -512,7 +512,40 @@ var (
 // findLinuxWANTable determines the routing table used for the physical WAN gateway.
 // On KeeneticOS, NDM places WAN routes in dedicated ISP tables (e.g. 1000, 1001), while table main has no default route.
 func findLinuxWANTable() string {
-	// 1. Try ip route get 8.8.8.8 (standard kernel FIB query)
+	// 1. Check known Keenetic NDM / OpenWrt / Linux ISP routing tables directly:
+	candidateTables := []string{"1000", "1001", "1002", "1003", "100", "200", "default"}
+	for _, tbl := range candidateTables {
+		cmdStr := fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)
+		if out, err := exec.Command("sh", "-c", cmdStr).Output(); err == nil {
+			line := strings.TrimSpace(string(out))
+			if strings.HasPrefix(line, "default") {
+				return tbl
+			}
+		}
+	}
+
+	// 2. Parse ip rule show for table lookup
+	if out, err := exec.Command("sh", "-c", "ip rule show 2>/dev/null").Output(); err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "lookup") {
+				fields := strings.Fields(line)
+				for i, f := range fields {
+					if f == "lookup" && i+1 < len(fields) {
+						tbl := fields[i+1]
+						if tbl != "main" && tbl != "local" && tbl != "default" {
+							c := fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)
+							if o, e := exec.Command("sh", "-c", c).Output(); e == nil && strings.HasPrefix(strings.TrimSpace(string(o)), "default") {
+								return tbl
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Try ip route get 8.8.8.8 (standard kernel FIB query)
 	if out, err := exec.Command("sh", "-c", "ip route get 8.8.8.8 2>/dev/null | head -n1").Output(); err == nil {
 		fields := strings.Fields(string(out))
 		for i, f := range fields {
@@ -521,15 +554,14 @@ func findLinuxWANTable() string {
 			}
 		}
 	}
-	// 2. Try ip route show table all default
-	if out, err := exec.Command("sh", "-c", "ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1").Output(); err == nil {
-		fields := strings.Fields(string(out))
-		for i, f := range fields {
-			if f == "table" && i+1 < len(fields) {
-				return fields[i+1]
-			}
+
+	// 4. Fallback: check table main
+	if out, err := exec.Command("sh", "-c", "ip route show table main default 2>/dev/null | grep -v 'nb0' | head -n1").Output(); err == nil {
+		if strings.HasPrefix(strings.TrimSpace(string(out)), "default") {
+			return "main"
 		}
 	}
+
 	return "main"
 }
 
@@ -539,8 +571,12 @@ func ensureDefaultRouteInMain(wanTable string) {
 	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
 		return // Table main already has a valid physical default route
 	}
-	if wanTable != "" && wanTable != "main" && wanTable != "default" {
-		defOut, defErr := exec.Command("sh", "-c", fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", wanTable)).Output()
+	tablesToTry := []string{wanTable, "1000", "1001", "1002", "100", "200", "default"}
+	for _, tbl := range tablesToTry {
+		if tbl == "" || tbl == "main" {
+			continue
+		}
+		defOut, defErr := exec.Command("sh", "-c", fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)).Output()
 		if defErr == nil {
 			line := strings.TrimSpace(string(defOut))
 			if strings.HasPrefix(line, "default") {
@@ -556,6 +592,7 @@ func ensureDefaultRouteInMain(wanTable string) {
 				args := append([]string{"route", "replace"}, cleanParts...)
 				args = append(args, "table", "main")
 				_ = runLinuxCmd("ip", args...)
+				break
 			}
 		}
 	}
@@ -575,14 +612,17 @@ func getPhysicalGatewayLinux() string {
 			}
 		}
 	}
-	// 2. Try ip route show table all default
-	if out, err := exec.Command("sh", "-c", "ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1").Output(); err == nil {
-		fields := strings.Fields(string(out))
-		for i, f := range fields {
-			if f == "via" && i+1 < len(fields) {
-				gw := fields[i+1]
-				if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
-					return gw
+	// 2. Try known ISP tables on Keenetic/OpenWrt
+	for _, tbl := range []string{"1000", "1001", "1002", "100", "200", "default", "main"} {
+		cmdStr := fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)
+		if out, err := exec.Command("sh", "-c", cmdStr).Output(); err == nil {
+			fields := strings.Fields(string(out))
+			for i, f := range fields {
+				if f == "via" && i+1 < len(fields) {
+					gw := fields[i+1]
+					if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
+						return gw
+					}
 				}
 			}
 		}

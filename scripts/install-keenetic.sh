@@ -8,7 +8,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.12"
+    DEFAULT_BETA="v1.9.507-beta.13"
     BETA_MODE=0
 
     # Parse CLI flags
@@ -505,6 +505,10 @@ if [ "$table" = "mangle" ]; then
 fi
 
 if [ "$table" = "nat" ]; then
+    iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 80 -j REDIRECT --to-ports 80 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 443 -j REDIRECT --to-ports 443 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i nb0 -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
+    iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     iptables -t nat -C POSTROUTING -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -m mark --mark 0x4e ! -o nb0 -j MASQUERADE 2>/dev/null || true
     # Remove broad 10.0.0.0/8 rule that breaks local LAN (e.g. 10.11.219.0/24)
     iptables -t nat -D POSTROUTING -s 10.0.0.0/8 ! -o nb0 -j MASQUERADE 2>/dev/null || true
@@ -525,6 +529,14 @@ fi
 ip rule add to 100.64.200.0/24 lookup main priority 40 2>/dev/null || true
 
 WAN_TABLE=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="table") print $(i+1)}')
+if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
+    for tbl in 1000 1001 1002 1003 100 200 default; do
+        if ip route show table "$tbl" default 2>/dev/null | grep -q 'default'; then
+            WAN_TABLE="$tbl"
+            break
+        fi
+    done
+fi
 [ -z "$WAN_TABLE" ] && WAN_TABLE="main"
 
 ip rule add fwmark 0x4e lookup $WAN_TABLE priority 60 2>/dev/null || true

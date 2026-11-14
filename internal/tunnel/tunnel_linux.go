@@ -413,8 +413,9 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 			ensureRule("", "_NDM_OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
 		}
 
-		// 3. Таблица mangle: отключение blackhole-маркировки для пакетов mesh
-		ensureRule("mangle", "PREROUTING", "-i", d.AdapterName, "-j", "ACCEPT")
+		// 3. Таблица mangle: маркировка пакетов mesh (0x4e) для NAT masquerade и выхода в WAN
+		_ = exec.Command("iptables", "-w", "2", "-t", "mangle", "-D", "PREROUTING", "-i", d.AdapterName, "-j", "ACCEPT").Run()
+		ensureRule("mangle", "PREROUTING", "-i", d.AdapterName, "-j", "MARK", "--set-mark", "0x4e")
 		ensureRule("mangle", "OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
 
 		// 4. Разрешение входящих UDP и TCP портов (Mesh P2P, WireGuard и ShadowTLS)
@@ -467,10 +468,15 @@ if [ "$table" = "filter" ]; then
 fi
 
 if [ "$table" = "mangle" ]; then
-    iptables -t mangle -C PREROUTING -i %s -j ACCEPT 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i %s -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -i %s -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -C PREROUTING -i %s -j MARK --set-mark 0x4e 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i %s -j MARK --set-mark 0x4e 2>/dev/null || true
     iptables -t mangle -C OUTPUT -o %s -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || true
 fi
-`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
+
+if [ "$table" = "nat" ]; then
+    iptables -t nat -C POSTROUTING -m mark --mark 0x4e ! -o %s -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -m mark --mark 0x4e ! -o %s -j MASQUERADE 2>/dev/null || true
+fi
+`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
 			hookPath := "/opt/etc/ndm/netfilter.d/010-natbypass.sh"
 			if cur, rErr := os.ReadFile(hookPath); rErr != nil || string(cur) != hookContent {
 				_ = os.WriteFile(hookPath, []byte(hookContent), 0755)

@@ -202,14 +202,29 @@ func syncAdvertisedSubnetRoutes(reg *peer.Registry, selfID string) {
 // findMeshRelayPeer finds an online peer capable of acting as an L3 mesh relay.
 // Priority is given to public VPS/servers (e.g. DSTR_Serv_RUS / 10.1.1.102 / public IP nodes)
 // with either an active Direct TCP connection OR a confirmed Direct UDP P2P link.
+func peerHasConn(tcpDirectMgr *network.TCPDirectManager, p *peer.Peer) bool {
+	if p == nil || !p.Online {
+		return false
+	}
+	if tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID) {
+		return true
+	}
+	if p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 50 {
+		return true
+	}
+	if p.ActiveEndpoint != "" || p.STUNAddr != "" || p.LocalAddr != "" {
+		return true
+	}
+	return false
+}
+
 func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectManager, excludeDevID string) *peer.Peer {
 	if registry == nil {
 		return nil
 	}
 	// Priority 0 (Level 5 NAT Traversal): Explicit opt-in relay node respecting metered/battery/quota limits
 	if bestRelay := registry.FindBestRelay(excludeDevID); bestRelay != nil {
-		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(bestRelay.DeviceID)) || (bestRelay.DirectP2P && bestRelay.ActiveEndpoint != "" && bestRelay.LossPercent < 20)
-		if hasConn {
+		if peerHasConn(tcpDirectMgr, bestRelay) {
 			return bestRelay
 		}
 	}
@@ -220,8 +235,7 @@ func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectM
 		}
 		vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 		isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(p.DeviceName), "serv") || strings.Contains(strings.ToLower(p.Nickname), "serv")
-		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
-		if isServ && hasConn {
+		if isServ && peerHasConn(tcpDirectMgr, p) {
 			return p
 		}
 	}
@@ -231,8 +245,7 @@ func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectM
 			continue
 		}
 		isRouter := p.IsKeenetic || p.OS == "linux" || p.IsExitNode || len(p.AdvertisedRoutes) > 0
-		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
-		if isRouter && hasConn {
+		if isRouter && peerHasConn(tcpDirectMgr, p) {
 			return p
 		}
 	}
@@ -241,8 +254,7 @@ func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectM
 		if p.DeviceID == excludeDevID || !p.Online {
 			continue
 		}
-		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
-		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && hasConn {
+		if p.PublicIP != "" && p.PublicIP != "0.0.0.0" && peerHasConn(tcpDirectMgr, p) {
 			return p
 		}
 	}
@@ -251,8 +263,7 @@ func findMeshRelayPeer(registry *peer.Registry, tcpDirectMgr *network.TCPDirectM
 		if p.DeviceID == excludeDevID || !p.Online {
 			continue
 		}
-		hasConn := (tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)) || (p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 20)
-		if hasConn {
+		if peerHasConn(tcpDirectMgr, p) {
 			return p
 		}
 	}
@@ -1092,11 +1103,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if destPeer == nil {
 				return fmt.Errorf("nil peer")
 			}
+			// 1. Direct TCP ShadowTLS stream
 			if tcpDirectMgr != nil && tcpDirectMgr.HasConn(destPeer.DeviceID) {
 				if err := tcpDirectMgr.SendPacket(destPeer.DeviceID, packet); err == nil {
 					return nil
 				}
 			}
+			// 2. Direct UDP / AWG
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
 				targetEP = destPeer.STUNAddr
@@ -1111,9 +1124,56 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					pmin = destPeer.AWG.Pmin
 					pmax = destPeer.AWG.Pmax
 				}
-				return puncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax)
+				if err := puncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
+					return nil
+				}
 			}
-			return fmt.Errorf("no route to peer")
+			// 3. Multi-Hop Mesh Relay fallback (route via intermediate peer)
+			if registry != nil {
+				if relayPeer := findMeshRelayPeer(registry, tcpDirectMgr, destPeer.DeviceID); relayPeer != nil {
+					if mhPkt, mhErr := network.EncodeMultiHopPacket(deviceID, destPeer.DeviceID, network.DefaultMaxTTL, 0x00, packet); mhErr == nil {
+						if tcpDirectMgr != nil && tcpDirectMgr.HasConn(relayPeer.DeviceID) {
+							if err := tcpDirectMgr.SendPacket(relayPeer.DeviceID, mhPkt); err == nil {
+								registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+								return nil
+							}
+						} else if puncher != nil {
+							rEP := relayPeer.ActiveEndpoint
+							if rEP == "" {
+								rEP = relayPeer.STUNAddr
+							}
+							if rEP == "" {
+								rEP = relayPeer.LocalAddr
+							}
+							if rEP != "" {
+								pmin, pmax := 0, 0
+								if relayPeer.AWG != nil {
+									pmin = relayPeer.AWG.Pmin
+									pmax = relayPeer.AWG.Pmax
+								}
+								if err := puncher.SendDataPacketWithPadding(rEP, mhPkt, pmin, pmax); err == nil {
+									registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+									return nil
+								}
+							}
+						}
+					}
+				}
+			}
+			// 4. Central MQTT Relay fallback with encryption
+			if sigMgr != nil {
+				dataToSend := packet
+				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+					cKey := crypto.DeriveKey(activeProf.NetworkKey)
+					if enc, encErr := crypto.EncryptSelf(packet, cKey); encErr == nil && len(enc) > 0 {
+						dataToSend = enc
+					}
+				}
+				if err := sigMgr.PublishTunnelData(destPeer.DeviceID, dataToSend); err == nil {
+					return nil
+				}
+			}
+			return fmt.Errorf("no route to peer %s", destPeer.DeviceID)
 		}
 
 		transitForwarder := tunnel.NewTransitForwarder(myVirtualIP,
@@ -1188,14 +1248,13 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				return c4[0] == l4[0] && c4[1] == l4[1] && c4[2] == l4[2]
 			}
 
-			// If direct data packet arrived, immediately lock and promote direct P2P path with Dynamic IP Auto-Learning
-			if directAddr != nil && registry != nil && !isRelay {
-				fromAddrStr := directAddr.String()
-				var targetPeer *peer.Peer
+			var targetPeer *peer.Peer
+			if registry != nil {
 				// 1. Match by Virtual IP
 				if p, ok := registry.GetByVirtualIP(srcIP); ok && p != nil {
 					targetPeer = p
-				} else {
+				} else if directAddr != nil {
+					fromAddrStr := directAddr.String()
 					// 2. Dynamic Auto-learning: Match peer by sender socket address (STUNAddr, ActiveEndpoint, Candidates, LocalAddr)
 					// Strictly prevent VIP hijacking: never overwrite existing VirtualIP!
 					for _, item := range registry.List() {
@@ -1222,8 +1281,10 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						}
 					}
 				}
+			}
 
-				if targetPeer != nil {
+			if targetPeer != nil {
+				if directAddr != nil && !isRelay {
 					var myPubIP string
 					if puncher != nil {
 						if cachedSTUN := puncher.GetCachedSTUNAddr(); cachedSTUN != "" {
@@ -1234,6 +1295,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 					}
+					fromAddrStr := directAddr.String()
 					oldEP := targetPeer.ActiveEndpoint
 					if isTCP {
 						targetPeer.DirectP2P = true
@@ -1262,11 +1324,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							targetPeer.ActiveEndpoint = targetPeer.LocalAddr
 						}
 					}
-					targetPeer.Online = true
-					targetPeer.LastSeen = time.Now()
 					targetPeer.LastDirectSeen = time.Now()
 					targetPeer.ProbeCount = 0 // Reset backoff on successful direct packet
-					registry.Upsert(targetPeer)
 					if magicSock != nil && targetPeer.ActiveEndpoint != "" {
 						magicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
 					}
@@ -1280,7 +1339,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							_ = puncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
 						}
 					}
+				} else if isRelay {
+					if !targetPeer.DirectP2P {
+						if targetPeer.Transport == "" || targetPeer.Transport == "udp_direct" || targetPeer.Transport == "offline" {
+							targetPeer.Transport = "relay"
+						}
+					}
 				}
+				targetPeer.Online = true
+				targetPeer.LastSeen = time.Now()
+				registry.Upsert(targetPeer)
 			}
 
 			// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
@@ -1674,11 +1742,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							targetEP = fmt.Sprintf("%s:%d", p.PublicIP, p.WGPort)
 						}
 
-						// B1: Динамический обход физического шлюза для Exit Node / roaming peer, чтобы избежать routing black hole
-						if targetEP != "" && cfg.Network.SelectedExitNode != "" {
-							_ = tunnel.BypassEndpoint(targetEP)
-						}
-
 						pmin := 0
 						pmax := 0
 						if p.AWG != nil {
@@ -1823,19 +1886,33 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 											p.Transport = "relay_mesh"
 											log.Debug().Str("dst", dstIP).Str("via", relayPeer.DeviceID).Msg("🔀 MultiHop: Routed packet via Mesh TCP Relay peer")
 										}
-									} else if puncher != nil && relayPeer.DirectP2P && relayPeer.ActiveEndpoint != "" {
-										if err := puncher.SendDataPacketWithPadding(relayPeer.ActiveEndpoint, mhPkt, 0, 0); err == nil {
-											sentDirect = true
-											registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
-											rName := relayPeer.DeviceName
-											if rName == "" {
-												rName = relayPeer.Nickname
+									} else if puncher != nil {
+										rEP := relayPeer.ActiveEndpoint
+										if rEP == "" {
+											rEP = relayPeer.STUNAddr
+										}
+										if rEP == "" {
+											rEP = relayPeer.LocalAddr
+										}
+										if rEP != "" {
+											pmin, pmax := 0, 0
+											if relayPeer.AWG != nil {
+												pmin = relayPeer.AWG.Pmin
+												pmax = relayPeer.AWG.Pmax
 											}
-											p.RelayedViaDevID = relayPeer.DeviceID
-											p.RelayedViaName = rName
-											p.RelayedViaVIP = relayPeer.VirtualIP
-											p.Transport = "relay_mesh"
-											log.Debug().Str("dst", dstIP).Str("via", relayPeer.ActiveEndpoint).Msg("🔀 MultiHop: Routed packet via Mesh UDP Relay peer")
+											if err := puncher.SendDataPacketWithPadding(rEP, mhPkt, pmin, pmax); err == nil {
+												sentDirect = true
+												registry.RecordRelayTraffic(relayPeer.DeviceID, int64(len(mhPkt)))
+												rName := relayPeer.DeviceName
+												if rName == "" {
+													rName = relayPeer.Nickname
+												}
+												p.RelayedViaDevID = relayPeer.DeviceID
+												p.RelayedViaName = rName
+												p.RelayedViaVIP = relayPeer.VirtualIP
+												p.Transport = "relay_mesh"
+												log.Debug().Str("dst", dstIP).Str("via", rEP).Msg("🔀 MultiHop: Routed packet via Mesh UDP Relay peer")
+											}
 										}
 									}
 								}
