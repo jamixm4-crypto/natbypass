@@ -11,7 +11,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.14"
+    DEFAULT_BETA="v1.9.507-beta.22"
     BETA_MODE=-1
 
     # Parse CLI flags
@@ -103,12 +103,13 @@ main() {
     TAG=""
     if [ "$BETA_MODE" -eq 1 ]; then
         print_yellow ">> Канал обновлений: BETA / PRE-RELEASE"
+        CACHE_BUST=$(date +%s 2>/dev/null || echo "0")
         for manifest_url in \
-            "https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" \
-            "https://gh-proxy.com/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" \
-            "https://ghfast.top/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" \
+            "https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json?_t=${CACHE_BUST}" \
+            "https://gh-proxy.com/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json?_t=${CACHE_BUST}" \
+            "https://ghfast.top/https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json?_t=${CACHE_BUST}" \
             "https://api.github.com/repos/${REPO}/releases" \
-            "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest-beta.json"
+            "https://cdn.jsdelivr.net/gh/${REPO}@main/mirror/releases/latest-beta.json?_t=${CACHE_BUST}"
         do
             TAG=$(curl -fsSL -k --connect-timeout 4 --max-time 10 "${manifest_url}" 2>/dev/null | grep -E '"(version|tag_name)":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
             [ -n "$TAG" ] && break
@@ -236,6 +237,45 @@ https://github.com/${REPO}/releases/download/${TAG}/${name}
         done
     done
 
+    # Fallback retry if primary download failed (e.g. if the tag was just pruned or CDN had stale cache)
+    if [ "$DOWNLOADED" -eq 0 ]; then
+        FALLBACK_TAG=$(curl -fsSL -k --connect-timeout 4 --max-time 8 "https://api.github.com/repos/${REPO}/releases" 2>/dev/null | grep -E '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+        if [ -n "$FALLBACK_TAG" ] && [ "$FALLBACK_TAG" != "$TAG" ]; then
+            print_yellow ">> Релиз ${TAG} устарел или недоступен на GitHub. Переключаемся на актуальный ${FALLBACK_TAG}..."
+            TAG="$FALLBACK_TAG"
+            for name in $DL_NAMES; do
+                CANDIDATE_URLS="
+https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://ghproxy.net/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://github.com/${REPO}/releases/download/${TAG}/${name}
+"
+                for u in $CANDIDATE_URLS; do
+                    [ -z "$u" ] && continue
+                    if command -v curl >/dev/null 2>&1; then
+                        if curl -fsSL -k --connect-timeout 8 --max-time 180 --retry 3 --retry-delay 1 "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                            if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
+                                DOWNLOADED=1
+                                SUCCESS_URL="$u"
+                                break 2
+                            fi
+                            rm -f "${TMP_BIN}"
+                        fi
+                    elif command -v wget >/dev/null 2>&1; then
+                        if wget -q --no-check-certificate --timeout=15 --tries=3 -c "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                            if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
+                                DOWNLOADED=1
+                                SUCCESS_URL="$u"
+                                break 2
+                            fi
+                            rm -f "${TMP_BIN}"
+                        fi
+                    fi
+                done
+            done
+        fi
+    fi
+
     if [ "$DOWNLOADED" -eq 0 ] || [ ! -s "${TMP_BIN}" ]; then
         print_red "[!] Ошибка: не удалось скачать исполняемый файл обновления."
         print_yellow "Проверьте подключение к сети и доступность релизов на GitHub / зеркалах."
@@ -276,7 +316,7 @@ https://github.com/${REPO}/releases/download/${TAG}/${name}
 
     chmod 0755 "${TMP_BIN}"
 
-    # 4. Stop service and free storage space before binary swap
+    # 4. Stop service and prepare flash storage for atomic replacement
     echo ">> Остановка службы для безопасной замены бинарника..."
     if [ -f /opt/etc/init.d/S99natbypass ]; then
         /opt/etc/init.d/S99natbypass stop >/dev/null 2>&1 || true
@@ -290,8 +330,8 @@ https://github.com/${REPO}/releases/download/${TAG}/${name}
     rm -f "${TARGET_BIN}.old" "${TARGET_BIN}.new" "${TARGET_BIN}.tmp" /opt/bin/*.old /opt/bin/*.new 2>/dev/null || true
     if [ -f /opt/var/log/natbypass.log ]; then
         LOG_SIZE_KB=$(du -k /opt/var/log/natbypass.log 2>/dev/null | awk '{print $1}')
-        if [ -n "$LOG_SIZE_KB" ] && [ "$LOG_SIZE_KB" -gt 2048 ]; then
-            tail -n 200 /opt/var/log/natbypass.log > /opt/var/log/natbypass.log.tmp 2>/dev/null && \
+        if [ -n "$LOG_SIZE_KB" ] && [ "$LOG_SIZE_KB" -gt 512 ]; then
+            tail -n 100 /opt/var/log/natbypass.log > /opt/var/log/natbypass.log.tmp 2>/dev/null && \
                 mv /opt/var/log/natbypass.log.tmp /opt/var/log/natbypass.log 2>/dev/null || true
         fi
     fi
@@ -313,12 +353,9 @@ https://github.com/${REPO}/releases/download/${TAG}/${name}
     if cp -f "${TMP_BIN}" "${TARGET_BIN}" 2>/dev/null; then
         rm -f "${TMP_BIN}"
     else
-        # Fallback to rm + mv if cross-device copy hit space issues
-        rm -f "${TARGET_BIN}"
         mv -f "${TMP_BIN}" "${TARGET_BIN}"
     fi
-    chmod 0755 "${TARGET_BIN}"
-
+    chmod 0755 "${TARGET_BIN}" 2>/dev/null || true
     if [ -f /opt/bin/natbypass ]; then
         mkdir -p /opt/usr/bin 2>/dev/null || true
         ln -sf /opt/bin/natbypass /opt/usr/bin/natbypass 2>/dev/null || true
