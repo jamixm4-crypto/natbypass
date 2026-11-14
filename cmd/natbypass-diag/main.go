@@ -845,10 +845,8 @@ func saveConsolidatedReport(
 func createSignalingChannel(ctx context.Context, broker, topic, collectorID, networkKey string) (signaling.SignalingChannel, <-chan *signaling.Payload, error) {
 	var sigChannels []signaling.SignalingChannel
 	sigChannels = append(sigChannels, signaling.NewMQTTChannelNamed("mqtt:primary", broker, topic, collectorID, "", ""))
-	for _, b := range config.DefaultPublicMQTTBrokers {
-		if b != broker {
-			sigChannels = append(sigChannels, signaling.NewMQTTChannelNamed("mqtt:backup:"+b, b, topic, collectorID, "", ""))
-		}
+	for _, b := range config.GetEffectiveBackupBrokersForBroker(broker) {
+		sigChannels = append(sigChannels, signaling.NewMQTTChannelNamed("mqtt:backup:"+b, b, topic, collectorID, "", ""))
 	}
 	fm := signaling.NewFallbackManager(sigChannels)
 	if networkKey != "" {

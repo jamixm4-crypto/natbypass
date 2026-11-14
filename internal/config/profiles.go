@@ -91,6 +91,29 @@ func extractBrokerHost(rawURL string) string {
 	return u
 }
 
+// GetEffectiveBackupBrokersForBroker возвращает список резервных брокеров для произвольного URL брокера,
+// исключая дублирование одного и того же хоста.
+func GetEffectiveBackupBrokersForBroker(primaryURL string) []string {
+	seenHosts := make(map[string]bool)
+	primaryClean := strings.TrimSpace(strings.ToLower(primaryURL))
+	if primaryClean != "" {
+		host := extractBrokerHost(primaryClean)
+		if host != "" {
+			seenHosts[host] = true
+		}
+	}
+	var backups []string
+	for _, b := range DefaultPublicMQTTBrokers {
+		bClean := strings.TrimSpace(strings.ToLower(b))
+		host := extractBrokerHost(bClean)
+		if host != "" && !seenHosts[host] {
+			seenHosts[host] = true
+			backups = append(backups, b)
+		}
+	}
+	return backups
+}
+
 // GetEffectiveBackupBrokers возвращает список резервных брокеров, гарантированно исключая
 // хосты, совпадающие с основным брокером или уже добавленными резервными (дедупликация по домену).
 func (p *Profile) GetEffectiveBackupBrokers() []string {
