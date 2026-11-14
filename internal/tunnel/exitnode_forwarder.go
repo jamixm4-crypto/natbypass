@@ -66,6 +66,7 @@ type tcpSessionEntry struct {
 	serverNextSeq atomic.Uint32
 	lastActive    atomic.Int64
 	closed        atomic.Bool
+	dialing       atomic.Bool
 	closeOnce     sync.Once
 }
 
@@ -486,21 +487,45 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 
 	val, found := tf.tcpSessions.Load(key)
 
-	// Case 1: SYN packet (new outbound connection)
+	// Case 1: SYN packet (new outbound connection or SYN retransmit)
 	if (flags & 0x02) != 0 {
-		// If existing session, clean it up
 		if found {
-			if oldEntry, ok := val.(*tcpSessionEntry); ok && oldEntry != nil {
+			if oldEntry, ok := val.(*tcpSessionEntry); ok && oldEntry != nil && !oldEntry.closed.Load() {
+				if oldEntry.clientISN == seqNum {
+					// SYN retransmission
+					if oldEntry.dialing.Load() {
+						// Still dialing, ignore duplicate SYN
+						return true
+					}
+					// Already connected: re-deliver SYN|ACK in case client dropped previous packet
+					synAckPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, oldEntry.serverISN, seqNum+1, 0x12, 64240, nil)
+					tf.deliverToClient(srcIP, synAckPkt)
+					return true
+				}
 				oldEntry.close()
 			}
 			tf.tcpSessions.Delete(key)
 		}
 
+		placeholder := &tcpSessionEntry{
+			clientVIP:  srcIP,
+			clientPort: srcPort,
+			dstIP:      destIP,
+			dstPort:    dstPort,
+			clientISN:  seqNum,
+		}
+		placeholder.dialing.Store(true)
+		placeholder.lastActive.Store(time.Now().Unix())
+		tf.tcpSessions.Store(key, placeholder)
+
 		// Asynchronously dial target host to avoid blocking TUN reader
-		go func(cVIP, dIP net.IP, cPort, dPort uint16, cISN uint32, k tcpSessionKey) {
+		go func(cVIP, dIP net.IP, cPort, dPort uint16, cISN uint32, k tcpSessionKey, entry *tcpSessionEntry) {
 			targetAddr := net.JoinHostPort(dIP.String(), strconv.Itoa(int(dPort)))
 			conn, err := net.DialTimeout("tcp", targetAddr, 6*time.Second)
 			if err != nil {
+				entry.dialing.Store(false)
+				entry.close()
+				tf.tcpSessions.Delete(k)
 				// Send TCP RST|ACK back to client
 				rstPkt := buildIPv4TCPPacket(dIP, dPort, cVIP, cPort, 0, cISN+1, 0x14, 0, nil)
 				tf.deliverToClient(cVIP, rstPkt)
@@ -508,20 +533,12 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 			}
 
 			sISN := uint32(time.Now().UnixNano()) & 0x7FFFFFFF
-			entry := &tcpSessionEntry{
-				conn:       conn,
-				clientVIP:  cVIP,
-				clientPort: cPort,
-				dstIP:      dIP,
-				dstPort:    dPort,
-				clientISN:  cISN,
-				serverISN:  sISN,
-			}
+			entry.conn = conn
+			entry.serverISN = sISN
 			entry.clientNextSeq.Store(cISN + 1)
 			entry.serverNextSeq.Store(sISN + 1)
 			entry.lastActive.Store(time.Now().Unix())
-
-			tf.tcpSessions.Store(k, entry)
+			entry.dialing.Store(false)
 
 			// Send SYN|ACK back to client
 			synAckPkt := buildIPv4TCPPacket(dIP, dPort, cVIP, cPort, sISN, cISN+1, 0x12, 64240, nil)
@@ -529,7 +546,7 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 
 			// Start reader for this TCP session
 			go tf.tcpSessionReader(k, entry)
-		}(srcIP, destIP, srcPort, dstPort, seqNum, key)
+		}(srcIP, destIP, srcPort, dstPort, seqNum, key, placeholder)
 
 		return true
 	}

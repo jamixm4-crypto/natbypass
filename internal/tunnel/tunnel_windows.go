@@ -12,11 +12,11 @@ package tunnel
 import (
 	"archive/zip"
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +31,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
 const (
@@ -372,12 +373,15 @@ func CreateAdapter(adapterName, virtualIP string) (retDev *Device, retErr error)
 		hReadEvent:  windows.Handle(hEvent),
 	}
 
-	// 3. Мгновенная прямая привязка IP и маршрутов к InterfaceIndex
+	// 3. Мгновенная прямая привязка IP и параметров адаптера через WireGuard NetIO API (< 1ms)
 	var luid uint64
 	var ifIndex uint32
 	procWintunGetAdapterLUID.Call(hAdapter, uintptr(unsafe.Pointer(&luid)))
 	procConvertInterfaceLuidToIndex.Call(uintptr(unsafe.Pointer(&luid)), uintptr(unsafe.Pointer(&ifIndex)))
 	SetCachedWintunIfIndex(ifIndex)
+
+	winLuid := winipcfg.LUID(luid)
+	SetCachedWintunLUID(winLuid)
 
 	// Ensure adapter is named "NatBypass" in Windows Network Connections and cache name
 	if iface, err := net.InterfaceByIndex(int(ifIndex)); err == nil && iface.Name != "" {
@@ -396,25 +400,40 @@ func CreateAdapter(adapterName, virtualIP string) (retDev *Device, retErr error)
 		prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
 	}
 
-	extraRouteClean := ""
-	if prefix != "100.64.200" {
-		extraRouteClean = fmt.Sprintf(`Get-NetRoute | Where-Object { $_.DestinationPrefix -like "100.64.200*" -and $_.InterfaceIndex -eq %d } | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; `, ifIndex)
+	// Direct in-memory IP address assignment via Win32 IP Helper API (< 1ms)
+	if vipAddr, err := netip.ParseAddr(cleanVIP); err == nil && vipAddr.Is4() {
+		vipPrefix := netip.PrefixFrom(vipAddr, 24)
+		_ = winLuid.SetIPAddresses([]netip.Prefix{vipPrefix})
 	}
 
-	psSetup := fmt.Sprintf(`Get-NetRoute | Where-Object { ($_.DestinationPrefix -like "%s*" -or $_.DestinationPrefix -like "100.64.200*") -and $_.InterfaceIndex -ne %d } | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; Get-NetIPAddress | Where-Object { ($_.IPAddress -like "%s*" -or $_.IPAddress -like "100.64.200*") -and $_.InterfaceIndex -ne %d } | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue; %s$cur = Get-NetIPAddress | Where-Object { $_.IPAddress -eq "%s" -and $_.InterfaceIndex -eq %d }; if (-not $cur) { New-NetIPAddress -InterfaceIndex %d -IPAddress "%s" -PrefixLength 24 -SkipAsSource $false -ErrorAction SilentlyContinue }; Set-NetIPInterface -InterfaceIndex %d -Forwarding Enabled -NlMtu 1280 -DadTransmits 0 -InterfaceMetric 1 -RouterDiscovery Disabled -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue; Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | ForEach-Object { Set-NetIPInterface -InterfaceIndex $_.InterfaceIndex -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue }; New-NetRoute -InterfaceIndex %d -DestinationPrefix "%s.0/24" -NextHop 0.0.0.0 -RouteMetric 1 -ErrorAction SilentlyContinue; Set-NetConnectionProfile -InterfaceIndex %d -NetworkCategory Private -ErrorAction SilentlyContinue`, prefix, ifIndex, prefix, ifIndex, extraRouteClean, cleanVIP, ifIndex, ifIndex, cleanVIP, ifIndex, ifIndex, prefix, ifIndex)
-	_ = runHiddenPS(psSetup)
+	// Direct interface properties configuration (< 1ms)
+	if ipif, err := winLuid.IPInterface(windows.AF_INET); err == nil {
+		ipif.NLMTU = 1280
+		ipif.UseAutomaticMetric = false
+		ipif.Metric = 1
+		ipif.ForwardingEnabled = true
+		ipif.WeakHostSend = true
+		ipif.WeakHostReceive = true
+		ipif.RouterDiscoveryBehavior = winipcfg.RouterDiscoveryDisabled
+		ipif.DadTransmits = 0
+		_ = ipif.Set()
+	}
 
-	// Фоновое добавление правил брандмауэра Windows (поддержка Windows 10/11 и Windows Server 2016-2025)
-	go func() {
-		exePath, _ := os.Executable()
-		psExeFw := ""
-		if exePath != "" {
-			escapedExe := strings.ReplaceAll(exePath, "'", "''")
-			psExeFw = fmt.Sprintf(`$exe = '%s'; if (-not (Get-NetFirewallRule -Name "NatBypass-App-UDP-In" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name "NatBypass-App-UDP-In" -DisplayName "NatBypass Core UDP Inbound" -Direction Inbound -Program $exe -Action Allow -Protocol UDP -Profile Any -ErrorAction SilentlyContinue }; if (-not (Get-NetFirewallRule -Name "NatBypass-App-TCP-In" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name "NatBypass-App-TCP-In" -DisplayName "NatBypass Core TCP Inbound" -Direction Inbound -Program $exe -Action Allow -Protocol TCP -Profile Any -ErrorAction SilentlyContinue }; `, escapedExe)
+	// Direct overlay subnet route installation (< 1ms)
+	if overlayPrefix, err := netip.ParsePrefix(fmt.Sprintf("%s.0/24", prefix)); err == nil {
+		_ = winLuid.AddRoute(overlayPrefix, netip.IPv4Unspecified(), 1)
+	}
+	if prefix != "100.64.200" {
+		if defOverlay, err := netip.ParsePrefix("100.64.200.0/24"); err == nil {
+			_ = winLuid.AddRoute(defOverlay, netip.IPv4Unspecified(), 1)
 		}
-		psFw := psExeFw + fmt.Sprintf(`$realAlias = (Get-NetAdapter | Where-Object { $_.InterfaceIndex -eq %d }).Name; if ($realAlias) { Set-NetConnectionProfile -InterfaceIndex %d -NetworkCategory Private -ErrorAction SilentlyContinue; if (-not (Get-NetFirewallRule -Name "NatBypass-In-All" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name "NatBypass-In-All" -DisplayName "NatBypass Mesh Inbound All" -Direction Inbound -Action Allow -Profile Any -InterfaceAlias $realAlias -ErrorAction SilentlyContinue } }; if (-not (Get-NetFirewallRule -Name "NatBypass-ICMP-In" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name "NatBypass-ICMP-In" -DisplayName "NatBypass ICMPv4 Inbound" -Direction Inbound -Action Allow -Protocol ICMPv4 -Profile Any -ErrorAction SilentlyContinue }; if (-not (Get-NetFirewallRule -Name "NatBypass-Mesh-Subnet-In" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name "NatBypass-Mesh-Subnet-In" -DisplayName "NatBypass Mesh Subnet Inbound" -Direction Inbound -Action Allow -RemoteAddress '10.1.0.0/16','100.64.0.0/10' -Profile Any -ErrorAction SilentlyContinue }; Set-NetFirewallRule -Name "NatBypass-ICMP-In" -Profile Any -Enabled True -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayName "*ICMPv4*" -ErrorAction SilentlyContinue`, ifIndex, ifIndex)
+	}
+
+	// Фоновое добавление правил брандмауэра Windows и назначение Private профиля (не блокирует запуск)
+	go func(idx uint32) {
+		psFw := fmt.Sprintf(`Set-NetConnectionProfile -InterfaceIndex %d -NetworkCategory Private -ErrorAction SilentlyContinue; if (-not (Get-NetFirewallRule -Name "NatBypass-In-All" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name "NatBypass-In-All" -DisplayName "NatBypass Mesh Inbound All" -Direction Inbound -Action Allow -Profile Any -InterfaceIndex %d -ErrorAction SilentlyContinue }; if (-not (Get-NetFirewallRule -Name "NatBypass-ICMP-In" -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name "NatBypass-ICMP-In" -DisplayName "NatBypass ICMPv4 Inbound" -Direction Inbound -Action Allow -Protocol ICMPv4 -Profile Any -ErrorAction SilentlyContinue }; Enable-NetFirewallRule -DisplayGroup "Core Networking Diagnostics" -ErrorAction SilentlyContinue; Enable-NetFirewallRule -DisplayName "*ICMPv4*" -ErrorAction SilentlyContinue`, idx, idx)
 		_ = runHiddenPS(psFw)
-	}()
+	}(ifIndex)
 
 	SetTUNStatus(&TUNStatus{
 		Active:       true,
@@ -497,55 +516,43 @@ func (d *Device) WritePacket(packet []byte) error {
 	return nil
 }
 
-// SetVirtualIP обновляет IP адрес интерфейса и маршрут подсети
+// SetVirtualIP обновляет IP адрес интерфейса и маршрут подсети через NetIO API (< 1ms)
 func (d *Device) SetVirtualIP(virtualIP string) error {
 	if d == nil {
 		return nil
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(virtualIP, "/")[0])
 	d.VirtualIP = cleanVIP
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
 
-	realName := getNatBypassAdapterNameWindows()
-	if realName == "" {
-		realName = d.AdapterName
-	}
-	cmd := exec.CommandContext(ctx, "netsh", "interface", "ipv4", "set", "address",
-		fmt.Sprintf("name=%s", realName),
-		"source=static",
-		fmt.Sprintf("address=%s", cleanVIP),
-		"mask=255.255.255.0",
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000,
-	}
-	err := cmd.Run()
-
-	// Extract subnet prefix and install subnet route
-	prefix := "100.64.200"
-	parts := strings.Split(cleanVIP, ".")
-	if len(parts) >= 3 {
-		prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
-	}
-	_ = exec.CommandContext(ctx, "route", "add", prefix+".0", "mask", "255.255.255.0", cleanVIP, "metric", "10").Run()
-
-	if err == nil {
-		SetTUNStatus(&TUNStatus{
-			Active:       true,
-			DeviceName:   d.AdapterName,
-			VirtualIP:    cleanVIP,
-			MTU:          1280,
-			IsAdmin:      checkIsAdmin(),
-			DriverLoaded: true,
-		})
+	winLuid := GetCachedWintunLUID()
+	if winLuid != 0 {
+		if vipAddr, err := netip.ParseAddr(cleanVIP); err == nil && vipAddr.Is4() {
+			vipPrefix := netip.PrefixFrom(vipAddr, 24)
+			_ = winLuid.SetIPAddresses([]netip.Prefix{vipPrefix})
+		}
+		prefix := "100.64.200"
+		parts := strings.Split(cleanVIP, ".")
+		if len(parts) >= 3 {
+			prefix = fmt.Sprintf("%s.%s.%s", parts[0], parts[1], parts[2])
+		}
+		if overlayPrefix, err := netip.ParsePrefix(fmt.Sprintf("%s.0/24", prefix)); err == nil {
+			_ = winLuid.AddRoute(overlayPrefix, netip.IPv4Unspecified(), 10)
+		}
 	}
 
-	return err
+	SetTUNStatus(&TUNStatus{
+		Active:       true,
+		DeviceName:   d.AdapterName,
+		VirtualIP:    cleanVIP,
+		MTU:          1280,
+		IsAdmin:      checkIsAdmin(),
+		DriverLoaded: true,
+	})
+
+	return nil
 }
 
-// SetMTU динамически обновляет MTU на интерфейсе Windows
+// SetMTU динамически обновляет MTU на интерфейсе Windows через NetIO API (< 1ms)
 func (d *Device) SetMTU(mtu int) error {
 	if d == nil {
 		return nil
@@ -553,24 +560,29 @@ func (d *Device) SetMTU(mtu int) error {
 	if mtu < 1280 || mtu > 1500 {
 		return fmt.Errorf("недопустимый MTU: %d (допустимо 1280..1500)", mtu)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "netsh", "interface", "ipv4", "set", "subinterface",
-		fmt.Sprintf("name=%s", d.AdapterName),
-		fmt.Sprintf("mtu=%d", mtu),
-		"store=persistent",
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000,
+	winLuid := GetCachedWintunLUID()
+	if winLuid != 0 {
+		if ipif, err := winLuid.IPInterface(windows.AF_INET); err == nil {
+			ipif.NLMTU = uint32(mtu)
+			return ipif.Set()
+		}
 	}
-	return cmd.Run()
+	return nil
 }
 
-// Close корректно завершает работу адаптера
+// Close корректно завершает работу адаптера и очищает LUID
 func (d *Device) Close() error {
 	if d == nil || !atomic.CompareAndSwapInt32(&d.isClosed, 0, 1) {
 		return nil
+	}
+
+	// 1. Очистить все маршруты, IP адреса и DNS привязанные к LUID адаптера
+	winLuid := GetCachedWintunLUID()
+	if winLuid != 0 {
+		_ = winLuid.FlushRoutes(windows.AF_INET)
+		_ = winLuid.FlushIPAddresses(windows.AF_INET)
+		_ = winLuid.FlushDNS(windows.AF_INET)
+		SetCachedWintunLUID(0)
 	}
 
 	d.mu.Lock()

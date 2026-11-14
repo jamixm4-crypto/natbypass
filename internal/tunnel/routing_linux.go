@@ -388,22 +388,32 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			}
 		}
 
-		// Priority 60: forward mesh internet traffic to real WAN routing table
-		// Packets from mesh enter via nb0 or carry fwmark 0x4e
+		// WireGuard-grade table isolation: populate dedicated table 60 with default route from WAN
+		wanDefOut, _ := exec.Command("sh", "-c", "ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g'").Output()
+		if wanDef := strings.TrimSpace(string(wanDefOut)); wanDef != "" {
+			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace %s table 60", wanDef))
+		} else if wanTable != "" && wanTable != "main" {
+			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace $(ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g') table 60", wanTable))
+		}
+
+		// Priority 60: forward mesh transit traffic to dedicated WAN routing table 60
 		for i := 0; i < 5; i++ {
 			_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "61")
 		}
-		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", wanTable)
-		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", wanTable)
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", "60")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", "60")
 		for _, s := range buildMeshSubnetList(cleanSubnet) {
 			if s != "" && s != "10.0.0.0/8" && s != "172.16.0.0/12" {
-				_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "from", s, "lookup", wanTable)
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "from", s, "lookup", "60")
 			}
 		}
 
-		// On KeeneticOS, table main MUST NOT contain a default route, because NDM isolates WAN to table 1000+.
-		// Having an injected default route in table main breaks Keenetic NDM/LAN management and web UI.
-		_ = runLinuxCmd("ip", "route", "del", "default", "table", "main")
+		// Fallback priority 61: direct lookup into detected ISP table if table 60 needs redundancy
+		if wanTable != "" && wanTable != "main" {
+			_ = runLinuxCmd("ip", "rule", "add", "pref", "61", "fwmark", "0x4e", "lookup", wanTable)
+			_ = runLinuxCmd("ip", "rule", "add", "pref", "61", "iif", "nb0", "lookup", wanTable)
+		}
 
 		// Ensure persistent KeeneticOS netfilter hook is installed and valid
 		ensureKeeneticNetfilterHook(cleanSubnet)
@@ -484,16 +494,21 @@ if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
 fi
 [ -z "$WAN_TABLE" ] && WAN_TABLE="main"
 
-ip rule add fwmark 0x4e lookup $WAN_TABLE priority 60 2>/dev/null || true
-ip rule add iif nb0 lookup $WAN_TABLE priority 60 2>/dev/null || true
-if [ -n "$NB_SUBNET" ]; then
-    ip rule add from "$NB_SUBNET" lookup $WAN_TABLE priority 60 2>/dev/null || true
-fi
-ip rule add from 100.64.200.0/24 lookup $WAN_TABLE priority 60 2>/dev/null || true
-
 WAN_DEF=$(ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g')
 if [ -n "$WAN_DEF" ]; then
-    ip route replace $WAN_DEF table main 2>/dev/null || true
+    ip route replace $WAN_DEF table 60 2>/dev/null || true
+fi
+
+ip rule add fwmark 0x4e lookup 60 priority 60 2>/dev/null || true
+ip rule add iif nb0 lookup 60 priority 60 2>/dev/null || true
+if [ -n "$NB_SUBNET" ]; then
+    ip rule add from "$NB_SUBNET" lookup 60 priority 60 2>/dev/null || true
+fi
+ip rule add from 100.64.200.0/24 lookup 60 priority 60 2>/dev/null || true
+
+if [ -n "$WAN_TABLE" ] && [ "$WAN_TABLE" != "main" ]; then
+    ip rule add fwmark 0x4e lookup $WAN_TABLE priority 61 2>/dev/null || true
+    ip rule add iif nb0 lookup $WAN_TABLE priority 61 2>/dev/null || true
 fi
 `
 	_ = os.WriteFile(hookPath, []byte(script), 0755)
@@ -594,12 +609,14 @@ func DisableHostIPForwarding(subnets ...string) error {
 		}
 	}
 
-	// Clean up ip rules
+	// Clean up ip rules and table 60
 	_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
+	_ = runLinuxCmd("ip", "rule", "del", "pref", "61")
 	_ = runLinuxCmd("ip", "rule", "del", "fwmark", "0x4e")
 	_ = runLinuxCmd("ip", "rule", "del", "iif", "nb0")
 	_ = runLinuxCmd("ip", "rule", "del", "from", "10.0.0.0/8")
 	_ = runLinuxCmd("ip", "rule", "del", "to", "10.0.0.0/8", "lookup", "main")
+	_ = runLinuxCmd("ip", "route", "flush", "table", "60")
 	return nil
 }
 
