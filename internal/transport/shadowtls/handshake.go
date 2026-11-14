@@ -471,9 +471,11 @@ func ProxyActiveProbe(conn net.Conn, initialBytes []byte, sni string) {
 		defer conn.Close()
 		defer remoteConn.Close()
 
-		_ = remoteConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		if _, err := remoteConn.Write(initialBytes); err != nil {
-			return
+		if len(initialBytes) > 0 {
+			_ = remoteConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if _, err := remoteConn.Write(initialBytes); err != nil {
+				return
+			}
 		}
 		_ = remoteConn.SetDeadline(time.Time{})
 		_ = conn.SetDeadline(time.Time{})
@@ -502,9 +504,13 @@ func ProxyActiveProbe(conn net.Conn, initialBytes []byte, sni string) {
 // If an unauthenticated probe is detected, it transparently proxies the connection to the
 // authentic SNI target server and returns ErrActiveProbeHandled.
 // On success, it upgrades the connection to genuine TLS 1.3 with mutual authentication (mTLS) via crypto/tls.
-func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) (*ShadowTLSConn, error) {
+func ServerHandshake(conn net.Conn, networkKey [32]byte, defaultSNI string, timeout time.Duration) (*ShadowTLSConn, error) {
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	defer conn.SetDeadline(time.Time{})
+
+	if defaultSNI == "" {
+		defaultSNI = DefaultSNI
+	}
 
 	hdr := make([]byte, 5)
 	if _, err := io.ReadFull(conn, hdr); err != nil {
@@ -518,7 +524,9 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 	}
 	recLen := binary.BigEndian.Uint16(hdr[3:5])
 	if recLen < 40 || recLen > 8192 {
-		return nil, ErrInvalidTLSHandshake
+		// Active probe with abnormal TLS record length: proxy to authentic SNI rather than closing with RST
+		ProxyActiveProbe(conn, hdr, defaultSNI)
+		return nil, ErrActiveProbeHandled
 	}
 
 	body := make([]byte, recLen)
@@ -526,7 +534,13 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 		return nil, fmt.Errorf("failed to read ClientHello body: %w", err)
 	}
 	if body[0] != HandshakeClientHello || len(body) < 70 {
-		return nil, ErrInvalidTLSHandshake
+		// Active probe with malformed ClientHello: transparently proxy to authentic SNI
+		sni := ExtractSNI(body)
+		if sni == "" {
+			sni = defaultSNI
+		}
+		ProxyActiveProbe(conn, append(hdr, body...), sni)
+		return nil, ErrActiveProbeHandled
 	}
 
 	// clientRandom starts at offset 6 in body
@@ -538,7 +552,7 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 	if sessIDLen != 32 || len(body) < 39+32 {
 		sni := ExtractSNI(body)
 		if sni == "" {
-			sni = DefaultSNI
+			sni = defaultSNI
 		}
 		fullPkt := append(hdr, body...)
 		ProxyActiveProbe(conn, fullPkt, sni)
@@ -553,7 +567,7 @@ func ServerHandshake(conn net.Conn, networkKey [32]byte, timeout time.Duration) 
 		// Active probe detected: deflect to genuine TLS server
 		sni := ExtractSNI(body)
 		if sni == "" {
-			sni = DefaultSNI
+			sni = defaultSNI
 		}
 		fullPkt := append(hdr, body...)
 		ProxyActiveProbe(conn, fullPkt, sni)

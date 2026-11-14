@@ -303,20 +303,26 @@ func (m *TCPDirectManager) acceptLoop(ln net.Listener) {
 			m.mu.RLock()
 			hasKey := m.hasKey
 			netKey := m.networkKey
+			sni := m.sni
 			myID := m.myDeviceID
 			onPkt := m.onPacket
 			onUp := m.onPeerUp
 			m.mu.RUnlock()
 
+			if sni == "" {
+				sni = shadowtls.DefaultSNI
+			}
+
 			if hasKey {
-				// 1. Stealth TLS 1.3 Server Handshake (DPI bypass)
-				tlsConn, err := shadowtls.ServerHandshake(c, netKey, 5*time.Second)
+				// 1. Stealth TLS 1.3 Server Handshake with Active Probing Decoy Relay (TSPU / DPI bypass)
+				tlsConn, err := shadowtls.ServerHandshake(c, netKey, sni, 5*time.Second)
 				if err != nil {
 					if errors.Is(err, shadowtls.ErrActiveProbeHandled) {
 						// Probe was safely proxied to real SNI host or gracefully deflected
 						return
 					}
-					_ = c.Close()
+					// If unexpected error, proxy to decoy SNI rather than abruptly sending TCP RST
+					shadowtls.ProxyActiveProbe(c, nil, sni)
 					return
 				}
 				_ = tlsConn.SetDeadline(time.Now().Add(5 * time.Second))

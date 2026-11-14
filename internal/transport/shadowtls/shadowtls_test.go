@@ -98,7 +98,7 @@ func TestHandshake_SuccessAndTransmission(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		serverTLS, serverErr = ServerHandshake(serverConn, key, 3*time.Second)
+		serverTLS, serverErr = ServerHandshake(serverConn, key, sni, 3*time.Second)
 	}()
 
 	go func() {
@@ -164,7 +164,7 @@ func TestHandshake_WrongKeyRejection_ActiveProbing(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		_, serverErr = ServerHandshake(serverConn, keyAlice, 2*time.Second)
+		_, serverErr = ServerHandshake(serverConn, keyAlice, "gateway.icloud.com", 2*time.Second)
 	}()
 
 	go func() {

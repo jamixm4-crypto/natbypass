@@ -76,7 +76,12 @@ func NewClientConn(rawConn net.Conn, sni string, key [32]byte, timeout time.Dura
 
 // NewServerConn performs server-side TLS 1.3 mutual authentication handshake and returns an authenticated ShadowTLSConn.
 func NewServerConn(rawConn net.Conn, key [32]byte, timeout time.Duration) (*ShadowTLSConn, error) {
-	return ServerHandshake(rawConn, key, timeout)
+	return ServerHandshake(rawConn, key, DefaultSNI, timeout)
+}
+
+// NewServerConnWithSNI performs server-side TLS 1.3 handshake with custom SNI decoy fallback.
+func NewServerConnWithSNI(rawConn net.Conn, key [32]byte, sni string, timeout time.Duration) (*ShadowTLSConn, error) {
+	return ServerHandshake(rawConn, key, sni, timeout)
 }
 
 // WritePacket encapsulates an IP/tunnel packet into an encrypted TLS 1.3 Application Data stream

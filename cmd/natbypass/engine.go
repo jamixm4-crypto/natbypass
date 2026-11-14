@@ -2398,14 +2398,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								p.Latency = 0
 								p.PingMs = 0
 								isDirectFresh := !p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) < 25*time.Second
-								shouldFallback := !isDirectFresh && (p.ConsecutiveDrops >= 4 ||
-									(p.ProbeCount >= 10 && p.LossPercent > 50) ||
+								shouldFallback := !isDirectFresh && (p.ConsecutiveDrops >= 3 ||
+									(p.ProbeCount >= 6 && p.LossPercent >= 35) ||
 									(!p.LastDirectSeen.IsZero() && time.Since(p.LastDirectSeen) > constants.PeerOfflineThreshold) ||
 									(!p.LastBilateralSeen.IsZero() && time.Since(p.LastBilateralSeen) > constants.BilateralDemotionThreshold))
 								if shouldFallback {
 									if p.Transport != "tcp_tls" && p.Transport != "tcp_shadowtls" && (tcpDirectMgr == nil || !tcpDirectMgr.HasConn(p.DeviceID)) {
 										if p.DirectP2P {
-											log.Warn().Str("peer", p.DeviceID).Int("loss", p.LossPercent).Int("drops", p.ConsecutiveDrops).Msg("🔀 UDP packet loss > 50% and drops >= 4: automatic fallback to Relay")
+											log.Warn().Str("peer", p.DeviceID).Int("loss", p.LossPercent).Int("drops", p.ConsecutiveDrops).Msg("🔀 UDP packet loss >= 35% or drops >= 3: automatic fallback to Direct TCP / Relay")
 										}
 										p.DirectP2P = false
 										if findMeshRelayPeer(registry, tcpDirectMgr, p.DeviceID) != nil {

@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.19"
+	Version = "1.9.507-beta.20"
 	Commit  = "release"
 )
 
@@ -416,6 +416,7 @@ var (
 	hListPeers           uintptr
 	hBtnCopyPeerVIP      uintptr
 	hBtnPingPeer         uintptr
+	hBtnTestAllPings     uintptr
 	lastPeersHash        string
 	activeExitNodeID     string
 	activeExitVIP        string
@@ -572,13 +573,20 @@ var (
 	lastCountryLookupIP     string
 	guiInboundPacketHandler func(srcAddr *net.UDPAddr, payload []byte, isTCP, isRelay bool)
 
-	// Статистика дебаггера
-	startTime        time.Time
-	packetsSentCount uint64
-	packetsRecvCount uint64
-	debugLogFile     *os.File
-	debugLogMu       sync.Mutex
-	singleMutex      uintptr
+	// Статистика дебаггера и скорость трафика
+	startTime         time.Time
+	packetsSentCount  uint64
+	packetsRecvCount  uint64
+	bytesSentCount    uint64
+	bytesRecvCount    uint64
+	lastBytesSent     uint64
+	lastBytesRecv     uint64
+	lastSpeedCalcTime time.Time
+	currentTxSpeed    float64 // bytes/sec
+	currentRxSpeed    float64 // bytes/sec
+	debugLogFile      *os.File
+	debugLogMu        sync.Mutex
+	singleMutex       uintptr
 
 	// Состояние модального диалога закладок
 	dlgResultText string
@@ -648,6 +656,7 @@ const (
 	ID_BTN_TOGGLE_BETA       = 4057
 	ID_BTN_APPLY_SUBNETS     = 4058
 	ID_BTN_CLEAR_SUBNETS     = 4059
+	ID_BTN_TEST_ALL_PINGS    = 4072
 	ID_BTN_RELAUNCH_ADMIN    = 4075
 	WM_CHECK_UPDATE_DONE     = 0x8000 + 105
 
@@ -1108,7 +1117,7 @@ func main() {
 
 	// 6. Создание главного окна (комфортный премиальный размер 1120x760 для четкого отображения всех элементов)
 	hwnd, _, _ := procCreateWindowExW.Call(
-		0,
+		0x02000000, /* WS_EX_COMPOSITED: DWM double-buffered drawing for flicker-free child controls */
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(windowTitle)),
 		WS_FIXEDWINDOW|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
@@ -1642,6 +1651,9 @@ func handleCommand(id uint16) {
 
 	case ID_BTN_PING_PEER:
 		handlePingSelectedPeer()
+
+	case ID_BTN_TEST_ALL_PINGS:
+		handleTestAllPings()
 
 	case ID_BTN_CONNECT_TCP:
 		handleConnectTCPSelectedPeer()
@@ -2317,6 +2329,12 @@ func handleExitNodeSelect() {
 
 	// 4. Если доступно несколько Exit Node и ни один не выбран в списке — показываем меню выбора шлюза
 	hMenu, _, _ := procCreatePopupMenu.Call()
+
+	// Пункт автоматического выбора шлюза с минимальной задержкой
+	autoStr, _ := syscall.UTF16PtrFromString("⚡ [Авто] Выбрать шлюз с минимальным пингом (Best Ping)")
+	procAppendMenuW.Call(hMenu, 0, uintptr(6999), uintptr(unsafe.Pointer(autoStr)))
+	procAppendMenuW.Call(hMenu, 0x0800 /* MF_SEPARATOR */, 0, 0)
+
 	for i, en := range exitNodes {
 		name := en.Nickname
 		if name == "" {
@@ -2326,7 +2344,13 @@ func handleExitNodeSelect() {
 		if plat == "" {
 			plat = en.OS
 		}
-		itemLabel := fmt.Sprintf("🌐 [%s] %s (%s)", plat, name, en.VirtualIP)
+		pingTag := ""
+		if en.PingMs > 0 {
+			pingTag = fmt.Sprintf(" • %d ms", en.PingMs)
+		} else if en.Latency > 0 {
+			pingTag = fmt.Sprintf(" • %v", en.Latency.Round(time.Millisecond))
+		}
+		itemLabel := fmt.Sprintf("🌐 [%s] %s (%s%s)", plat, name, en.VirtualIP, pingTag)
 		itemStr, _ := syscall.UTF16PtrFromString(itemLabel)
 		procAppendMenuW.Call(hMenu, 0, uintptr(7000+i), uintptr(unsafe.Pointer(itemStr)))
 	}
@@ -2348,6 +2372,28 @@ func handleExitNodeSelect() {
 	procSetForegroundWindow.Call(hMainWnd)
 	cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */|0x0002 /* TPM_RIGHTBUTTON */, uintptr(rect.Left), uintptr(rect.Bottom), 0, hMainWnd, 0)
 	procDestroyMenu.Call(hMenu)
+
+	if cmd == 6999 {
+		var best *peer.Peer
+		for _, en := range exitNodes {
+			if best == nil {
+				best = en
+				continue
+			}
+			if en.Latency > 0 && (best.Latency == 0 || en.Latency < best.Latency) {
+				best = en
+			}
+		}
+		if best != nil {
+			name := best.Nickname
+			if name == "" {
+				name = best.DeviceID
+			}
+			addLog(fmt.Sprintf("⚡ [Автовыбор] Выбран интернет-шлюз с наименьшей задержкой (%v): [%s] (%s)", best.Latency.Round(time.Millisecond), name, best.VirtualIP))
+			setExitNodePeer(best)
+		}
+		return
+	}
 
 	chosenIdx := int(cmd) - 7000
 	if chosenIdx >= 0 && chosenIdx < len(exitNodes) {
@@ -3760,6 +3806,92 @@ func handlePingTargetPeer(p *peer.Peer) {
 	}()
 }
 
+func handleTestAllPings() {
+	if registry == nil {
+		addLog("⚠️ Сетевой реестр не инициализирован")
+		return
+	}
+	peers := registry.List()
+	if len(peers) == 0 {
+		addLog("⚠️ Нет доступных узлов для замера задержек")
+		return
+	}
+
+	buttonLabels[ID_BTN_TEST_ALL_PINGS] = "⏳ Тестирование..."
+	if hBtnTestAllPings != 0 {
+		procInvalidateRect.Call(hBtnTestAllPings, 0, 1)
+	}
+	if hLblPeersDesc != 0 {
+		setControlText(hLblPeersDesc, "⚡ Запущен параллельный замер ICMP задержек для всех узлов сети...")
+	}
+	addLog("⚡ Запущен параллельный замер задержек для всех узлов сети...")
+
+	go func() {
+		defer func() {
+			buttonLabels[ID_BTN_TEST_ALL_PINGS] = "⚡ Тест всей сети"
+			if hBtnTestAllPings != 0 {
+				procInvalidateRect.Call(hBtnTestAllPings, 0, 1)
+			}
+			if hLblPeersDesc != 0 {
+				setControlText(hLblPeersDesc, "✅ Замер задержек сети завершен. Данные обновлены.")
+			}
+			updateData()
+		}()
+
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 8) // max 8 concurrent pings
+
+		for _, p := range peers {
+			if !p.Online || p.VirtualIP == "" {
+				continue
+			}
+			vip := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			if vip == "" {
+				continue
+			}
+
+			wg.Add(1)
+			go func(targetPeer *peer.Peer, targetVIP string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+				defer cancel()
+
+				rtt, err := diagnostic.PingVirtualIP(ctx, targetVIP, 1200*time.Millisecond)
+				if err == nil && rtt > 0 {
+					targetPeer.Latency = rtt
+					targetPeer.PingMs = rtt.Milliseconds()
+					targetPeer.ConsecutiveDrops = 0
+					targetPeer.LossPercent = 0
+					name := targetPeer.Nickname
+					if name == "" {
+						name = targetPeer.DeviceID
+					}
+					addLog(fmt.Sprintf("🟢 Задержка до [%s] (%s): %v", name, targetVIP, rtt.Round(time.Millisecond)))
+				} else {
+					targetPeer.ConsecutiveDrops++
+					if targetPeer.LossPercent < 100 {
+						targetPeer.LossPercent += 25
+					}
+					name := targetPeer.Nickname
+					if name == "" {
+						name = targetPeer.DeviceID
+					}
+					addLog(fmt.Sprintf("🔴 Узел [%s] (%s) не ответил на пинг (таймаут)", name, targetVIP))
+				}
+				if registry != nil {
+					registry.Upsert(targetPeer)
+				}
+			}(p, vip)
+		}
+
+		wg.Wait()
+		addLog("✅ Параллельный замер задержек сети завершен!")
+	}()
+}
+
 func peerHasConnGUI(tcpMgr *network.TCPDirectManager, p *peer.Peer) bool {
 	if p == nil || !p.Online {
 		return false
@@ -3767,7 +3899,7 @@ func peerHasConnGUI(tcpMgr *network.TCPDirectManager, p *peer.Peer) bool {
 	if tcpMgr != nil && tcpMgr.HasConn(p.DeviceID) {
 		return true
 	}
-	if p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 50 {
+	if p.DirectP2P && p.ActiveEndpoint != "" && p.LossPercent < 35 {
 		return true
 	}
 	if p.ActiveEndpoint != "" || p.STUNAddr != "" || p.LocalAddr != "" {
@@ -4321,16 +4453,17 @@ func buildModernUI(hInstance uintptr) {
 	lblPeersPageTitle := createLabel(hInstance, "👥 Устройства в вашей P2P сети (Mesh Nodes)", cx, 16, cw, 28, hFontTitle)
 	hLblPeersDesc = createLabel(hInstance, "Все обнаруженные пиры с прямыми UDP P2P каналами и адресами. Кликните правой кнопкой мыши для меню действий.", cx, 44, cw, 18, hFontNormal)
 
-	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ Задать имя", cx, 68, 180, 34, ID_BTN_BOOKMARK_PEER, "normal")
-	hBtnCopyPeerVIP = createOwnerDrawButton(hInstance, "📋 Скопировать IP", cx+190, 68, 180, 34, ID_BTN_COPY_PEER_VIP, "normal")
-	hBtnPingPeer = createOwnerDrawButton(hInstance, "🧪 Ping узла", cx+380, 68, 160, 34, ID_BTN_PING_PEER, "normal")
-	hBtnConnectPeerTCP = createOwnerDrawButton(hInstance, "⚡ Direct TCP", cx+442, 68, 150, 34, ID_BTN_CONNECT_TCP, "primary")
-	hBtnExitNodeDirect = createOwnerDrawButton(hInstance, "🌐 Шлюз (Exit Node)", cx+600, 68, 240, 34, ID_BTN_EXIT_NODE_SELECT, "normal")
+	hBtnBookmarkPeer = createOwnerDrawButton(hInstance, "⭐ Задать имя", cx, 68, 130, 34, ID_BTN_BOOKMARK_PEER, "normal")
+	hBtnCopyPeerVIP = createOwnerDrawButton(hInstance, "📋 Скопировать IP", cx+138, 68, 130, 34, ID_BTN_COPY_PEER_VIP, "normal")
+	hBtnPingPeer = createOwnerDrawButton(hInstance, "🧪 Ping узла", cx+276, 68, 110, 34, ID_BTN_PING_PEER, "normal")
+	hBtnTestAllPings = createOwnerDrawButton(hInstance, "⚡ Тест всей сети", cx+394, 68, 140, 34, ID_BTN_TEST_ALL_PINGS, "yellow")
+	hBtnConnectPeerTCP = createOwnerDrawButton(hInstance, "⚡ Direct TCP", cx+542, 68, 120, 34, ID_BTN_CONNECT_TCP, "primary")
+	hBtnExitNodeDirect = createOwnerDrawButton(hInstance, "🌐 Шлюз (Exit Node)", cx+670, 68, 170, 34, ID_BTN_EXIT_NODE_SELECT, "normal")
 
 	hListPeers = createListBox(hInstance, cx, 108, cw, 600, hFontNormal)
 
 	tabPages[1] = []uintptr{
-		lblPeersPageTitle, hLblPeersDesc, hBtnBookmarkPeer, hBtnCopyPeerVIP, hBtnPingPeer, hBtnConnectPeerTCP, hBtnExitNodeDirect, hListPeers,
+		lblPeersPageTitle, hLblPeersDesc, hBtnBookmarkPeer, hBtnCopyPeerVIP, hBtnPingPeer, hBtnTestAllPings, hBtnConnectPeerTCP, hBtnExitNodeDirect, hListPeers,
 	}
 
 	// СТРАНИЦА 2: ПРОФИЛИ СЕТЕЙ (PROFILES)
@@ -5429,6 +5562,7 @@ func startEngineFromConfig(c *config.Config) {
 			if guiTransitForwarder != nil && allowExitNode {
 				if guiTransitForwarder.HandleTransitPacket(payload) {
 					atomic.AddUint64(&packetsRecvCount, 1)
+					atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
 					return
 				}
 			}
@@ -5450,6 +5584,7 @@ func startEngineFromConfig(c *config.Config) {
 				}
 				errWrite := tunDev.WritePacket(payload)
 				atomic.AddUint64(&packetsRecvCount, 1)
+				atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
 				if len(payload) >= 20 && payload[9] == 1 { // ICMP
 					icmpType := "Unknown"
 					if len(payload) >= ihl+1 {
@@ -5938,6 +6073,7 @@ func startEngineFromConfig(c *config.Config) {
 									}(tDevID, pktToRelay)
 								}
 								atomic.AddUint64(&packetsSentCount, 1)
+								atomic.AddUint64(&bytesSentCount, uint64(len(packet)))
 							}
 						}
 					}
@@ -7956,6 +8092,28 @@ func awgParamsMatch(local wireguard.AWGParams, remote *signaling.AWGParams) bool
 		local.H4 == uint32(h4)
 }
 
+func formatSpeed(bytesPerSec float64) string {
+	if bytesPerSec < 1024 {
+		return fmt.Sprintf("%.0f Б/с", bytesPerSec)
+	} else if bytesPerSec < 1024*1024 {
+		return fmt.Sprintf("%.1f КБ/с", bytesPerSec/1024)
+	} else {
+		return fmt.Sprintf("%.2f МБ/с", bytesPerSec/(1024*1024))
+	}
+}
+
+func formatBytes(b uint64) string {
+	if b < 1024 {
+		return fmt.Sprintf("%d Б", b)
+	} else if b < 1024*1024 {
+		return fmt.Sprintf("%.1f КБ", float64(b)/1024)
+	} else if b < 1024*1024*1024 {
+		return fmt.Sprintf("%.1f МБ", float64(b)/(1024*1024))
+	} else {
+		return fmt.Sprintf("%.2f ГБ", float64(b)/(1024*1024*1024))
+	}
+}
+
 // updateData вызывается строго на главном UI потоке в таймере
 func updateData() {
 	if isSplashActive {
@@ -7974,6 +8132,29 @@ func updateData() {
 			hideSplashScreen()
 		}
 		return
+	}
+
+	// 1. Расчет скорости передачи данных (Rx / Tx KB/s или MB/s)
+	now := time.Now()
+	if lastSpeedCalcTime.IsZero() {
+		lastSpeedCalcTime = now
+		lastBytesSent = atomic.LoadUint64(&bytesSentCount)
+		lastBytesRecv = atomic.LoadUint64(&bytesRecvCount)
+	} else {
+		dt := now.Sub(lastSpeedCalcTime).Seconds()
+		if dt >= 0.8 {
+			currSent := atomic.LoadUint64(&bytesSentCount)
+			currRecv := atomic.LoadUint64(&bytesRecvCount)
+			if currSent >= lastBytesSent {
+				currentTxSpeed = float64(currSent-lastBytesSent) / dt
+			}
+			if currRecv >= lastBytesRecv {
+				currentRxSpeed = float64(currRecv-lastBytesRecv) / dt
+			}
+			lastBytesSent = currSent
+			lastBytesRecv = currRecv
+			lastSpeedCalcTime = now
+		}
 	}
 
 	ipStr := myPublicIP
@@ -8017,15 +8198,21 @@ func updateData() {
 		setControlText(hLblCardVIP, fmt.Sprintf("Локальный VIP:\r\n%s", myVirtualIP))
 	}
 	if hLblCardPubIP != 0 {
-		setControlText(hLblCardPubIP, fmt.Sprintf("Внешний IP:\r\n%s", ipStr))
+		setControlText(hLblCardPubIP, fmt.Sprintf("Внешний IP / STUN:\r\n%s • %s", ipStr, stunStr))
 	}
 	if hLblCardSTUN != 0 {
-		setControlText(hLblCardSTUN, fmt.Sprintf("STUN Сокет:\r\n%s", stunStr))
+		totRx := formatBytes(atomic.LoadUint64(&bytesRecvCount))
+		totTx := formatBytes(atomic.LoadUint64(&bytesSentCount))
+		cardSpeed := fmt.Sprintf("⚡ Скорость сети:\r\n↓ %s • ↑ %s", formatSpeed(currentRxSpeed), formatSpeed(currentTxSpeed))
+		if totRx != "0 Б" || totTx != "0 Б" {
+			cardSpeed = fmt.Sprintf("⚡ Трафик (↓%s ↑%s):\r\n↓ %s • ↑ %s", totRx, totTx, formatSpeed(currentRxSpeed), formatSpeed(currentTxSpeed))
+		}
+		setControlText(hLblCardSTUN, cardSpeed)
 	}
 	if hLblCardSig != 0 {
-		sigText := fmt.Sprintf("Сигнал: %s\r\nCPU: %.1f%% | RAM: %.1f MB", activeChannelStr, mStats.ProcessCPUPercent, mStats.ProcessAllocMB)
+		sigText := fmt.Sprintf("📡 Сигнал: %s\r\n🧠 CPU: %.1f%% | RAM: %.1f MB", activeChannelStr, mStats.ProcessCPUPercent, mStats.ProcessAllocMB)
 		if guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp" {
-			sigText = fmt.Sprintf("Сигнал: %s • TCP\r\nCPU: %.1f%% | RAM: %.1f MB", activeChannelStr, mStats.ProcessCPUPercent, mStats.ProcessAllocMB)
+			sigText = fmt.Sprintf("📡 Сигнал: %s (TCP)\r\n🧠 CPU: %.1f%% | RAM: %.1f MB", activeChannelStr, mStats.ProcessCPUPercent, mStats.ProcessAllocMB)
 		}
 		setControlText(hLblCardSig, sigText)
 	}
@@ -8162,6 +8349,11 @@ func updateData() {
 			}
 		}
 
+		speedSuffix := ""
+		if currentRxSpeed > 0 || currentTxSpeed > 0 {
+			speedSuffix = fmt.Sprintf(" • ↓ %s ↑ %s", formatSpeed(currentRxSpeed), formatSpeed(currentTxSpeed))
+		}
+
 		// Реальная верификация статуса mesh-соединения и адаптера TUN
 		if !tunSt.Active {
 			vpnConnected = false
@@ -8183,7 +8375,7 @@ func updateData() {
 			if minRTT > 0 {
 				pingStr = fmt.Sprintf(" (%v)", minRTT.Round(time.Millisecond))
 			}
-			setControlText(hLblStatus, fmt.Sprintf("⚡ DIRECT TCP (ShadowTLS) АКТИВЕН (%d пир(ов)%s)%s", directTCPCount, pingStr, exitSuffix))
+			setControlText(hLblStatus, fmt.Sprintf("⚡ DIRECT TCP (ShadowTLS) АКТИВЕН (%d пир(ов)%s)%s%s", directTCPCount, pingStr, speedSuffix, exitSuffix))
 			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("⚡ Direct TCP (TLS)%s • VIP: %s", pingStr, myVirtualIP)
 			buttonTypes[ID_BTN_VPN] = "green"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
@@ -8199,13 +8391,13 @@ func updateData() {
 			if minRTT > 0 {
 				pingStr = fmt.Sprintf(" (%v)", minRTT.Round(time.Millisecond))
 			}
-			setControlText(hLblStatus, fmt.Sprintf("🟢 ПРЯМАЯ P2P СВЯЗЬ АКТИВНА (%d пир(ов)%s)%s", directP2PCount, pingStr, exitSuffix))
+			setControlText(hLblStatus, fmt.Sprintf("🟢 ПРЯМАЯ P2P СВЯЗЬ АКТИВНА (%d пир(ов)%s)%s%s", directP2PCount, pingStr, speedSuffix, exitSuffix))
 			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 Прямой P2P%s • VIP: %s", pingStr, myVirtualIP)
 			buttonTypes[ID_BTN_VPN] = "green"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
 		} else if onlineCount > 0 {
 			vpnConnected = true
-			setControlText(hLblStatus, fmt.Sprintf("🟢 СЕТЬ АКТИВНА (%d пир(ов) онлайн | Релей/STUN)%s", onlineCount, exitSuffix))
+			setControlText(hLblStatus, fmt.Sprintf("🟢 СЕТЬ АКТИВНА (%d пир(ов) онлайн | Релей/STUN)%s%s", onlineCount, speedSuffix, exitSuffix))
 			buttonLabels[ID_BTN_VPN] = fmt.Sprintf("🟢 В СЕТИ (%d пир(ов) | VIP: %s)", onlineCount, myVirtualIP)
 			buttonTypes[ID_BTN_VPN] = "green"
 			procInvalidateRect.Call(hBtnVpn, 0, 1)
@@ -8265,12 +8457,30 @@ func updateData() {
 					var statusDisplay string
 					isOnline := p.Online && !p.LastSeen.IsZero() && time.Since(p.LastSeen) <= constants.PeerOfflineThreshold
 					if isOnline {
+						pingBadge := ""
+						if p.PingMs > 0 {
+							if p.PingMs < 60 {
+								pingBadge = fmt.Sprintf("🟢 %d ms", p.PingMs)
+							} else if p.PingMs < 140 {
+								pingBadge = fmt.Sprintf("🟡 %d ms", p.PingMs)
+							} else {
+								pingBadge = fmt.Sprintf("🟠 %d ms", p.PingMs)
+							}
+						} else if p.Latency > 0 {
+							ms := p.Latency.Milliseconds()
+							if ms < 60 {
+								pingBadge = fmt.Sprintf("🟢 %v", p.Latency.Round(time.Millisecond))
+							} else if ms < 140 {
+								pingBadge = fmt.Sprintf("🟡 %v", p.Latency.Round(time.Millisecond))
+							} else {
+								pingBadge = fmt.Sprintf("🟠 %v", p.Latency.Round(time.Millisecond))
+							}
+						}
+
 						if p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" || (guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(p.DeviceID)) {
 							icon = "[TLS]"
-							if p.PingMs > 0 {
-								statusDisplay = fmt.Sprintf("Прямой ShadowTLS (%d ms)", p.PingMs)
-							} else if p.Latency > 0 {
-								statusDisplay = fmt.Sprintf("Прямой ShadowTLS (%v)", p.Latency.Round(time.Millisecond))
+							if pingBadge != "" {
+								statusDisplay = fmt.Sprintf("Прямой ShadowTLS (%s)", pingBadge)
 							} else {
 								statusDisplay = "Прямой ShadowTLS (OK)"
 							}
@@ -8279,8 +8489,8 @@ func updateData() {
 							statusDisplay = "Установка Direct TCP (ShadowTLS)..."
 						} else if p.DirectP2P {
 							icon = "[P2P]"
-							if p.PingMs > 0 {
-								statusDisplay = fmt.Sprintf("Прямой AWG (%d ms)", p.PingMs)
+							if pingBadge != "" {
+								statusDisplay = fmt.Sprintf("Прямой AWG (%s)", pingBadge)
 							} else if p.Latency > 0 {
 								statusDisplay = fmt.Sprintf("⚠️ AWG (L3 таймаут, UDP %v)", p.Latency.Round(time.Millisecond))
 							} else {
@@ -8288,7 +8498,11 @@ func updateData() {
 							}
 						} else {
 							icon = "[NAT]"
-							statusDisplay = "Релей (MQTT / WSS)"
+							if pingBadge != "" {
+								statusDisplay = fmt.Sprintf("Релей (%s)", pingBadge)
+							} else {
+								statusDisplay = "Релей (MQTT / WSS)"
+							}
 						}
 					} else {
 						icon = "[OFF]"
@@ -8329,7 +8543,7 @@ func updateData() {
 						extraTags = append(extraTags, "[AWG: ⚠️]")
 					}
 					if p.Online && p.LossPercent > 0 {
-						extraTags = append(extraTags, fmt.Sprintf("[Потери: %d%%]", p.LossPercent))
+						extraTags = append(extraTags, fmt.Sprintf("[🔴 Потери: %d%%]", p.LossPercent))
 					}
 					extraInfo := ""
 					if len(extraTags) > 0 {
@@ -8369,7 +8583,7 @@ func updateData() {
 					if hListSummaryPeers != 0 {
 						lossStr := ""
 						if p.Online && p.LossPercent > 0 {
-							lossStr = fmt.Sprintf(" • Потери: %d%%", p.LossPercent)
+							lossStr = fmt.Sprintf(" • 🔴 Потери: %d%%", p.LossPercent)
 						}
 						sumLine := fmt.Sprintf("  %s %s • VIP: %s • %s • %s%s", icon, nameDisplay, vip, statusDisplay, platBadge, lossStr)
 						addListBoxItem(hListSummaryPeers, sumLine)
