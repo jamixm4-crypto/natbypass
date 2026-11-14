@@ -455,5 +455,19 @@ func buildSignalingChannels(cfg *config.Config) ([]signaling.SignalingChannel, e
 		channels = append(channels, ch)
 	}
 
+	// Always append LAN broadcast channel for zero-config local subnet discovery
+	netKey := ""
+	devID := "node"
+	if cfg != nil {
+		if prof := cfg.EnsureActiveProfile(); prof != nil {
+			netKey = prof.NetworkKey
+			if prof.ID != "" {
+				devID = prof.ID
+			}
+		}
+	}
+	lanCh := signaling.NewLANBroadcastChannel(devID, netKey, constants.DefaultLANDiscoveryPort)
+	channels = append(channels, lanCh)
+
 	return channels, nil
 }

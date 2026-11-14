@@ -2599,12 +2599,24 @@ func startSignaling(ctx context.Context, cfg *config.Config, deviceID string) *s
 			}
 		}
 		channels = append(channels, signaling.NewMQTTChannelNamed("mqtt:"+broker, broker, topic, deviceID, "", ""))
-		backups := []string{"tcp://broker.hivemq.com:1883", "tcp://broker.emqx.io:1883"}
+		backups := config.GetEffectiveBackupBrokersForBroker(broker)
 		for _, bURL := range backups {
 			if bURL != broker {
 				channels = append(channels, signaling.NewMQTTChannelNamed("mqtt:backup:"+bURL, bURL, topic, deviceID, "", ""))
 			}
 		}
+
+		netKey := ""
+		if activeProf != nil {
+			netKey = activeProf.NetworkKey
+		}
+		// 1. Zero-Config LAN / Wi-Fi Multicast & Broadcast Channel (<10ms discovery on local network)
+		lanCh := signaling.NewLANBroadcastChannel(deviceID, netKey, constants.DefaultLANDiscoveryPort)
+		channels = append(channels, lanCh)
+
+		// 2. Decentralized Serverless Kademlia DHT Discovery Channel
+		dhtCh := signaling.NewDHTChannel(deviceID, netKey, "")
+		channels = append(channels, dhtCh)
 	}
 
 	sigMgr := signaling.NewFallbackManager(channels)

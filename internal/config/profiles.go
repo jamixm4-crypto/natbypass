@@ -71,6 +71,10 @@ type Profile struct {
 var DefaultPublicMQTTBrokers = []string{
 	"ssl://broker.emqx.io:8883",
 	"ssl://broker.hivemq.com:8883",
+	"ssl://test.mosquitto.org:8883",
+	"tcp://broker.emqx.io:1883",
+	"tcp://broker.hivemq.com:1883",
+	"tcp://test.mosquitto.org:1883",
 }
 
 // extractBrokerHost возвращает хостнейм брокера без протокола и порта для дедупликации (e.g. "broker.emqx.io")

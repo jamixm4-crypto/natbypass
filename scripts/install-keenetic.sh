@@ -8,7 +8,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.22"
+    DEFAULT_BETA="v1.9.507-beta.23"
     BETA_MODE=0
 
     # Parse CLI flags
@@ -24,8 +24,9 @@ main() {
     done
 
     if [ "$BETA_MODE" -eq 1 ]; then
-        BETA_TAG=$(curl -s "https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
-        if [ -n "$BETA_TAG" ]; then
+        CACHE_BUST=$(date +%s 2>/dev/null || echo "1")
+        BETA_TAG=$(curl -s --connect-timeout 4 "https://raw.githubusercontent.com/${REPO}/main/mirror/releases/latest-beta.json?_t=${CACHE_BUST}" 2>/dev/null | grep '"version":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+        if [ -n "$BETA_TAG" ] && [ "${#BETA_TAG}" -lt 40 ]; then
             TAG="${BETA_TAG}"
         else
             TAG="${DEFAULT_BETA}"
@@ -237,32 +238,46 @@ main() {
     killall natbypass 2>/dev/null || true
 
     # 5. Download Release Binary
-    URLS="
-https://github.com/${REPO}/releases/download/${TAG}/natbypass-${TAG}-${BIN_SUFFIX}
-https://github.com/${REPO}/releases/download/${TAG}/natbypass-${BIN_SUFFIX}
-https://github.com/${REPO}/releases/latest/download/natbypass-${TAG}-${BIN_SUFFIX}
-https://github.com/${REPO}/releases/latest/download/natbypass-${BIN_SUFFIX}
-"
-
+    DL_NAMES="natbypass-${BIN_SUFFIX} natbypass-${TAG}-${BIN_SUFFIX}"
     echo ">> Загрузка бинарного файла ${BIN_SUFFIX} (${TAG})..."
     DOWNLOADED=0
     DOWNLOAD_SOURCE_URL=""
 
-    for u in $URLS; do
-        [ -z "$u" ] && continue
-        if command -v curl >/dev/null 2>&1; then
-            if curl -fsSL "$u" -o "${TARGET_BIN}" 2>/dev/null && [ -s "${TARGET_BIN}" ]; then
-                DOWNLOADED=1
-                DOWNLOAD_SOURCE_URL="$u"
-                break
+    for name in $DL_NAMES; do
+        CANDIDATE_URLS="
+https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
+"
+        for u in $CANDIDATE_URLS; do
+            [ -z "$u" ] && continue
+            MIRROR_HOST=$(echo "$u" | awk -F[/:] '{print $4}')
+            printf "   [•] Подключение к источнику: %s ...\n" "${MIRROR_HOST}"
+            rm -f "${TARGET_BIN}"
+
+            if command -v curl >/dev/null 2>&1; then
+                if curl -fL -k --connect-timeout 6 --max-time 60 --progress-bar "$u" -o "${TARGET_BIN}" && [ -s "${TARGET_BIN}" ]; then
+                    if head -c 4 "${TARGET_BIN}" 2>/dev/null | grep -q 'ELF'; then
+                        DOWNLOADED=1
+                        DOWNLOAD_SOURCE_URL="$u"
+                        print_green "   [✓] Загрузка успешно завершена (${name})"
+                        break 2
+                    fi
+                    rm -f "${TARGET_BIN}"
+                fi
+            elif command -v wget >/dev/null 2>&1; then
+                if wget --no-check-certificate --timeout=30 "$u" -O "${TARGET_BIN}" 2>/dev/null && [ -s "${TARGET_BIN}" ]; then
+                    if head -c 4 "${TARGET_BIN}" 2>/dev/null | grep -q 'ELF'; then
+                        DOWNLOADED=1
+                        DOWNLOAD_SOURCE_URL="$u"
+                        print_green "   [✓] Загрузка успешно завершена (${name})"
+                        break 2
+                    fi
+                    rm -f "${TARGET_BIN}"
+                fi
             fi
-        elif command -v wget >/dev/null 2>&1; then
-            if wget -q "$u" -O "${TARGET_BIN}" 2>/dev/null && [ -s "${TARGET_BIN}" ]; then
-                DOWNLOADED=1
-                DOWNLOAD_SOURCE_URL="$u"
-                break
-            fi
-        fi
+            print_yellow "   [!] Источник ${MIRROR_HOST} недоступен или медленный, переключаемся..."
+        done
     done
 
     if [ "$DOWNLOADED" -eq 0 ] || [ ! -s "${TARGET_BIN}" ]; then

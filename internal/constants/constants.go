@@ -18,6 +18,7 @@ const (
 	ConnectedPublishInterval = 120 * time.Second
 	DefaultIPTimeout         = 10 * time.Second
 	DefaultWGListenPort      = 51820
+	DefaultLANDiscoveryPort  = 51825
 	DefaultWGMTU             = 1280
 	MTUMedium                = 1360
 	MTUMinimum               = 1280

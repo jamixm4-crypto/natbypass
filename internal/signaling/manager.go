@@ -399,6 +399,12 @@ func (m *FallbackManager) SetNetworkKey(networkKey string) {
 		if mqttCh, ok := ch.(*MQTTChannel); ok {
 			mqttCh.SetNetworkKey(networkKey)
 		}
+		if lanCh, ok := ch.(*LANBroadcastChannel); ok {
+			lanCh.SetNetworkKey(networkKey)
+		}
+		if dhtCh, ok := ch.(*DHTChannel); ok {
+			dhtCh.SetNetworkKey(networkKey)
+		}
 	}
 }
 
