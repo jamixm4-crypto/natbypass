@@ -197,18 +197,18 @@ main() {
 
     for name in $DL_NAMES; do
         CANDIDATE_URLS="
-https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
 "
         for u in $CANDIDATE_URLS; do
             [ -z "$u" ] && continue
             MIRROR_HOST=$(echo "$u" | awk -F[/:] '{print $4}')
-            printf "   [•] Подключение к зеркалу: %s ...\n" "${MIRROR_HOST}"
+            printf "   [•] Подключение к источнику: %s ...\n" "${MIRROR_HOST}"
             rm -f "${TMP_BIN}"
 
             if command -v curl >/dev/null 2>&1; then
-                if curl -fL -k --connect-timeout 6 --max-time 60 --progress-bar "$u" -o "${TMP_BIN}" && [ -s "${TMP_BIN}" ]; then
+                if curl -fL -k --connect-timeout 6 --speed-limit 51200 --speed-time 5 --max-time 120 --progress-bar "$u" -o "${TMP_BIN}" && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         SUCCESS_URL="$u"
@@ -218,7 +218,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                     rm -f "${TMP_BIN}"
                 fi
             elif command -v wget >/dev/null 2>&1; then
-                if wget --no-check-certificate --timeout=30 "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if wget --no-check-certificate --timeout=15 "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         SUCCESS_URL="$u"
@@ -228,7 +228,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                     rm -f "${TMP_BIN}"
                 fi
             fi
-            print_yellow "   [!] Зеркало ${MIRROR_HOST} недоступно или медленное, переключаемся..."
+            print_yellow "   [!] Источник ${MIRROR_HOST} недоступен или медленный (<50 КБ/с), переключаемся..."
         done
     done
 
@@ -240,17 +240,17 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
             TAG="$FALLBACK_TAG"
             for name in $DL_NAMES; do
                 CANDIDATE_URLS="
-https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
 "
                 for u in $CANDIDATE_URLS; do
                     [ -z "$u" ] && continue
                     MIRROR_HOST=$(echo "$u" | awk -F[/:] '{print $4}')
-                    printf "   [•] Подключение к зеркалу: %s ...\n" "${MIRROR_HOST}"
+                    printf "   [•] Подключение к источнику: %s ...\n" "${MIRROR_HOST}"
                     rm -f "${TMP_BIN}"
                     if command -v curl >/dev/null 2>&1; then
-                        if curl -fL -k --connect-timeout 6 --max-time 60 --progress-bar "$u" -o "${TMP_BIN}" && [ -s "${TMP_BIN}" ]; then
+                        if curl -fL -k --connect-timeout 6 --speed-limit 51200 --speed-time 5 --max-time 120 --progress-bar "$u" -o "${TMP_BIN}" && [ -s "${TMP_BIN}" ]; then
                             if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                                 DOWNLOADED=1
                                 SUCCESS_URL="$u"
@@ -260,7 +260,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                             rm -f "${TMP_BIN}"
                         fi
                     elif command -v wget >/dev/null 2>&1; then
-                        if wget --no-check-certificate --timeout=30 "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                        if wget --no-check-certificate --timeout=15 "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                             if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                                 DOWNLOADED=1
                                 SUCCESS_URL="$u"
@@ -270,7 +270,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                             rm -f "${TMP_BIN}"
                         fi
                     fi
-                    print_yellow "   [!] Зеркало ${MIRROR_HOST} недоступно, переключаемся..."
+                    print_yellow "   [!] Источник ${MIRROR_HOST} недоступен или медленный (<50 КБ/с), переключаемся..."
                 done
             done
         fi

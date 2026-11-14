@@ -247,9 +247,9 @@ main() {
 
     for name in $DL_NAMES; do
         CANDIDATE_URLS="
-https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
 "
         for u in $CANDIDATE_URLS; do
             [ -z "$u" ] && continue
@@ -258,7 +258,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
             rm -f "${TARGET_BIN}"
 
             if command -v curl >/dev/null 2>&1; then
-                if curl -fL -k --connect-timeout 6 --max-time 60 --progress-bar "$u" -o "${TARGET_BIN}" && [ -s "${TARGET_BIN}" ]; then
+                if curl -fL -k --connect-timeout 6 --speed-limit 51200 --speed-time 5 --max-time 120 --progress-bar "$u" -o "${TARGET_BIN}" && [ -s "${TARGET_BIN}" ]; then
                     if head -c 4 "${TARGET_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         DOWNLOAD_SOURCE_URL="$u"
@@ -268,7 +268,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                     rm -f "${TARGET_BIN}"
                 fi
             elif command -v wget >/dev/null 2>&1; then
-                if wget --no-check-certificate --timeout=30 "$u" -O "${TARGET_BIN}" 2>/dev/null && [ -s "${TARGET_BIN}" ]; then
+                if wget --no-check-certificate --timeout=15 "$u" -O "${TARGET_BIN}" 2>/dev/null && [ -s "${TARGET_BIN}" ]; then
                     if head -c 4 "${TARGET_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         DOWNLOAD_SOURCE_URL="$u"
@@ -278,7 +278,7 @@ https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
                     rm -f "${TARGET_BIN}"
                 fi
             fi
-            print_yellow "   [!] Источник ${MIRROR_HOST} недоступен или медленный, переключаемся..."
+            print_yellow "   [!] Источник ${MIRROR_HOST} недоступен или медленный (<50 КБ/с), переключаемся..."
         done
     done
 

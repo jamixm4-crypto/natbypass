@@ -1101,7 +1101,8 @@ func main() {
 				conf = strings.TrimSpace(strings.ToLower(conf))
 			}
 			if conf == "y" || conf == "yes" || conf == "д" || conf == "да" {
-				_, nodes, _ := runCollection(ch, rx, topic, broker, networkKey, collectorID, "", true, *flagTimeout, false)
+				tID := *flagTarget
+				_, nodes, _ := runCollection(ch, rx, topic, broker, networkKey, collectorID, tID, true, *flagTimeout, false)
 				fmt.Println(colorBold + "\nРезультаты обновления:" + colorReset)
 				for id, n := range nodes {
 					fmt.Printf("  • %-22s: %s (%s)\n", id, n.Status, n.FullReport)
