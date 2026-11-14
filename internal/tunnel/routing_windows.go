@@ -213,14 +213,6 @@ func EnsurePeerHostRoute(peerVIP string) {
 		return
 	}
 
-	now := time.Now().Unix()
-	if prev, loaded := winPeerRoutes.LoadOrStore(cleanVIP, now); loaded {
-		if ts, ok := prev.(int64); ok && now-ts < 86400 {
-			return
-		}
-		winPeerRoutes.Store(cleanVIP, now)
-	}
-
 	ifIdx := getNatBypassIfIndexWindows()
 	args := []string{"add", cleanVIP, "mask", "255.255.255.255", "0.0.0.0", "metric", "5"}
 	if ifIdx > 0 {
@@ -452,9 +444,7 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
 
 	// 0. Cleanly teardown any prior exit node state before applying new one
-	if lastActiveExitVIP != "" {
-		disableExitNodeRoutingLocked(lastActiveExitVIP)
-	}
+	_ = disableExitNodeRoutingLocked("")
 	lastActiveExitVIP = cleanVIP
 
 	// 1. Routing loop prevention: bypass remote endpoints, MQTT broker, STUN servers via physical default gateway
@@ -489,6 +479,10 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	if cleanVIP != "" {
 		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", cleanVIP)
 		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", cleanVIP)
+	}
+	if ifIdx > 0 {
+		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
+		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
 	}
 
 	// On Windows Point-to-Point Wintun, the next hop for def1 routes MUST be cleanVIP (the exit gateway VIP),
@@ -535,19 +529,6 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	// 6. Fast DNS cache flush (10ms)
 	_ = runRouteCmd("ipconfig", "/flushdns")
 
-	// 7. Non-blocking asynchronous PowerShell safety sync (ensures Windows 11 Dnscache recognizes new DNS immediately)
-	if ifIdx > 0 {
-		go func(idx int, doh bool) {
-			var psDNS string
-			if doh {
-				psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('127.0.0.1', '77.88.8.8', '9.9.9.9', '1.1.1.1') -ErrorAction SilentlyContinue; Clear-DnsClientCache -ErrorAction SilentlyContinue", idx)
-			} else {
-				psDNS = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @('77.88.8.8', '9.9.9.9', '1.1.1.1') -ErrorAction SilentlyContinue; Clear-DnsClientCache -ErrorAction SilentlyContinue", idx)
-			}
-			_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psDNS)
-		}(ifIdx, dohActive)
-	}
-
 	return nil
 }
 
@@ -578,13 +559,14 @@ func disableExitNodeRoutingLocked(gatewayVIP string) error {
 	}
 
 	if ifIdx > 0 {
-		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
-		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
-		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
-		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "IF", fmt.Sprintf("%d", ifIdx))
+		ifIdxStr := fmt.Sprintf("%d", ifIdx)
+		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "IF", ifIdxStr)
+		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "0.0.0.0", "IF", ifIdxStr)
+		_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", "IF", ifIdxStr)
+		_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", "IF", ifIdxStr)
 		if vipToClean != "" {
-			_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", vipToClean, "IF", fmt.Sprintf("%d", ifIdx))
-			_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", vipToClean, "IF", fmt.Sprintf("%d", ifIdx))
+			_ = runRouteCmd("route", "delete", "0.0.0.0", "mask", "128.0.0.0", vipToClean, "IF", ifIdxStr)
+			_ = runRouteCmd("route", "delete", "128.0.0.0", "mask", "128.0.0.0", vipToClean, "IF", ifIdxStr)
 		}
 	}
 
@@ -624,18 +606,6 @@ func disableExitNodeRoutingLocked(gatewayVIP string) error {
 	_ = runRouteCmd("netsh", "interface", "ipv4", "delete", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "all")
 	_ = runRouteCmd("netsh", "interface", "ipv4", "set", "dnsservers", fmt.Sprintf("name=%s", adapterIdentifier), "source=dhcp")
 	_ = runRouteCmd("ipconfig", "/flushdns")
-
-	// 5. Asynchronous PowerShell cleanup (runs in background, zero latency for caller)
-	go func(targetIfIdx int) {
-		psClean := fmt.Sprintf(`
-			Get-NetRoute -DestinationPrefix '0.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-			Get-NetRoute -DestinationPrefix '128.0.0.0/1' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-			if (%d -gt 0) { Set-DnsClientServerAddress -InterfaceIndex %d -ResetServerAddresses -ErrorAction SilentlyContinue }
-			Get-DnsClientServerAddress | Where-Object { $_.InterfaceAlias -like '*NatBypass*' -or $_.InterfaceAlias -like '*Wintun*' } | Set-DnsClientServerAddress -ResetServerAddresses -ErrorAction SilentlyContinue
-			Clear-DnsClientCache -ErrorAction SilentlyContinue
-		`, targetIfIdx, targetIfIdx)
-		_ = runRouteCmd("powershell", "-NoProfile", "-NonInteractive", "-Command", psClean)
-	}(ifIdx)
 
 	return nil
 }

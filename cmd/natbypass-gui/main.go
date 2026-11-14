@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.18"
+	Version = "1.9.507-beta.19"
 	Commit  = "release"
 )
 
@@ -179,6 +179,8 @@ var (
 	procGetForegroundWindow      = moduser32.NewProc("GetForegroundWindow")
 	procAttachThreadInput        = moduser32.NewProc("AttachThreadInput")
 	procBringWindowToTop         = moduser32.NewProc("BringWindowToTop")
+	procScreenToClient           = moduser32.NewProc("ScreenToClient")
+	procDestroyMenu              = moduser32.NewProc("DestroyMenu")
 	procGetCurrentThreadId       = modkernel32.NewProc("GetCurrentThreadId")
 
 	modshell32            = syscall.NewLazyDLL("shell32.dll")
@@ -404,6 +406,7 @@ var (
 	hBtnManageProfiles    uintptr
 	hBtnBookmarkPeer      uintptr
 	hBtnExitNodeSelect    uintptr
+	hBtnExitNodeDirect    uintptr
 	hBtnExitNodeDisable   uintptr
 	hBtnToggleSubnetRoute uintptr
 	hListSummaryPeers     uintptr
@@ -2198,6 +2201,9 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 		if hBtnExitNodeSelect != 0 {
 			procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 		}
+		if hBtnExitNodeDirect != 0 {
+			procInvalidateRect.Call(hBtnExitNodeDirect, 0, 1)
+		}
 		updateData()
 	}()
 }
@@ -2219,6 +2225,9 @@ func disableExitNode() {
 	if hBtnExitNodeSelect != 0 {
 		procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 	}
+	if hBtnExitNodeDirect != 0 {
+		procInvalidateRect.Call(hBtnExitNodeDirect, 0, 1)
+	}
 	addLog("🌐 Выход в интернет через Exit Node отключен. Восстановлен стандартный интернет-шлюз.")
 	updateData()
 
@@ -2231,7 +2240,38 @@ func disableExitNode() {
 		}
 		writeDebug("Exit Node disabled, restored default gateway")
 		addLog("✅ Стандартный интернет-шлюз успешно восстановлен, маршруты 0.0.0.0/1 и 128.0.0.0/1 удалены.")
+		if hBtnExitNodeSelect != 0 {
+			procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
+		}
+		if hBtnExitNodeDirect != 0 {
+			procInvalidateRect.Call(hBtnExitNodeDirect, 0, 1)
+		}
+		updateData()
 	}()
+}
+
+func getSelectedPeer() *peer.Peer {
+	if registry == nil {
+		return nil
+	}
+	peers := registry.List()
+	if len(peers) == 0 {
+		return nil
+	}
+	if currentTab == 0 && hListSummaryPeers != 0 {
+		selIdx, _, _ := procSendMessageW.Call(hListSummaryPeers, 0x0188 /* LB_GETCURSEL */, 0, 0)
+		idx := int(int32(selIdx))
+		if idx >= 0 && idx < len(peers) {
+			return peers[idx]
+		}
+	} else if currentTab == 1 && hListPeers != 0 {
+		selIdx, _, _ := procSendMessageW.Call(hListPeers, 0x0188 /* LB_GETCURSEL */, 0, 0)
+		idx := int(int32(selIdx)) / 2
+		if idx >= 0 && idx < len(peers) {
+			return peers[idx]
+		}
+	}
+	return nil
 }
 
 func handleExitNodeSelect() {
@@ -2246,6 +2286,18 @@ func handleExitNodeSelect() {
 		return
 	}
 
+	// 2. Если в списке устройств явно выбран узел пользователем — используем именно его!
+	if selected := getSelectedPeer(); selected != nil && selected.Online {
+		displayName := selected.Nickname
+		if displayName == "" {
+			displayName = selected.DeviceID
+		}
+		addLog(fmt.Sprintf("🌐 Выбран интернет-шлюз из списка: [%s] (%s)", displayName, selected.VirtualIP))
+		setExitNodePeer(selected)
+		return
+	}
+
+	// 3. Собираем все онлайн узлы с включенным Exit Node
 	var exitNodes []*peer.Peer
 	for _, p := range registry.List() {
 		if p.Online && p.IsExitNode {
@@ -2254,19 +2306,53 @@ func handleExitNodeSelect() {
 	}
 
 	if len(exitNodes) == 0 {
-		addLog("💡 В сети пока нет устройств с включенным Exit Node. Включите Exit Node на удаленном устройстве.")
+		addLog("💡 В сети пока нет устройств с включенным Exit Node. Нажмите правой кнопкой мыши на любое устройство в списке и выберите 'Использовать как шлюз', либо включите 'Разрешить выход в интернет через меня' на удаленном узле.")
 		return
 	}
 
-	// 2. Автоматический выбор наилучшего интернет-шлюза (приоритет: роутер Keenetic или Linux-сервер)
-	var target *peer.Peer = exitNodes[0]
-	for _, en := range exitNodes {
-		if en.IsKeenetic || en.OS == "linux" {
-			target = en
-			break
-		}
+	if len(exitNodes) == 1 {
+		setExitNodePeer(exitNodes[0])
+		return
 	}
-	setExitNodePeer(target)
+
+	// 4. Если доступно несколько Exit Node и ни один не выбран в списке — показываем меню выбора шлюза
+	hMenu, _, _ := procCreatePopupMenu.Call()
+	for i, en := range exitNodes {
+		name := en.Nickname
+		if name == "" {
+			name = en.DeviceID
+		}
+		plat := en.Platform
+		if plat == "" {
+			plat = en.OS
+		}
+		itemLabel := fmt.Sprintf("🌐 [%s] %s (%s)", plat, name, en.VirtualIP)
+		itemStr, _ := syscall.UTF16PtrFromString(itemLabel)
+		procAppendMenuW.Call(hMenu, 0, uintptr(7000+i), uintptr(unsafe.Pointer(itemStr)))
+	}
+
+	var rect struct{ Left, Top, Right, Bottom int32 }
+	btnHwnd := hBtnExitNodeSelect
+	if currentTab == 1 && hBtnExitNodeDirect != 0 {
+		btnHwnd = hBtnExitNodeDirect
+	}
+	if btnHwnd != 0 {
+		procGetWindowRect.Call(btnHwnd, uintptr(unsafe.Pointer(&rect)))
+	} else {
+		var pt struct{ X, Y int32 }
+		procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+		rect.Left = pt.X
+		rect.Bottom = pt.Y
+	}
+
+	procSetForegroundWindow.Call(hMainWnd)
+	cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */|0x0002 /* TPM_RIGHTBUTTON */, uintptr(rect.Left), uintptr(rect.Bottom), 0, hMainWnd, 0)
+	procDestroyMenu.Call(hMenu)
+
+	chosenIdx := int(cmd) - 7000
+	if chosenIdx >= 0 && chosenIdx < len(exitNodes) {
+		setExitNodePeer(exitNodes[chosenIdx])
+	}
 }
 
 func handleToggleSubnetRoute() {
@@ -2281,14 +2367,7 @@ func handleToggleSubnetRoute() {
 		return
 	}
 
-	selIdx, _, _ := procSendMessageW.Call(hListPeers, 0x0188, 0, 0)
-	idx := int(int32(selIdx)) / 2
-
-	var targetPeer *peer.Peer
-	if idx >= 0 && idx < len(peers) {
-		targetPeer = peers[idx]
-	}
-
+	targetPeer := getSelectedPeer()
 	if targetPeer == nil || len(targetPeer.AdvertisedRoutes) == 0 {
 		for _, p := range peers {
 			if p.Online && len(p.AdvertisedRoutes) > 0 {
@@ -4021,6 +4100,18 @@ func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
 	if len(peers) == 0 {
 		return
 	}
+
+	// Update ListBox selection to the item directly under the mouse cursor
+	var pt struct{ X, Y int32 }
+	pt.X = x
+	pt.Y = y
+	procScreenToClient.Call(hList, uintptr(unsafe.Pointer(&pt)))
+	itemPointRes, _, _ := procSendMessageW.Call(hList, 0x01A9 /* LB_ITEMFROMPOINT */, 0, uintptr(uint32(uint16(pt.X))|(uint32(uint16(pt.Y))<<16)))
+	if (itemPointRes >> 16) == 0 {
+		clickedIdx := uintptr(itemPointRes & 0xFFFF)
+		procSendMessageW.Call(hList, 0x0186 /* LB_SETCURSEL */, clickedIdx, 0)
+	}
+
 	selIdx, _, _ := procSendMessageW.Call(hList, 0x0188 /* LB_GETCURSEL */, 0, 0)
 	idx := int(int32(selIdx))
 	if hList == hListPeers {
@@ -4068,6 +4159,7 @@ func showPeerContextMenu(hParent, hList uintptr, x, y int32) {
 
 	procSetForegroundWindow.Call(hParent)
 	cmd, _, _ := procTrackPopupMenu.Call(hMenu, 0x0100 /* TPM_RETURNCMD */ |0x0002 /* TPM_RIGHTBUTTON */, uintptr(x), uintptr(y), 0, hParent, 0)
+	procDestroyMenu.Call(hMenu)
 
 	switch cmd {
 	case 6001:
@@ -4233,12 +4325,12 @@ func buildModernUI(hInstance uintptr) {
 	hBtnCopyPeerVIP = createOwnerDrawButton(hInstance, "📋 Скопировать IP", cx+190, 68, 180, 34, ID_BTN_COPY_PEER_VIP, "normal")
 	hBtnPingPeer = createOwnerDrawButton(hInstance, "🧪 Ping узла", cx+380, 68, 160, 34, ID_BTN_PING_PEER, "normal")
 	hBtnConnectPeerTCP = createOwnerDrawButton(hInstance, "⚡ Direct TCP", cx+442, 68, 150, 34, ID_BTN_CONNECT_TCP, "primary")
-	btnExitNodeDirect := createOwnerDrawButton(hInstance, "🌐 Шлюз (Exit Node)", cx+600, 68, 240, 34, ID_BTN_EXIT_NODE_SELECT, "normal")
+	hBtnExitNodeDirect = createOwnerDrawButton(hInstance, "🌐 Шлюз (Exit Node)", cx+600, 68, 240, 34, ID_BTN_EXIT_NODE_SELECT, "normal")
 
 	hListPeers = createListBox(hInstance, cx, 108, cw, 600, hFontNormal)
 
 	tabPages[1] = []uintptr{
-		lblPeersPageTitle, hLblPeersDesc, hBtnBookmarkPeer, hBtnCopyPeerVIP, hBtnPingPeer, hBtnConnectPeerTCP, btnExitNodeDirect, hListPeers,
+		lblPeersPageTitle, hLblPeersDesc, hBtnBookmarkPeer, hBtnCopyPeerVIP, hBtnPingPeer, hBtnConnectPeerTCP, hBtnExitNodeDirect, hListPeers,
 	}
 
 	// СТРАНИЦА 2: ПРОФИЛИ СЕТЕЙ (PROFILES)
