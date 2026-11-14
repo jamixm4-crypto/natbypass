@@ -276,8 +276,8 @@ func (s *Server) checkCredentials(username, password string) bool {
 		return false
 	}
 
-	// 1. Configured static credentials (from config.yaml)
-	if s.user != "" && s.password != "" {
+	// 1. Configured static credentials (from config.yaml) — if user set a custom non-default password
+	if s.user != "" && s.password != "" && s.password != "admin" {
 		uMatch := subtle.ConstantTimeCompare([]byte(s.user), []byte(username)) == 1
 		pMatch := subtle.ConstantTimeCompare([]byte(s.password), []byte(password)) == 1
 		if uMatch && pMatch {
@@ -285,16 +285,7 @@ func (s *Server) checkCredentials(username, password string) bool {
 		}
 	}
 
-	// 2. Default fallback when no custom password set in config: admin / admin
-	// Check this immediately in 0ms BEFORE slow network/RCI probes on routers!
-	if (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
-		if subtle.ConstantTimeCompare([]byte(username), []byte("admin")) == 1 &&
-			subtle.ConstantTimeCompare([]byte(password), []byte("admin")) == 1 {
-			return true
-		}
-	}
-
-	// 3. KeeneticOS: check router system credentials
+	// 2. KeeneticOS: check router system credentials (e.g. user entering their router admin credentials)
 	if IsKeeneticOS() {
 		if s.customAuth != nil && s.customAuth(username, password) {
 			return true
@@ -302,7 +293,14 @@ func (s *Server) checkCredentials(username, password string) bool {
 		if VerifyKeeneticAuth(username, password) {
 			return true
 		}
-		return false
+	}
+
+	// 3. Fallback when password is empty or default admin: accept admin/admin
+	if (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
+		if subtle.ConstantTimeCompare([]byte(username), []byte("admin")) == 1 &&
+			subtle.ConstantTimeCompare([]byte(password), []byte("admin")) == 1 {
+			return true
+		}
 	}
 
 	// 4. Custom external authenticator if provided

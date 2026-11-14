@@ -160,19 +160,21 @@ func VerifyKeeneticAuth(username, password string) bool {
 // getKeeneticProbeTargets dynamically gathers local IP addresses and ports to probe Keenetic web services
 func getKeeneticProbeTargets() []string {
 	targets := []string{
-		"http://127.0.0.1:80",
-		"https://127.0.0.1:443",
 		"http://192.168.1.1:80",
 		"https://192.168.1.1:443",
+		"http://127.0.0.1:79",
+		"http://127.0.0.1:80",
+		"https://127.0.0.1:443",
 		"http://192.168.0.1:80",
 		"https://192.168.0.1:443",
 	}
 
 	seen := map[string]bool{
-		"http://127.0.0.1:80":     true,
-		"https://127.0.0.1:443":   true,
 		"http://192.168.1.1:80":   true,
 		"https://192.168.1.1:443": true,
+		"http://127.0.0.1:79":     true,
+		"http://127.0.0.1:80":     true,
+		"https://127.0.0.1:443":   true,
 		"http://192.168.0.1:80":   true,
 		"https://192.168.0.1:443": true,
 	}
@@ -253,19 +255,20 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 			jar, _ := cookiejar.New(nil)
 			client := &http.Client{
 				Jar:     jar,
-				Timeout: 1500 * time.Millisecond,
+				Timeout: 3500 * time.Millisecond,
 				CheckRedirect: func(req *http.Request, via []*http.Request) error {
 					return http.ErrUseLastResponse
 				},
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 					DialContext: (&net.Dialer{
-						Timeout: 800 * time.Millisecond,
+						Timeout: 1800 * time.Millisecond,
 					}).DialContext,
 				},
 			}
 
 			// Step 1: Request challenge
+			postURL := tgt + "/auth"
 			req, err := http.NewRequest("GET", tgt+"/auth", nil)
 			if err != nil {
 				return
@@ -277,7 +280,7 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 
 			// Handle HTTP to HTTPS redirect on /auth
 			if resp.StatusCode == http.StatusMovedPermanently || resp.StatusCode == http.StatusFound ||
-				resp.StatusCode == http.StatusTemporaryRedirect {
+				resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == 308 {
 				loc := resp.Header.Get("Location")
 				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
@@ -285,6 +288,7 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 					if strings.HasPrefix(loc, "/") {
 						loc = tgt + loc
 					}
+					postURL = loc
 					reqRedir, rErr := http.NewRequest("GET", loc, nil)
 					if rErr == nil {
 						resp, err = client.Do(reqRedir)
@@ -324,9 +328,25 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 				}
 			}
 
-			for _, r := range realmsToTry {
+			for idx, r := range realmsToTry {
 				if atomic.LoadInt32(&authSuccess) == 1 {
 					return
+				}
+
+				// If this is a retry with an alternative realm, request a fresh challenge because Keenetic burns used challenges
+				curChallenge := challenge
+				if idx > 0 {
+					cReq, cErr := http.NewRequest("GET", postURL, nil)
+					if cErr == nil {
+						if cResp, cErr := client.Do(cReq); cErr == nil {
+							newChal := cResp.Header.Get("X-NDM-Challenge")
+							_, _ = io.Copy(io.Discard, cResp.Body)
+							cResp.Body.Close()
+							if newChal != "" {
+								curChallenge = newChal
+							}
+						}
+					}
 				}
 
 				// Official Keenetic RCI:
@@ -335,7 +355,7 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 				md5Raw := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
 				md5Hex := hex.EncodeToString(md5Raw[:])
 
-				sha256Raw := sha256.Sum256([]byte(challenge + md5Hex))
+				sha256Raw := sha256.Sum256([]byte(curChallenge + md5Hex))
 				sha256Hex := hex.EncodeToString(sha256Raw[:])
 
 				payload, _ := json.Marshal(map[string]string{
@@ -343,7 +363,7 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 					"password": sha256Hex,
 				})
 
-				pReq, pErr := http.NewRequest("POST", tgt+"/auth", bytes.NewReader(payload))
+				pReq, pErr := http.NewRequest("POST", postURL, bytes.NewReader(payload))
 				if pErr != nil {
 					continue
 				}
@@ -365,14 +385,14 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 				// Alternative: SHA256 of login:realm:password
 				sha256P := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
 				sha256PHex := hex.EncodeToString(sha256P[:])
-				cSha := sha256.Sum256([]byte(challenge + sha256PHex))
+				cSha := sha256.Sum256([]byte(curChallenge + sha256PHex))
 				cShaHex := hex.EncodeToString(cSha[:])
 
 				payload2, _ := json.Marshal(map[string]string{
 					"login":    username,
 					"password": cShaHex,
 				})
-				pReq2, pErr2 := http.NewRequest("POST", tgt+"/auth", bytes.NewReader(payload2))
+				pReq2, pErr2 := http.NewRequest("POST", postURL, bytes.NewReader(payload2))
 				if pErr2 == nil {
 					pReq2.Header.Set("Content-Type", "application/json; charset=utf-8")
 					pResp2, pErr2 := client.Do(pReq2)
@@ -396,11 +416,11 @@ func verifyKeeneticRCIChallenge(username, password string) bool {
 // verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
 func verifyViaLocalKeeneticHTTP(username, password string) bool {
 	client := &http.Client{
-		Timeout: 1000 * time.Millisecond,
+		Timeout: 2500 * time.Millisecond,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			DialContext: (&net.Dialer{
-				Timeout: 600 * time.Millisecond,
+				Timeout: 1500 * time.Millisecond,
 			}).DialContext,
 		},
 	}

@@ -4481,11 +4481,6 @@ func (s *Server) handleAdminPasswordChange(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if IsKeeneticOS() {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "На Keenetic пароль управляется через системный интерфейс KeeneticOS")
-		return
-	}
-
 	var req struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
@@ -4495,23 +4490,35 @@ func (s *Server) handleAdminPasswordChange(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if len(req.NewPassword) < 8 {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "новый пароль должен содержать минимум 8 символов")
+	if len(req.NewPassword) < 4 {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "новый пароль должен содержать минимум 4 символа")
 		return
 	}
 
-	// Проверяем текущий пароль строго — никаких хардкод-значений
-	if s.password != "" {
-		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte(s.password)) != 1 {
-			s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль")
-			return
+	// Проверяем текущий пароль (настройки в config.yaml, дефолтный admin или системный Keenetic)
+	currentValid := false
+	if s.password != "" && s.password != "admin" {
+		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte(s.password)) == 1 {
+			currentValid = true
 		}
 	} else {
-		// Пароль не установлен: допускаем только "admin" (дефолт), НЕ пустую строку и НЕ "admin123"
-		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte("admin")) != 1 {
-			s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль")
-			return
+		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte("admin")) == 1 {
+			currentValid = true
 		}
+	}
+	if !currentValid && IsKeeneticOS() {
+		checkUser := s.user
+		if checkUser == "" {
+			checkUser = "admin"
+		}
+		if VerifyKeeneticAuth(checkUser, req.CurrentPassword) || VerifyKeeneticAuth("admin", req.CurrentPassword) {
+			currentValid = true
+		}
+	}
+
+	if !currentValid {
+		s.jsonResponse(w, http.StatusUnauthorized, nil, "неверный текущий пароль")
+		return
 	}
 	if s.user == "" {
 		s.user = "admin"
@@ -4521,13 +4528,14 @@ func (s *Server) handleAdminPasswordChange(w http.ResponseWriter, r *http.Reques
 	s.password = req.NewPassword
 
 	// Сохраняем в config.yaml
-	if s.configPath != "" {
-		if cfg, err := config.Load(s.configPath); err == nil && cfg != nil {
+	targetCfgPath := s.resolveConfigPath()
+	if targetCfgPath != "" {
+		if cfg, err := config.Load(targetCfgPath); err == nil && cfg != nil {
 			if cfg.WebUI.Username == "" {
 				cfg.WebUI.Username = s.user
 			}
 			cfg.WebUI.Password = req.NewPassword
-			if err := config.Save(cfg, s.configPath, false); err != nil {
+			if err := config.Save(cfg, targetCfgPath, false); err != nil {
 				s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка сохранения настроек: "+err.Error())
 				return
 			}
