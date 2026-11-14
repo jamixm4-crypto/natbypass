@@ -197,43 +197,38 @@ main() {
 
     for name in $DL_NAMES; do
         CANDIDATE_URLS="
-https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
-https://ghproxy.net/https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
 "
         for u in $CANDIDATE_URLS; do
             [ -z "$u" ] && continue
-            if command -v aria2c >/dev/null 2>&1; then
-                rm -f "${TMP_BIN}" "${TMP_BIN}.aria2"
-                if aria2c -q -x 4 -s 4 -k 512K --check-certificate=false --connect-timeout=8 --timeout=30 -d /tmp -o natbypass.new "$u" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
-                    if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
-                        DOWNLOADED=1
-                        SUCCESS_URL="$u"
-                        break 2
-                    fi
-                    rm -f "${TMP_BIN}"
-                fi
-            fi
+            MIRROR_HOST=$(echo "$u" | awk -F[/:] '{print $4}')
+            printf "   [•] Подключение к зеркалу: %s ...\n" "${MIRROR_HOST}"
+            rm -f "${TMP_BIN}"
+
             if command -v curl >/dev/null 2>&1; then
-                if curl -fsSL -k --connect-timeout 8 --max-time 180 --retry 3 --retry-delay 1 "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if curl -fL -k --connect-timeout 6 --max-time 60 --progress-bar "$u" -o "${TMP_BIN}" && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         SUCCESS_URL="$u"
+                        print_green "   [✓] Загрузка успешно завершена (${name})"
                         break 2
                     fi
                     rm -f "${TMP_BIN}"
                 fi
             elif command -v wget >/dev/null 2>&1; then
-                if wget -q --no-check-certificate --timeout=15 --tries=3 -c "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                if wget --no-check-certificate --timeout=30 "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                     if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                         DOWNLOADED=1
                         SUCCESS_URL="$u"
+                        print_green "   [✓] Загрузка успешно завершена (${name})"
                         break 2
                     fi
                     rm -f "${TMP_BIN}"
                 fi
             fi
+            print_yellow "   [!] Зеркало ${MIRROR_HOST} недоступно или медленное, переключаемся..."
         done
     done
 
@@ -245,32 +240,37 @@ https://github.com/${REPO}/releases/download/${TAG}/${name}
             TAG="$FALLBACK_TAG"
             for name in $DL_NAMES; do
                 CANDIDATE_URLS="
-https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
-https://ghproxy.net/https://github.com/${REPO}/releases/download/${TAG}/${name}
 https://github.com/${REPO}/releases/download/${TAG}/${name}
+https://gh-proxy.com/https://github.com/${REPO}/releases/download/${TAG}/${name}
 "
                 for u in $CANDIDATE_URLS; do
                     [ -z "$u" ] && continue
+                    MIRROR_HOST=$(echo "$u" | awk -F[/:] '{print $4}')
+                    printf "   [•] Подключение к зеркалу: %s ...\n" "${MIRROR_HOST}"
+                    rm -f "${TMP_BIN}"
                     if command -v curl >/dev/null 2>&1; then
-                        if curl -fsSL -k --connect-timeout 8 --max-time 180 --retry 3 --retry-delay 1 "$u" -o "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                        if curl -fL -k --connect-timeout 6 --max-time 60 --progress-bar "$u" -o "${TMP_BIN}" && [ -s "${TMP_BIN}" ]; then
                             if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                                 DOWNLOADED=1
                                 SUCCESS_URL="$u"
+                                print_green "   [✓] Загрузка успешно завершена (${name})"
                                 break 2
                             fi
                             rm -f "${TMP_BIN}"
                         fi
                     elif command -v wget >/dev/null 2>&1; then
-                        if wget -q --no-check-certificate --timeout=15 --tries=3 -c "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
+                        if wget --no-check-certificate --timeout=30 "$u" -O "${TMP_BIN}" 2>/dev/null && [ -s "${TMP_BIN}" ]; then
                             if head -c 4 "${TMP_BIN}" 2>/dev/null | grep -q 'ELF'; then
                                 DOWNLOADED=1
                                 SUCCESS_URL="$u"
+                                print_green "   [✓] Загрузка успешно завершена (${name})"
                                 break 2
                             fi
                             rm -f "${TMP_BIN}"
                         fi
                     fi
+                    print_yellow "   [!] Зеркало ${MIRROR_HOST} недоступно, переключаемся..."
                 done
             done
         fi
