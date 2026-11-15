@@ -523,7 +523,7 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 	var filtered []GitHubAsset
 	for _, a := range assets {
 		nl := strings.ToLower(a.Name)
-		if strings.Contains(nl, "diag") || strings.Contains(nl, "builder") || strings.Contains(nl, "toolkit") || strings.Contains(nl, "probe") || strings.HasPrefix(nl, "test-") || strings.HasSuffix(nl, ".zip") || strings.HasSuffix(nl, ".tar.gz") || strings.HasSuffix(nl, ".example") {
+		if strings.Contains(nl, "diag") || strings.Contains(nl, "builder") || strings.Contains(nl, "toolkit") || strings.Contains(nl, "probe") || strings.HasPrefix(nl, "test-") || strings.HasSuffix(nl, ".zip") || strings.HasSuffix(nl, ".tar.gz") || strings.HasSuffix(nl, ".example") || strings.HasSuffix(nl, ".sha256") || strings.HasSuffix(nl, ".md5") {
 			continue
 		}
 		if osName == "windows" {
@@ -533,7 +533,7 @@ func pickAsset(assets []GitHubAsset) (string, string, int64) {
 			}
 		} else if osName == "linux" {
 			// На Linux исключаем файлы .exe, .apk, скрипты, конфиги, dll, подписи и резервные копии
-			if strings.HasSuffix(nl, ".exe") || strings.HasSuffix(nl, ".apk") || strings.HasSuffix(nl, ".ps1") || strings.HasSuffix(nl, ".yaml") || strings.HasSuffix(nl, ".dll") || strings.HasSuffix(nl, ".sig") || strings.HasSuffix(nl, ".pem") || strings.Contains(nl, ".old") {
+			if strings.HasSuffix(nl, ".exe") || strings.HasSuffix(nl, ".apk") || strings.HasSuffix(nl, ".ps1") || strings.HasSuffix(nl, ".yaml") || strings.HasSuffix(nl, ".dll") || strings.HasSuffix(nl, ".sig") || strings.HasSuffix(nl, ".pem") || strings.HasSuffix(nl, ".sha256") || strings.HasSuffix(nl, ".md5") || strings.Contains(nl, ".old") {
 				continue
 			}
 		} else if osName == "android" {

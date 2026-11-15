@@ -822,8 +822,16 @@ func ensureDefaultRouteInMain(wanTable string) {
 	}
 }
 
-// getPhysicalGatewayLinux finds the physical default gateway IP
-func getPhysicalGatewayLinux() string {
+type physicalRouteLinux struct {
+	Gateway string
+	Device  string
+}
+
+// getPhysicalRouteLinux discovers the physical default gateway IP and egress interface.
+// Works seamlessly across DHCP, static IP, PPPoE (dev without via), and cellular LTE modems.
+func getPhysicalRouteLinux() physicalRouteLinux {
+	res := physicalRouteLinux{}
+
 	// 1. Try ip route get 8.8.8.8 (most accurate query across all Linux/Keenetic/OpenWrt kernels)
 	if out, err := exec.Command("sh", "-c", "ip route get 8.8.8.8 2>/dev/null | head -n1").Output(); err == nil {
 		fields := strings.Fields(string(out))
@@ -831,11 +839,20 @@ func getPhysicalGatewayLinux() string {
 			if f == "via" && i+1 < len(fields) {
 				gw := fields[i+1]
 				if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
-					return gw
+					res.Gateway = gw
+				}
+			} else if f == "dev" && i+1 < len(fields) {
+				dev := fields[i+1]
+				if dev != "nb0" && dev != "lo" {
+					res.Device = dev
 				}
 			}
 		}
+		if res.Gateway != "" || res.Device != "" {
+			return res
+		}
 	}
+
 	// 2. Try known ISP tables on Keenetic/OpenWrt
 	for _, tbl := range []string{"1000", "1001", "1002", "100", "200", "default", "main"} {
 		cmdStr := fmt.Sprintf("ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1", tbl)
@@ -845,22 +862,46 @@ func getPhysicalGatewayLinux() string {
 				if f == "via" && i+1 < len(fields) {
 					gw := fields[i+1]
 					if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
-						return gw
+						res.Gateway = gw
 					}
+				} else if f == "dev" && i+1 < len(fields) {
+					dev := fields[i+1]
+					if dev != "nb0" && dev != "lo" {
+						res.Device = dev
+					}
+				}
+			}
+			if res.Gateway != "" || res.Device != "" {
+				return res
+			}
+		}
+	}
+
+	// 3. Fallback to standard table main
+	cmd := exec.Command("sh", "-c", "ip route show default | grep -v 'nb0' | head -n1")
+	out, err := cmd.Output()
+	if err == nil {
+		fields := strings.Fields(string(out))
+		for i, f := range fields {
+			if f == "via" && i+1 < len(fields) {
+				gw := fields[i+1]
+				if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
+					res.Gateway = gw
+				}
+			} else if f == "dev" && i+1 < len(fields) {
+				dev := fields[i+1]
+				if dev != "nb0" && dev != "lo" {
+					res.Device = dev
 				}
 			}
 		}
 	}
-	// 3. Fallback to standard table main
-	cmd := exec.Command("sh", "-c", "ip route show default | grep -v 'nb0' | head -n1 | awk '{print $3}'")
-	out, err := cmd.Output()
-	if err == nil {
-		gw := strings.TrimSpace(string(out))
-		if ip := net.ParseIP(gw); ip != nil && !ip.IsUnspecified() {
-			return gw
-		}
-	}
-	return ""
+	return res
+}
+
+// getPhysicalGatewayLinux finds the physical default gateway IP
+func getPhysicalGatewayLinux() string {
+	return getPhysicalRouteLinux().Gateway
 }
 
 func extractHostIPs(endpoint string) []string {
@@ -908,15 +949,15 @@ func extractHostIPs(endpoint string) []string {
 // BypassEndpoint dynamically adds a /32 route via the physical default gateway for an endpoint IP/host
 // to prevent routing loops when Exit Node routing is active.
 func BypassEndpoint(endpoint string) error {
-	physGW := getPhysicalGatewayLinux()
-	if physGW == "" || endpoint == "" {
+	phys := getPhysicalRouteLinux()
+	if (phys.Gateway == "" && phys.Device == "") || endpoint == "" {
 		return nil
 	}
 	hostIPs := extractHostIPs(endpoint)
 	linuxBypassedMu.Lock()
 	defer linuxBypassedMu.Unlock()
 	for _, hostIP := range hostIPs {
-		if hostIP == physGW {
+		if phys.Gateway != "" && hostIP == phys.Gateway {
 			continue
 		}
 		if ip := net.ParseIP(hostIP); ip != nil {
@@ -933,12 +974,20 @@ func BypassEndpoint(endpoint string) error {
 			}
 		}
 		if !alreadyAdded {
-			_ = runLinuxCmd("ip", "route", "replace", hostIP+"/32", "via", physGW, "table", "main")
-			_ = runLinuxCmd("ip", "route", "replace", hostIP+"/32", "via", physGW)
+			args := []string{"route", "replace", hostIP + "/32"}
+			if phys.Gateway != "" {
+				args = append(args, "via", phys.Gateway)
+			}
+			if phys.Device != "" {
+				args = append(args, "dev", phys.Device)
+			}
+			args = append(args, "onlink")
+			_ = runLinuxCmd("ip", append(args, "table", "main")...)
+			_ = runLinuxCmd("ip", args...)
 			if isKeeneticDevice() {
 				wanTable := findLinuxWANTable()
 				if wanTable != "" && wanTable != "main" {
-					_ = runLinuxCmd("ip", "route", "replace", hostIP+"/32", "via", physGW, "table", wanTable)
+					_ = runLinuxCmd("ip", append(args, "table", wanTable)...)
 				}
 			}
 			lastBypassedEndpointIPs = append(lastBypassedEndpointIPs, hostIP)
@@ -961,17 +1010,25 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		_ = BypassEndpoint(ep)
 	}
 
-	// 2. Add def1 routes in table main
-	_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
-	_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
-	_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "onlink")
-	_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "onlink")
+	// 2. Add WireGuard-parity def1 routes directly to nb0 TUN interface
+	_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "dev", "nb0", "table", "main")
+	_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "dev", "nb0", "table", "main")
+	_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "dev", "nb0")
+	_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "dev", "nb0")
+	if cleanVIP != "" {
+		_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
+		_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
+	}
 
 	if isKeeneticDevice() {
 		// Keenetic NDM: Add def1 routes to wanTable as well so table 1000 routes through nb0
 		if wanTable != "" && wanTable != "main" {
-			_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
-			_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
+			_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "dev", "nb0", "table", wanTable)
+			_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "dev", "nb0", "table", wanTable)
+			if cleanVIP != "" {
+				_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
+				_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
+			}
 		}
 		// Keenetic NDM: Priority 500 lookup main to ensure local router processes and LAN devices prioritize table main over rule 1000
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "500", "lookup", "main")
@@ -984,10 +1041,10 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 
 	// 3. Ensure DNS servers (1.1.1.1, 8.8.8.8, 77.88.8.8, 9.9.9.9) are routed via exit node
 	for _, dns := range []string{"1.1.1.1/32", "8.8.8.8/32", "77.88.8.8/32", "9.9.9.9/32"} {
-		_ = runLinuxCmd("ip", "route", "replace", dns, "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
-		_ = runLinuxCmd("ip", "route", "replace", dns, "via", cleanVIP, "dev", "nb0", "onlink")
+		_ = runLinuxCmd("ip", "route", "replace", dns, "dev", "nb0", "table", "main")
+		_ = runLinuxCmd("ip", "route", "replace", dns, "dev", "nb0")
 		if isKeeneticDevice() && wanTable != "" && wanTable != "main" {
-			_ = runLinuxCmd("ip", "route", "replace", dns, "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
+			_ = runLinuxCmd("ip", "route", "replace", dns, "dev", "nb0", "table", wanTable)
 		}
 	}
 
@@ -1001,6 +1058,12 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 // setLinuxExitNodeDNS настраивает DNS серверы при активации exit node на Linux.
 // R2: Без этого DNS запросы могут идти мимо VPN-тоннеля (DNS leak).
 func setLinuxExitNodeDNS() {
+	if isKeeneticDevice() {
+		// On KeeneticOS, NDM manages local dnsmasq (127.0.0.1).
+		// Overwriting /etc/resolv.conf breaks Keenetic.
+		// Public DNS resolvers (1.1.1.1, 8.8.8.8, 77.88.8.8) are routed via nb0 directly.
+		return
+	}
 	dohActive := false
 	if conn, err := net.DialTimeout("udp", "127.0.0.1:53", 100*time.Millisecond); err == nil {
 		_ = conn.Close()

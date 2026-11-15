@@ -269,6 +269,9 @@ func runCollection(
 		}
 	}
 
+	// Brief pause to allow initial MQTT subscriptions to settle before publishing
+	time.Sleep(500 * time.Millisecond)
+
 	// Send request signal with retry
 	var sendErr error
 	for attempt := 1; attempt <= 4; attempt++ {
@@ -276,7 +279,7 @@ func runCollection(
 		if sendErr == nil {
 			break
 		}
-		time.Sleep(400 * time.Millisecond)
+		time.Sleep(600 * time.Millisecond)
 	}
 	if sendErr != nil {
 		fmt.Printf(colorYellow+"[!] Предупреждение: ошибка отправки команды в топик: %v\n"+colorReset, sendErr)
