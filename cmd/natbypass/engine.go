@@ -1527,11 +1527,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 
 			// Exit Node Userspace Transit Forwarder:
-			// Fallback userspace proxying is only used if native TUN/Wintun adapter is unavailable.
-			// When tunDev != nil, native OS kernel forwarding & NAT (Netfilter / Windows NetNat) is used directly for WireGuard parity.
-			if tunDev == nil && runtime.GOOS == "windows" && transitForwarder != nil && cfg.Network.AllowExitNode {
+			// On Windows, the OS lacks native kernel NAT masquerade for Wintun without Hyper-V NetNat.
+			// Userspace transit forwarder handles ICMP, UDP (DNS), and TCP proxying directly via host sockets for instant exit node access.
+			// On Linux, if tunDev == nil, transit forwarder acts as an instant fallback.
+			if (runtime.GOOS == "windows" || tunDev == nil) && transitForwarder != nil && cfg.Network.AllowExitNode {
 				if transitForwarder.HandleTransitPacket(payload) {
-					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace fallback")
+					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder")
 					return
 				}
 			}

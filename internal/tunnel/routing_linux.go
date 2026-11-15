@@ -113,73 +113,82 @@ func findIptablesBinary() string {
 	return "iptables"
 }
 
+// runIptablesExec executes iptables with -w 2 lock, automatically falling back without -w if unsupported.
+func runIptablesExec(ipt string, args ...string) error {
+	wArgs := append([]string{"-w", "2"}, args...)
+	if err := exec.Command(ipt, wArgs...).Run(); err == nil {
+		return nil
+	}
+	return exec.Command(ipt, args...).Run()
+}
+
 // ensureIptablesRule checks if a rule exists in iptables; if not, appends it.
 func ensureIptablesRule(ipt string, table string, chain string, args ...string) {
-	checkArgs := []string{"-w", "2"}
+	checkArgs := []string{}
 	if table != "" {
 		checkArgs = append(checkArgs, "-t", table)
 	}
 	checkArgs = append(checkArgs, "-C", chain)
 	checkArgs = append(checkArgs, args...)
-	if exec.Command(ipt, checkArgs...).Run() == nil {
+	if runIptablesExec(ipt, checkArgs...) == nil {
 		return // Rule already exists, do not duplicate!
 	}
-	insertArgs := []string{"-w", "2"}
+	insertArgs := []string{}
 	if table != "" {
 		insertArgs = append(insertArgs, "-t", table)
 	}
 	insertArgs = append(insertArgs, "-A", chain)
 	insertArgs = append(insertArgs, args...)
-	_ = exec.Command(ipt, insertArgs...).Run()
+	_ = runIptablesExec(ipt, insertArgs...)
 }
 
 // forceInsertIptablesRule ensures a rule is at the very top (rule 1) of a chain.
 // If the rule already exists anywhere in the chain, it is removed first to avoid duplicates.
 func forceInsertIptablesRule(ipt, table, chain string, args ...string) {
-	checkArgs := []string{"-w", "2"}
+	checkArgs := []string{}
 	if table != "" {
 		checkArgs = append(checkArgs, "-t", table)
 	}
 	checkArgs = append(checkArgs, "-C", chain)
 	checkArgs = append(checkArgs, args...)
-	if exec.Command(ipt, checkArgs...).Run() == nil {
+	if runIptablesExec(ipt, checkArgs...) == nil {
 		// Rule exists. Remove it so we can re-insert at top
-		delArgs := []string{"-w", "2"}
+		delArgs := []string{}
 		if table != "" {
 			delArgs = append(delArgs, "-t", table)
 		}
 		delArgs = append(delArgs, "-D", chain)
 		delArgs = append(delArgs, args...)
-		_ = exec.Command(ipt, delArgs...).Run()
+		_ = runIptablesExec(ipt, delArgs...)
 	}
-	insertArgs := []string{"-w", "2"}
+	insertArgs := []string{}
 	if table != "" {
 		insertArgs = append(insertArgs, "-t", table)
 	}
 	insertArgs = append(insertArgs, "-I", chain, "1")
 	insertArgs = append(insertArgs, args...)
-	_ = exec.Command(ipt, insertArgs...).Run()
+	_ = runIptablesExec(ipt, insertArgs...)
 }
 
 // insertIptablesRule inserts a rule at the TOP of a chain (-I), ensuring it takes priority
 // over any existing rules (e.g. Docker's DROP policies). Idempotent via -C check.
 func insertIptablesRule(ipt, table, chain string, args ...string) {
-	checkArgs := []string{"-w", "2"}
+	checkArgs := []string{}
 	if table != "" {
 		checkArgs = append(checkArgs, "-t", table)
 	}
 	checkArgs = append(checkArgs, "-C", chain)
 	checkArgs = append(checkArgs, args...)
-	if exec.Command(ipt, checkArgs...).Run() == nil {
+	if runIptablesExec(ipt, checkArgs...) == nil {
 		return // already exists
 	}
-	insertArgs := []string{"-w", "2"}
+	insertArgs := []string{}
 	if table != "" {
 		insertArgs = append(insertArgs, "-t", table)
 	}
 	insertArgs = append(insertArgs, "-I", chain, "1")
 	insertArgs = append(insertArgs, args...)
-	_ = exec.Command(ipt, insertArgs...).Run()
+	_ = runIptablesExec(ipt, insertArgs...)
 }
 
 // buildMeshSubnetList возвращает уникальный набор подсетей для iptables/ip-route: подсеть из конфига + 100.64.200.0/24.
@@ -1003,6 +1012,7 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		return fmt.Errorf("gateway VIP is required")
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+	_ = cleanVIP
 	wanTable := findLinuxWANTable()
 
 	// 1. Bypass remote endpoint IPs via physical default gateway to prevent routing loop
@@ -1015,28 +1025,24 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 	_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "dev", "nb0", "table", "main")
 	_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "dev", "nb0")
 	_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "dev", "nb0")
-	if cleanVIP != "" {
-		_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
-		_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
-	}
 
 	if isKeeneticDevice() {
 		// Keenetic NDM: Add def1 routes to wanTable as well so table 1000 routes through nb0
 		if wanTable != "" && wanTable != "main" {
 			_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "dev", "nb0", "table", wanTable)
 			_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "dev", "nb0", "table", wanTable)
-			if cleanVIP != "" {
-				_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
-				_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
-			}
 		}
 		// Keenetic NDM: Priority 500 lookup main to ensure local router processes and LAN devices prioritize table main over rule 1000
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "500", "lookup", "main")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "500", "lookup", "main")
 
-		// Keenetic NDM: Masquerade LAN traffic exiting through nb0 to cleanVIP
+		// Keenetic NDM: Masquerade LAN traffic exiting through nb0 to cleanVIP, and accept forwarding between LAN (br0) and nb0
 		ipt := findIptablesBinary()
 		forceInsertIptablesRule(ipt, "nat", "POSTROUTING", "-o", "nb0", "-j", "MASQUERADE")
+		forceInsertIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "FORWARD", "-i", "br0", "-o", "nb0", "-j", "ACCEPT")
+		forceInsertIptablesRule(ipt, "", "FORWARD", "-i", "nb0", "-o", "br0", "-j", "ACCEPT")
 	}
 
 	// 3. Ensure DNS servers (1.1.1.1, 8.8.8.8, 77.88.8.8, 9.9.9.9) are routed via exit node
@@ -1127,10 +1133,15 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 			}
 		}
 		ipt := findIptablesBinary()
-		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-o", "nb0", "-j", "MASQUERADE").Run()
+		_ = runIptablesExec(ipt, "-t", "nat", "-D", "POSTROUTING", "-o", "nb0", "-j", "MASQUERADE")
+		_ = runIptablesExec(ipt, "-D", "FORWARD", "-i", "nb0", "-j", "ACCEPT")
+		_ = runIptablesExec(ipt, "-D", "FORWARD", "-o", "nb0", "-j", "ACCEPT")
+		_ = runIptablesExec(ipt, "-D", "FORWARD", "-i", "br0", "-o", "nb0", "-j", "ACCEPT")
+		_ = runIptablesExec(ipt, "-D", "FORWARD", "-i", "nb0", "-o", "br0", "-j", "ACCEPT")
 	}
 	if gatewayVIP != "" {
 		cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+	_ = cleanVIP
 		_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1", "via", cleanVIP)
 		_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1", "via", cleanVIP)
 		_ = runLinuxCmd("ip", "route", "del", "1.1.1.1/32", "via", cleanVIP)
@@ -1168,6 +1179,7 @@ func DisableExitNodeRouting(gatewayVIP string) error {
 // AddSubnetRoute adds a route for a subnet CIDR via gatewayVIP with dev nb0 onlink.
 func AddSubnetRoute(subnetCIDR string, gatewayVIP string) error {
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+	_ = cleanVIP
 	_ = runLinuxCmd("ip", "route", "replace", subnetCIDR, "dev", "nb0", "table", "main", "onlink")
 	err := runLinuxCmd("ip", "route", "replace", subnetCIDR, "dev", "nb0", "onlink")
 	if err != nil && cleanVIP != "" {

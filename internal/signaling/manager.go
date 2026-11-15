@@ -93,7 +93,7 @@ func (m *FallbackManager) Send(ctx context.Context, payload *Payload) error {
 			wg.Add(1)
 			go func(c SignalingChannel) {
 				defer wg.Done()
-				sCtx, sCancel := context.WithTimeout(ctx, 4*time.Second)
+				sCtx, sCancel := context.WithTimeout(ctx, 9*time.Second)
 				defer sCancel()
 				err := m.sendWithRetry(sCtx, c, payload)
 				broadcastMu.Lock()

@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.26"
+	Version = "1.9.507-beta.27"
 	Commit  = "release"
 )
 
@@ -5558,9 +5558,9 @@ func startEngineFromConfig(c *config.Config) {
 			}
 
 			// Exit Node Userspace Transit Forwarder:
-			// Fallback userspace proxying is only used if native TUN/Wintun adapter is unavailable.
-			// When tunDev != nil, native OS kernel forwarding & Windows NetNat handles transit for WireGuard parity.
-			if tunDev == nil && guiTransitForwarder != nil && allowExitNode {
+			// On Windows, the OS lacks native kernel NAT masquerade for Wintun without Hyper-V NetNat.
+			// Userspace transit forwarder handles ICMP, UDP (DNS), and TCP proxying directly via host sockets for instant exit node access.
+			if guiTransitForwarder != nil && allowExitNode {
 				if guiTransitForwarder.HandleTransitPacket(payload) {
 					atomic.AddUint64(&packetsRecvCount, 1)
 					atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))

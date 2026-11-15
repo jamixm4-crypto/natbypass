@@ -154,7 +154,7 @@ func printBanner() {
 	fmt.Print(colorBrightCyan + colorBold + `
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║               NATBYPASS CLUSTER DIAGNOSTIC & CONTROL CENTER                  ║
-║                  (v1.9.226-beta23 | Local Engineering)                        ║
+║                  (v1.9.507-beta27 | Local Engineering)                       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ` + colorReset)
 }
@@ -270,7 +270,7 @@ func runCollection(
 	}
 
 	// Brief pause to allow initial MQTT subscriptions to settle before publishing
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1500 * time.Millisecond)
 
 	// Send request signal with retry
 	var sendErr error
