@@ -5293,9 +5293,18 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (!node.isSelf && !node.isHub && node.rawPeer) {
         const p = node.rawPeer;
         const vIP = (p.virtual_ip || '').split('/')[0].trim();
+        const isSelectedActive = Boolean(
+          (currentSelectedExitNode && (currentSelectedExitNode === p.device_id || currentSelectedExitNode === vIP)) ||
+          (currentActiveExitVIP && currentActiveExitVIP === vIP)
+        );
         actionBtns += `
           <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="font-size:0.74rem; padding:4px 10px;">⚡ Пинг</button>
-          <button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="font-size:0.74rem; padding:4px 10px; color:#38bdf8;" title="Использовать как выходной шлюз интернета">🌐 Сделать шлюзом</button>
+          ${isSelectedActive
+            ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="font-size:0.74rem; padding:4px 10px; background:#ef4444; color:#fff;" title="Отключить этот шлюз интернета">🔌 Отключить шлюз</button>`
+            : (p.is_exit_node
+                ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="font-size:0.74rem; padding:4px 10px; color:#38bdf8;" title="Использовать как выходной шлюз интернета">🌐 Сделать шлюзом</button>`
+                : '')
+          }
           <button onclick="copyToClipboard('${vIP}')" class="btn btn-glass" style="font-size:0.74rem; padding:4px 10px;" title="Скопировать Virtual IP">📋 Копировать IP</button>
         `;
       }
@@ -5340,11 +5349,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const relayPeers = onlinePeers.filter(p => !directPeers.includes(p));
       const offlinePeers = pList.filter(p => !p.online);
 
-      // Exit Gateway
-      const activeExit = pList.find(p => p.is_exit_node ||
+      // Exit Gateway - ONLY if user explicitly chose an exit node for this client
+      const activeExit = (currentSelectedExitNode || currentActiveExitVIP) ? pList.find(p => p.online && (
         (currentSelectedExitNode && (p.device_id === currentSelectedExitNode || (p.virtual_ip && p.virtual_ip.startsWith(currentSelectedExitNode)))) ||
         (currentActiveExitVIP && p.virtual_ip && p.virtual_ip.startsWith(currentActiveExitVIP))
-      );
+      )) : null;
 
       // Latency average
       const pings = directPeers.map(p => (p.latency_ms && p.latency_ms > 0) ? p.latency_ms : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0))).filter(v => v > 0);
@@ -5403,7 +5412,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                 <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="flex:1; font-size:0.72rem; padding:4px 6px; justify-content:center;">⚡ Пинг</button>
                 ${isExitActive
                   ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-size:0.72rem; padding:4px 8px; font-weight:700;">🔌 Выкл</button>`
-                  : `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.72rem; padding:4px 8px; font-weight:700;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`
+                  : (p.is_exit_node
+                      ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.72rem; padding:4px 8px; font-weight:700;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`
+                      : '')
                 }
                 <button onclick="copyToClipboard('${vIP}')" class="btn btn-glass" style="font-size:0.72rem; padding:4px 8px;" title="Скопировать IP">📋</button>
               </div>
@@ -5418,14 +5429,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const vIP = (p.virtual_ip || '').split('/')[0].trim();
           const pName = p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10));
           const relayVia = p.relayed_via_name || p.relayed_via_vip || 'Mesh Hub';
+          const isRelayExitActive = Boolean(activeExit && (activeExit.device_id === p.device_id || activeExit.virtual_ip === p.virtual_ip));
 
           relayCardsHtml += `
-            <div style="background:rgba(15,23,42,0.85); border:1px solid rgba(192,132,252,0.25); border-radius:12px; padding:14px; display:flex; flex-direction:column; justify-content:space-between; gap:10px; box-shadow:0 4px 20px rgba(0,0,0,0.35);">
+            <div style="background:rgba(15,23,42,0.85); border:1px solid ${isRelayExitActive ? '#10b981' : 'rgba(192,132,252,0.25)'}; border-radius:12px; padding:14px; display:flex; flex-direction:column; justify-content:space-between; gap:10px; box-shadow:0 4px 20px rgba(0,0,0,0.35);">
               <div>
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; margin-bottom:8px;">
                   <div style="font-weight:700; font-size:0.88rem; color:#f8fafc; display:flex; align-items:center; gap:6px;">
                     <span style="font-size:1.1rem;">${os.icon}</span>
                     <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px;" title="${pName}">${pName}</span>
+                    ${p.is_exit_node ? `<span class="badge" style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35); color:#34d399; font-size:0.62rem; padding:1px 5px;" title="Узел может служить шлюзом в интернет">🌐 Шлюз</span>` : ''}
                   </div>
                   <span class="badge ${os.cls}" style="font-size:0.65rem; padding:2px 6px;">${os.name}</span>
                 </div>
@@ -5448,6 +5461,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               </div>
               <div style="display:flex; gap:6px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
                 <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="flex:1; font-size:0.72rem; padding:4px 6px; justify-content:center;">⚡ ICMP Пинг</button>
+                ${isRelayExitActive
+                  ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-size:0.72rem; padding:4px 8px; font-weight:700;">🔌 Выкл</button>`
+                  : (p.is_exit_node
+                      ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.72rem; padding:4px 8px; font-weight:700;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`
+                      : '')
+                }
                 <button onclick="copyToClipboard('${vIP}')" class="btn btn-glass" style="font-size:0.72rem; padding:4px 8px;" title="Скопировать IP">📋</button>
               </div>
             </div>`;
@@ -5500,7 +5519,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px 14px;">
             <div style="font-size:0.68rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Выход в Интернет</div>
             <div style="font-size:0.95rem; font-weight:800; color:${activeExit ? '#10b981' : '#94a3b8'}; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-              ${activeExit ? '🌐 ' + (activeExit.nickname || activeExit.device_name || activeExit.device_id.substring(0, 10)) : '🏠 Прямой WAN'}
+              ${activeExit ? '🌐 ' + (activeExit.nickname || activeExit.device_name || activeExit.device_id.substring(0, 10)) : '🏠 Прямой WAN (Локальный)'}
             </div>
           </div>
         </div>
@@ -5794,16 +5813,19 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       let hasCloudRelayPeers = false;
       let activeExitPeer = null;
 
-      // Identify active Exit Node if set
-      pList.forEach(p => {
-        const vIPClean = (p.virtual_ip || '').split('/')[0].trim();
-        const isExit = Boolean(p.is_exit_node ||
-          (currentSelectedExitNode && (currentSelectedExitNode === p.device_id || currentSelectedExitNode === vIPClean)) ||
-          (currentActiveExitVIP && currentActiveExitVIP === vIPClean));
-        if (isExit && p.online) {
-          activeExitPeer = p;
-        }
-      });
+      // Identify active Exit Node ONLY if explicitly selected by the client
+      if (currentSelectedExitNode || currentActiveExitVIP) {
+        pList.forEach(p => {
+          const vIPClean = (p.virtual_ip || '').split('/')[0].trim();
+          const isUserSelected = Boolean(
+            (currentSelectedExitNode && (currentSelectedExitNode === p.device_id || currentSelectedExitNode === vIPClean)) ||
+            (currentActiveExitVIP && currentActiveExitVIP === vIPClean)
+          );
+          if (isUserSelected && p.online) {
+            activeExitPeer = p;
+          }
+        });
+      }
 
       // 2. Build Peer Nodes
       pList.forEach((p, idx) => {
@@ -5852,26 +5874,26 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           nodeColor = '#10b981';
           nodeIcon = '⭐';
           badgeText = 'Exit Gateway';
-          routeDesc = '🌐 Выходной шлюз интернета (WinNAT / IP Forwarding)';
+          routeDesc = '🌐 Активный выходной шлюз интернета (0.0.0.0/0)';
         } else if (isDirectTCP) {
           nodeColor = '#818cf8';
-          badgeText = 'Direct TCP';
-          routeDesc = '🔒 Direct ShadowTLS 1.3 (SNI обфускация)';
+          badgeText = p.is_exit_node ? 'Direct TCP • Шлюз' : 'Direct TCP';
+          routeDesc = '🔒 Direct ShadowTLS 1.3 (SNI обфускация)' + (p.is_exit_node ? ' • Доступен как Exit Node' : '');
         } else if (isDirectAWG) {
           nodeColor = (pingMs > 0 && pingMs < 50) ? '#06b6d4' : '#34d399';
-          badgeText = 'Direct AWG';
-          routeDesc = `⚡ Прямой AWG туннель (RTT: ${pingMs}ms)`;
+          badgeText = p.is_exit_node ? 'Direct AWG • Шлюз' : 'Direct AWG';
+          routeDesc = `⚡ Прямой AWG туннель (RTT: ${pingMs}ms)` + (p.is_exit_node ? ' • Доступен как Exit Node' : '');
         } else if (isMeshRelayed) {
           nodeColor = '#c084fc';
           nodeIcon = '🔀';
           const rName = p.relayed_via_name || p.relayed_via_vip || 'Клиент';
-          badgeText = `Relay via ${rName}`;
-          routeDesc = `🔀 Многоузловой P2P релей через [${rName}]`;
+          badgeText = p.is_exit_node ? `Relay via ${rName} • Шлюз` : `Relay via ${rName}`;
+          routeDesc = `🔀 Многоузловой P2P релей через [${rName}]` + (p.is_exit_node ? ' • Доступен как Exit Node' : '');
         } else {
           nodeColor = '#c084fc';
           nodeIcon = '☁️';
-          badgeText = 'Cloud Relay';
-          routeDesc = '☁️ Транзитный сигнальный брокер MQTT / WSS';
+          badgeText = p.is_exit_node ? 'Cloud Relay • Шлюз' : 'Cloud Relay';
+          routeDesc = '☁️ Транзитный сигнальный брокер MQTT / WSS' + (p.is_exit_node ? ' • Доступен как Exit Node' : '');
           hasCloudRelayPeers = true;
         }
 
@@ -5910,6 +5932,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           online: p.online,
           direct: (isDirectAWG || isDirectTCP),
           isExit: isExit,
+          canBeExit: Boolean(p.is_exit_node),
           ping: pingMs,
           radius: isExit ? 21 : 17,
           color: nodeColor,
