@@ -367,8 +367,7 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            val activeNet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm?.activeNetwork else null
+            val activeNet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork else null
             val underlyingNets = if (activeNet != null) arrayOf(activeNet) else null
 
             // 1. Привязка физической сети на уровне Builder (API 33+ Android 13/14/15/16)
