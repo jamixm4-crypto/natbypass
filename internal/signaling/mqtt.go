@@ -507,10 +507,21 @@ func (m *MQTTChannel) Send(ctx context.Context, payload *Payload) error {
 		dataToSend = crypto.SignFrame(data, signKey)
 	}
 
-	if m.client == nil || !m.client.IsConnected() {
-		if m.client == nil {
-			return fmt.Errorf("MQTT client is nil (%s)", m.BrokerURL())
+	if m.client == nil {
+		return fmt.Errorf("MQTT client is nil (%s)", m.BrokerURL())
+	}
+
+	// Wait up to 3 seconds for initial background connection to complete before initiating a reconnect
+	if !m.client.IsConnected() {
+		for i := 0; i < 30; i++ {
+			if m.client.IsConnected() {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
+	}
+
+	if !m.client.IsConnected() {
 		tok := m.client.Connect()
 		if !tok.WaitTimeout(5 * time.Second) {
 			return fmt.Errorf("MQTT reconnect timeout (%s)", m.BrokerURL())
