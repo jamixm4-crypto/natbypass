@@ -8170,6 +8170,13 @@ func updateData() {
 			lastBytesSent = currSent
 			lastBytesRecv = currRecv
 			lastSpeedCalcTime = now
+
+			totSpeed := currentRxSpeed + currentTxSpeed
+			totKB := int(totSpeed / 1024.0)
+			totStr := formatSpeed(totSpeed)
+			if uiServer != nil {
+				uiServer.SetThroughput(totKB, totStr)
+			}
 		}
 	}
 

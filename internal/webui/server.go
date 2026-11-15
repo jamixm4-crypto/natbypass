@@ -112,6 +112,35 @@ type Server struct {
 	onOpenWindow    func()
 	readyCh         chan struct{}
 	readyOnce       sync.Once
+	throughputMu    sync.RWMutex
+	throughputKB    int
+	throughputStr   string
+}
+
+// SetThroughput updates the active aggregate P2P throughput shown in the Web UI.
+func (s *Server) SetThroughput(kb int, str string) {
+	s.throughputMu.Lock()
+	defer s.throughputMu.Unlock()
+	s.throughputKB = kb
+	s.throughputStr = str
+}
+
+// GetThroughput returns the current P2P throughput.
+func (s *Server) GetThroughput() (int, string) {
+	s.throughputMu.RLock()
+	defer s.throughputMu.RUnlock()
+	if s.throughputStr != "" && s.throughputStr != "—" {
+		return s.throughputKB, s.throughputStr
+	}
+	return 0, "0.0 КБ/с"
+}
+
+func (s *Server) getApkDownloadURL(ver string) string {
+	tag := ver
+	if !strings.HasPrefix(tag, "v") {
+		tag = "v" + tag
+	}
+	return fmt.Sprintf("https://github.com/jamixm4-crypto/natbypass/releases/download/%s/NatBypass-%s-universal.apk", tag, tag)
 }
 
 // SetTransportSwitcher links the global TransportSwitcher to the WebUI server.
@@ -2299,8 +2328,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	throughputStr := "—"
-	throughputKB := 0
+	throughputKB, throughputStr := s.GetThroughput()
 
 	ver := s.version
 	if ver == "" {
@@ -2375,6 +2403,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"awg_preset":        awgPreset,
 		"throughput_str":    throughputStr,
 		"throughput_kb":     throughputKB,
+		"apk_download_url":  s.getApkDownloadURL(ver),
 		"selected_exit_node": func() string {
 			if cfg != nil {
 				return cfg.Network.SelectedExitNode

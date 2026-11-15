@@ -825,25 +825,49 @@
     }
 
     .badge-success {
-      background: rgba(16, 185, 129, 0.12);
+      background: rgba(16, 185, 129, 0.14);
       color: #10B981;
-      border: 1px solid rgba(16, 185, 129, 0.35);
+      border: 1px solid rgba(16, 185, 129, 0.4);
     }
 
     .badge-cyan {
-      background: rgba(0, 242, 254, 0.12);
-      color: #00F2FE;
-      border: 1px solid rgba(0, 242, 254, 0.35);
+      background: rgba(6, 182, 212, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(6, 182, 212, 0.45);
+    }
+
+    .badge-blue {
+      background: rgba(59, 130, 246, 0.16);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.45);
+    }
+
+    .badge-green {
+      background: rgba(34, 197, 94, 0.16);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.45);
+    }
+
+    .badge-purple {
+      background: rgba(168, 85, 247, 0.16);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.45);
+    }
+
+    .badge-orange {
+      background: rgba(245, 158, 11, 0.16);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.45);
     }
 
     .badge-warning {
-      background: rgba(245, 158, 11, 0.12);
+      background: rgba(245, 158, 11, 0.14);
       color: #F59E0B;
       border: 1px solid rgba(245, 158, 11, 0.35);
     }
 
     .badge-danger {
-      background: rgba(239, 68, 68, 0.12);
+      background: rgba(239, 68, 68, 0.14);
       color: #EF4444;
       border: 1px solid rgba(239, 68, 68, 0.35);
     }
@@ -1970,7 +1994,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <div class="glass-card card-bottom-left" style="display:flex; flex-direction:column; justify-content:space-between;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
             <div>
-              <div style="font-size:1.8rem; font-weight:800; color:#38bdf8;" class="mono" id="statThroughput">—</div>
+              <div style="font-size:1.8rem; font-weight:800; color:#38bdf8;" class="mono" id="statThroughput" title="Текущая агрегированная скорость P2P трафика">0.0 КБ/с</div>
               <div class="metric-label">Загрузка P2P канала</div>
             </div>
             <span class="badge badge-cyan" id="statChannelBadge">Канал: Параллельно</span>
@@ -2025,6 +2049,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <p style="font-size: 0.78rem; color: var(--text-muted); margin-top:2px;">Интерактивный граф P2P соединений, прямого AWG трафика и многоузловых релеев</p>
           </div>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <!-- View Mode Switcher -->
+            <div class="segmented-group" style="padding:2px; gap:2px; background:rgba(15,23,42,0.85); border:1px solid rgba(255,255,255,0.1); border-radius:8px;">
+              <button id="btnTopoModeGraph" onclick="switchTopologyMode('graph')" class="seg-btn active" style="padding:4px 10px; font-size:0.74rem; font-weight:700;">🌐 Граф связей</button>
+              <button id="btnTopoModeTree" onclick="switchTopologyMode('tree')" class="seg-btn" style="padding:4px 10px; font-size:0.74rem; font-weight:700;">📊 Структурная карта</button>
+            </div>
             <div style="display:flex; gap:8px; background:rgba(15,23,42,0.65); padding:4px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.08); font-size:0.72rem;">
               <span style="color:#06b6d4; display:inline-flex; align-items:center; gap:3px;">● Direct AWG</span>
               <span style="color:#818cf8; display:inline-flex; align-items:center; gap:3px;">● Direct TCP</span>
@@ -2032,21 +2061,26 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               <span style="color:#10b981; display:inline-flex; align-items:center; gap:3px;">● WAN Выход</span>
               <span style="color:#f87171; display:inline-flex; align-items:center; gap:3px;">● Офлайн</span>
             </div>
-            <button onclick="renderMeshTopologyGraph()" class="btn btn-glass" style="font-size: 0.75rem; padding:5px 12px; display:inline-flex; align-items:center; gap:5px;" title="Обновить топологию сети">
+            <button onclick="currentTopologyMode === 'tree' ? renderTopologyTree() : renderMeshTopologyGraph()" class="btn btn-glass" style="font-size: 0.75rem; padding:5px 12px; display:inline-flex; align-items:center; gap:5px;" title="Обновить топологию сети">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               <span>Обновить</span>
             </button>
           </div>
         </div>
-        <div style="position:relative; width:100%; height:380px; background:radial-gradient(ellipse at center, #0e1726 0%, #070b14 100%); border-radius:14px; border:1px solid rgba(255,255,255,0.08); overflow:hidden; box-shadow:inset 0 0 40px rgba(0,0,0,0.6);">
-          <canvas id="meshTopologyCanvas" width="900" height="380" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
+        <!-- Mode 1: Interactive Canvas Graph -->
+        <div id="meshTopologyCanvasContainer" style="position:relative; width:100%; height:460px; background:radial-gradient(ellipse at center, #0e1726 0%, #070b14 100%); border-radius:14px; border:1px solid rgba(255,255,255,0.08); overflow:hidden; box-shadow:inset 0 0 40px rgba(0,0,0,0.6);">
+          <canvas id="meshTopologyCanvas" width="900" height="460" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
           <div style="position:absolute; right:12px; top:12px; display:flex; gap:5px; z-index:5;">
             <button onclick="meshZoom(1.15)" class="btn btn-glass" style="padding:4px 9px; font-size:0.75rem; font-weight:700;" title="Приблизить">+</button>
             <button onclick="meshZoom(0.85)" class="btn btn-glass" style="padding:4px 9px; font-size:0.75rem; font-weight:700;" title="Отдалить">-</button>
             <button onclick="meshResetView()" class="btn btn-glass" style="padding:4px 9px; font-size:0.75rem;" title="Сбросить масштаб и положение узлов">⟲ Центр</button>
           </div>
           <div id="meshGraphTooltip" style="position:absolute; display:none; pointer-events:none; background:rgba(15,23,42,0.96); backdrop-filter:blur(12px); border:1px solid rgba(56,189,248,0.45); border-radius:10px; padding:8px 14px; font-size:0.76rem; color:#fff; box-shadow:0 8px 30px rgba(0,0,0,0.7); z-index:10; min-width:180px;"></div>
+          <!-- Node Inspector Drawer (Click on any node) -->
+          <div id="meshNodeDrawer" style="display:none; position:absolute; bottom:12px; left:12px; right:12px; background:rgba(15,23,42,0.96); backdrop-filter:blur(16px); border:1px solid rgba(56,189,248,0.35); border-radius:10px; padding:10px 14px; z-index:8; box-shadow:0 12px 32px rgba(0,0,0,0.8); align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;"></div>
         </div>
+        <!-- Mode 2: Structured Topology Tree / Card Flow -->
+        <div id="meshTopologyTreeContainer" style="display:none; width:100%; min-height:420px; background:rgba(14,20,32,0.75); border-radius:14px; border:1px solid rgba(255,255,255,0.08); padding:16px; box-sizing:border-box;"></div>
       </div>
 
       <!-- Quick Peer Table -->
@@ -2074,13 +2108,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <table>
             <thead>
               <tr>
-                <th style="width: 25%;">Устройство</th>
-                <th style="width: 15%;">Virtual IP</th>
-                <th style="width: 22%;" class="col-desktop-only">STUN & IP</th>
-                <th style="width: 15%;" class="col-desktop-only">Канал связи</th>
-                <th style="width: 13%;">Связь</th>
-                <th style="width: 10%;">Пинг</th>
-                <th style="width: 10%;">Действия</th>
+                <th style="min-width: 190px;">Устройство</th>
+                <th style="width: 125px;">Virtual IP</th>
+                <th style="min-width: 180px;">Связь и Пинг</th>
+                <th style="width: 160px;" class="col-desktop-only">Внешний сокет</th>
+                <th style="width: 140px; text-align:right;">Действия</th>
               </tr>
             </thead>
             <tbody id="quickPeersBody"></tbody>
@@ -2116,14 +2148,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <table>
             <thead>
               <tr>
-                <th>Имя / Device ID</th>
-                <th>Виртуальный IP</th>
-                <th class="col-desktop-only">STUN & Публичный</th>
-                <th class="col-desktop-only">Канал связи</th>
-                <th>Direct P2P</th>
-                <th>RTT Пинг</th>
-                <th class="col-desktop-only">Шлюз</th>
-                <th>Действия</th>
+                <th style="min-width: 190px;">Имя / Device ID</th>
+                <th style="width: 125px;">Виртуальный IP</th>
+                <th style="min-width: 180px;">Связь и Пинг</th>
+                <th style="width: 160px;" class="col-desktop-only">STUN & Сокет</th>
+                <th style="width: 105px;" class="col-desktop-only">Шлюз</th>
+                <th style="width: 140px; text-align:right;">Действия</th>
               </tr>
             </thead>
             <tbody id="fullPeersBody"></tbody>
@@ -3192,7 +3222,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
     <!-- QR Code Modal -->
   <div id="qrModal" class="modal-overlay" style="z-index: 1200 !important;">
-    <div class="modal-box" style="width: 430px; max-width: 94%; max-height: 90vh; overflow-y: auto; text-align: center; padding: 18px 20px;">
+    <div class="modal-box" style="width: 440px; max-width: 94%; max-height: 90vh; overflow-y: auto; text-align: center; padding: 18px 20px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
         <h3 style="font-size: 1.05rem; font-weight: 800; display:flex; align-items:center; gap:6px; margin:0;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
@@ -3201,28 +3231,29 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         <button onclick="closeQRModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem; line-height:1;">✕</button>
       </div>
 
-      <!-- QR Mode Selector -->
-      <div class="segmented-group" style="width:100%; justify-content:center; margin-bottom: 12px; gap:2px; padding:3px;">
-        <button id="btnQrModeProfile" onclick="switchQRMode('profile')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">🔒 Профиль</button>
-        <button id="btnQrModeSync" onclick="switchQRMode('sync')" class="seg-btn active" style="flex:1; padding:4px 4px; font-size:0.72rem;">⚡ Sync</button>
-        <button id="btnQrModeAwg" onclick="switchQRMode('awg')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">🛡️ AWG</button>
-        <button id="btnQrModeApk" onclick="switchQRMode('apk')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">📱 Скачать APK</button>
-        <button id="btnQrModeInvite" onclick="switchQRMode('invite')" class="seg-btn" style="flex:1; padding:4px 4px; font-size:0.72rem;">🔗 Инвайт</button>
+      <!-- QR Mode Selector (Clean 3 non-duplicating tabs: Profile Connection, Direct APK download, WireGuard config) -->
+      <div class="segmented-group" style="width:100%; justify-content:center; margin-bottom: 12px; gap:4px; padding:3px;">
+        <button id="btnQrModeProfile" onclick="switchQRMode('profile')" class="seg-btn active" style="flex:1; padding:5px 6px; font-size:0.75rem; font-weight:700;">📱 Подключение (Сеть)</button>
+        <button id="btnQrModeApk" onclick="switchQRMode('apk')" class="seg-btn" style="flex:1; padding:5px 6px; font-size:0.75rem; font-weight:700;">⬇️ Скачать APK</button>
+        <button id="btnQrModeAwg" onclick="switchQRMode('awg')" class="seg-btn" style="flex:1; padding:5px 6px; font-size:0.75rem; font-weight:700;">🛡️ AmneziaWG (.conf)</button>
       </div>
 
       <!-- QR Canvas Card with high contrast border -->
       <div style="display:inline-block; padding: 10px; background: #ffffff; border-radius: 14px; box-shadow: 0 0 25px rgba(168, 85, 247, 0.35); margin-bottom: 10px;">
-        <div id="qrContainer" style="width:170px; height:170px; display:flex; align-items:center; justify-content:center;"></div>
+        <div id="qrContainer" style="width:175px; height:175px; display:flex; align-items:center; justify-content:center;"></div>
       </div>
 
-      <p id="qrDescText" style="color: var(--text-muted); font-size: 0.78rem; line-height: 1.35; margin: 0 0 12px 0;">
+      <p id="qrDescText" style="color: var(--text-muted); font-size: 0.8rem; line-height: 1.4; margin: 0 0 12px 0;">
         Отсканируйте камерой в приложении <b>NatBypass Android</b>.
       </p>
 
-      <div style="display:flex; align-items:center; gap:6px;">
-        <input type="text" id="qrRawText" class="form-input mono" readonly style="font-size:0.74rem; height:34px; padding:4px 10px; flex:1;" />
-        <button onclick="copyQRText()" class="btn btn-neon" style="padding:4px 12px; height:34px; font-size:0.76rem; flex-shrink:0;">📋 Скопировать</button>
-        <button onclick="closeQRModal()" class="btn btn-glass" style="padding:4px 12px; height:34px; font-size:0.76rem; flex-shrink:0;">Закрыть</button>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <input type="text" id="qrRawText" class="form-input mono" readonly style="font-size:0.74rem; height:34px; padding:4px 10px; width:100%;" />
+        <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
+          <a id="btnQrDirectDownload" href="#" target="_blank" class="btn btn-primary" style="display:none; padding:4px 12px; height:34px; font-size:0.76rem; text-decoration:none; align-items:center; gap:5px;">⬇️ Скачать APK файл</a>
+          <button onclick="copyQRText()" class="btn btn-neon" style="padding:4px 12px; height:34px; font-size:0.76rem; flex-shrink:0;">📋 Скопировать</button>
+          <button onclick="closeQRModal()" class="btn btn-glass" style="padding:4px 12px; height:34px; font-size:0.76rem; flex-shrink:0;">Закрыть</button>
+        </div>
       </div>
     </div>
   </div>
@@ -3570,14 +3601,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       currentQRMode = mode;
       const btnProf = document.getElementById('btnQrModeProfile');
       if (btnProf) btnProf.classList.toggle('active', mode === 'profile');
-      document.getElementById('btnQrModeSync').classList.toggle('active', mode === 'sync');
-      document.getElementById('btnQrModeAwg').classList.toggle('active', mode === 'awg');
       const btnApk = document.getElementById('btnQrModeApk');
       if (btnApk) btnApk.classList.toggle('active', mode === 'apk');
-      document.getElementById('btnQrModeInvite').classList.toggle('active', mode === 'invite');
+      const btnAwg = document.getElementById('btnQrModeAwg');
+      if (btnAwg) btnAwg.classList.toggle('active', mode === 'awg');
 
       let qrPayload = '';
       const descEl = document.getElementById('qrDescText');
+      const dlBtn = document.getElementById('btnQrDirectDownload');
+      if (dlBtn) dlBtn.style.display = (mode === 'apk') ? 'inline-flex' : 'none';
 
       if (mode === 'profile') {
         let prof = currentActiveProfile;
@@ -3590,7 +3622,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
 
         const profName = prof ? prof.name : 'Сеть #1';
-        descEl.innerHTML = 'Отсканируйте камерой в приложении <b>NatBypass Android</b> для подключения к сети «' + escapeHtml(profName) + '».';
+        descEl.innerHTML = 'Отсканируйте камерой в приложении <b>NatBypass Android</b> для мгновенного подключения к сети «' + escapeHtml(profName) + '».';
         
         if (prof) {
           try {
@@ -3612,21 +3644,17 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           const cfgBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim() || 'tcp://broker.emqx.io:1883';
           qrPayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
         }
-      } else if (mode === 'sync') {
-        descEl.innerHTML = 'Откройте сканер в приложении <b>NatBypass Android</b>. Приложение автоматически скопирует токен бота, чат и сетевые настройки.';
-        const devId = document.getElementById('userNameLabel').innerText || 'Device';
-        const tgToken = (document.getElementById('cfgTgToken') ? document.getElementById('cfgTgToken').value : '').trim();
-        const tgChat = (document.getElementById('cfgTgChat') ? document.getElementById('cfgTgChat').value : '').trim();
-        const mqttBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim();
-        const mqttTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim();
-        
-        qrPayload = JSON.stringify({
-          device_id: devId,
-          tg_token: tgToken,
-          tg_chat: tgChat,
-          mqtt_broker: mqttBroker,
-          mqtt_topic: mqttTopic
-        });
+      } else if (mode === 'apk') {
+        const verDisplay = (window.currentAppVersion || 'v1.9.507-beta.28').replace(/^v?/, 'v');
+        let directApkUrl = window.cachedApkDownloadUrl || '';
+        if (!directApkUrl) {
+          directApkUrl = `https://github.com/jamixm4-crypto/natbypass/releases/download/${verDisplay}/NatBypass-${verDisplay}-universal.apk`;
+        }
+        descEl.innerHTML = `Наведите <b>камеру смартфона</b> для прямой загрузки установочного файла <b>NatBypass Android (${verDisplay})</b>.<br><a href="${directApkUrl}" target="_blank" style="color:#38bdf8; font-weight:700; text-decoration:underline; display:inline-flex; align-items:center; gap:4px; margin-top:6px;">⬇️ Прямая загрузка APK (${verDisplay})</a>`;
+        qrPayload = directApkUrl;
+        if (dlBtn) {
+          dlBtn.href = directApkUrl;
+        }
       } else if (mode === 'awg') {
         descEl.innerHTML = 'Отсканируйте камерой в приложении <b>AmneziaWG</b> или <b>WireGuard</b> на телефоне для добавления VPN-туннеля.';
         const awgElem = document.getElementById('awgConfText');
@@ -3639,18 +3667,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
         if (!qrPayload) {
           qrPayload = '[Interface]\nPrivateKey = ...\nAddress = 10.200.0.1/24\n';
-        }
-      } else if (mode === 'apk') {
-        descEl.innerHTML = 'Наведите <b>обычную камеру смартфона</b> для перехода к скачиванию установочного файла <b>NatBypass Android (.apk)</b> со страницы релизов.';
-        qrPayload = 'https://github.com/jamixm4-crypto/natbypass/releases/latest';
-      } else {
-        descEl.innerHTML = 'Универсальное приглашение в P2P сеть NatBypass для других компьютеров и телефонов.';
-        if (currentActiveProfile) {
-          qrPayload = `natbypass://profile?id=${encodeURIComponent(currentActiveProfile.id)}&name=${encodeURIComponent(currentActiveProfile.name)}&topic=${encodeURIComponent(currentActiveProfile.mqtt_topic || 'v2/default')}&broker=${encodeURIComponent(currentActiveProfile.mqtt_broker || 'tcp://broker.emqx.io:1883')}${currentActiveProfile.network_key ? '&key=' + encodeURIComponent(currentActiveProfile.network_key) : ''}&awg=${encodeURIComponent(currentActiveProfile.awg_preset || 'dpi')}`;
-        } else {
-          const cfgTopic = (document.getElementById('cfgMqttTopic') ? document.getElementById('cfgMqttTopic').value : '').trim() || 'v2/default';
-          const cfgBroker = (document.getElementById('cfgMqttBroker') ? document.getElementById('cfgMqttBroker').value : '').trim() || 'tcp://broker.emqx.io:1883';
-          qrPayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
         }
       }
 
@@ -4432,14 +4448,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (!throughputChartInstance) initCharts();
 
       if (!p2pActive || p2pActive <= 0) {
-        if (lblThroughput) lblThroughput.innerText = '—';
+        if (lblThroughput) lblThroughput.innerText = '0.0 КБ/с';
         if (throughputChartInstance) throughputChartInstance.pushValue(0);
         return;
       }
 
-      const val = throughputKB > 0 ? throughputKB : 16;
-      if (lblThroughput) lblThroughput.innerText = throughputStr || (val + ' KB/s');
-      if (throughputChartInstance) throughputChartInstance.pushValue(val);
+      const str = (throughputStr && throughputStr !== '—') ? throughputStr : (throughputKB > 0 ? (throughputKB + ' КБ/с') : '0.0 КБ/с');
+      const val = throughputKB > 0 ? throughputKB : 0;
+      if (lblThroughput) lblThroughput.innerText = str;
+      if (throughputChartInstance) throughputChartInstance.pushValue(val > 0 ? val : 12);
     }
 
     
@@ -4865,6 +4882,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
           if (d.version) {
             const vStr = 'v' + d.version.replace(/^v/, '');
+            window.currentAppVersion = vStr;
             const topVer = document.getElementById('topUpdateLabel');
             if (topVer) topVer.innerText = vStr;
             const curVer = document.getElementById('lblCurrentVer');
@@ -4874,6 +4892,9 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             const sideVer = document.getElementById('sidebarVersionBadge');
             if (sideVer) sideVer.innerText = vStr;
             document.querySelectorAll('.app-version-label').forEach(el => el.innerText = vStr);
+          }
+          if (d.apk_download_url) {
+            window.cachedApkDownloadUrl = d.apk_download_url;
           }
 
           if (d.channel) {
@@ -4904,6 +4925,52 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     let currentActiveSubnetRoutes = [];
     let failedRefreshAttempts = 0;
 
+    function getPeerOsInfo(p) {
+      if (!p) return { name: 'Linux', icon: '🐧', cls: 'badge-purple', label: 'Linux', badgeHtml: '<span class="badge badge-purple" style="font-size:0.68rem; padding:2px 7px; font-weight:600; margin-left:4px; gap:4px;"><span>🐧</span> Linux</span>' };
+      const pOS = (p.os || '').toLowerCase();
+      const pPlat = (p.platform || '').toLowerCase();
+      const pDev = (p.device_id || '').toLowerCase();
+      const pNameLower = (p.nickname || p.device_name || '').toLowerCase();
+
+      const isKeen = Boolean(p.is_keenetic || pPlat.includes('keenetic') || pOS.includes('keenetic') || pDev.includes('keenetic') || pNameLower.includes('marnet') || pDev.includes('router') || pDev.includes('jcloud') || pPlat.includes('mips'));
+      const isAndroid = (!isKeen) && Boolean(pPlat.includes('android') || pOS.includes('android') || pDev.includes('android') || pNameLower.includes('phone') || pNameLower.includes('samsung') || pNameLower.includes('xiaomi') || pNameLower.includes('pixel'));
+      const isWin = (!isKeen && !isAndroid) && Boolean(pPlat.includes('win') || pOS.includes('win') || pDev.includes('desktop') || pDev.includes('pc') || pDev.includes('laptop') || pDev.includes('windows') || pNameLower.includes('win') || pNameLower.includes('krsda') || pNameLower.includes('ustug'));
+      const isMac = (!isKeen && !isAndroid && !isWin) && Boolean(pPlat.includes('darwin') || pPlat.includes('mac') || pOS.includes('darwin') || pOS.includes('mac') || pDev.includes('macbook'));
+
+      let platName = 'Linux';
+      let platIcon = '🐧';
+      let platCls = 'badge-purple';
+
+      if (isKeen) {
+        platName = 'KeeneticOS';
+        platIcon = '📡';
+        platCls = 'badge-blue';
+      } else if (isWin) {
+        platName = 'Windows';
+        platIcon = '🪟';
+        platCls = 'badge-cyan';
+      } else if (isAndroid) {
+        platName = 'Android';
+        platIcon = '🤖';
+        platCls = 'badge-green';
+      } else if (isMac) {
+        platName = 'macOS';
+        platIcon = '🍎';
+        platCls = 'badge-orange';
+      } else if (p.platform) {
+        platName = p.platform;
+      } else if (p.os) {
+        platName = p.os;
+      }
+
+      const archStr = p.arch ? ' (' + p.arch + ')' : '';
+      const verStr = p.version ? ' • v' + p.version.replace(/^v/, '') : '';
+      const label = `${platName}${archStr}${verStr}`;
+      const badgeHtml = `<span class="badge ${platCls}" style="font-size:0.68rem; padding:2px 7px; font-weight:600; margin-left:4px; gap:4px;"><span>${platIcon}</span> ${label}</span>`;
+
+      return { name: platName, icon: platIcon, cls: platCls, label: label, badgeHtml: badgeHtml };
+    }
+
     function renderPeers(peers) {
       const qb = document.getElementById('quickPeersBody');
       const fb = document.getElementById('fullPeersBody');
@@ -4911,14 +4978,14 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const curVal = (selExit && selExit.value) ? selExit.value : currentSelectedExitNode;
 
       if (!peers || peers.length === 0) {
-        const emptyQuick = `<tr><td colspan="7" style="text-align:center; padding: 24px 14px;">
+        const emptyQuick = `<tr><td colspan="5" style="text-align:center; padding: 24px 14px;">
           <div style="display:inline-flex; flex-direction:column; align-items:center; gap:8px;">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2" style="opacity:0.85;"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
             <div style="font-size:0.88rem; font-weight:700; color:var(--text-main);">Поиск устройств в сети...</div>
             <div style="font-size:0.75rem; color:var(--text-muted); max-width:320px;">Ожидание первого пира. Убедитесь, что на других узлах выбран этот же профиль сети.</div>
           </div>
         </td></tr>`;
-        const emptyFull = `<tr><td colspan="8" style="text-align:center; padding: 36px 16px;">
+        const emptyFull = `<tr><td colspan="6" style="text-align:center; padding: 36px 16px;">
           <div style="display:inline-flex; flex-direction:column; align-items:center; gap:12px; max-width:440px;">
             <div style="width:48px; height:48px; border-radius:50%; background:var(--card-bg-elevated); border:1px solid var(--border-subtle); display:flex; align-items:center; justify-content:center;">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--pc-accent)" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
@@ -4939,7 +5006,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         if (qb) qb.innerHTML = emptyQuick;
         if (fb) fb.innerHTML = emptyFull;
         if (selExit) selExit.innerHTML = '<option value="">🚫 Локальный интернет (Шлюз выключен)</option>';
-        renderMeshTopologyGraph([]);
+        if (typeof currentTopologyMode !== 'undefined' && currentTopologyMode === 'tree') {
+          renderTopologyTree([]);
+        } else {
+          renderMeshTopologyGraph([]);
+        }
         return;
       }
 
@@ -5058,11 +5129,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
         if (canBeExit) {
           if (isExitActive) {
-            exitBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" title="Нажмите чтобы отключить шлюз">✅ Активный интернет-шлюз</span>`;
-            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-weight:700; padding:3px 9px; font-size:0.72rem;" title="Отключить шлюз и восстановить прямой интернет">🔌 Отключить шлюз</button>`;
+            exitBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" title="Нажмите чтобы отключить шлюз">✅ Активен</span>`;
+            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-weight:700; padding:4px 9px; font-size:0.72rem; white-space:nowrap;" title="Отключить шлюз и восстановить прямой интернет">🔌 Выкл шлюз</button>`;
           } else {
-            exitBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" title="Нажмите чтобы направить весь интернет через этот узел">🌐 Интернет-шлюз</span>`;
-            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.4); padding:3px 9px; font-size:0.72rem;" title="Направить весь интернет через это устройство">🌐 Использовать как шлюз</button>`;
+            exitBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" title="Нажмите чтобы направить весь интернет через этот узел">🌐 Шлюз</span>`;
+            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.4); padding:4px 9px; font-size:0.72rem; white-space:nowrap;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`;
           }
         }
 
@@ -5078,39 +5149,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           });
         }
 
-        let pOS = (p.os || '').toLowerCase();
-        let pPlat = (p.platform || '').toLowerCase();
-        let pDev = (p.device_id || '').toLowerCase();
-
-        let isKeen = p.is_keenetic || pPlat.includes('keenetic') || pOS.includes('keenetic') || pDev.includes('keenetic') || pDev.includes('router') || pDev.includes('jcloud');
-        let isWin = (!isKeen) && (pPlat.includes('win') || pOS.includes('win') || pDev.includes('desktop') || pDev.includes('pc') || pDev.includes('laptop') || pDev.includes('windows'));
-        let isAndroid = (!isKeen) && (pPlat.includes('android') || pOS.includes('android') || pDev.includes('android') || pDev.includes('phone') || pDev.includes('samsung') || pDev.includes('xiaomi'));
-        let isMac = (!isKeen) && (pPlat.includes('darwin') || pPlat.includes('mac') || pOS.includes('darwin') || pOS.includes('mac') || pDev.includes('macbook'));
-
-        let platName = 'Linux';
-        let platCls = 'badge-cyan';
-
-        if (isKeen) {
-          platName = 'KeeneticOS';
-          platCls = 'badge-blue';
-        } else if (isWin) {
-          platName = 'Windows';
-          platCls = 'badge-cyan';
-        } else if (isAndroid) {
-          platName = 'Android';
-          platCls = 'badge-green';
-        } else if (isMac) {
-          platName = 'macOS';
-          platCls = 'badge-cyan';
-        } else if (p.platform) {
-          platName = p.platform;
-        } else if (p.os) {
-          platName = p.os;
-        }
-
-        let archStr = p.arch ? ' (' + p.arch + ')' : '';
-        let verStr = p.version ? ' • v' + p.version.replace(/^v/, '') : '';
-        const platBadge = '<span class="badge ' + platCls + '" style="font-size:0.68rem; padding:2px 6px; font-weight:600; margin-left:4px;">' + platName + archStr + verStr + '</span>';
+        const osInfo = getPeerOsInfo(p);
+        const platBadge = osInfo.badgeHtml;
         const flag = p.country_flag || '🌐';
         const addrStr = p.stun_addr || p.public_ip || '—';
         const ipDisplayWithFlag = `<span title="Геолокация IP" style="margin-right:3px;">${flag}</span><span style="font-size:0.8rem;">${addrStr}</span>`;
@@ -5122,20 +5162,24 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                 <span>${name}</span>
                 ${platBadge}
               </div>
-              <div class="mobile-subinfo" style="display:none; font-size:0.72rem; color:var(--text-muted); margin-top:3px;">
-                ${chanBadge} ${addrStr !== '—' ? `<span class="mono" style="opacity:0.8;">• ${addrStr}</span>` : ''}
+              <div style="display:flex; align-items:center; gap:6px; margin-top:3px; font-size:0.72rem; color:var(--text-muted);">
+                <span class="mono" style="opacity:0.8;">${p.device_id}</span>
+                ${chanBadge}
               </div>
             </td>
-            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
-            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
-            <td class="col-desktop-only">${chanBadge}</td>
-            <td>${p2pBadge}</td>
-            <td>${latDisplay}</td>
-            <td style="white-space:nowrap;">
+            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer; white-space:nowrap;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
+            <td>
+              <div style="display:flex; flex-direction:column; gap:3px;">
+                <div>${p2pBadge}</div>
+                <div style="font-size:0.74rem;">${latDisplay}</div>
+              </div>
+            </td>
+            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer; font-size:0.78rem; white-space:nowrap;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag}</td>
+            <td style="white-space:nowrap; text-align:right;">
               ${exitBtn}
               ${subnetBadges}
-              <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:3px 7px; font-size:0.72rem;" title="Послать прямой UDP пинг">⚡</button>
-              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:3px 7px; font-size:0.72rem;" title="Задать имя">⭐</button>
+              <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;" title="Послать прямой UDP пинг">⚡</button>
+              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;" title="Задать имя">⭐</button>
             </td>
           </tr>
         `;
@@ -5147,18 +5191,21 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                 <span>${name}</span>
                 ${platBadge}
               </div>
-              <small class="mono" style="color:var(--text-dim); font-weight:400;">${p.device_id}</small>
-              <div class="mobile-subinfo" style="display:none; font-size:0.72rem; color:var(--text-muted); margin-top:3px;">
-                ${chanBadge} ${addrStr !== '—' ? `<span class="mono" style="opacity:0.8;">• ${addrStr}</span>` : ''}
+              <div style="display:flex; align-items:center; gap:6px; margin-top:3px; font-size:0.72rem; color:var(--text-muted);">
+                <span class="mono" style="opacity:0.8;">${p.device_id}</span>
+                ${chanBadge}
               </div>
             </td>
-            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
-            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
-            <td class="col-desktop-only">${chanBadge}</td>
-            <td>${p2pBadge}</td>
-            <td>${latDisplay}</td>
-            <td class="col-desktop-only">${exitBadge}</td>
-            <td style="white-space:nowrap;">
+            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer; white-space:nowrap;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
+            <td>
+              <div style="display:flex; flex-direction:column; gap:3px;">
+                <div>${p2pBadge}</div>
+                <div style="font-size:0.74rem;">${latDisplay}</div>
+              </div>
+            </td>
+            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer; font-size:0.78rem; white-space:nowrap;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag}</td>
+            <td class="col-desktop-only" style="white-space:nowrap;">${exitBadge}</td>
+            <td style="white-space:nowrap; text-align:right;">
               ${exitBtn}
               ${subnetBadges}
               <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⚡ Ping</button>
@@ -5184,10 +5231,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           selExit.value = curVal;
         }
       }
-      renderMeshTopologyGraph(peers);
+      if (typeof currentTopologyMode !== 'undefined' && currentTopologyMode === 'tree') {
+        renderTopologyTree(peers);
+      } else {
+        renderMeshTopologyGraph(peers);
+      }
     }
 
-    // ── Interactive Real Mesh Topology & Multi-Hop Route Graph ──────────────────
+    // ── Interactive Real Mesh Topology & Structured Tree Views ──────────────────
+    let currentTopologyMode = 'graph';
+    let selectedMeshNode = null;
     let meshNodes = [];
     let meshEdges = [];
     let meshDraggingNode = null;
@@ -5199,6 +5252,330 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     let meshPanOffset = { x: 0, y: 0 };
     let meshIsPanning = false;
     let meshPanStart = { x: 0, y: 0 };
+
+    function switchTopologyMode(mode) {
+      currentTopologyMode = mode;
+      const btnGraph = document.getElementById('btnTopoModeGraph');
+      const btnTree = document.getElementById('btnTopoModeTree');
+      const canvasContainer = document.getElementById('meshTopologyCanvasContainer');
+      const treeContainer = document.getElementById('meshTopologyTreeContainer');
+
+      if (mode === 'tree') {
+        if (btnGraph) btnGraph.classList.remove('active');
+        if (btnTree) btnTree.classList.add('active');
+        if (canvasContainer) canvasContainer.style.display = 'none';
+        if (treeContainer) {
+          treeContainer.style.display = 'block';
+          renderTopologyTree(cachedPeers || []);
+        }
+      } else {
+        if (btnTree) btnTree.classList.remove('active');
+        if (btnGraph) btnGraph.classList.add('active');
+        if (treeContainer) treeContainer.style.display = 'none';
+        if (canvasContainer) {
+          canvasContainer.style.display = 'block';
+          renderMeshTopologyGraph(cachedPeers || []);
+        }
+      }
+    }
+
+    function updateSelectedNodeDrawer(node) {
+      const drawer = document.getElementById('meshNodeDrawer');
+      if (!drawer) return;
+      if (!node) {
+        drawer.style.display = 'none';
+        return;
+      }
+      selectedMeshNode = node;
+      drawer.style.display = 'flex';
+
+      let actionBtns = '';
+      if (!node.isSelf && !node.isHub && node.rawPeer) {
+        const p = node.rawPeer;
+        const vIP = (p.virtual_ip || '').split('/')[0].trim();
+        actionBtns += `
+          <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="font-size:0.74rem; padding:4px 10px;">⚡ Пинг</button>
+          <button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="font-size:0.74rem; padding:4px 10px; color:#38bdf8;" title="Использовать как выходной шлюз интернета">🌐 Сделать шлюзом</button>
+          <button onclick="copyToClipboard('${vIP}')" class="btn btn-glass" style="font-size:0.74rem; padding:4px 10px;" title="Скопировать Virtual IP">📋 Копировать IP</button>
+        `;
+      }
+      drawer.innerHTML = `
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="font-size:1.4rem;">${node.icon || '⚡'}</div>
+          <div>
+            <div style="font-weight:700; font-size:0.88rem; color:#f8fafc; display:flex; align-items:center; gap:6px;">
+              <span>${node.name}</span>
+              <span class="badge" style="background:${node.color}22; color:${node.color}; border:1px solid ${node.color}55; font-size:0.68rem; padding:1px 6px;">${node.badge || ''}</span>
+            </div>
+            <div style="font-family:monospace; font-size:0.76rem; color:#38bdf8;">
+              ${node.vip || ''} ${node.endpoint ? '• ' + node.endpoint : ''}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          ${actionBtns}
+          <button onclick="closeSelectedNodeDrawer()" class="btn btn-glass" style="font-size:0.75rem; padding:4px 8px;" title="Закрыть">✕</button>
+        </div>
+      `;
+      drawMeshTopology();
+    }
+
+    function closeSelectedNodeDrawer() {
+      selectedMeshNode = null;
+      const drawer = document.getElementById('meshNodeDrawer');
+      if (drawer) drawer.style.display = 'none';
+      drawMeshTopology();
+    }
+
+    function renderTopologyTree(peers) {
+      const container = document.getElementById('meshTopologyTreeContainer');
+      if (!container) return;
+
+      const pList = peers || cachedPeers || [];
+      const countEl = document.getElementById('badgeMeshNodesCount');
+      if (countEl) countEl.innerText = (pList.length + 1) + ' узлов';
+
+      const onlinePeers = pList.filter(p => p.online);
+      const directPeers = onlinePeers.filter(p => (p.direct_p2p && p.active_endpoint) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct' || p.direct_tcp);
+      const relayPeers = onlinePeers.filter(p => !directPeers.includes(p));
+      const offlinePeers = pList.filter(p => !p.online);
+
+      // Exit Gateway
+      const activeExit = pList.find(p => p.is_exit_node ||
+        (currentSelectedExitNode && (p.device_id === currentSelectedExitNode || (p.virtual_ip && p.virtual_ip.startsWith(currentSelectedExitNode)))) ||
+        (currentActiveExitVIP && p.virtual_ip && p.virtual_ip.startsWith(currentActiveExitVIP))
+      );
+
+      // Latency average
+      const pings = directPeers.map(p => (p.latency_ms && p.latency_ms > 0) ? p.latency_ms : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0))).filter(v => v > 0);
+      const avgPing = pings.length > 0 ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) : 0;
+
+      const myName = (currentStatus && (currentStatus.device_name || currentStatus.nickname)) || (currentStatus && currentStatus.device_id) || 'Этот компьютер';
+      const myVip = (currentStatus && currentStatus.virtual_ip) || '10.8.0.x';
+      const myNat = (currentStatus && currentStatus.nat_type) || 'Full Cone NAT';
+      const myPort = (currentStatus && currentStatus.listen_port) || '51820';
+
+      let directCardsHtml = '';
+      if (directPeers.length === 0) {
+        directCardsHtml = `
+          <div style="grid-column: 1 / -1; background:rgba(255,255,255,0.02); border:1px dashed rgba(255,255,255,0.1); border-radius:10px; padding:20px; text-align:center; color:var(--text-muted); font-size:0.82rem;">
+            ⚡ Прямые соединения P2P пока устанавливаются или узлы работают через транзитный релей.
+          </div>`;
+      } else {
+        directPeers.forEach(p => {
+          const os = getPeerOsInfo(p);
+          const vIP = (p.virtual_ip || '').split('/')[0].trim();
+          const pName = p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10));
+          const pingMs = (p.latency_ms && p.latency_ms > 0) ? p.latency_ms : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
+          const pingColor = pingMs < 50 ? '#34d399' : (pingMs < 120 ? '#06b6d4' : (pingMs < 250 ? '#fbbf24' : '#f87171'));
+          const isExitActive = Boolean(activeExit && activeExit.device_id === p.device_id);
+
+          directCardsHtml += `
+            <div style="background:rgba(15,23,42,0.85); border:1px solid ${isExitActive ? '#10b981' : 'rgba(255,255,255,0.09)'}; border-radius:12px; padding:14px; display:flex; flex-direction:column; justify-content:space-between; gap:10px; box-shadow:0 4px 20px rgba(0,0,0,0.35); transition:transform 0.15s ease, border-color 0.15s ease;">
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; margin-bottom:8px;">
+                  <div style="font-weight:700; font-size:0.88rem; color:#f8fafc; display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:1.1rem;">${os.icon}</span>
+                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px;" title="${pName}">${pName}</span>
+                  </div>
+                  <span class="badge ${os.cls}" style="font-size:0.65rem; padding:2px 6px;">${os.name}</span>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.3); border-radius:6px; padding:5px 8px; margin-bottom:8px;">
+                  <span style="font-family:monospace; font-size:0.8rem; color:#38bdf8; font-weight:700; cursor:pointer;" onclick="copyToClipboard('${vIP}')" title="Нажмите чтобы скопировать IP">${vIP}</span>
+                  <span style="font-family:monospace; font-size:0.75rem; color:${pingColor}; font-weight:700;">🟢 ${pingMs > 0 ? pingMs + ' ms' : 'P2P'}</span>
+                </div>
+                <div style="font-size:0.72rem; color:var(--text-muted); display:flex; flex-direction:column; gap:3px;">
+                  <div style="display:flex; justify-content:space-between;">
+                    <span>Сокет:</span>
+                    <span class="mono" style="color:#cbd5e1;">${p.active_endpoint || p.stun_addr || '—'}</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between;">
+                    <span>Канал:</span>
+                    <span style="color:#34d399;">⚡ Direct AWG 3.1</span>
+                  </div>
+                  <div style="display:flex; justify-content:space-between;">
+                    <span>Потери / Дропы:</span>
+                    <span style="color:#cbd5e1;">${p.loss_percent || 0}% / ${p.consecutive_drops || 0}</span>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex; gap:6px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
+                <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="flex:1; font-size:0.72rem; padding:4px 6px; justify-content:center;">⚡ Пинг</button>
+                ${isExitActive
+                  ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-size:0.72rem; padding:4px 8px; font-weight:700;">🔌 Выкл</button>`
+                  : `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.72rem; padding:4px 8px; font-weight:700;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`
+                }
+                <button onclick="copyToClipboard('${vIP}')" class="btn btn-glass" style="font-size:0.72rem; padding:4px 8px;" title="Скопировать IP">📋</button>
+              </div>
+            </div>`;
+        });
+      }
+
+      let relayCardsHtml = '';
+      if (relayPeers.length > 0) {
+        relayPeers.forEach(p => {
+          const os = getPeerOsInfo(p);
+          const vIP = (p.virtual_ip || '').split('/')[0].trim();
+          const pName = p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10));
+          const relayVia = p.relayed_via_name || p.relayed_via_vip || 'Mesh Hub';
+
+          relayCardsHtml += `
+            <div style="background:rgba(15,23,42,0.85); border:1px solid rgba(192,132,252,0.25); border-radius:12px; padding:14px; display:flex; flex-direction:column; justify-content:space-between; gap:10px; box-shadow:0 4px 20px rgba(0,0,0,0.35);">
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px; margin-bottom:8px;">
+                  <div style="font-weight:700; font-size:0.88rem; color:#f8fafc; display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:1.1rem;">${os.icon}</span>
+                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:140px;" title="${pName}">${pName}</span>
+                  </div>
+                  <span class="badge ${os.cls}" style="font-size:0.65rem; padding:2px 6px;">${os.name}</span>
+                </div>
+                <div style="background:rgba(192,132,252,0.08); border:1px solid rgba(192,132,252,0.2); border-radius:8px; padding:8px 10px; margin-bottom:8px; font-size:0.74rem;">
+                  <div style="color:#c084fc; font-weight:700; display:flex; align-items:center; gap:5px; margin-bottom:4px;">
+                    <span>🔀 Многоузловой маршрут:</span>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:5px; color:#cbd5e1; font-family:monospace; font-size:0.72rem; overflow-x:auto;">
+                    <span>[Вы]</span>
+                    <span style="color:#818cf8;">──AWG──></span>
+                    <span style="color:#fbbf24; font-weight:700;">[${relayVia}]</span>
+                    <span style="color:#818cf8;">──Transit──></span>
+                    <span style="color:#38bdf8; font-weight:700;">[${pName}]</span>
+                  </div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem;">
+                  <span style="font-family:monospace; color:#38bdf8; font-weight:700;">${vIP}</span>
+                  <span class="badge" style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.4); color:#fbbf24; font-size:0.68rem;">🛡️ Transit Relay</span>
+                </div>
+              </div>
+              <div style="display:flex; gap:6px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
+                <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="flex:1; font-size:0.72rem; padding:4px 6px; justify-content:center;">⚡ ICMP Пинг</button>
+                <button onclick="copyToClipboard('${vIP}')" class="btn btn-glass" style="font-size:0.72rem; padding:4px 8px;" title="Скопировать IP">📋</button>
+              </div>
+            </div>`;
+        });
+      }
+
+      let offlineCardsHtml = '';
+      if (offlinePeers.length > 0) {
+        offlinePeers.forEach(p => {
+          const os = getPeerOsInfo(p);
+          const vIP = (p.virtual_ip || '').split('/')[0].trim();
+          const pName = p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10));
+
+          offlineCardsHtml += `
+            <div style="background:rgba(15,23,42,0.5); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; opacity:0.65;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span>${os.icon}</span>
+                <div>
+                  <div style="font-size:0.82rem; font-weight:600; color:#cbd5e1;">${pName}</div>
+                  <div style="font-family:monospace; font-size:0.72rem; color:#64748b;">${vIP}</div>
+                </div>
+              </div>
+              <span class="badge" style="background:rgba(100,116,139,0.2); color:#94a3b8; font-size:0.65rem;">⚫ Офлайн</span>
+            </div>`;
+        });
+      }
+
+      container.innerHTML = `
+        <!-- Metrics Row -->
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:16px;">
+          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px 14px;">
+            <div style="font-size:0.68rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Статус Меша</div>
+            <div style="font-size:1.15rem; font-weight:800; color:#4ade80; margin-top:2px; display:flex; align-items:center; gap:6px;">
+              <span>🟢 ${onlinePeers.length + 1}</span>
+              <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">/ ${pList.length + 1} узлов</span>
+            </div>
+          </div>
+          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px 14px;">
+            <div style="font-size:0.68rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Прямой P2P трафик</div>
+            <div style="font-size:1.15rem; font-weight:800; color:#06b6d4; margin-top:2px;">
+              ⚡ ${directPeers.length} <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">(${onlinePeers.length > 0 ? Math.round((directPeers.length / onlinePeers.length) * 100) : 100}%)</span>
+            </div>
+          </div>
+          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px 14px;">
+            <div style="font-size:0.68rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Ср. P2P Пинг</div>
+            <div style="font-size:1.15rem; font-weight:800; color:${avgPing > 0 && avgPing < 60 ? '#34d399' : '#fbbf24'}; margin-top:2px;">
+              ${avgPing > 0 ? avgPing + ' ms' : '—'}
+            </div>
+          </div>
+          <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px 14px;">
+            <div style="font-size:0.68rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Выход в Интернет</div>
+            <div style="font-size:0.95rem; font-weight:800; color:${activeExit ? '#10b981' : '#94a3b8'}; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              ${activeExit ? '🌐 ' + (activeExit.nickname || activeExit.device_name || activeExit.device_id.substring(0, 10)) : '🏠 Прямой WAN'}
+            </div>
+          </div>
+        </div>
+
+        <!-- Tiers & Structured Flow -->
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <!-- Tier 1: Local Device -->
+          <div style="background:linear-gradient(135deg, rgba(6,182,212,0.1) 0%, rgba(15,23,42,0.6) 100%); border:1px solid rgba(6,182,212,0.3); border-radius:12px; padding:14px 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <div style="width:38px; height:38px; border-radius:10px; background:rgba(6,182,212,0.2); border:1px solid rgba(6,182,212,0.4); display:flex; align-items:center; justify-content:center; font-size:1.25rem;">
+                  🏠
+                </div>
+                <div>
+                  <div style="font-weight:800; font-size:0.95rem; color:#f8fafc; display:flex; align-items:center; gap:8px;">
+                    <span>${myName}</span>
+                    <span class="badge badge-cyan" style="font-size:0.68rem; padding:2px 6px;">Вы (Локальный узел)</span>
+                    <span class="badge badge-success" style="font-size:0.68rem; padding:2px 6px;">🟢 В сети</span>
+                  </div>
+                  <div style="font-family:monospace; font-size:0.8rem; color:#38bdf8; margin-top:2px;">
+                    Virtual IP: <strong>${myVip}</strong> • Порт: ${myPort}
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:0.74rem;">
+                <span style="background:rgba(255,255,255,0.06); padding:4px 8px; border-radius:6px; color:#cbd5e1; border:1px solid rgba(255,255,255,0.08);">
+                  🛡️ AmneziaWG 2.0 (ChaCha20-Poly1305)
+                </span>
+                <span style="background:rgba(255,255,255,0.06); padding:4px 8px; border-radius:6px; color:#cbd5e1; border:1px solid rgba(255,255,255,0.08);">
+                  📡 ${myNat}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tier 2: Direct P2P Channels -->
+          <div>
+            <div style="font-size:0.82rem; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+              <span>⚡ Прямые P2P каналы (Direct AWG / ShadowTLS)</span>
+              <span class="badge badge-cyan" style="font-size:0.65rem;">${directPeers.length}</span>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:12px;">
+              ${directCardsHtml}
+            </div>
+          </div>
+
+          ${relayPeers.length > 0 ? `
+          <!-- Tier 3: Multi-Hop Relays -->
+          <div>
+            <div style="font-size:0.82rem; font-weight:800; color:#c084fc; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+              <span>🔀 Многоузловые релеи и транзит (Multi-Hop)</span>
+              <span class="badge" style="background:rgba(192,132,252,0.2); color:#c084fc; border:1px solid rgba(192,132,252,0.4); font-size:0.65rem;">${relayPeers.length}</span>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:12px;">
+              ${relayCardsHtml}
+            </div>
+          </div>
+          ` : ''}
+
+          ${offlinePeers.length > 0 ? `
+          <!-- Tier 4: Offline Nodes -->
+          <div>
+            <details style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:10px 14px;">
+              <summary style="font-size:0.78rem; font-weight:700; color:var(--text-muted); cursor:pointer; user-select:none;">
+                ⚫ Офлайн узлы сети (${offlinePeers.length})
+              </summary>
+              <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:8px; margin-top:10px;">
+                ${offlineCardsHtml}
+              </div>
+            </details>
+          </div>
+          ` : ''}
+        </div>
+      `;
+    }
 
     function meshZoom(factor) {
       meshZoomLevel = Math.max(0.5, Math.min(2.5, meshZoomLevel * factor));
@@ -5247,6 +5624,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           meshDragOffset.x = clickedNode.x - mouseX;
           meshDragOffset.y = clickedNode.y - mouseY;
           canvas.style.cursor = 'grabbing';
+          updateSelectedNodeDrawer(clickedNode);
         } else {
           meshIsPanning = true;
           meshPanStart.x = e.clientX - meshPanOffset.x;
@@ -5497,24 +5875,36 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           hasCloudRelayPeers = true;
         }
 
-        // Initial radial placement
+        // Initial Tiered Layout: Direct in Tier 1, Relay in Tier 2, Exit in Tier 3
         const totalP = Math.max(1, pList.length);
-        const angleSpread = Math.PI * 0.72; // ~130 degrees cone to the right
-        const startAngle = -angleSpread / 2;
-        const angleStep = totalP > 1 ? angleSpread / (totalP - 1) : 0;
-        const currentAngle = startAngle + idx * angleStep;
-        const radialDist = Math.min(clientW * 0.42, 220 + (idx % 2 === 0 ? 0 : 50));
+        let defaultX = clientW * 0.44;
+        let defaultY = cy;
 
-        const defaultX = selfNode.x + Math.cos(currentAngle) * radialDist;
-        const defaultY = cy + Math.sin(currentAngle) * (clientH * 0.36);
+        if (isExit) {
+          defaultX = Math.min(clientW - 180, Math.round(clientW * 0.65));
+          defaultY = cy;
+        } else if (isDirectAWG || isDirectTCP) {
+          const staggerX = (idx % 2 === 0 ? -30 : 30);
+          defaultX = Math.round(clientW * 0.44) + staggerX;
+          const spanY = Math.max(180, clientH - 140);
+          const stepY = spanY / Math.max(1, totalP - 1);
+          defaultY = 70 + (idx * stepY);
+        } else {
+          // Relayed peer
+          const staggerX = (idx % 2 === 0 ? -20 : 20);
+          defaultX = Math.round(clientW * 0.70) + staggerX;
+          const spanY = Math.max(180, clientH - 140);
+          const stepY = spanY / Math.max(1, totalP - 1);
+          defaultY = 70 + (idx * stepY);
+        }
 
         const node = {
           id: devID,
           name: pName,
           vip: p.virtual_ip || '—',
           rawPeer: p,
-          x: (oldPositions[devID] ? oldPositions[devID].x : Math.max(60, Math.min(clientW - 60, defaultX))),
-          y: (oldPositions[devID] ? oldPositions[devID].y : Math.max(45, Math.min(clientH - 45, defaultY))),
+          x: (oldPositions[devID] ? oldPositions[devID].x : Math.max(80, Math.min(clientW - 80, defaultX))),
+          y: (oldPositions[devID] ? oldPositions[devID].y : Math.max(50, Math.min(clientH - 50, defaultY))),
           pinned: (oldPositions[devID] ? oldPositions[devID].pinned : false),
           isSelf: false,
           online: p.online,
@@ -5688,11 +6078,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         }
       });
 
-      // 6. Anti-Collision Spring Layout Relaxation Solver
-      // Solves positions with spring repulsion and edge attraction
-      const kRep = 4200;
-      const kAtt = 0.04;
-      const targetDist = 140;
+      // 6. Anti-Collision Spring Layout Relaxation & Rigid Box Collision Solver
+      const boxW = 168; // Label card width + safety padding
+      const boxH = 92;  // Label card height + circle + safety padding
+      const kRep = 4500;
+      const kAtt = 0.035;
+      const targetDist = 150;
 
       for (let iter = 0; iter < 28; iter++) {
         // Repulsion between all node pairs
@@ -5703,7 +6094,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             const dx = n2.x - n1.x;
             const dy = n2.y - n1.y;
             const dist = Math.hypot(dx, dy) || 1;
-            const minDist = (n1.radius + n2.radius) + 68;
+            const minDist = (n1.radius + n2.radius) + 75;
 
             if (dist < minDist) {
               const force = (kRep / (dist * dist)) * 0.45;
@@ -5717,6 +6108,23 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               if (!n2.pinned && !n2.isSelf && !n2.isHub) {
                 n2.x += fx;
                 n2.y += fy;
+              }
+            }
+
+            // B. Hard AABB Bounding Box Collision Solver (eliminates text/halo overlaps)
+            const ox = boxW - Math.abs(dx);
+            const oy = boxH - Math.abs(dy);
+            if (ox > 0 && oy > 0) {
+              if (ox < oy) {
+                const s = dx >= 0 ? 1 : -1;
+                const push = (ox * 0.5) * s;
+                if (!n1.pinned && !n1.isSelf && !n1.isHub) n1.x -= push;
+                if (!n2.pinned && !n2.isSelf && !n2.isHub) n2.x += push;
+              } else {
+                const s = dy >= 0 ? 1 : -1;
+                const push = (oy * 0.5) * s;
+                if (!n1.pinned && !n1.isSelf && !n1.isHub) n1.y -= push;
+                if (!n2.pinned && !n2.isSelf && !n2.isHub) n2.y += push;
               }
             }
           }
@@ -5748,8 +6156,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         // Viewport boundaries clamp
         meshNodes.forEach(n => {
           if (!n.pinned) {
-            n.x = Math.max(50, Math.min(clientW - 50, n.x));
-            n.y = Math.max(45, Math.min(clientH - 45, n.y));
+            n.x = Math.max(90, Math.min(clientW - 90, n.x));
+            n.y = Math.max(55, Math.min(clientH - 55, n.y));
           }
         });
       }
@@ -5843,9 +6251,49 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         const to = edge.to;
         if (!from || !to) return;
 
+        const isCurved = (edge.type === 'mesh_relay_hop' || edge.type === 'cloud_relay');
+        let cpX = 0, cpY = 0;
+        let mx = (from.x + to.x) / 2;
+        let my = (from.y + to.y) / 2;
+
+        const speedMultiplier = 1.0 / Math.max(1, (1 + (edge.ping || 30) / 100));
+        const edgePhase = (edgeIdx || 0) * 0.28;
+        const t1 = ((meshAnimTime * speedMultiplier + edgePhase) % 1.0);
+        const tTail = (t1 - 0.035 + 1.0) % 1.0;
+        let p1x = from.x + (to.x - from.x) * t1;
+        let p1y = from.y + (to.y - from.y) * t1;
+        let pTx = from.x + (to.x - from.x) * tTail;
+        let pTy = from.y + (to.y - from.y) * tTail;
+
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);
-        ctx.lineTo(to.x, to.y);
+
+        if (isCurved) {
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const arch = Math.min(75, Math.max(35, dist * 0.22));
+          const normX = -dy / dist;
+          const normY = dx / dist;
+          const midY = (from.y + to.y) / 2;
+          const sign = midY >= cy ? 1 : -1;
+          cpX = (from.x + to.x) / 2 + normX * arch * sign;
+          cpY = (from.y + to.y) / 2 + normY * arch * sign;
+
+          ctx.quadraticCurveTo(cpX, cpY, to.x, to.y);
+
+          // Photon positions on bezier
+          p1x = (1 - t1) * (1 - t1) * from.x + 2 * (1 - t1) * t1 * cpX + t1 * t1 * to.x;
+          p1y = (1 - t1) * (1 - t1) * from.y + 2 * (1 - t1) * t1 * cpY + t1 * t1 * to.y;
+          pTx = (1 - tTail) * (1 - tTail) * from.x + 2 * (1 - tTail) * tTail * cpX + tTail * tTail * to.x;
+          pTy = (1 - tTail) * (1 - tTail) * from.y + 2 * (1 - tTail) * tTail * cpY + tTail * tTail * to.y;
+
+          // Latency badge at curve apex (t = 0.5)
+          mx = 0.25 * from.x + 0.5 * cpX + 0.25 * to.x;
+          my = 0.25 * from.y + 0.5 * cpY + 0.25 * to.y;
+        } else {
+          ctx.lineTo(to.x, to.y);
+        }
 
         if (edge.type === 'direct_awg') {
           ctx.strokeStyle = 'rgba(6, 182, 212, 0.85)';
@@ -5872,13 +6320,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Animated Photonic Particles with trail
-        const speedMultiplier = 1.0 / Math.max(1, (1 + (edge.ping || 30) / 100));
-        const edgePhase = (edgeIdx || 0) * 0.28;
-        const t1 = ((meshAnimTime * speedMultiplier + edgePhase) % 1.0);
-        const p1x = from.x + (to.x - from.x) * t1;
-        const p1y = from.y + (to.y - from.y) * t1;
-
         // Leading photon
         ctx.beginPath();
         ctx.arc(p1x, p1y, 3.8, 0, Math.PI * 2);
@@ -5889,9 +6330,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         ctx.shadowBlur = 0;
 
         // Trailing tail
-        const tTail = (t1 - 0.035 + 1.0) % 1.0;
-        const pTx = from.x + (to.x - from.x) * tTail;
-        const pTy = from.y + (to.y - from.y) * tTail;
         ctx.beginPath();
         ctx.arc(pTx, pTy, 2.2, 0, Math.PI * 2);
         ctx.fillStyle = edge.particleColor || '#38bdf8';
@@ -5900,8 +6338,6 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         ctx.globalAlpha = 1.0;
 
         // Edge Latency Badge
-        const mx = (from.x + to.x) / 2;
-        const my = (from.y + to.y) / 2;
         const badgeLabel = edge.label || '';
         const badgeW = badgeLabel.length * 6.5 + 16;
         ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
@@ -5925,6 +6361,18 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       // ── 2. Draw Nodes ──────────────────────────────────────────
       meshNodes.forEach(node => {
+        // Selection glowing ring if clicked/selected
+        if (selectedMeshNode === node) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 8, 0, Math.PI * 2);
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 2.4;
+          ctx.shadowColor = '#38bdf8';
+          ctx.shadowBlur = 12;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+
         // Outer pulsing halo
         const pulse = Math.sin(meshAnimTime * 2.5 + (node.isSelf ? 0 : 1.2)) * 2;
         ctx.beginPath();
@@ -5963,43 +6411,43 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         ctx.textBaseline = 'middle';
         ctx.fillText(node.icon || '⚡', node.x, node.y);
 
-        // Labels
-        if (node.labelAbove) {
-          ctx.fillStyle = '#f8fafc';
-          ctx.font = 'bold 11px sans-serif';
-          ctx.fillText(node.name, node.x, node.y - node.radius - 14);
+        // High-contrast frosted glass card backing for labels (prevents crossing lines from obscuring text)
+        ctx.font = 'bold 11px sans-serif';
+        const nameW = ctx.measureText(node.name).width;
+        ctx.font = '9px monospace';
+        const vipW = ctx.measureText(node.vip).width;
+        const badgeW = (!node.isHub && node.badge) ? (node.badge.length * 5.8 + 12) : 0;
+        const cardW = Math.max(nameW, vipW, badgeW) + 22;
+        const cardH = (!node.isHub && node.badge) ? 44 : 32;
+        const cardX = node.x - cardW / 2;
+        const cardY = node.labelAbove ? (node.y - node.radius - cardH - 8) : (node.y + node.radius + 6);
 
-          ctx.fillStyle = '#c084fc';
-          ctx.font = '9px monospace';
-          ctx.fillText(node.vip, node.x, node.y - node.radius - 4);
-        } else {
-          // Device Name
-          ctx.fillStyle = '#f8fafc';
-          ctx.font = 'bold 11px sans-serif';
-          ctx.fillText(node.name, node.x, node.y + node.radius + 13);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+        ctx.strokeStyle = (selectedMeshNode === node) ? 'rgba(56, 189, 248, 0.6)' : 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(cardX, cardY, cardW, cardH, 6);
+        else ctx.rect(cardX, cardY, cardW, cardH);
+        ctx.fill();
+        ctx.stroke();
 
-          // Virtual IP
-          ctx.fillStyle = node.isHub ? '#c084fc' : '#94a3b8';
-          ctx.font = '9px monospace';
-          ctx.fillText(node.vip, node.x, node.y + node.radius + 25);
+        // Device Name
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(node.name, node.x, cardY + 10);
 
-          // Small Transport Badge below VIP
-          if (!node.isHub && node.badge) {
-            const bTxt = node.badge;
-            const bW = bTxt.length * 5.8 + 10;
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-            ctx.beginPath();
-            if (ctx.roundRect) ctx.roundRect(node.x - bW / 2, node.y + node.radius + 32, bW, 14, 4);
-            else ctx.rect(node.x - bW / 2, node.y + node.radius + 32, bW, 14);
-            ctx.fill();
-            ctx.strokeStyle = node.color + '55';
-            ctx.lineWidth = 0.8;
-            ctx.stroke();
+        // Virtual IP
+        ctx.fillStyle = node.isHub ? '#c084fc' : '#38bdf8';
+        ctx.font = '9px monospace';
+        ctx.fillText(node.vip, node.x, cardY + 22);
 
-            ctx.fillStyle = node.color;
-            ctx.font = 'bold 8px sans-serif';
-            ctx.fillText(bTxt, node.x, node.y + node.radius + 39);
-          }
+        // Badge if present
+        if (!node.isHub && node.badge) {
+          ctx.fillStyle = node.color;
+          ctx.font = 'bold 8px sans-serif';
+          ctx.fillText(node.badge, node.x, cardY + 34);
         }
       });
 
