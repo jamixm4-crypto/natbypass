@@ -167,8 +167,8 @@ func TestDefaultConfigValues(t *testing.T) {
 	if loaded.App.ShowDiagnostics != false {
 		t.Errorf("Default ShowDiagnostics = %v, want false", loaded.App.ShowDiagnostics)
 	}
-	if loaded.Network.AllowExitNode != false {
-		t.Errorf("Default AllowExitNode = %v, want false", loaded.Network.AllowExitNode)
+	if loaded.Network.AllowExitNode != true {
+		t.Errorf("Default AllowExitNode = %v, want true", loaded.Network.AllowExitNode)
 	}
 }
 

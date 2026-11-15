@@ -379,7 +379,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("network.obfuscation_sni", "gateway.icloud.com")
 	v.SetDefault("network.ip_timeout", 10)
 	v.SetDefault("network.mtu", 1280)
-	v.SetDefault("network.allow_exit_node", false)
+	v.SetDefault("network.allow_exit_node", true)
 	v.SetDefault("network.stun_servers", []string{
 		"162.159.207.0:3478",   // Cloudflare STUN direct IP (0ms DNS)
 		"74.125.250.129:19302", // Google STUN direct IP (0ms DNS)

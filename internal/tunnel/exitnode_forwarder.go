@@ -83,16 +83,17 @@ func (e *tcpSessionEntry) close() {
 // on an Exit Node so that mesh clients can ping external hosts, resolve DNS, and browse web services (HTTP/HTTPS)
 // without relying on host OS NAT drivers (like Windows WinNAT).
 type TransitForwarder struct {
-	mu           sync.RWMutex
-	myVIP        string
-	lookupPeer   func(vipOrID string) *peer.Peer
-	sendToPeer   func(destPeer *peer.Peer, packet []byte) error
-	icmpConn     net.PacketConn
-	icmpSessions sync.Map // map[icmpSessionKey]icmpSessionEntry
-	udpSessions  sync.Map // map[udpSessionKey]*udpSessionEntry
-	tcpSessions  sync.Map // map[tcpSessionKey]*tcpSessionEntry
-	closed       chan struct{}
-	closeOnce    sync.Once
+	mu                sync.RWMutex
+	myVIP             string
+	lookupPeer        func(vipOrID string) *peer.Peer
+	sendToPeer        func(destPeer *peer.Peer, packet []byte) error
+	icmpConn          net.PacketConn
+	icmpSessions      sync.Map // map[icmpSessionKey]icmpSessionEntry
+	udpSessions       sync.Map // map[udpSessionKey]*udpSessionEntry
+	tcpSessions       sync.Map // map[tcpSessionKey]*tcpSessionEntry
+	recentSenderPeers sync.Map // map[string]*peer.Peer (clientVIP -> *peer.Peer)
+	closed            chan struct{}
+	closeOnce         sync.Once
 }
 
 // NewTransitForwarder creates and initializes a userspace transit forwarder.
@@ -188,6 +189,20 @@ func (tf *TransitForwarder) IsTransitPacket(payload []byte) (bool, net.IP, net.I
 	}
 
 	return true, srcIP, destIP
+}
+
+// HandleTransitPacketWithSender inspects an inbound packet, associates client IP with sender peer,
+// and forwards ICMP, UDP, or TCP transit traffic in userspace.
+func (tf *TransitForwarder) HandleTransitPacketWithSender(payload []byte, senderPeer *peer.Peer) bool {
+	if senderPeer != nil && len(payload) >= 20 {
+		srcIP := GetSrcIP(payload)
+		if srcIP != nil {
+			tf.recentSenderPeers.Store(srcIP.String(), senderPeer)
+			clean := strings.TrimSpace(strings.Split(srcIP.String(), "/")[0])
+			tf.recentSenderPeers.Store(clean, senderPeer)
+		}
+	}
+	return tf.HandleTransitPacket(payload)
 }
 
 // HandleTransitPacket inspects an inbound packet and forwards ICMP, UDP, or TCP transit traffic in userspace.
@@ -449,10 +464,24 @@ func (tf *TransitForwarder) udpSessionReader(key udpSessionKey, entry *udpSessio
 
 // deliverToClient delivers an encapsulated IPv4 reply packet back to the client peer.
 func (tf *TransitForwarder) deliverToClient(clientVIP net.IP, packet []byte) {
-	if tf.lookupPeer == nil || tf.sendToPeer == nil {
+	if tf.sendToPeer == nil {
 		return
 	}
-	destPeer := tf.lookupPeer(clientVIP.String())
+	var destPeer *peer.Peer
+	cleanVIP := strings.TrimSpace(strings.Split(clientVIP.String(), "/")[0])
+	if tf.lookupPeer != nil {
+		destPeer = tf.lookupPeer(cleanVIP)
+		if destPeer == nil {
+			destPeer = tf.lookupPeer(clientVIP.String())
+		}
+	}
+	if destPeer == nil {
+		if val, ok := tf.recentSenderPeers.Load(cleanVIP); ok && val != nil {
+			destPeer = val.(*peer.Peer)
+		} else if val, ok := tf.recentSenderPeers.Load(clientVIP.String()); ok && val != nil {
+			destPeer = val.(*peer.Peer)
+		}
+	}
 	if destPeer == nil {
 		return
 	}
@@ -477,6 +506,17 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 	}
 	flags := tcpHdr[13]
 	tcpData := tcpHdr[dataOffset:]
+
+	// Case 0: Port 853 (DNS-over-TLS / Private DNS on Android).
+	// Modern Android devices probe DoT on port 853. In environments where port 853 is throttled
+	// or blocked by ISP/TSPU, dialing port 853 hangs for seconds and freezes app network queries.
+	// Returning an immediate TCP RST|ACK informs Android that DoT is not offered on this tunnel,
+	// causing Android to instantly and seamlessly fall back to plaintext UDP 53 without latency.
+	if dstPort == 853 {
+		rstPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, 0, seqNum+1, 0x14, 0, nil)
+		tf.deliverToClient(srcIP, rstPkt)
+		return true
+	}
 
 	key := tcpSessionKey{
 		clientVIPStr: srcIP.String(),
@@ -577,31 +617,62 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 		return true
 	}
 
-	// Case 4: FIN from client
+	// Case 4: Client data packet (must precede FIN check to deliver trailing data)
+	if len(tcpData) > 0 {
+		curExpected := entry.clientNextSeq.Load()
+		if seqNum+uint32(len(tcpData)) <= curExpected {
+			// Duplicate/retransmitted data packet already processed: simply re-ACK to keep client moving
+			ackPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), curExpected, 0x10, 64240, nil)
+			tf.deliverToClient(srcIP, ackPkt)
+			return true
+		}
+
+		dataToSend := tcpData
+		if seqNum < curExpected {
+			// Partial overlap: slice off already received bytes
+			offset := curExpected - seqNum
+			if int(offset) < len(tcpData) {
+				dataToSend = tcpData[offset:]
+			} else {
+				dataToSend = nil
+			}
+		}
+
+		if len(dataToSend) > 0 && entry.conn != nil {
+			_ = entry.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			_, err := entry.conn.Write(dataToSend)
+			if err != nil {
+				entry.close()
+				tf.tcpSessions.Delete(key)
+				rstPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x14, 0, nil)
+				tf.deliverToClient(srcIP, rstPkt)
+				return true
+			}
+		}
+		entry.clientNextSeq.Store(seqNum + uint32(len(tcpData)))
+
+		// Send ACK to client
+		ackPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x10, 64240, nil)
+		tf.deliverToClient(srcIP, ackPkt)
+
+		if (flags & 0x01) != 0 {
+			// Client FIN attached to data
+			entry.clientNextSeq.Add(1)
+			finAckPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x10, 64240, nil)
+			tf.deliverToClient(srcIP, finAckPkt)
+			entry.close()
+			tf.tcpSessions.Delete(key)
+		}
+		return true
+	}
+
+	// Case 5: Standalone FIN from client (no data)
 	if (flags & 0x01) != 0 {
 		entry.clientNextSeq.Add(1)
 		ackPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x10, 64240, nil)
 		tf.deliverToClient(srcIP, ackPkt)
 		entry.close()
 		tf.tcpSessions.Delete(key)
-		return true
-	}
-
-	// Case 5: Client data packet
-	if len(tcpData) > 0 {
-		_ = entry.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		_, err := entry.conn.Write(tcpData)
-		if err != nil {
-			entry.close()
-			tf.tcpSessions.Delete(key)
-			rstPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x14, 0, nil)
-			tf.deliverToClient(srcIP, rstPkt)
-			return true
-		}
-		entry.clientNextSeq.Store(seqNum + uint32(len(tcpData)))
-		// Send ACK to client
-		ackPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x10, 64240, nil)
-		tf.deliverToClient(srcIP, ackPkt)
 		return true
 	}
 
@@ -724,6 +795,51 @@ func buildIPv4Packet(srcIP, dstIP net.IP, protocol byte, ttl byte, payload []byt
 	return pkt
 }
 
+// calculateUDPChecksum calculates the 16-bit UDP checksum using IPv4 pseudo-header.
+func calculateUDPChecksum(srcIP, dstIP net.IP, udpHeader []byte, data []byte) uint16 {
+	src := srcIP.To4()
+	dst := dstIP.To4()
+	if src == nil || dst == nil {
+		return 0
+	}
+	udpLen := len(udpHeader) + len(data)
+	var sum uint32
+
+	// Pseudo Header:
+	sum += uint32(binary.BigEndian.Uint16(src[0:2]))
+	sum += uint32(binary.BigEndian.Uint16(src[2:4]))
+	sum += uint32(binary.BigEndian.Uint16(dst[0:2]))
+	sum += uint32(binary.BigEndian.Uint16(dst[2:4]))
+	sum += uint32(17) // Proto UDP
+	sum += uint32(udpLen)
+
+	// UDP Header (checksum field at 6:8 skipped)
+	for i := 0; i < len(udpHeader)-1; i += 2 {
+		if i == 6 {
+			continue
+		}
+		sum += uint32(binary.BigEndian.Uint16(udpHeader[i : i+2]))
+	}
+
+	// Payload data
+	for i := 0; i < len(data)-1; i += 2 {
+		sum += uint32(binary.BigEndian.Uint16(data[i : i+2]))
+	}
+	if len(data)%2 != 0 {
+		sum += uint32(data[len(data)-1]) << 8
+	}
+
+	for sum > 0xFFFF {
+		sum = (sum & 0xFFFF) + (sum >> 16)
+	}
+
+	cs := ^uint16(sum)
+	if cs == 0 {
+		cs = 0xFFFF // RFC 768: if calculated checksum is 0, send 0xFFFF
+	}
+	return cs
+}
+
 // buildIPv4UDPPacket constructs an IPv4 packet encapsulating a UDP datagram.
 func buildIPv4UDPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte) []byte {
 	udpLen := 8 + len(payload)
@@ -741,13 +857,17 @@ func buildIPv4UDPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint
 	binary.BigEndian.PutUint16(pkt[10:12], ipCS)
 
 	// UDP Header
-	binary.BigEndian.PutUint16(pkt[20:22], srcPort)
-	binary.BigEndian.PutUint16(pkt[22:24], dstPort)
-	binary.BigEndian.PutUint16(pkt[24:26], uint16(udpLen))
-	binary.BigEndian.PutUint16(pkt[26:28], 0) // UDP checksum optional in IPv4, 0 is valid
+	udpHdr := pkt[20:28]
+	binary.BigEndian.PutUint16(udpHdr[0:2], srcPort)
+	binary.BigEndian.PutUint16(udpHdr[2:4], dstPort)
+	binary.BigEndian.PutUint16(udpHdr[4:6], uint16(udpLen))
+	binary.BigEndian.PutUint16(udpHdr[6:8], 0)
 
 	// UDP Payload
 	copy(pkt[28:], payload)
+
+	udpCS := calculateUDPChecksum(srcIP, dstIP, udpHdr, payload)
+	binary.BigEndian.PutUint16(pkt[26:28], udpCS)
 	return pkt
 }
 

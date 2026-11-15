@@ -170,7 +170,7 @@ class NatBypassVpnService : VpnService() {
             }
 
             val parsedVip = resolvedVip.substringBefore("/").trim()
-            val currentVip = if (parsedVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))) parsedVip else "100.64.200.10"
+            val currentVip = if (parsedVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))) parsedVip else "10.1.2.10"
             val prefix = resolvedVip.substringAfter("/", "24").toIntOrNull() ?: 24
 
             try {
@@ -280,6 +280,13 @@ class NatBypassVpnService : VpnService() {
                         for (route in linkProps.routes) {
                             val dest = route.destination
                             if (dest != null && dest.prefixLength in 8..32 && !dest.address.isAnyLocalAddress && !dest.address.isLoopbackAddress) {
+                                val hostAddr = dest.address.hostAddress ?: ""
+                                // КРИТИЧНО: НЕ исключаем подсети, пересекающиеся с меш-сетью (10.x.x.x, 100.64.x.x) или широкие диапазоны (<=16).
+                                // Если мобильный оператор (LTE/CGNAT) выдаёт 10.0.0.0/8, его исключение отрезает Android от всех узлов кластера 10.1.2.x!
+                                if (hostAddr.startsWith("10.") || hostAddr.startsWith("100.64.") || dest.prefixLength <= 16) {
+                                    Log.i(TAG, "Skipping excludeRoute for mesh-overlapping route: $dest")
+                                    continue
+                                }
                                 try {
                                     builder.excludeRoute(dest)
                                     Log.i(TAG, "excludeRoute applied for local network: $dest")
@@ -313,9 +320,10 @@ class NatBypassVpnService : VpnService() {
                 // её служебный трафик (MQTT, STUN) обращается к физическому DNS Wi-Fi/LTE без блокировок.
                 try {
                     builder.addDnsServer("77.88.8.8")
+                    builder.addDnsServer("77.88.8.1")
                     builder.addDnsServer("1.1.1.1")
                     builder.addDnsServer("8.8.8.8")
-                    Log.i(TAG, "DNS servers 77.88.8.8, 1.1.1.1, 8.8.8.8 added for Exit Node mode")
+                    Log.i(TAG, "DNS servers 77.88.8.8, 77.88.8.1, 1.1.1.1, 8.8.8.8 added for Exit Node mode")
                 } catch (e: Exception) {
                     Log.w(TAG, "addDnsServer error: ${e.message}")
                 }

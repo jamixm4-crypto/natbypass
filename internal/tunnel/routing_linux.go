@@ -324,6 +324,10 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 
 	// Keenetic NDM chains if present: MUST be inserted at position 1 to precede default DROP/REJECT!
 	if isKeeneticDevice() {
+		forceInsertIptablesRule(ipt, "nat", "_NDM_POSTROUTING", "-m", "mark", "--mark", "0x4e", "!", "-o", "nb0", "-j", "MASQUERADE")
+		for _, s := range meshSubnets {
+			forceInsertIptablesRule(ipt, "nat", "_NDM_POSTROUTING", "-s", s, "!", "-o", "nb0", "-j", "MASQUERADE")
+		}
 		forceInsertIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "nb0", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "_NDM_FORWARD", "-o", "nb0", "-j", "ACCEPT")
 		forceInsertIptablesRule(ipt, "", "_NDM_FORWARD", "-i", "nb0", "-o", "br0", "-j", "ACCEPT")
@@ -350,6 +354,8 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			_ = runLinuxCmd("ip", "rule", "del", "pref", "50", "from", cleanSubnet)
 			_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "iif", "nb0")
 		}
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "25", "to", cleanSubnet, "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "25", "to", cleanSubnet, "lookup", "main")
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanSubnet, "lookup", "main")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", cleanSubnet, "lookup", "main")
 	}
@@ -388,10 +394,19 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 				}
 			}
 		}
+		for _, tbl := range []string{"1000", "1001"} {
+			for _, s := range buildMeshSubnetList(cleanSubnet) {
+				if s != "" {
+					_ = runLinuxCmd("ip", "route", "replace", s, "dev", "nb0", "table", tbl, "onlink")
+				}
+			}
+		}
 
-		// Priority 40: return traffic to mesh subnets always looks up table main
+		// Priority 25 and 40: return traffic to mesh subnets always looks up table main
 		for _, s := range buildMeshSubnetList(cleanSubnet) {
 			if s != "" {
+				_ = runLinuxCmd("ip", "rule", "del", "pref", "25", "to", s, "lookup", "main")
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "25", "to", s, "lookup", "main")
 				_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", s, "lookup", "main")
 				_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", s, "lookup", "main")
 			}
@@ -440,6 +455,8 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
 			_ = runLinuxCmd("ip", "rule", "del", "pref", "61")
 			_ = runLinuxCmd("ip", "rule", "del", "pref", "62")
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "63")
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "64")
 		}
 		if wanTable != "" && wanTable != "main" {
 			_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", wanTable)
@@ -450,10 +467,24 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 				}
 			}
 		}
+		// Also add candidate ISP tables 1000 and 1001 for Keenetic multi-WAN resilience
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "63", "iif", "nb0", "lookup", "1000")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "63", "fwmark", "0x4e", "lookup", "1000")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "64", "iif", "nb0", "lookup", "1001")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "64", "fwmark", "0x4e", "lookup", "1001")
+
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "61", "fwmark", "0x4e", "lookup", "60")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "61", "iif", "nb0", "lookup", "60")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "62", "fwmark", "0x4e", "lookup", "main")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "62", "iif", "nb0", "lookup", "main")
+		for _, s := range buildMeshSubnetList(cleanSubnet) {
+			if s != "" && s != "10.0.0.0/8" && s != "172.16.0.0/12" {
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "61", "from", s, "lookup", "60")
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "62", "from", s, "lookup", "main")
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "63", "from", s, "lookup", "1000")
+				_ = runLinuxCmd("ip", "rule", "add", "pref", "64", "from", s, "lookup", "1001")
+			}
+		}
 
 		// Ensure persistent KeeneticOS netfilter hook is installed and valid
 		ensureKeeneticNetfilterHook(cleanSubnet)
@@ -1246,6 +1277,10 @@ func EnsurePeerHostRoute(peerVIP string) {
 		if wanTable != "" && wanTable != "main" {
 			_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "table", wanTable, "onlink")
 		}
+		_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "table", "1000", "onlink")
+		_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "table", "1001", "onlink")
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "25", "to", cleanVIP+"/32", "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "25", "to", cleanVIP+"/32", "lookup", "main")
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
 	}

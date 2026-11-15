@@ -1724,7 +1724,7 @@ func attachTUNLocked(tunFd int) {
 							} else {
 								for _, p := range globalRegistry.List() {
 									pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-									if p.DeviceID == globalExitNode || pVIP == globalExitNode || p.Nickname == globalExitNode {
+									if p.DeviceID == globalExitNode || pVIP == globalExitNode || p.Nickname == globalExitNode || p.DeviceName == globalExitNode {
 										targetPeer = p
 										break
 									}
@@ -1884,12 +1884,14 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// Fallback Relay Rule: ONLY if direct transmission is not bilaterally verified AND NOT Exit Node internet traffic!
+							// Fallback Relay Rule: Multi-Hop mesh relay fallback if direct transmission is unconfirmed
 							// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
+							// Массовый интернет-трафик СТРОГО запрещен к публикации в центральный MQTT-брокер во избежание перегрузки.
 							isICMP := len(pkt) >= 20 && pkt[9] == 1
 							isExitOrInternet := !isICMP && ((globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetPeer.VirtualIP == globalExitNode)) || (cleanVIP != "" && srcIP.String() != cleanVIP))
 							directVerified := sentTCP || (sentDirect && targetPeer.DirectP2P && bilateralOK)
-							needsRelay := !directVerified && (!isExitOrInternet || isICMP)
+							needsRelay := !directVerified
+							needsMQTTRelay := needsRelay && (!isExitOrInternet || isICMP)
 
 							// 1e. Mesh Userspace Relay Fallback (encapsulated in Multi-Hop header)
 							if needsRelay && !isForceUDP && globalRegistry != nil {
@@ -1988,7 +1990,7 @@ func attachTUNLocked(tunFd int) {
 							}
 
 							// 1f. Fallback: relay via MQTT/Signaling when direct transmission is unconfirmed or failed (ASYNCHRONOUS, non-blocking)
-							if needsRelay && globalSigMgr != nil {
+							if needsMQTTRelay && globalSigMgr != nil {
 								pktCopy := make([]byte, len(pkt))
 								copy(pktCopy, pkt)
 								tDevID := targetPeer.DeviceID

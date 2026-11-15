@@ -1530,8 +1530,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// On Windows, the OS lacks native kernel NAT masquerade for Wintun without Hyper-V NetNat.
 			// Userspace transit forwarder handles ICMP, UDP (DNS), and TCP proxying directly via host sockets for instant exit node access.
 			// On Linux, if tunDev == nil, transit forwarder acts as an instant fallback.
-			if (runtime.GOOS == "windows" || tunDev == nil) && transitForwarder != nil && cfg.Network.AllowExitNode {
-				if transitForwarder.HandleTransitPacket(payload) {
+			if (runtime.GOOS == "windows" || tunDev == nil) && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
+				if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder")
 					return
 				}

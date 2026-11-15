@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.27"
+	Version = "1.9.507-beta.28"
 	Commit  = "release"
 )
 
@@ -487,7 +487,7 @@ var (
 
 	// Вкладка 5: Шлюз и подсети (Routing)
 	hBtnAllowExit      uintptr
-	allowExitNode      bool
+	allowExitNode      bool = true
 	hBtnAddLocalSubnet uintptr
 	hEditAdvSubnets    uintptr
 	hBtnApplySubnets   uintptr
@@ -980,7 +980,10 @@ func main() {
 	myNick = cfg.App.DeviceName
 	saveLogsToDisk = cfg.App.SaveLogsToDisk
 	showDiagnostics = cfg.App.ShowDiagnostics
-	allowExitNode = cfg.Network.AllowExitNode
+	allowExitNode = true
+	if cfg != nil {
+		allowExitNode = cfg.Network.AllowExitNode
+	}
 	if allowExitNode {
 		go func() {
 			_ = tunnel.EnableHostIPForwardingSubnet(myVirtualIP)
@@ -5561,7 +5564,7 @@ func startEngineFromConfig(c *config.Config) {
 			// On Windows, the OS lacks native kernel NAT masquerade for Wintun without Hyper-V NetNat.
 			// Userspace transit forwarder handles ICMP, UDP (DNS), and TCP proxying directly via host sockets for instant exit node access.
 			if guiTransitForwarder != nil && allowExitNode {
-				if guiTransitForwarder.HandleTransitPacket(payload) {
+				if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 					atomic.AddUint64(&packetsRecvCount, 1)
 					atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
 					return
@@ -8795,7 +8798,10 @@ func fillConfigFields() {
 		if active != nil {
 			applyAWGProfileToGUI(active)
 		}
+		allowExitNode = true
+	if cfg != nil {
 		allowExitNode = cfg.Network.AllowExitNode
+	}
 		if hBtnAllowExit != 0 {
 			if allowExitNode {
 				buttonLabels[ID_BTN_ALLOW_EXIT] = "🌐 Разрешить выход в интернет через меня: ВКЛ"
