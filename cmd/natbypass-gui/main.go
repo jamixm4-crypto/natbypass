@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.24"
+	Version = "1.9.507-beta.25"
 	Commit  = "release"
 )
 
@@ -5558,8 +5558,9 @@ func startEngineFromConfig(c *config.Config) {
 			}
 
 			// Exit Node Userspace Transit Forwarder:
-			// If this node is acting as an exit node, handle ICMP pings and UDP transit in userspace
-			if guiTransitForwarder != nil && allowExitNode {
+			// Fallback userspace proxying is only used if native TUN/Wintun adapter is unavailable.
+			// When tunDev != nil, native OS kernel forwarding & Windows NetNat handles transit for WireGuard parity.
+			if tunDev == nil && guiTransitForwarder != nil && allowExitNode {
 				if guiTransitForwarder.HandleTransitPacket(payload) {
 					atomic.AddUint64(&packetsRecvCount, 1)
 					atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
@@ -5888,6 +5889,18 @@ func startEngineFromConfig(c *config.Config) {
 								}
 								if targetEP == "" {
 									targetEP = targetPeer.LocalAddr
+								}
+								if targetEP == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
+									targetEP = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
+								}
+								if targetEP == "" {
+									for _, cand := range targetPeer.Candidates {
+										cand = strings.TrimSpace(cand)
+										if cand != "" {
+											targetEP = cand
+											break
+										}
+									}
 								}
 
 								pmin := 0

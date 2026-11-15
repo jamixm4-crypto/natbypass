@@ -69,6 +69,10 @@ func startPeerRouteWatchdog() {
 							_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "table", "main", "onlink")
 							_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "onlink")
 							if isKeeneticDevice() {
+								wanTable := findLinuxWANTable()
+								if wanTable != "" && wanTable != "main" {
+									_ = runLinuxCmd("ip", "route", "replace", targetVIP+"/32", "dev", "nb0", "table", wanTable, "onlink")
+								}
 								_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", targetVIP+"/32", "lookup", "main")
 								_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", targetVIP+"/32", "lookup", "main")
 							}
@@ -352,7 +356,7 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		_ = exec.Command(nft, "add", "rule", "inet", "filter", "forward", "oifname", "nb0", "accept").Run()
 	}
 
-	// 7. Ensure direct routes for standard mesh subnets exist on nb0 in table main
+	// 7. Ensure direct routes for standard mesh subnets exist on nb0 in table main and WAN table
 	for _, s := range buildMeshSubnetList(cleanSubnet) {
 		if s != "" {
 			_ = runLinuxCmd("ip", "route", "replace", s, "dev", "nb0", "table", "main", "onlink")
@@ -365,6 +369,15 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 		wanTable := findLinuxWANTable()
 		if wanTable == "" || wanTable == "default" {
 			wanTable = "main"
+		}
+
+		// Ensure direct routes to mesh subnets exist in detected WAN table too (bulletproof return routing)
+		if wanTable != "" && wanTable != "main" {
+			for _, s := range buildMeshSubnetList(cleanSubnet) {
+				if s != "" {
+					_ = runLinuxCmd("ip", "route", "replace", s, "dev", "nb0", "table", wanTable, "onlink")
+				}
+			}
 		}
 
 		// Priority 40: return traffic to mesh subnets always looks up table main
@@ -388,32 +401,50 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 			}
 		}
 
-		// WireGuard-grade table isolation: populate dedicated table 60 with default route from WAN with onlink
-		wanDefOut, _ := exec.Command("sh", "-c", "ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g'").Output()
-		if wanDef := strings.TrimSpace(string(wanDefOut)); wanDef != "" {
-			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace %s onlink table 60 2>/dev/null || ip route replace %s table 60", wanDef, wanDef))
-		} else if wanTable != "" && wanTable != "main" {
-			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace $(ip route show table %s default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g') onlink table 60 2>/dev/null || true", wanTable))
+		// Extract physical default route using BusyBox-compatible syntax
+		var wanDef string
+		if wanTable != "" && wanTable != "main" {
+			cmdStr := fmt.Sprintf("ip route show table %s 2>/dev/null | grep '^default' | grep -v 'nb0' | head -n1", wanTable)
+			if out, err := exec.Command("sh", "-c", cmdStr).Output(); err == nil {
+				wanDef = strings.TrimSpace(string(out))
+			}
 		}
-
-		// Priority 60: forward mesh transit traffic to dedicated WAN routing table 60
-		for i := 0; i < 5; i++ {
-			_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
-			_ = runLinuxCmd("ip", "rule", "del", "pref", "61")
+		if wanDef == "" {
+			if out, err := exec.Command("sh", "-c", "ip route show table main 2>/dev/null | grep '^default' | grep -v 'nb0' | head -n1").Output(); err == nil {
+				wanDef = strings.TrimSpace(string(out))
+			}
 		}
-		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", "60")
-		_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", "60")
-		for _, s := range buildMeshSubnetList(cleanSubnet) {
-			if s != "" && s != "10.0.0.0/8" && s != "172.16.0.0/12" {
-				_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "from", s, "lookup", "60")
+		if wanDef == "" {
+			if out, err := exec.Command("sh", "-c", "ip route show 2>/dev/null | grep '^default' | grep -v 'nb0' | head -n1").Output(); err == nil {
+				wanDef = strings.TrimSpace(string(out))
 			}
 		}
 
-		// Fallback priority 61: direct lookup into detected ISP table if table 60 needs redundancy
-		if wanTable != "" && wanTable != "main" {
-			_ = runLinuxCmd("ip", "rule", "add", "pref", "61", "fwmark", "0x4e", "lookup", wanTable)
-			_ = runLinuxCmd("ip", "rule", "add", "pref", "61", "iif", "nb0", "lookup", wanTable)
+		// Populate dedicated table 60 AND table main with WAN default route
+		if wanDef != "" {
+			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace %s onlink table 60 2>/dev/null || ip route replace %s table 60", wanDef, wanDef))
+			_ = runLinuxCmd("sh", "-c", fmt.Sprintf("ip route replace %s onlink table main 2>/dev/null || ip route replace %s table main", wanDef, wanDef))
 		}
+
+		// Priority 60/61/62: forward mesh transit traffic directly to detected ISP table, then table 60, then main
+		for i := 0; i < 5; i++ {
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "60")
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "61")
+			_ = runLinuxCmd("ip", "rule", "del", "pref", "62")
+		}
+		if wanTable != "" && wanTable != "main" {
+			_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "fwmark", "0x4e", "lookup", wanTable)
+			_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "iif", "nb0", "lookup", wanTable)
+			for _, s := range buildMeshSubnetList(cleanSubnet) {
+				if s != "" && s != "10.0.0.0/8" && s != "172.16.0.0/12" {
+					_ = runLinuxCmd("ip", "rule", "add", "pref", "60", "from", s, "lookup", wanTable)
+				}
+			}
+		}
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "61", "fwmark", "0x4e", "lookup", "60")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "61", "iif", "nb0", "lookup", "60")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "62", "fwmark", "0x4e", "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "62", "iif", "nb0", "lookup", "main")
 
 		// Ensure persistent KeeneticOS netfilter hook is installed and valid
 		ensureKeeneticNetfilterHook(cleanSubnet)
@@ -477,16 +508,8 @@ ip rule add to 100.64.200.0/24 lookup main priority 40 2>/dev/null || true
 
 WAN_TABLE=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="table") print $(i+1)}')
 if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
-    for tbl in $(ip route show table all default 2>/dev/null | grep -v 'nb0' | awk '{for(i=1;i<=NF;i++) if($i=="table") print $(i+1)}'); do
-        if [ "$tbl" != "main" ] && [ "$tbl" != "local" ] && [ "$tbl" != "default" ]; then
-            WAN_TABLE="$tbl"
-            break
-        fi
-    done
-fi
-if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
     for tbl in 1000 1001 1002 1003 1004 1005 1008 100 200 default; do
-        if ip route show table "$tbl" default 2>/dev/null | grep -q 'default'; then
+        if ip route show table "$tbl" 2>/dev/null | grep -q '^default'; then
             WAN_TABLE="$tbl"
             break
         fi
@@ -494,22 +517,48 @@ if [ -z "$WAN_TABLE" ] || [ "$WAN_TABLE" = "main" ]; then
 fi
 [ -z "$WAN_TABLE" ] && WAN_TABLE="main"
 
-WAN_DEF=$(ip route show table all default 2>/dev/null | grep -v 'nb0' | head -n1 | sed -E 's/table [0-9a-zA-Z_]+//g')
+WAN_DEF=""
+if [ -n "$WAN_TABLE" ] && [ "$WAN_TABLE" != "main" ]; then
+    WAN_DEF=$(ip route show table "$WAN_TABLE" 2>/dev/null | grep '^default' | grep -v 'nb0' | head -n1)
+fi
+if [ -z "$WAN_DEF" ]; then
+    WAN_DEF=$(ip route show table main 2>/dev/null | grep '^default' | grep -v 'nb0' | head -n1)
+fi
+if [ -z "$WAN_DEF" ]; then
+    WAN_DEF=$(ip route show 2>/dev/null | grep '^default' | grep -v 'nb0' | head -n1)
+fi
+
 if [ -n "$WAN_DEF" ]; then
     ip route replace $WAN_DEF onlink table 60 2>/dev/null || ip route replace $WAN_DEF table 60 2>/dev/null || true
+    ip route replace $WAN_DEF onlink table main 2>/dev/null || ip route replace $WAN_DEF table main 2>/dev/null || true
 fi
 
-ip rule add fwmark 0x4e lookup 60 priority 60 2>/dev/null || true
-ip rule add iif nb0 lookup 60 priority 60 2>/dev/null || true
-if [ -n "$NB_SUBNET" ]; then
-    ip rule add from "$NB_SUBNET" lookup 60 priority 60 2>/dev/null || true
+if [ -n "$NB_SUBNET" ] && [ -n "$WAN_TABLE" ] && [ "$WAN_TABLE" != "main" ]; then
+    ip route replace "$NB_SUBNET" dev nb0 table "$WAN_TABLE" onlink 2>/dev/null || true
 fi
-ip rule add from 100.64.200.0/24 lookup 60 priority 60 2>/dev/null || true
+
+for i in 60 61 62; do
+    ip rule del priority $i 2>/dev/null || true
+done
 
 if [ -n "$WAN_TABLE" ] && [ "$WAN_TABLE" != "main" ]; then
-    ip rule add fwmark 0x4e lookup $WAN_TABLE priority 61 2>/dev/null || true
-    ip rule add iif nb0 lookup $WAN_TABLE priority 61 2>/dev/null || true
+    ip rule add fwmark 0x4e lookup $WAN_TABLE priority 60 2>/dev/null || true
+    ip rule add iif nb0 lookup $WAN_TABLE priority 60 2>/dev/null || true
+    if [ -n "$NB_SUBNET" ]; then
+        ip rule add from "$NB_SUBNET" lookup $WAN_TABLE priority 60 2>/dev/null || true
+    fi
+    ip rule add from 100.64.200.0/24 lookup $WAN_TABLE priority 60 2>/dev/null || true
 fi
+
+ip rule add fwmark 0x4e lookup 60 priority 61 2>/dev/null || true
+ip rule add iif nb0 lookup 60 priority 61 2>/dev/null || true
+if [ -n "$NB_SUBNET" ]; then
+    ip rule add from "$NB_SUBNET" lookup 60 priority 61 2>/dev/null || true
+fi
+ip rule add from 100.64.200.0/24 lookup 60 priority 61 2>/dev/null || true
+
+ip rule add fwmark 0x4e lookup main priority 62 2>/dev/null || true
+ip rule add iif nb0 lookup main priority 62 2>/dev/null || true
 `
 	_ = os.WriteFile(hookPath, []byte(script), 0755)
 }
@@ -884,7 +933,14 @@ func BypassEndpoint(endpoint string) error {
 			}
 		}
 		if !alreadyAdded {
-			_ = runLinuxCmd("ip", "route", "add", hostIP+"/32", "via", physGW)
+			_ = runLinuxCmd("ip", "route", "replace", hostIP+"/32", "via", physGW, "table", "main")
+			_ = runLinuxCmd("ip", "route", "replace", hostIP+"/32", "via", physGW)
+			if isKeeneticDevice() {
+				wanTable := findLinuxWANTable()
+				if wanTable != "" && wanTable != "main" {
+					_ = runLinuxCmd("ip", "route", "replace", hostIP+"/32", "via", physGW, "table", wanTable)
+				}
+			}
 			lastBypassedEndpointIPs = append(lastBypassedEndpointIPs, hostIP)
 		}
 	}
@@ -898,25 +954,42 @@ func EnableExitNodeRouting(gatewayVIP string, remoteEndpoints ...string) error {
 		return fmt.Errorf("gateway VIP is required")
 	}
 	cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
+	wanTable := findLinuxWANTable()
 
 	// 1. Bypass remote endpoint IPs via physical default gateway to prevent routing loop
 	for _, ep := range remoteEndpoints {
 		_ = BypassEndpoint(ep)
 	}
 
-	// 2. Add def1 routes
-	err1 := runLinuxCmd("ip", "route", "add", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "onlink")
-	if err1 != nil {
-		_ = runLinuxCmd("ip", "route", "add", "0.0.0.0/1", "via", cleanVIP)
-	}
-	err2 := runLinuxCmd("ip", "route", "add", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "onlink")
-	if err2 != nil {
-		_ = runLinuxCmd("ip", "route", "add", "128.0.0.0/1", "via", cleanVIP)
+	// 2. Add def1 routes in table main
+	_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
+	_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
+	_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "onlink")
+	_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "onlink")
+
+	if isKeeneticDevice() {
+		// Keenetic NDM: Add def1 routes to wanTable as well so table 1000 routes through nb0
+		if wanTable != "" && wanTable != "main" {
+			_ = runLinuxCmd("ip", "route", "replace", "0.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
+			_ = runLinuxCmd("ip", "route", "replace", "128.0.0.0/1", "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
+		}
+		// Keenetic NDM: Priority 500 lookup main to ensure local router processes and LAN devices prioritize table main over rule 1000
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "500", "lookup", "main")
+		_ = runLinuxCmd("ip", "rule", "add", "pref", "500", "lookup", "main")
+
+		// Keenetic NDM: Masquerade LAN traffic exiting through nb0 to cleanVIP
+		ipt := findIptablesBinary()
+		forceInsertIptablesRule(ipt, "nat", "POSTROUTING", "-o", "nb0", "-j", "MASQUERADE")
 	}
 
-	// 3. Ensure DNS servers (1.1.1.1, 8.8.8.8) are routed via exit node
-	_ = runLinuxCmd("ip", "route", "add", "1.1.1.1/32", "via", cleanVIP, "dev", "nb0", "onlink")
-	_ = runLinuxCmd("ip", "route", "add", "8.8.8.8/32", "via", cleanVIP, "dev", "nb0", "onlink")
+	// 3. Ensure DNS servers (1.1.1.1, 8.8.8.8, 77.88.8.8, 9.9.9.9) are routed via exit node
+	for _, dns := range []string{"1.1.1.1/32", "8.8.8.8/32", "77.88.8.8/32", "9.9.9.9/32"} {
+		_ = runLinuxCmd("ip", "route", "replace", dns, "via", cleanVIP, "dev", "nb0", "table", "main", "onlink")
+		_ = runLinuxCmd("ip", "route", "replace", dns, "via", cleanVIP, "dev", "nb0", "onlink")
+		if isKeeneticDevice() && wanTable != "" && wanTable != "main" {
+			_ = runLinuxCmd("ip", "route", "replace", dns, "via", cleanVIP, "dev", "nb0", "table", wanTable, "onlink")
+		}
+	}
 
 	// R2: Настраиваем DNS через exit node чтобы не было DNS-утечек
 	// Пробуем resolvectl (systemd-resolved), затем прямую запись в resolv.conf
@@ -980,21 +1053,45 @@ func restoreLinuxDNS() {
 
 // DisableExitNodeRouting removes def1 routes and bypass routes.
 func DisableExitNodeRouting(gatewayVIP string) error {
+	if isKeeneticDevice() {
+		_ = runLinuxCmd("ip", "rule", "del", "pref", "500", "lookup", "main")
+		wanTable := findLinuxWANTable()
+		if wanTable != "" && wanTable != "main" {
+			_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1", "table", wanTable)
+			_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1", "table", wanTable)
+			for _, dns := range []string{"1.1.1.1/32", "8.8.8.8/32", "77.88.8.8/32", "9.9.9.9/32"} {
+				_ = runLinuxCmd("ip", "route", "del", dns, "table", wanTable)
+			}
+		}
+		ipt := findIptablesBinary()
+		_ = exec.Command(ipt, "-w", "2", "-t", "nat", "-D", "POSTROUTING", "-o", "nb0", "-j", "MASQUERADE").Run()
+	}
 	if gatewayVIP != "" {
 		cleanVIP := strings.TrimSpace(strings.Split(gatewayVIP, "/")[0])
 		_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1", "via", cleanVIP)
 		_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1", "via", cleanVIP)
 		_ = runLinuxCmd("ip", "route", "del", "1.1.1.1/32", "via", cleanVIP)
 		_ = runLinuxCmd("ip", "route", "del", "8.8.8.8/32", "via", cleanVIP)
+		_ = runLinuxCmd("ip", "route", "del", "77.88.8.8/32", "via", cleanVIP)
+		_ = runLinuxCmd("ip", "route", "del", "9.9.9.9/32", "via", cleanVIP)
 	}
+	_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1", "table", "main")
+	_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1", "table", "main")
 	_ = runLinuxCmd("ip", "route", "del", "0.0.0.0/1")
 	_ = runLinuxCmd("ip", "route", "del", "128.0.0.0/1")
-	_ = runLinuxCmd("ip", "route", "del", "1.1.1.1/32")
-	_ = runLinuxCmd("ip", "route", "del", "8.8.8.8/32")
+	for _, dns := range []string{"1.1.1.1/32", "8.8.8.8/32", "77.88.8.8/32", "9.9.9.9/32"} {
+		_ = runLinuxCmd("ip", "route", "del", dns, "table", "main")
+		_ = runLinuxCmd("ip", "route", "del", dns)
+	}
 
 	linuxBypassedMu.Lock()
+	wanTable := findLinuxWANTable()
 	for _, hostIP := range lastBypassedEndpointIPs {
+		_ = runLinuxCmd("ip", "route", "del", hostIP+"/32", "table", "main")
 		_ = runLinuxCmd("ip", "route", "del", hostIP+"/32")
+		if isKeeneticDevice() && wanTable != "" && wanTable != "main" {
+			_ = runLinuxCmd("ip", "route", "del", hostIP+"/32", "table", wanTable)
+		}
 	}
 	lastBypassedEndpointIPs = nil
 	linuxBypassedMu.Unlock()
@@ -1070,6 +1167,10 @@ func EnsurePeerHostRoute(peerVIP string) {
 	_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "table", "main", "onlink")
 	_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "onlink")
 	if isKeeneticDevice() {
+		wanTable := findLinuxWANTable()
+		if wanTable != "" && wanTable != "main" {
+			_ = runLinuxCmd("ip", "route", "replace", cleanVIP+"/32", "dev", "nb0", "table", wanTable, "onlink")
+		}
 		_ = runLinuxCmd("ip", "rule", "del", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
 		_ = runLinuxCmd("ip", "rule", "add", "pref", "40", "to", cleanVIP+"/32", "lookup", "main")
 	}
