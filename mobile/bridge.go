@@ -1702,7 +1702,11 @@ func attachTUNLocked(tunFd int) {
 										break
 									}
 									for _, route := range p.AdvertisedRoutes {
-										if _, ipNet, err := net.ParseCIDR(route); err == nil && ipNet.Contains(destIP) {
+										r := strings.TrimSpace(route)
+										if r == "0.0.0.0/0" || r == "::/0" {
+											continue
+										}
+										if _, ipNet, err := net.ParseCIDR(r); err == nil && ipNet.Contains(destIP) {
 											targetPeer = p
 											break
 										}
@@ -1806,10 +1810,10 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// 1c. Троттлированное реактивное пробитие NAT при невозможности прямой отправки (не чаще 1 раза в 3 сек на пир)
+							// 1c. Троттлированное реактивное пробитие NAT при невозможности прямой отправки (не чаще 1 раза в 2 сек на пир)
 							now := time.Now()
-							if !isForceTCP && !sentDirect && !sentTCP && globalPuncher != nil {
-								if now.Sub(lastReactivePunchMobile[targetPeer.DeviceID]) > 3*time.Second {
+							if !isForceTCP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && globalPuncher != nil {
+								if now.Sub(lastReactivePunchMobile[targetPeer.DeviceID]) > 2*time.Second {
 									lastReactivePunchMobile[targetPeer.DeviceID] = now
 									if targetEP != "" {
 										_ = globalPuncher.SendHolePunchProbe(targetEP)
@@ -1828,9 +1832,9 @@ func attachTUNLocked(tunFd int) {
 								}
 							}
 
-							// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (троттлинг 1 раз в 5 сек)
-							if !isForceUDP && !sentTCP && !sentDirect && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
-								if now.Sub(lastReactiveDialMobile[targetPeer.DeviceID]) > 5*time.Second {
+							// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (троттлинг 1 раз в 4 сек)
+							if !isForceUDP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+								if now.Sub(lastReactiveDialMobile[targetPeer.DeviceID]) > 4*time.Second {
 									lastReactiveDialMobile[targetPeer.DeviceID] = now
 									defTCPPort := 8443
 									netKey := ""
@@ -2686,6 +2690,36 @@ func SelectExitNode(deviceID string) {
 	engineMu.Unlock()
 
 	logger.Info().Str("exit_node", deviceID).Msg("Выбран Exit Node для Android")
+
+	// Если Exit Node отключен, немедленно восстанавливаем прямые P2P-пинхолы ко всем узлам сети (< 20мс)
+	if epDev == "" && puncher != nil && reg != nil {
+		go func() {
+			for _, p := range reg.List() {
+				if p.DeviceID == globalDevID {
+					continue
+				}
+				p.ProbeCount = 0
+				targets := []string{}
+				if p.ActiveEndpoint != "" {
+					targets = append(targets, p.ActiveEndpoint)
+				}
+				if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+					targets = append(targets, p.STUNAddr)
+				}
+				if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
+					targets = append(targets, p.LocalAddr)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" && cand != p.ActiveEndpoint && cand != p.STUNAddr {
+						targets = append(targets, cand)
+					}
+				}
+				if len(targets) > 0 {
+					puncher.SendHolePunchBurstWithDelta(targets, 3, p.NATDelta)
+				}
+			}
+		}()
+	}
 
 	// Немедленно запускаем пробитие UDP-канала и TCP-подключение до выбранного узла-шлюза
 	if epDev != "" && puncher != nil && reg != nil {

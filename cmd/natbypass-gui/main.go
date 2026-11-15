@@ -2255,6 +2255,36 @@ func disableExitNode() {
 		}
 		writeDebug("Exit Node disabled, restored default gateway")
 		addLog("✅ Стандартный интернет-шлюз успешно восстановлен, маршруты 0.0.0.0/1 и 128.0.0.0/1 удалены.")
+
+		// Immediately restore physical NAT pinholes to all mesh peers (< 20ms)
+		if registry != nil && udpPuncher != nil {
+			peers := registry.List()
+			for _, p := range peers {
+				if p.DeviceID == myDevID {
+					continue
+				}
+				p.ProbeCount = 0
+				targets := []string{}
+				if p.ActiveEndpoint != "" {
+					targets = append(targets, p.ActiveEndpoint)
+				}
+				if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+					targets = append(targets, p.STUNAddr)
+				}
+				if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
+					targets = append(targets, p.LocalAddr)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" && cand != p.ActiveEndpoint && cand != p.STUNAddr {
+						targets = append(targets, cand)
+					}
+				}
+				if len(targets) > 0 {
+					udpPuncher.SendHolePunchBurstWithDelta(targets, 3, p.NATDelta)
+				}
+			}
+		}
+
 		if hBtnExitNodeSelect != 0 {
 			procInvalidateRect.Call(hBtnExitNodeSelect, 0, 1)
 		}
@@ -5560,17 +5590,10 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}
 
-			// Exit Node Userspace Transit Forwarder:
-			// On Windows, the OS lacks native kernel NAT masquerade for Wintun without Hyper-V NetNat.
-			// Userspace transit forwarder handles ICMP, UDP (DNS), and TCP proxying directly via host sockets for instant exit node access.
-			if guiTransitForwarder != nil && allowExitNode {
-				if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
-					atomic.AddUint64(&packetsRecvCount, 1)
-					atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
-					return
-				}
-			}
-
+			// Inbound L3 Packet Delivery:
+			// 1. If tunDev is present and active, deliver directly to OS kernel network stack (Wintun / nb0).
+			// If allowExitNode is true, Windows NetNat or Linux iptables MASQUERADE forwards transit traffic
+			// to the physical WAN at hardware line-rate with full kernel TCP stack (WireGuard architecture).
 			if tunDev != nil {
 				tunnel.EnsurePeerHostRoute(inSrcIP)
 				// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
@@ -5604,6 +5627,18 @@ func startEngineFromConfig(c *config.Config) {
 						}
 					}
 					writeDebug(fmt.Sprintf("📥 TUN [ICMP %s] %s -> %s (len: %d, err: %v)", icmpType, inSrcIP, inDstIP, len(payload), errWrite))
+				}
+				return
+			}
+
+			// 2. Userspace Transit Forwarder fallback:
+			// If tunDev is nil (e.g. running without Admin rights or adapter creation failed),
+			// userspace transit forwarder proxies ICMP, UDP (DNS), and TCP.
+			if guiTransitForwarder != nil && allowExitNode {
+				if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
+					atomic.AddUint64(&packetsRecvCount, 1)
+					atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
+					return
 				}
 			}
 		}
@@ -5758,8 +5793,9 @@ func startEngineFromConfig(c *config.Config) {
 			addLog(msg)
 			writeDebug(msg)
 
-			// Буферизированный конвейер отправки исходящих IP-пакетов из сетевого стека Windows
-			pktCh := make(chan []byte, 2048)
+			// Буферизированный высокопроизводительный конвейер отправки исходящих IP-пакетов
+			pktCh := make(chan []byte, 8192)
+			var reactiveMu sync.Mutex
 			lastReactivePunchGUI := make(map[string]time.Time)
 			lastReactiveDialGUI := make(map[string]time.Time)
 			go func() {
@@ -5786,15 +5822,22 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}()
 
-			go func() {
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case packet, ok := <-pktCh:
-						if !ok {
+			numWorkers := runtime.NumCPU()
+			if numWorkers < 4 {
+				numWorkers = 4
+			} else if numWorkers > 16 {
+				numWorkers = 16
+			}
+			for w := 0; w < numWorkers; w++ {
+				go func() {
+					for {
+						select {
+						case <-ctx.Done():
 							return
-						}
+						case packet, ok := <-pktCh:
+							if !ok {
+								return
+							}
 						srcIP := tunnel.GetSrcIP(packet)
 						destIP := tunnel.GetDestIP(packet)
 						if srcIP == nil || destIP == nil {
@@ -5964,11 +6007,16 @@ func startEngineFromConfig(c *config.Config) {
 									}
 									writeDebug(fmt.Sprintf("📤 TUN [ICMP %s] %s -> %s via %s (%s, direct: %v, tcp: %v)", icmpType, srcIP.String(), destStr, targetPeer.DeviceID, targetEP, sentDirect, sentTCP))
 								}
-								// 1c. Троттлированное реактивное пробитие NAT при невозможности прямой отправки (не чаще 1 раза в 3 сек на пир)
+								// 1c. Троттлированное реактивное пробитие NAT при невозможности прямой отправки (не чаще 1 раза в 2 сек на пир)
 								now := time.Now()
-								if !isForceTCP && !sentDirect && !sentTCP && udpPuncher != nil {
-									if now.Sub(lastReactivePunchGUI[targetPeer.DeviceID]) > 3*time.Second {
+								if !isForceTCP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && udpPuncher != nil {
+									reactiveMu.Lock()
+									shouldPunch := now.Sub(lastReactivePunchGUI[targetPeer.DeviceID]) > 2*time.Second
+									if shouldPunch {
 										lastReactivePunchGUI[targetPeer.DeviceID] = now
+									}
+									reactiveMu.Unlock()
+									if shouldPunch {
 										if targetEP != "" {
 											_ = udpPuncher.SendHolePunchProbe(targetEP)
 										}
@@ -5985,10 +6033,15 @@ func startEngineFromConfig(c *config.Config) {
 										}
 									}
 								}
-								// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (троттлинг 1 раз в 5 сек)
-								if !isForceUDP && !sentTCP && !sentDirect && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
-									if now.Sub(lastReactiveDialGUI[targetPeer.DeviceID]) > 5*time.Second {
+								// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (троттлинг 1 раз в 4 сек)
+								if !isForceUDP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && guiTCPDirectMgr != nil && !guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+									reactiveMu.Lock()
+									shouldDial := now.Sub(lastReactiveDialGUI[targetPeer.DeviceID]) > 4*time.Second
+									if shouldDial {
 										lastReactiveDialGUI[targetPeer.DeviceID] = now
+									}
+									reactiveMu.Unlock()
+									if shouldDial {
 										go connectPeerTCPDirect(targetPeer)
 									}
 								}
@@ -6095,6 +6148,7 @@ func startEngineFromConfig(c *config.Config) {
 					}
 				}
 			}()
+		}
 		} else {
 			warnMsg := fmt.Sprintf("⚠️ Wintun адаптер: %s (Для полного ping запустите от Администратора)", tErr.Error())
 			addLog(warnMsg)

@@ -1062,6 +1062,34 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 									Msg("🚨 Exit Node unresponsive (15s) — blackhole recovery: disabling exit routes, restored local internet gateway")
 								_ = tunnel.DisableExitNodeRouting(activeExitVIP)
 								exitRoutingActive = false
+
+								// Proactively restore direct UDP P2P NAT pinholes to all mesh peers (< 20ms)
+								if registry != nil && puncher != nil {
+									for _, p := range registry.List() {
+										if p.DeviceID == deviceID {
+											continue
+										}
+										p.ProbeCount = 0
+										targets := []string{}
+										if p.ActiveEndpoint != "" {
+											targets = append(targets, p.ActiveEndpoint)
+										}
+										if p.STUNAddr != "" && p.STUNAddr != p.ActiveEndpoint {
+											targets = append(targets, p.STUNAddr)
+										}
+										if p.LocalAddr != "" && p.LocalAddr != p.ActiveEndpoint {
+											targets = append(targets, p.LocalAddr)
+										}
+										for _, cand := range p.Candidates {
+											if cand != "" && cand != p.ActiveEndpoint && cand != p.STUNAddr {
+												targets = append(targets, cand)
+											}
+										}
+										if len(targets) > 0 {
+											puncher.SendHolePunchBurstWithDelta(targets, 3, p.NATDelta)
+										}
+									}
+								}
 							}
 						}
 					}
@@ -1526,19 +1554,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 			log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 
-			if (runtime.GOOS == "windows" || tunDev == nil) && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
-				if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
-					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder")
-					return
-				}
-			}
-
-			// Ensure OS kernel has a /32 host route back to peer VIP via TUN/Wintun
-			// BEFORE writing packet to TUN, so kernel ICMP replies and NAT return packets don't escape via WAN
-			if inSrcIP != "" {
-				tunnel.EnsurePeerHostRoute(inSrcIP)
-			}
+			// Inbound L3 Packet Delivery:
+			// 1. If tunDev is present and active, deliver directly to OS kernel network stack (Wintun / nb0).
+			// If allowExitNode is true, Windows NetNat or Linux iptables MASQUERADE forwards transit traffic
+			// to the physical WAN at hardware line-rate with full kernel TCP stack (WireGuard architecture).
 			if tunDev != nil {
+				if inSrcIP != "" {
+					tunnel.EnsurePeerHostRoute(inSrcIP)
+				}
 				// Recalculate IPv4 header checksum so Windows Wintun driver accepts packet unconditionally
 				if len(payload) >= 20 && payload[0]>>4 == 4 {
 					ihl := int(payload[0]&0x0F) * 4
@@ -1556,6 +1579,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					}
 				}
 				_ = tunDev.WritePacket(payload)
+				return
+			}
+
+			// 2. Userspace Transit Forwarder fallback:
+			// If tunDev is nil (e.g. running without Admin rights or adapter creation failed),
+			// userspace transit forwarder proxies ICMP, UDP (DNS), and TCP.
+			if tunDev == nil && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
+				if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
+					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder")
+					return
+				}
 			}
 		}
 
@@ -1605,7 +1639,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		// All data plane traffic flows strictly peer-to-peer over direct UDP.
 
 		// L3 Data-plane: Outbound packets from TUN -> Dispatch to peer over UDP Direct or MQTT Relay
-		pktCh := make(chan []byte, 2048)
+		pktCh := make(chan []byte, 8192)
+		var reactiveCLIMu sync.Mutex
 		lastReactivePunchCLI := make(map[string]time.Time)
 		lastReactiveDialCLI := make(map[string]time.Time)
 		go func() {
@@ -1650,15 +1685,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 		}()
 
-		go func() {
-			for {
-				select {
-				case <-engineCtx.Done():
-					return
-				case pkt, ok := <-pktCh:
-					if !ok {
+		numCLIWorkers := runtime.NumCPU()
+		if numCLIWorkers < 4 {
+			numCLIWorkers = 4
+		} else if numCLIWorkers > 16 {
+			numCLIWorkers = 16
+		}
+		for w := 0; w < numCLIWorkers; w++ {
+			go func() {
+				for {
+					select {
+					case <-engineCtx.Done():
 						return
-					}
+					case pkt, ok := <-pktCh:
+						if !ok {
+							return
+						}
 					if len(pkt) < 20 || pkt[0]>>4 != 4 {
 						continue
 					}
@@ -1817,11 +1859,16 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}
-						// 1c. Reactive instant hole punching if direct P2P is not yet confirmed AND direct send failed (throttled to 3s)
+						// 1c. Reactive instant hole punching if direct P2P is not yet confirmed (throttled to 2s)
 						now := time.Now()
-						if !isForceTCP && !sentDirect && !sentTCP && puncher != nil {
-							if now.Sub(lastReactivePunchCLI[p.DeviceID]) > 3*time.Second {
+						if !isForceTCP && !sentTCP && (!p.DirectP2P || !bilateralOK) && puncher != nil {
+							reactiveCLIMu.Lock()
+							shouldPunch := now.Sub(lastReactivePunchCLI[p.DeviceID]) > 2*time.Second
+							if shouldPunch {
 								lastReactivePunchCLI[p.DeviceID] = now
+							}
+							reactiveCLIMu.Unlock()
+							if shouldPunch {
 								if targetEP != "" {
 									_ = puncher.SendHolePunchProbe(targetEP)
 								}
@@ -1847,10 +1894,15 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}
-						// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (throttled to 5s)
-						if !isForceUDP && !sentTCP && !sentDirect && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
-							if now.Sub(lastReactiveDialCLI[p.DeviceID]) > 5*time.Second {
+						// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (throttled to 4s)
+						if !isForceUDP && !sentTCP && (!p.DirectP2P || !bilateralOK) && tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+							reactiveCLIMu.Lock()
+							shouldDial := now.Sub(lastReactiveDialCLI[p.DeviceID]) > 4*time.Second
+							if shouldDial {
 								lastReactiveDialCLI[p.DeviceID] = now
+							}
+							reactiveCLIMu.Unlock()
+							if shouldDial {
 								defaultTCPPort := 8443
 								netKey := ""
 								if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
@@ -2031,6 +2083,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 		}()
+	}
 	}
 
 	// Dedicated keepalive & probe loop for maintaining carrier CGNAT mappings.

@@ -54,20 +54,51 @@ type tcpSessionKey struct {
 	dstPort      uint16
 }
 
+type tcpSentSegment struct {
+	seq  uint32
+	data []byte
+}
+
 type tcpSessionEntry struct {
-	conn          net.Conn
-	clientVIP     net.IP
-	clientPort    uint16
-	dstIP         net.IP
-	dstPort       uint16
-	clientISN     uint32
-	serverISN     uint32
-	clientNextSeq atomic.Uint32
-	serverNextSeq atomic.Uint32
-	lastActive    atomic.Int64
-	closed        atomic.Bool
-	dialing       atomic.Bool
-	closeOnce     sync.Once
+	conn             net.Conn
+	clientVIP        net.IP
+	clientPort       uint16
+	dstIP            net.IP
+	dstPort          uint16
+	clientISN        uint32
+	serverISN        uint32
+	clientNextSeq    atomic.Uint32
+	serverNextSeq    atomic.Uint32
+	lastClientAckSeq atomic.Uint32
+	clientWindow     atomic.Uint32
+	lastActive       atomic.Int64
+	closed           atomic.Bool
+	dialing          atomic.Bool
+	closeOnce        sync.Once
+
+	recentPktsMu sync.Mutex
+	recentPkts   []tcpSentSegment
+}
+
+func (e *tcpSessionEntry) addRecentSegment(seq uint32, data []byte) {
+	e.recentPktsMu.Lock()
+	defer e.recentPktsMu.Unlock()
+	if len(e.recentPkts) >= 64 {
+		e.recentPkts = e.recentPkts[1:]
+	}
+	e.recentPkts = append(e.recentPkts, tcpSentSegment{seq: seq, data: data})
+}
+
+func (e *tcpSessionEntry) getRecentSegment(ackNum uint32) *tcpSentSegment {
+	e.recentPktsMu.Lock()
+	defer e.recentPktsMu.Unlock()
+	for i := range e.recentPkts {
+		if e.recentPkts[i].seq == ackNum {
+			cp := e.recentPkts[i]
+			return &cp
+		}
+	}
+	return nil
 }
 
 func (e *tcpSessionEntry) close() {
@@ -507,17 +538,6 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 	flags := tcpHdr[13]
 	tcpData := tcpHdr[dataOffset:]
 
-	// Case 0: Port 853 (DNS-over-TLS / Private DNS on Android).
-	// Modern Android devices probe DoT on port 853. In environments where port 853 is throttled
-	// or blocked by ISP/TSPU, dialing port 853 hangs for seconds and freezes app network queries.
-	// Returning an immediate TCP RST|ACK informs Android that DoT is not offered on this tunnel,
-	// causing Android to instantly and seamlessly fall back to plaintext UDP 53 without latency.
-	if dstPort == 853 {
-		rstPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, 0, seqNum+1, 0x14, 0, nil)
-		tf.deliverToClient(srcIP, rstPkt)
-		return true
-	}
-
 	key := tcpSessionKey{
 		clientVIPStr: srcIP.String(),
 		clientPort:   srcPort,
@@ -655,6 +675,15 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 		ackPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, entry.serverNextSeq.Load(), entry.clientNextSeq.Load(), 0x10, 64240, nil)
 		tf.deliverToClient(srcIP, ackPkt)
 
+		// Record client ACK and receive window for flow control
+		if ackNum > 0 {
+			entry.lastClientAckSeq.Store(ackNum)
+		}
+		win := uint32(binary.BigEndian.Uint16(tcpHdr[14:16]))
+		if win > 0 {
+			entry.clientWindow.Store(win)
+		}
+
 		if (flags & 0x01) != 0 {
 			// Client FIN attached to data
 			entry.clientNextSeq.Add(1)
@@ -677,6 +706,30 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 	}
 
 	// Case 6: Pure ACK (completing 3-way handshake or acknowledging received data)
+	if ackNum > 0 {
+		entry.lastClientAckSeq.Store(ackNum)
+		win := uint32(binary.BigEndian.Uint16(tcpHdr[14:16]))
+		if win > 0 {
+			entry.clientWindow.Store(win)
+		}
+		curServerSeq := entry.serverNextSeq.Load()
+		if ackNum < curServerSeq {
+			// Fast Retransmit: client missed segment starting at ackNum
+			if lostSeg := entry.getRecentSegment(ackNum); lostSeg != nil {
+				curClientSeq := entry.clientNextSeq.Load()
+				retransPkt := buildIPv4TCPPacket(
+					destIP, dstPort,
+					srcIP, srcPort,
+					lostSeg.seq,
+					curClientSeq,
+					0x18, // PSH | ACK
+					64240,
+					lostSeg.data,
+				)
+				tf.deliverToClient(srcIP, retransPkt)
+			}
+		}
+	}
 	return true
 }
 
@@ -687,7 +740,7 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 		tf.tcpSessions.Delete(key)
 	}()
 
-	buf := make([]byte, 1220)
+	buf := make([]byte, 1360)
 	for {
 		select {
 		case <-tf.closed:
@@ -697,6 +750,18 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 		if entry.closed.Load() {
 			return
 		}
+
+		// TCP flow control: pause if unacknowledged data in flight exceeds client's receive window
+		cWin := entry.clientWindow.Load()
+		if cWin == 0 {
+			cWin = 64240
+		}
+		curServerSeq := entry.serverNextSeq.Load()
+		lastAck := entry.lastClientAckSeq.Load()
+		if curServerSeq > lastAck && (curServerSeq-lastAck) > cWin {
+			time.Sleep(5 * time.Millisecond)
+		}
+
 		_ = entry.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		n, err := entry.conn.Read(buf)
 		if n > 0 {
@@ -704,6 +769,10 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 			curServerSeq := entry.serverNextSeq.Load()
 			curClientSeq := entry.clientNextSeq.Load()
 			entry.serverNextSeq.Add(uint32(n))
+
+			dataCopy := make([]byte, n)
+			copy(dataCopy, buf[:n])
+			entry.addRecentSegment(curServerSeq, dataCopy)
 
 			dataPkt := buildIPv4TCPPacket(
 				entry.dstIP, entry.dstPort,

@@ -367,14 +367,16 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val activeNet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm?.activeNetwork else null
+            val underlyingNets = if (activeNet != null) arrayOf(activeNet) else null
+
             // 1. Привязка физической сети на уровне Builder (API 33+ Android 13/14/15/16)
-            // Как и в эталонном WireGuard for Android, передача null сообщает системе,
-            // что VPN использует системную дефолтную сеть без жёсткой привязки дескриптора,
-            // что позволяет системному стеку Android 14/15/16 маршрутизировать трафик не-VPN приложений напрямую.
+            // Как и в эталонном WireGuard for Android, передаем активную физическую сеть
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 try {
-                    builder.setUnderlyingNetworks(null)
-                    Log.i(TAG, "builder.setUnderlyingNetworks(null) applied (system auto-routing)")
+                    builder.setUnderlyingNetworks(underlyingNets)
+                    Log.i(TAG, "builder.setUnderlyingNetworks applied: activeNet=$activeNet")
                 } catch (t: Throwable) {
                     Log.w(TAG, "builder.setUnderlyingNetworks error: ${t.message}")
                 }
@@ -397,8 +399,8 @@ class NatBypassVpnService : VpnService() {
             // 2. Дублируем привязку physical underlying network после establish()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                 try {
-                    setUnderlyingNetworks(null)
-                    Log.i(TAG, "VpnService.setUnderlyingNetworks(null) applied")
+                    setUnderlyingNetworks(underlyingNets)
+                    Log.i(TAG, "VpnService.setUnderlyingNetworks applied: activeNet=$activeNet")
                 } catch (t: Throwable) {
                     Log.w(TAG, "VpnService.setUnderlyingNetworks error: ${t.message}")
                 }
@@ -586,9 +588,10 @@ class NatBypassVpnService : VpnService() {
         }
 
         val activeNet = network ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork else null
+        val underlyingNets = if (activeNet != null) arrayOf(activeNet) else null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
             try {
-                setUnderlyingNetworks(null)
+                setUnderlyingNetworks(underlyingNets)
             } catch (e: Exception) {
                 Log.w(TAG, "setUnderlyingNetworks error: ${e.message}")
             }
