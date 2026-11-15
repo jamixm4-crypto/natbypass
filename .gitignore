@@ -1,7 +1,8 @@
 # Binaries and build outputs
 dist/
 release/
-releases/
+/releases/
+!mirror/releases/
 build/
 bin/
 *.exe

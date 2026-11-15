@@ -101,23 +101,34 @@ def build_manifest(release: dict, token: str | None, mirror_base: str | None, bu
 
     for asset in release.get("assets", []):
         name = asset["name"]
-        # Пропускаем .sig, .pem, .apk в основном маппинге
-        if name.endswith(".sig") or name.endswith(".pem") or name.endswith(".apk"):
+        # Пропускаем .sig, .pem в основном маппинге
+        if name.endswith(".sig") or name.endswith(".pem"):
             continue
 
-        key = ASSET_KEY_MAP.get(name)
+        key = None
+        if name.endswith(".apk"):
+            if "arm64" in name.lower():
+                key = "android/arm64"
+            else:
+                key = "android/universal"
+        else:
+            key = ASSET_KEY_MAP.get(name)
+
         if not key:
             continue
 
         dl_url = asset["browser_download_url"]
         sig_url = dl_url + ".sig"
 
-        # Пытаемся вычислить SHA-256 локально (если передан --build-dir и файл существует)
+        # Пытаемся вычислить SHA-256 локально или взять из API
         sha = ""
         local_path = (build_dir / name) if build_dir else None
         if local_path and local_path.is_file():
             print(f"  [{name}] SHA-256 (local build/{name})...", flush=True)
             sha = sha256_of_file(local_path)
+        elif asset.get("digest", "").startswith("sha256:"):
+            sha = asset["digest"].split("sha256:")[1]
+            print(f"  [{name}] SHA-256 (from GitHub digest): {sha[:8]}...", flush=True)
         else:
             print(f"  [{name}] SHA-256 (download from GitHub)...", flush=True)
             try:

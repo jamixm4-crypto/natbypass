@@ -3,11 +3,9 @@ package org.natbypass.app.util
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,14 +15,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.File
-import java.io.FileOutputStream
+import java.io.IOException
+import java.io.InputStream
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
-import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 
 sealed class UpdateState {
     object Idle : UpdateState()
@@ -52,13 +50,37 @@ sealed class UpdateState {
 
 object AppUpdateManager {
 
+    private const val TAG = "AppUpdateManager"
+
     private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val updateState: StateFlow<UpdateState> = _updateState.asStateFlow()
 
     private var downloadCancelled = false
-    private val isDownloading = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val isDownloading = AtomicBoolean(false)
 
-    suspend fun checkForUpdates(currentVersion: String, manual: Boolean, includePrerelease: Boolean = false): UpdateState = withContext(Dispatchers.IO) {
+    // High-speed CDN mirror proxies for GitHub releases in Russia & CIS
+    private val PROXY_PREFIXES = listOf(
+        "https://gh-proxy.com/",
+        "https://ghproxy.net/",
+        "https://ghfast.top/"
+    )
+
+    fun getDownloadMirrors(apkUrl: String): List<String> {
+        val mirrors = mutableListOf<String>()
+        if (apkUrl.contains("github.com/")) {
+            for (prefix in PROXY_PREFIXES) {
+                mirrors.add(prefix + apkUrl)
+            }
+        }
+        mirrors.add(apkUrl) // Direct GitHub fallback
+        return mirrors
+    }
+
+    suspend fun checkForUpdates(
+        currentVersion: String,
+        manual: Boolean,
+        includePrerelease: Boolean = false
+    ): UpdateState = withContext(Dispatchers.IO) {
         _updateState.value = UpdateState.Checking
         try {
             val apiUrl = if (includePrerelease) {
@@ -89,8 +111,6 @@ object AppUpdateManager {
                 }
                 val tagName = releaseObj.optString("tag_name", "").removePrefix("v")
                 val isPrerelease = releaseObj.optBoolean("prerelease", false)
-                // GitHub API может прислать "body": null (JSON null), в этом случае
-                // optString вернёт строку "null" — проверяем явно через isNull()
                 val releaseBody = if (releaseObj.isNull("body")) {
                     "Улучшена стабильность и производительность."
                 } else {
@@ -155,29 +175,170 @@ object AppUpdateManager {
                     _updateState.value = state
                     return@withContext state
                 } else {
-                    val err = UpdateState.Error("APK файл не найден в релизе v$tagName")
-                    _updateState.value = err
-                    return@withContext err
+                    // Try fallback to mirror manifest
+                    val manifestUrl = if (includePrerelease) {
+                        "https://gh-proxy.com/https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/mirror/releases/latest-beta.json"
+                    } else {
+                        "https://gh-proxy.com/https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/mirror/releases/latest.json"
+                    }
+                    return@withContext checkFromMirrorManifest(manifestUrl, currentVersion, includePrerelease)
                 }
             } else {
-                val err = UpdateState.Error("Сервер вернул код ${conn.responseCode}")
+                // Non-200 from GitHub API -> Fallback to mirror manifest
+                val manifestUrl = if (includePrerelease) {
+                    "https://gh-proxy.com/https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/mirror/releases/latest-beta.json"
+                } else {
+                    "https://gh-proxy.com/https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/mirror/releases/latest.json"
+                }
+                return@withContext checkFromMirrorManifest(manifestUrl, currentVersion, includePrerelease)
+            }
+        } catch (e: Exception) {
+            // Network error connecting to GitHub API -> Fallback to mirror manifest
+            try {
+                val manifestUrl = if (includePrerelease) {
+                    "https://gh-proxy.com/https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/mirror/releases/latest-beta.json"
+                } else {
+                    "https://gh-proxy.com/https://raw.githubusercontent.com/jamixm4-crypto/natbypass/main/mirror/releases/latest.json"
+                }
+                return@withContext checkFromMirrorManifest(manifestUrl, currentVersion, includePrerelease)
+            } catch (_: Exception) {
+                val err = UpdateState.Error(e.message ?: "Ошибка сети при проверке обновлений")
                 _updateState.value = err
                 return@withContext err
             }
-        } catch (e: Exception) {
-            val err = UpdateState.Error(e.message ?: "Ошибка сети при проверке обновлений")
-            _updateState.value = err
-            return@withContext err
         }
     }
 
-    suspend fun downloadAndInstall(context: Context, version: String, apkUrl: String, sizeBytes: Long) = withContext(Dispatchers.IO) {
+    private fun checkFromMirrorManifest(
+        manifestUrl: String,
+        currentVersion: String,
+        includePrerelease: Boolean
+    ): UpdateState {
+        val u = URL(manifestUrl)
+        val conn = u.openConnection() as HttpURLConnection
+        conn.connectTimeout = 8000
+        conn.readTimeout = 8000
+        conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
+        if (conn.responseCode != 200) {
+            throw IOException("Mirror returned HTTP ${conn.responseCode}")
+        }
+        val text = conn.inputStream.bufferedReader().use { it.readText() }
+        val root = JSONObject(text)
+        val version = root.optString("version", "").removePrefix("v")
+        val isPrerelease = root.optBoolean("prerelease", false)
+        val body = root.optString("release_notes", "Улучшена стабильность и производительность.")
+        val assetsObj = root.optJSONObject("assets")
+
+        var apkUrl = ""
+        var apkSize = 0L
+
+        if (assetsObj != null) {
+            val supportedAbis = Build.SUPPORTED_ABIS ?: emptyArray()
+            val isArm64 = supportedAbis.any { it.contains("arm64", ignoreCase = true) }
+            val targetAsset = if (isArm64 && assetsObj.has("android/arm64")) {
+                assetsObj.optJSONObject("android/arm64")
+            } else {
+                assetsObj.optJSONObject("android/universal") ?: assetsObj.optJSONObject("android/arm64")
+            }
+
+            if (targetAsset != null) {
+                apkUrl = targetAsset.optString("url", "")
+                apkSize = targetAsset.optLong("size", 0L)
+            }
+        }
+
+        if (apkUrl.isNotBlank()) {
+            val isNewer = if (includePrerelease) {
+                version != currentVersion.removePrefix("v")
+            } else {
+                isNewerVersion(currentVersion, version)
+            }
+            val state = UpdateState.Available(
+                version      = version,
+                changelog    = body,
+                apkUrl       = apkUrl,
+                sizeBytes    = apkSize,
+                isNewer      = isNewer,
+                isPrerelease = isPrerelease,
+                isRollback   = false
+            )
+            _updateState.value = state
+            return state
+        }
+        throw IOException("APK asset not found in mirror manifest")
+    }
+
+    private data class StreamConnection(
+        val connection: HttpURLConnection,
+        val responseCode: Int,
+        val finalUrl: String,
+        val contentLength: Long,
+        val isPartial: Boolean
+    )
+
+    private fun openStreamWithManualRedirects(
+        initialUrl: String,
+        startOffset: Long
+    ): StreamConnection {
+        var currentUrl = initialUrl
+        var hops = 0
+        val maxHops = 6
+
+        while (hops < maxHops) {
+            val u = URL(currentUrl)
+            val conn = u.openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false // Keep manual control so Range is never dropped on redirect!
+            conn.connectTimeout = 8000
+            conn.readTimeout = 7000 // Fast socket timeout to detect stalls and failover quickly
+            conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
+            conn.setRequestProperty("Accept-Encoding", "identity")
+            conn.setRequestProperty("Connection", "keep-alive")
+            if (startOffset > 0) {
+                conn.setRequestProperty("Range", "bytes=$startOffset-")
+            }
+
+            val code = conn.responseCode
+            if (code in 301..308) {
+                val location = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (location.isNullOrBlank()) {
+                    throw IOException("HTTP $code redirect without Location header from $currentUrl")
+                }
+                currentUrl = URL(u, location).toString()
+                hops++
+                continue
+            }
+
+            val isPartial = (code == 206)
+            var cl = conn.contentLengthLong
+            if (isPartial) {
+                val cr = conn.getHeaderField("Content-Range")
+                if (cr != null && cr.contains("/")) {
+                    val totalStr = cr.substringAfter("/").trim()
+                    val parsedTotal = totalStr.toLongOrNull()
+                    if (parsedTotal != null && parsedTotal > 0) {
+                        cl = parsedTotal
+                    }
+                }
+            }
+
+            return StreamConnection(conn, code, currentUrl, cl, isPartial)
+        }
+        throw IOException("Too many HTTP redirects ($hops) when connecting to $initialUrl")
+    }
+
+    suspend fun downloadAndInstall(
+        context: Context,
+        version: String,
+        apkUrl: String,
+        sizeBytes: Long
+    ) = withContext(Dispatchers.IO) {
         if (!isDownloading.compareAndSet(false, true)) {
             return@withContext
         }
         downloadCancelled = false
 
-        val estMB = if (sizeBytes > 0) sizeBytes.toFloat() / (1024 * 1024) else 15f
+        val estMB = if (sizeBytes > 0) sizeBytes.toFloat() / (1024 * 1024) else 25f
         _updateState.value = UpdateState.Downloading(
             version      = version,
             progress     = 0f,
@@ -188,258 +349,199 @@ object AppUpdateManager {
         )
 
         val destFile = File(context.cacheDir, "NatBypass-v$version.apk")
-        if (destFile.exists()) destFile.delete()
+        val partFile = File(context.cacheDir, "NatBypass-v$version.apk.part")
 
-        try {
-            // 1. Probe server for Range support and exact file length
-            var totalLength = sizeBytes
-            var acceptRanges = false
-
-            try {
-                val probeUrl = URL(apkUrl)
-                val probeConn = probeUrl.openConnection() as HttpURLConnection
-                probeConn.connectTimeout = 10000
-                probeConn.readTimeout = 15000
-                probeConn.setRequestProperty("User-Agent", "NatBypass-Android-App")
-                probeConn.setRequestProperty("Range", "bytes=0-0")
-                val probeCode = probeConn.responseCode
-                if (probeCode == 206) {
-                    acceptRanges = true
-                    val cr = probeConn.getHeaderField("Content-Range")
-                    if (cr != null && cr.contains("/")) {
-                        val totalStr = cr.substringAfter("/").trim()
-                        totalLength = totalStr.toLongOrNull() ?: totalLength
-                    }
-                } else if (probeCode == 200) {
-                    val cl = probeConn.contentLengthLong
-                    if (cl > 0) totalLength = cl
-                }
-                probeConn.disconnect()
-            } catch (_: Exception) {
-                // Ignore probe error, fallback below
-            }
-
-            if (totalLength <= 0) {
-                totalLength = 15 * 1024 * 1024L
-            }
-
-            // 2. If Range supported and size > 1MB: multi-threaded 4-stream download
-            var multiThreadSuccess = false
-            if (acceptRanges && totalLength > 1024 * 1024L) {
-                try {
-                    downloadMultiThreaded(apkUrl, destFile, version, totalLength)
-                    multiThreadSuccess = true
-                } catch (e: Exception) {
-                    if (downloadCancelled) {
-                        destFile.delete()
-                        _updateState.value = UpdateState.Idle
-                        return@withContext
-                    }
-                    // Fallback to single stream below
-                }
-            }
-
-            // 3. Fallback: single stream download
-            if (!multiThreadSuccess && !downloadCancelled) {
-                downloadSingleStream(apkUrl, destFile, version, totalLength)
-            }
-
-            if (!downloadCancelled && destFile.exists() && destFile.length() > 500 * 1024) {
-                _updateState.value = UpdateState.ReadyToInstall(destFile)
-                launchInstaller(context, destFile)
-            } else if (!downloadCancelled) {
-                _updateState.value = UpdateState.Error("Файл загрузки повреждён или неполон")
-            }
-
-        } catch (e: Exception) {
-            _updateState.value = UpdateState.Error("Ошибка загрузки: ${e.message}")
-        } finally {
+        // If completed valid APK already exists in cache, launch immediately!
+        if (destFile.exists() && isValidApk(destFile)) {
+            _updateState.value = UpdateState.ReadyToInstall(destFile)
+            launchInstaller(context, destFile)
             isDownloading.set(false)
+            return@withContext
         }
-    }
 
-    private suspend fun downloadMultiThreaded(
-        apkUrl: String,
-        destFile: File,
-        version: String,
-        totalLength: Long
-    ) = coroutineScope {
-        val raf = RandomAccessFile(destFile, "rw")
-        raf.setLength(totalLength)
-        val fileChannel = raf.channel
+        val mirrors = getDownloadMirrors(apkUrl)
+        var mirrorIndex = 0
+        var totalLength = sizeBytes
+        var downloadedBytes = if (partFile.exists()) partFile.length() else 0L
 
-        val numWorkers = 4
-        val chunkSize = totalLength / numWorkers
-        val downloadedTotal = AtomicLong(0L)
-
-        // Background progress updater
-        val progressJob = launch(Dispatchers.IO) {
-            var lastBytes = 0L
-            var lastTime = System.currentTimeMillis()
-            val totalMB = totalLength.toFloat() / (1024 * 1024)
-
-            while (isActive && !downloadCancelled) {
-                delay(250)
-                val currentBytes = downloadedTotal.get()
-                val now = System.currentTimeMillis()
-                val dt = (now - lastTime) / 1000f
-                val speedMBs = if (dt > 0.05f) {
-                    ((currentBytes - lastBytes).toFloat() / (1024 * 1024)) / dt
-                } else 0f
-                lastBytes = currentBytes
-                lastTime = now
-
-                val downloadedMB = currentBytes.toFloat() / (1024 * 1024)
-                val progress = (currentBytes.toFloat() / totalLength).coerceIn(0f, 1f)
-                val remainingBytes = totalLength - currentBytes
-                val etaSec = if (speedMBs > 0.01f) {
-                    (remainingBytes / (speedMBs * 1024 * 1024)).toInt().coerceAtLeast(0)
-                } else 0
-
-                _updateState.value = UpdateState.Downloading(
-                    version      = version,
-                    progress     = progress,
-                    downloadedMB = downloadedMB,
-                    totalMB      = totalMB,
-                    speedMBs     = speedMBs,
-                    etaSec       = etaSec,
-                )
-            }
+        // If part file is larger than expected, reset
+        if (totalLength > 0 && downloadedBytes > totalLength) {
+            partFile.delete()
+            downloadedBytes = 0L
         }
+
+        val maxAttempts = mirrors.size * 4
+        var attempts = 0
+        var success = false
+
+        val raf = RandomAccessFile(partFile, "rw")
 
         try {
-            val jobs = (0 until numWorkers).map { i ->
-                val start = i * chunkSize
-                val end = if (i == numWorkers - 1) totalLength - 1 else (start + chunkSize - 1)
-                async(Dispatchers.IO) {
-                    downloadChunkWithRetry(apkUrl, fileChannel, start, end, downloadedTotal)
-                }
-            }
-            jobs.awaitAll()
-        } finally {
-            progressJob.cancel()
-            try {
-                fileChannel.force(true)
-                fileChannel.close()
-                raf.close()
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun downloadChunkWithRetry(
-        apkUrl: String,
-        fileChannel: FileChannel,
-        startOffset: Long,
-        endOffset: Long,
-        downloadedTotal: AtomicLong
-    ) {
-        var currentOffset = startOffset
-        var retries = 0
-        val maxRetries = 3
-        val buffer = ByteArray(32 * 1024)
-
-        while (currentOffset <= endOffset && !downloadCancelled) {
-            var conn: HttpURLConnection? = null
-            try {
-                val url = URL(apkUrl)
-                conn = url.openConnection() as HttpURLConnection
-                conn.connectTimeout = 12000
-                conn.readTimeout = 25000
-                conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
-                conn.setRequestProperty("Range", "bytes=$currentOffset-$endOffset")
-
-                val code = conn.responseCode
-                if (code != 206 && code != 200) {
-                    throw java.io.IOException("HTTP code $code for range $currentOffset-$endOffset")
-                }
-
-                conn.inputStream.use { input ->
-                    while (currentOffset <= endOffset && !downloadCancelled) {
-                        val toRead = minOf(buffer.size.toLong(), endOffset - currentOffset + 1).toInt()
-                        val bytesRead = input.read(buffer, 0, toRead)
-                        if (bytesRead == -1) break
-
-                        val byteBuffer = ByteBuffer.wrap(buffer, 0, bytesRead)
-                        fileChannel.write(byteBuffer, currentOffset)
-                        currentOffset += bytesRead
-                        downloadedTotal.addAndGet(bytesRead.toLong())
-                    }
-                }
-                if (currentOffset > endOffset) {
+            while (attempts < maxAttempts && !downloadCancelled) {
+                if (totalLength > 0 && downloadedBytes >= totalLength) {
+                    success = true
                     break
                 }
-            } catch (e: Exception) {
-                if (downloadCancelled) return
-                retries++
-                if (retries > maxRetries) {
-                    throw e
+
+                val targetUrl = mirrors[mirrorIndex % mirrors.size]
+                Log.i(TAG, "Connecting to mirror [${mirrorIndex % mirrors.size}/${mirrors.size}]: $targetUrl (resume at $downloadedBytes)")
+
+                var streamConn: StreamConnection? = null
+                var input: InputStream? = null
+
+                try {
+                    streamConn = openStreamWithManualRedirects(targetUrl, downloadedBytes)
+                    val code = streamConn.responseCode
+                    if (code != 200 && code != 206) {
+                        throw IOException("HTTP $code from $targetUrl")
+                    }
+
+                    if (totalLength <= 0 && streamConn.contentLength > 0) {
+                        totalLength = if (streamConn.isPartial && downloadedBytes > 0) {
+                            streamConn.contentLength
+                        } else {
+                            downloadedBytes + streamConn.contentLength
+                        }
+                    }
+
+                    if (!streamConn.isPartial && downloadedBytes > 0) {
+                        // Server ignored Range header and sent entire file from 0
+                        Log.w(TAG, "Server ignored Range request, resetting to offset 0")
+                        downloadedBytes = 0L
+                        raf.seek(0)
+                        raf.setLength(0)
+                    } else {
+                        raf.seek(downloadedBytes)
+                    }
+
+                    input = BufferedInputStream(streamConn.connection.inputStream, 128 * 1024)
+                    val buffer = ByteArray(128 * 1024)
+
+                    var lastReadTime = System.currentTimeMillis()
+                    var lastReportTime = System.currentTimeMillis()
+                    var bytesSinceReport = 0L
+                    var smoothedSpeed = 0f
+
+                    // Active watchdog: detect TSPU stall if no data received for 4.5 seconds
+                    val watchdogJob = launch(Dispatchers.IO) {
+                        while (isActive && !downloadCancelled) {
+                            delay(1000)
+                            val elapsedSinceRead = System.currentTimeMillis() - lastReadTime
+                            if (elapsedSinceRead > 4500) {
+                                Log.w(TAG, "Stream stalled (>4.5s without data), aborting connection for failover")
+                                try {
+                                    streamConn.connection.disconnect()
+                                } catch (_: Throwable) {}
+                                break
+                            }
+                        }
+                    }
+
+                    try {
+                        while (!downloadCancelled) {
+                            val bytesRead = input.read(buffer)
+                            if (bytesRead == -1) {
+                                break // End of stream
+                            }
+
+                            raf.write(buffer, 0, bytesRead)
+                            downloadedBytes += bytesRead
+                            bytesSinceReport += bytesRead
+                            val now = System.currentTimeMillis()
+                            lastReadTime = now
+
+                            val dt = now - lastReportTime
+                            if (dt >= 200 || (totalLength > 0 && downloadedBytes >= totalLength)) {
+                                val instSpeedMBs = (bytesSinceReport.toFloat() / (1024 * 1024)) / (dt / 1000f)
+                                smoothedSpeed = if (smoothedSpeed == 0f) {
+                                    instSpeedMBs
+                                } else {
+                                    smoothedSpeed * 0.7f + instSpeedMBs * 0.3f
+                                }
+                                bytesSinceReport = 0L
+                                lastReportTime = now
+
+                                val progress = if (totalLength > 0) {
+                                    (downloadedBytes.toFloat() / totalLength).coerceIn(0f, 1f)
+                                } else 0.5f
+
+                                val totalMB = if (totalLength > 0) {
+                                    totalLength.toFloat() / (1024 * 1024)
+                                } else (downloadedBytes.toFloat() / (1024 * 1024))
+
+                                val downloadedMB = downloadedBytes.toFloat() / (1024 * 1024)
+                                val remainingBytes = if (totalLength > downloadedBytes) totalLength - downloadedBytes else 0L
+                                val etaSec = if (smoothedSpeed > 0.02f) {
+                                    (remainingBytes / (smoothedSpeed * 1024 * 1024)).toInt().coerceAtLeast(0)
+                                } else 0
+
+                                _updateState.value = UpdateState.Downloading(
+                                    version      = version,
+                                    progress     = progress,
+                                    downloadedMB = downloadedMB,
+                                    totalMB      = totalMB,
+                                    speedMBs     = smoothedSpeed,
+                                    etaSec       = etaSec,
+                                )
+                            }
+                        }
+                    } finally {
+                        watchdogJob.cancel()
+                    }
+
+                    if (totalLength > 0 && downloadedBytes >= totalLength) {
+                        success = true
+                        break
+                    }
+
+                } catch (e: Exception) {
+                    if (downloadCancelled) break
+                    Log.w(TAG, "Mirror error on $targetUrl: ${e.message}, failing over to next mirror...")
+                    mirrorIndex++
+                    attempts++
+                    delay(300)
+                } finally {
+                    try { input?.close() } catch (_: Throwable) {}
+                    try { streamConn?.connection?.disconnect() } catch (_: Throwable) {}
                 }
-                Thread.sleep(retries * 500L)
-            } finally {
-                conn?.disconnect()
             }
+        } finally {
+            try { raf.close() } catch (_: Throwable) {}
         }
+
+        if (downloadCancelled) {
+            partFile.delete()
+            _updateState.value = UpdateState.Idle
+            isDownloading.set(false)
+            return@withContext
+        }
+
+        if (success && partFile.exists() && partFile.length() > 500 * 1024) {
+            if (destFile.exists()) destFile.delete()
+            if (partFile.renameTo(destFile) && isValidApk(destFile)) {
+                _updateState.value = UpdateState.ReadyToInstall(destFile)
+                launchInstaller(context, destFile)
+            } else {
+                _updateState.value = UpdateState.Error("Файл APK повреждён или не прошёл проверку целостности")
+            }
+        } else {
+            _updateState.value = UpdateState.Error("Не удалось загрузить обновление (превышено число попыток)")
+        }
+        isDownloading.set(false)
     }
 
-    private fun downloadSingleStream(
-        apkUrl: String,
-        destFile: File,
-        version: String,
-        totalLength: Long
-    ) {
-        val url = URL(apkUrl)
-        val conn = url.openConnection() as HttpURLConnection
-        conn.connectTimeout = 15000
-        conn.readTimeout = 30000
-        conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
-
-        val totalMB = (totalLength.toFloat() / (1024 * 1024))
-
-        conn.inputStream.use { input ->
-            FileOutputStream(destFile).use { output ->
-                val buffer = ByteArray(32 * 1024)
-                var bytesRead: Int
-                var totalRead = 0L
-                val startTime = System.currentTimeMillis()
-                var lastUpdate = System.currentTimeMillis()
-
-                while (input.read(buffer).also { bytesRead = it } != -1) {
-                    if (downloadCancelled) {
-                        destFile.delete()
-                        _updateState.value = UpdateState.Idle
-                        return
-                    }
-                    output.write(buffer, 0, bytesRead)
-                    totalRead += bytesRead
-
-                    val now = System.currentTimeMillis()
-                    val dt = now - lastUpdate
-                    if (dt >= 200 || totalRead == totalLength) {
-                        val elapsedSec = (now - startTime) / 1000f
-                        val speedMBs = if (elapsedSec > 0.1f) {
-                            (totalRead.toFloat() / (1024 * 1024)) / elapsedSec
-                        } else 0f
-
-                        val downloadedMB = totalRead.toFloat() / (1024 * 1024)
-                        val progress = (totalRead.toFloat() / totalLength).coerceIn(0f, 1f)
-
-                        val remainingBytes = totalLength - totalRead
-                        val etaSec = if (speedMBs > 0.01f) {
-                            (remainingBytes / (speedMBs * 1024 * 1024)).toInt().coerceAtLeast(0)
-                        } else 0
-
-                        _updateState.value = UpdateState.Downloading(
-                            version      = version,
-                            progress     = progress,
-                            downloadedMB = downloadedMB,
-                            totalMB      = totalMB,
-                            speedMBs     = speedMBs,
-                            etaSec       = etaSec,
-                        )
-                        lastUpdate = now
-                    }
-                }
+    fun isValidApk(file: File): Boolean {
+        if (!file.exists() || file.length() < 500 * 1024) return false
+        return try {
+            RandomAccessFile(file, "r").use { raf ->
+                val magic = ByteArray(4)
+                raf.readFully(magic)
+                // ZIP magic header 'PK\x03\x04'
+                magic[0] == 0x50.toByte() && magic[1] == 0x4B.toByte() &&
+                magic[2] == 0x03.toByte() && magic[3] == 0x04.toByte()
             }
+        } catch (_: Throwable) {
+            false
         }
     }
 
