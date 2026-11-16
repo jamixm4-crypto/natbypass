@@ -434,6 +434,16 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 			ensureRule("nat", "_NDM_POSTROUTING", "-s", targetSubnet, "!", "-o", d.AdapterName, "-j", "MASQUERADE")
 		}
 
+		// 3c. Защита транзитных DNS запросов (UDP/TCP 53, TCP 853) от перехвата локальным DNS Keenetic / ndm
+		ensureRule("nat", "PREROUTING", "-i", d.AdapterName, "-p", "udp", "--dport", "53", "-j", "ACCEPT")
+		ensureRule("nat", "PREROUTING", "-i", d.AdapterName, "-p", "tcp", "--dport", "53", "-j", "ACCEPT")
+		ensureRule("nat", "PREROUTING", "-i", d.AdapterName, "-p", "tcp", "--dport", "853", "-j", "ACCEPT")
+		if isKeeneticDevice() {
+			ensureRule("nat", "_NDM_PREROUTING", "-i", d.AdapterName, "-p", "udp", "--dport", "53", "-j", "ACCEPT")
+			ensureRule("nat", "_NDM_PREROUTING", "-i", d.AdapterName, "-p", "tcp", "--dport", "53", "-j", "ACCEPT")
+			ensureRule("nat", "_NDM_PREROUTING", "-i", d.AdapterName, "-p", "tcp", "--dport", "853", "-j", "ACCEPT")
+		}
+
 		// 4. Разрешение входящих UDP и TCP портов (Mesh P2P, WireGuard и ShadowTLS)
 		ensureRule("", "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
 		ensureRule("", "INPUT", "-p", "udp", "--dport", "51820", "-j", "ACCEPT")
@@ -495,6 +505,12 @@ if [ "$table" = "mangle" ]; then
 fi
 
 if [ "$table" = "nat" ]; then
+    iptables -t nat -C PREROUTING -i %[1]s -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I PREROUTING 1 -i %[1]s -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C PREROUTING -i %[1]s -p tcp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I PREROUTING 1 -i %[1]s -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C PREROUTING -i %[1]s -p tcp --dport 853 -j ACCEPT 2>/dev/null || iptables -t nat -I PREROUTING 1 -i %[1]s -p tcp --dport 853 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C _NDM_PREROUTING -i %[1]s -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I _NDM_PREROUTING 1 -i %[1]s -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C _NDM_PREROUTING -i %[1]s -p tcp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I _NDM_PREROUTING 1 -i %[1]s -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C _NDM_PREROUTING -i %[1]s -p tcp --dport 853 -j ACCEPT 2>/dev/null || iptables -t nat -I _NDM_PREROUTING 1 -i %[1]s -p tcp --dport 853 -j ACCEPT 2>/dev/null || true
     iptables -t nat -C POSTROUTING -m mark --mark 0x4e ! -o %[1]s -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -m mark --mark 0x4e ! -o %[1]s -j MASQUERADE 2>/dev/null || true
     iptables -t nat -C POSTROUTING -s %[2]s ! -o %[1]s -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s %[2]s ! -o %[1]s -j MASQUERADE 2>/dev/null || true
     iptables -t nat -C _NDM_POSTROUTING -m mark --mark 0x4e ! -o %[1]s -j MASQUERADE 2>/dev/null || iptables -t nat -I _NDM_POSTROUTING 1 -m mark --mark 0x4e ! -o %[1]s -j MASQUERADE 2>/dev/null || true

@@ -478,8 +478,12 @@ func (tf *TransitForwarder) udpSessionReader(key udpSessionKey, entry *udpSessio
 		n, err := entry.conn.Read(buf)
 		if err != nil {
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-				// Check inactivity
-				if time.Now().Unix()-entry.lastActive.Load() > 60 {
+				// Check inactivity: for DNS queries (UDP 53) close after 10s of silence; for other UDP after 60s
+				maxIdle := int64(60)
+				if entry.dstPort == 53 {
+					maxIdle = 10
+				}
+				if time.Now().Unix()-entry.lastActive.Load() > maxIdle {
 					return
 				}
 				continue
@@ -583,7 +587,12 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 		// Asynchronously dial target host to avoid blocking TUN reader
 		go func(cVIP, dIP net.IP, cPort, dPort uint16, cISN uint32, k tcpSessionKey, entry *tcpSessionEntry) {
 			targetAddr := net.JoinHostPort(dIP.String(), strconv.Itoa(int(dPort)))
-			conn, err := net.DialTimeout("tcp", targetAddr, 6*time.Second)
+			dialTimeout := 6 * time.Second
+			if dPort == 853 {
+				// DoT (DNS-over-TLS): fast 2-second timeout to allow client to fall back to UDP 53 immediately without stalling
+				dialTimeout = 2 * time.Second
+			}
+			conn, err := net.DialTimeout("tcp", targetAddr, dialTimeout)
 			if err != nil {
 				entry.dialing.Store(false)
 				entry.close()

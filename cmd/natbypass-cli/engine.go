@@ -1177,6 +1177,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if targetEP == "" {
 				targetEP = destPeer.STUNAddr
 			}
+			if targetEP == "" && len(destPeer.Candidates) > 0 {
+				targetEP = destPeer.Candidates[0]
+			}
 			if targetEP == "" {
 				targetEP = destPeer.LocalAddr
 			}
@@ -1614,8 +1617,21 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// On Windows (or if tunDev is nil), kernel NAT is unsupported for Wintun adapters.
 			// Transit packets to the Internet MUST be handled by TransitForwarder (userspace proxy)
 			// to avoid immediate un-NATted blackholing by Windows tcpip.sys and ISP egress filters.
+			// Transit DNS queries (UDP port 53) are ALSO handled by TransitForwarder in userspace on Linux/Keenetic
+			// to guarantee that router firmware (Keenetic NDM dnsproxy / SafeDNS / AdGuard) never hijacks or corrupts DNS responses.
+			isDNS := false
+			if len(payload) >= 28 && payload[9] == 17 {
+				ihl := int(payload[0]&0x0F) * 4
+				if len(payload) >= ihl+8 {
+					dstPort := binary.BigEndian.Uint16(payload[ihl+2 : ihl+4])
+					if dstPort == 53 {
+						isDNS = true
+					}
+				}
+			}
+
 			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
-				if runtime.GOOS == "windows" || tunDev == nil {
+				if runtime.GOOS == "windows" || tunDev == nil || isDNS {
 					if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 						log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder")
 						return

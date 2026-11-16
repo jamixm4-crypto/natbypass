@@ -261,20 +261,20 @@ class NatBypassVpnService : VpnService() {
                 Log.w(TAG, "addDisallowedApplication error: ${e.message}")
             }
 
-            try { builder.allowFamily(android.system.OsConstants.AF_INET) } catch (_: Throwable) {}
-            // ВНИМАНИЕ: НЕ вызываем builder.allowFamily(AF_INET6)!
-            // NatBypass — это IPv4-only меш-сеть. При вызове allowFamily(AF_INET6) без IPv6-адреса и маршрутов
-            // Android 14/15/16 (IPv6-First) перенаправляет системный Private DNS DoT (dns.google:853) и IPv6-трафик
-            // в интерфейс tun0, где он отбрасывается, блокируя весь интернет и выдавая "Частный DNS-сервер недоступен".
-            // При указании ТОЛЬКО AF_INET Android по системной спецификации направляет весь IPv6 трафик
-            // напрямую через физическую сеть (Wi-Fi/LTE) в обход VPN.
+            // WireGuard Android standard: НЕ ограничиваем семейства адресов (allowFamily).
+            // По спецификации AOSP VpnService, вызов allowFamily(AF_INET) приводит к тому,
+            // что весь IPv6-трафик блокируется файрволом ОС, из-за чего системный Private DNS (DoT / netd)
+            // на Android 9-16 падает с ошибкой "Частный DNS-сервер недоступен" и блокирует всё разрешение имен.
+            // При отсутствии ограничений allowFamily оба семейства разрешены, а IPv4 маршрутизируется по addRoute.
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 try { builder.setMetered(false) } catch (_: Throwable) {}
             }
 
-            // Исключаем локальные физические маршруты (включая Wi-Fi роутер и локальную подсеть) из захвата VPN
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Исключаем локальные физические маршруты ТОЛЬКО в режиме сплит-туннеля (!useExitNode).
+            // В режиме Exit Node (полный туннель 0.0.0.0/0) исключать маршруты НЕЛЬЗЯ — это дырявит таблицу маршрутизации,
+            // ломая резолвинг DNS и доставку транзитного трафика через шлюз.
+            if (!useExitNode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 try {
                     val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
                     val activeNet = cm?.activeNetwork
@@ -285,7 +285,6 @@ class NatBypassVpnService : VpnService() {
                             if (dest != null && dest.prefixLength in 8..32 && !dest.address.isAnyLocalAddress && !dest.address.isLoopbackAddress) {
                                 val hostAddr = dest.address.hostAddress ?: ""
                                 // КРИТИЧНО: НЕ исключаем подсети, пересекающиеся с меш-сетью (10.x.x.x, 100.64.x.x) или широкие диапазоны (<=16).
-                                // Если мобильный оператор (LTE/CGNAT) выдаёт 10.0.0.0/8, его исключение отрезает Android от всех узлов кластера 10.1.2.x!
                                 if (hostAddr.startsWith("10.") || hostAddr.startsWith("100.64.") || dest.prefixLength <= 16) {
                                     Log.i(TAG, "Skipping excludeRoute for mesh-overlapping route: $dest")
                                     continue

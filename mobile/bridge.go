@@ -40,7 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.34"
+const Version = "1.9.507-beta.35"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -468,6 +468,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		tf := globalTunFile
 		engineMu.Unlock()
 		if tf != nil {
+			ensureValidIPv4Checksum(dataToProcess)
 			_, _ = tf.Write(dataToProcess)
 		}
 	})
@@ -680,6 +681,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		tf := globalTunFile
 		engineMu.Unlock()
 		if tf != nil {
+			ensureValidIPv4Checksum(payload)
 			_, _ = tf.Write(payload)
 		}
 	})
@@ -722,6 +724,7 @@ func StartEngine(configYAML string, tunFd int) string {
 				tf := globalTunFile
 				engineMu.Unlock()
 				if tf != nil {
+					ensureValidIPv4Checksum(payload)
 					_, err := tf.Write(payload)
 					return err
 				}
@@ -1706,6 +1709,7 @@ func attachTUNLocked(tunFd int) {
 			tf := globalTunFile
 			engineMu.Unlock()
 			if tf != nil {
+				ensureValidIPv4Checksum(payload)
 				_, _ = tf.Write(payload)
 			}
 		})
@@ -2277,6 +2281,20 @@ func calcChecksum(data []byte) uint16 {
 		sum = (sum & 0xffff) + (sum >> 16)
 	}
 	return ^uint16(sum)
+}
+
+// ensureValidIPv4Checksum recalculates and writes the IPv4 header checksum
+// so the Android Linux kernel network stack accepts the packet unconditionally.
+func ensureValidIPv4Checksum(packet []byte) {
+	if len(packet) >= 20 && (packet[0]>>4) == 4 {
+		ihl := int(packet[0]&0x0F) * 4
+		if ihl >= 20 && ihl <= len(packet) {
+			packet[10] = 0
+			packet[11] = 0
+			cs := calcChecksum(packet[:ihl])
+			binary.BigEndian.PutUint16(packet[10:12], cs)
+		}
+	}
 }
 
 // AttachTUN привязывает дескриптор TUN-интерфейса к работающему движку (для вызова из GoMobile)

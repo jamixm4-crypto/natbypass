@@ -152,4 +152,25 @@ func TestBuildIPv4UDPPacket(t *testing.T) {
 	if dstPort != 12345 {
 		t.Errorf("dstPort = %d, want 12345", dstPort)
 	}
+
+	// Verify UDP checksum using standard 1's complement algorithm over pseudo-header + UDP datagram
+	var pseudoSum uint32
+	pseudoSum += uint32(binary.BigEndian.Uint16(src.To4()[0:2]))
+	pseudoSum += uint32(binary.BigEndian.Uint16(src.To4()[2:4]))
+	pseudoSum += uint32(binary.BigEndian.Uint16(dst.To4()[0:2]))
+	pseudoSum += uint32(binary.BigEndian.Uint16(dst.To4()[2:4]))
+	pseudoSum += uint32(17) // Proto UDP
+	pseudoSum += uint32(8 + len(payload))
+	for i := 20; i < len(pkt)-1; i += 2 {
+		pseudoSum += uint32(binary.BigEndian.Uint16(pkt[i : i+2]))
+	}
+	if len(payload)%2 != 0 {
+		pseudoSum += uint32(pkt[len(pkt)-1]) << 8
+	}
+	for pseudoSum > 0xFFFF {
+		pseudoSum = (pseudoSum & 0xFFFF) + (pseudoSum >> 16)
+	}
+	if ^uint16(pseudoSum) != 0 {
+		t.Errorf("UDP checksum verification failed: 0x%04x, want 0", ^uint16(pseudoSum))
+	}
 }

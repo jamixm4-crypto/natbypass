@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.34"
+	Version = "1.9.507-beta.35"
 	Commit  = "release"
 )
 
@@ -5639,8 +5639,21 @@ func startEngineFromConfig(c *config.Config) {
 			// On Windows (or if tunDev is nil), kernel NAT is unsupported for Wintun adapters.
 			// Transit packets to the Internet MUST be handled by TransitForwarder (userspace proxy)
 			// to avoid immediate un-NATted blackholing by Windows tcpip.sys and ISP egress filters.
+			// Transit DNS queries (UDP port 53) are ALSO handled by TransitForwarder in userspace
+			// to guarantee zero disruption from router or local iptables mangling.
+			isDNS := false
+			if len(payload) >= 28 && payload[9] == 17 {
+				ihl := int(payload[0]&0x0F) * 4
+				if len(payload) >= ihl+8 {
+					dstPort := binary.BigEndian.Uint16(payload[ihl+2 : ihl+4])
+					if dstPort == 53 {
+						isDNS = true
+					}
+				}
+			}
+
 			if isTransit && guiTransitForwarder != nil && allowExitNode {
-				if runtime.GOOS == "windows" || tunDev == nil {
+				if runtime.GOOS == "windows" || tunDev == nil || isDNS {
 					if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 						atomic.AddUint64(&packetsRecvCount, 1)
 						atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
@@ -5736,6 +5749,9 @@ func startEngineFromConfig(c *config.Config) {
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
 				targetEP = destPeer.STUNAddr
+			}
+			if targetEP == "" && len(destPeer.Candidates) > 0 {
+				targetEP = destPeer.Candidates[0]
 			}
 			if targetEP == "" {
 				targetEP = destPeer.LocalAddr
