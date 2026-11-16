@@ -331,7 +331,11 @@ https://ghfast.top/https://github.com/${REPO}/releases/download/${TAG}/${name}
     # Генерация криптографически стойких случайных значений (16 байт = 32 hex символа)
     RAND_HEX=$(generate_random_hex 16)
     RAND_NET_KEY=$(generate_random_hex 16)
-    RAND_WEB_PASS=$(generate_random_hex 6)
+    if [ "$IS_KEENETIC" -eq 1 ]; then
+        RAND_WEB_PASS="admin"
+    else
+        RAND_WEB_PASS=$(generate_random_hex 6)
+    fi
     HOST_NAME="${ROUTER_NAME:-$(uname -n 2>/dev/null || echo "Router")}"
     SHORT_ID=$(echo "${RAND_HEX}" | cut -c1-6)
     RAND_OCTET=$(( (0x$(echo "${RAND_HEX}" | cut -c7-8) % 240) + 2 ))

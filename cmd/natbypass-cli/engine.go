@@ -2780,6 +2780,7 @@ func startWebUI(ctx context.Context, cfg *config.Config, registry *peer.Registry
 	if webui.IsKeeneticOS() {
 		log.Info().Msg("🛡️ Обнаружена KeeneticOS: активирована системная авторизация роутера")
 		customAuth = webui.VerifyKeeneticAuth
+		webui.InitKeeneticAuth()
 	} else if runtime.GOOS != "windows" && (username == "" || password == "" || password == "admin" || password == "changeme") {
 		if username == "" {
 			username = "admin"

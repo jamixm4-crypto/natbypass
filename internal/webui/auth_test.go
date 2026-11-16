@@ -8,6 +8,11 @@
 package webui
 
 import (
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -194,5 +199,84 @@ func TestLocalLaunchURLAndAutoLogin(t *testing.T) {
 	s.handleIndex(wRemote, reqRemote)
 	if wRemote.Code == http.StatusFound {
 		t.Fatal("expected remote LAN access with launch token to be rejected from auto-login")
+	}
+}
+
+func TestKeeneticRCIChallengeMock(t *testing.T) {
+	expectedPass := "KeeneticAdminPass2026!"
+	realm := "Keenetic-Titan"
+	challenge := "4f8a92bcde10"
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth" {
+			if r.Method == "GET" {
+				w.Header().Set("X-NDM-Challenge", challenge)
+				w.Header().Set("X-NDM-Realm", realm)
+				http.SetCookie(w, &http.Cookie{Name: "session_id", Value: "mock-sess-42", Path: "/"})
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			if r.Method == "POST" {
+				var body struct {
+					Login    string `json:"login"`
+					Password string `json:"password"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				// Verify password hash
+				md5Raw := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", body.Login, realm, expectedPass)))
+				md5Hex := hex.EncodeToString(md5Raw[:])
+				shaRaw := sha256.Sum256([]byte(challenge + md5Hex))
+				expectedSha := hex.EncodeToString(shaRaw[:])
+
+				if body.Login == "admin" && body.Password == expectedSha {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockServer.Close()
+
+	keeneticTargetMu.Lock()
+	keeneticWorkingTarget = mockServer.URL
+	keeneticTargetChecked = time.Now()
+	keeneticTargetMu.Unlock()
+	defer invalidateKeeneticTarget()
+
+	// 1. Correct password must pass
+	if !verifyKeeneticRCIChallenge("admin", expectedPass) {
+		t.Fatal("expected correct Keenetic password to succeed challenge-response")
+	}
+
+	// 2. Wrong password must fail
+	if verifyKeeneticRCIChallenge("admin", "wrong-password") {
+		t.Fatal("expected wrong Keenetic password to fail challenge-response")
+	}
+}
+
+func TestCheckCredentials_KeeneticFallback(t *testing.T) {
+	isK := true
+	SetKeeneticOSOverrideForTest(&isK)
+	defer SetKeeneticOSOverrideForTest(nil)
+
+	// With any server config on Keenetic, admin/admin should always be accepted as emergency recovery
+	s := NewServer(0, "admin", "RandomHexGeneratedPassword123", nil, nil)
+	// Fallback admin/admin
+	if !s.checkCredentials("admin", "admin") {
+		t.Fatal("expected admin/admin fallback to be accepted")
+	}
+	// Configured password should also be accepted
+	if !s.checkCredentials("admin", "RandomHexGeneratedPassword123") {
+		t.Fatal("expected configured password to be accepted")
+	}
+	// Random wrong password should be rejected
+	if s.checkCredentials("admin", "completely_wrong") {
+		t.Fatal("expected completely_wrong password to be rejected")
 	}
 }

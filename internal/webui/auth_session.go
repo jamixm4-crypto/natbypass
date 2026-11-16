@@ -49,6 +49,25 @@ type SessionEntry struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+func isLocalOrPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() {
+		return true
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 10 && ip4[1] == 1 && ip4[2] == 2 {
+			return true
+		}
+		if ip4[0] == 100 && (ip4[1]&0xC0) == 64 {
+			return true
+		}
+	}
+	return false
+}
+
 func checkLoginRateLimit(ip string) (bool, time.Duration) {
 	loginLimiterMu.Lock()
 	defer loginLimiterMu.Unlock()
@@ -68,9 +87,15 @@ func checkLoginRateLimit(ip string) (bool, time.Duration) {
 		return true, 0
 	}
 
-	if info.count >= 5 {
-		info.blockedUntil = now.Add(30 * time.Second)
-		return false, 30 * time.Second
+	maxAttempts := 5
+	blockDuration := 30 * time.Second
+	if isLocalOrPrivateIP(ip) || IsKeeneticOS() {
+		blockDuration = 5 * time.Second
+	}
+
+	if info.count >= maxAttempts {
+		info.blockedUntil = now.Add(blockDuration)
+		return false, blockDuration
 	}
 
 	return true, 0
@@ -90,9 +115,15 @@ func recordFailedLogin(ip string) {
 		return
 	}
 
+	maxAttempts := 5
+	blockDuration := 30 * time.Second
+	if isLocalOrPrivateIP(ip) || IsKeeneticOS() {
+		blockDuration = 5 * time.Second
+	}
+
 	info.count++
-	if info.count >= 5 {
-		info.blockedUntil = now.Add(30 * time.Second)
+	if info.count >= maxAttempts {
+		info.blockedUntil = now.Add(blockDuration)
 	}
 }
 
@@ -276,8 +307,18 @@ func (s *Server) checkCredentials(username, password string) bool {
 		return false
 	}
 
-	// 1. Configured static credentials (from config.yaml) — if user set a custom non-default password
-	if s.user != "" && s.password != "" && s.password != "admin" {
+	// 1. KeeneticOS: check router system credentials first (router admin username & password)
+	if IsKeeneticOS() {
+		if VerifyKeeneticAuth(username, password) {
+			return true
+		}
+		if s.customAuth != nil && s.customAuth(username, password) {
+			return true
+		}
+	}
+
+	// 2. Configured static credentials (from config.yaml) — if custom password was configured
+	if s.user != "" && s.password != "" {
 		uMatch := subtle.ConstantTimeCompare([]byte(s.user), []byte(username)) == 1
 		pMatch := subtle.ConstantTimeCompare([]byte(s.password), []byte(password)) == 1
 		if uMatch && pMatch {
@@ -285,18 +326,8 @@ func (s *Server) checkCredentials(username, password string) bool {
 		}
 	}
 
-	// 2. KeeneticOS: check router system credentials (e.g. user entering their router admin credentials)
-	if IsKeeneticOS() {
-		if s.customAuth != nil && s.customAuth(username, password) {
-			return true
-		}
-		if VerifyKeeneticAuth(username, password) {
-			return true
-		}
-	}
-
-	// 3. Fallback when password is empty or default admin: accept admin/admin
-	if (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
+	// 3. Fallback when password is empty, default admin, OR on KeeneticOS as emergency recovery fallback
+	if IsKeeneticOS() || (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
 		if subtle.ConstantTimeCompare([]byte(username), []byte("admin")) == 1 &&
 			subtle.ConstantTimeCompare([]byte(password), []byte("admin")) == 1 {
 			return true

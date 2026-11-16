@@ -43,16 +43,39 @@ type KeeneticUser struct {
 }
 
 var (
+	isKeeneticOSOverride  *bool
 	keeneticUsersCache    []KeeneticUser
 	keeneticCacheMu       sync.RWMutex
 	keeneticCacheTime     time.Time
 	keeneticHostnameCache string
 	keeneticModelCache    string
 	keeneticRealmHttp     string
+	keeneticWorkingTarget string
+	keeneticTargetMu      sync.RWMutex
+	keeneticTargetChecked time.Time
 )
+
+// SetKeeneticOSOverrideForTest overrides KeeneticOS detection for unit testing.
+func SetKeeneticOSOverrideForTest(val *bool) {
+	isKeeneticOSOverride = val
+}
+
+// InitKeeneticAuth pre-warms the Keenetic users cache and discovers the local WebUI endpoint in background.
+func InitKeeneticAuth() {
+	if !IsKeeneticOS() {
+		return
+	}
+	go func() {
+		_ = GetKeeneticUsers()
+		_ = getKeeneticWorkingTarget()
+	}()
+}
 
 // IsKeeneticOS returns true if running on a genuine Keenetic router.
 func IsKeeneticOS() bool {
+	if isKeeneticOSOverride != nil {
+		return *isKeeneticOSOverride
+	}
 	if runtime.GOOS != "linux" {
 		return false
 	}
@@ -144,12 +167,22 @@ func VerifyKeeneticAuth(username, password string) bool {
 		}
 	}
 
-	// 2. Method 2: Official Keenetic RCI Challenge-Response HTTP Authentication with CookieJar
+	// Methods 2-4 require genuine KeeneticOS environment to probe local router endpoints
+	if !IsKeeneticOS() {
+		return false
+	}
+
+	// 2. Method 2: Official Keenetic RCI Challenge-Response HTTP Authentication
 	if verifyKeeneticRCIChallenge(username, password) {
 		return true
 	}
 
-	// 3. Method 3: Direct local RCI Basic Auth
+	// 3. Method 3: Direct local Telnet CLI authentication (if Telnet port 23 is enabled)
+	if verifyViaLocalTelnet(username, password) {
+		return true
+	}
+
+	// 4. Method 4: Direct local RCI Basic Auth
 	if verifyViaLocalKeeneticHTTP(username, password) {
 		return true
 	}
@@ -157,79 +190,144 @@ func VerifyKeeneticAuth(username, password string) bool {
 	return false
 }
 
+func getKeeneticWorkingTarget() string {
+	keeneticTargetMu.RLock()
+	if keeneticWorkingTarget != "" && time.Since(keeneticTargetChecked) < 10*time.Minute {
+		tgt := keeneticWorkingTarget
+		keeneticTargetMu.RUnlock()
+		return tgt
+	}
+	keeneticTargetMu.RUnlock()
+
+	keeneticTargetMu.Lock()
+	defer keeneticTargetMu.Unlock()
+
+	if keeneticWorkingTarget != "" && time.Since(keeneticTargetChecked) < 10*time.Minute {
+		return keeneticWorkingTarget
+	}
+
+	candidates := getKeeneticProbeTargets()
+	ch := make(chan string, len(candidates))
+	var wg sync.WaitGroup
+	var found int32
+
+	for _, cand := range candidates {
+		wg.Add(1)
+		go func(c string) {
+			defer wg.Done()
+			if atomic.LoadInt32(&found) == 1 {
+				return
+			}
+			if testKeeneticEndpoint(c) {
+				if atomic.CompareAndSwapInt32(&found, 0, 1) {
+					ch <- c
+				}
+			}
+		}(cand)
+	}
+
+	wg.Wait()
+	close(ch)
+
+	for working := range ch {
+		if working != "" {
+			keeneticWorkingTarget = working
+			keeneticTargetChecked = time.Now()
+			return working
+		}
+	}
+
+	// Cache failure timestamp to prevent immediate re-probing on consecutive failed attempts
+	keeneticTargetChecked = time.Now()
+	return ""
+}
+
+func invalidateKeeneticTarget() {
+	keeneticTargetMu.Lock()
+	keeneticWorkingTarget = ""
+	keeneticTargetChecked = time.Time{}
+	keeneticTargetMu.Unlock()
+}
+
+func testKeeneticEndpoint(tgt string) bool {
+	client := &http.Client{
+		Timeout: 600 * time.Millisecond,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			DialContext: (&net.Dialer{
+				Timeout: 400 * time.Millisecond,
+			}).DialContext,
+		},
+	}
+
+	req, err := http.NewRequest("GET", tgt+"/auth", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "NatBypass-Auth/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		if resp.Header.Get("X-NDM-Challenge") != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // getKeeneticProbeTargets dynamically gathers local IP addresses and ports to probe Keenetic web services
 func getKeeneticProbeTargets() []string {
-	targets := []string{
-		"http://192.168.1.1:80",
-		"https://192.168.1.1:443",
-		"http://127.0.0.1:79",
-		"http://127.0.0.1:80",
-		"https://127.0.0.1:443",
-		"http://192.168.0.1:80",
-		"https://192.168.0.1:443",
+	var candidates []string
+	seen := make(map[string]bool)
+
+	addCandidate := func(u string) {
+		if !seen[u] {
+			seen[u] = true
+			candidates = append(candidates, u)
+		}
 	}
 
-	seen := map[string]bool{
-		"http://192.168.1.1:80":   true,
-		"https://192.168.1.1:443": true,
-		"http://127.0.0.1:79":     true,
-		"http://127.0.0.1:80":     true,
-		"https://127.0.0.1:443":   true,
-		"http://192.168.0.1:80":   true,
-		"https://192.168.0.1:443": true,
-	}
+	// 1. Loopback first (0ms latency)
+	addCandidate("http://127.0.0.1:80")
+	addCandidate("https://127.0.0.1:443")
 
-	ifaces, err := net.Interfaces()
-	if err == nil {
+	// 2. Prioritize router LAN bridge br0 (standard Keenetic LAN bridge)
+	if ifaces, err := net.Interfaces(); err == nil {
 		for _, i := range ifaces {
 			nameLower := strings.ToLower(i.Name)
-			// Skip VPN, mesh, cellular PPP, docker, or wireguard interfaces
-			if strings.Contains(nameLower, "tun") || strings.Contains(nameLower, "wg") ||
-				strings.Contains(nameLower, "awg") || strings.Contains(nameLower, "ppp") ||
-				strings.Contains(nameLower, "docker") {
-				continue
-			}
-
-			addrs, err := i.Addrs()
-			if err != nil {
-				continue
-			}
-			for _, addr := range addrs {
-				var ip net.IP
-				switch v := addr.(type) {
-				case *net.IPNet:
-					ip = v.IP
-				case *net.IPAddr:
-					ip = v.IP
-				}
-				if ip == nil || ip.IsLoopback() || ip.To4() == nil {
-					continue
-				}
-				// Strictly RFC 1918 private LAN addresses
-				if !ip.IsPrivate() {
-					continue
-				}
-				// Skip NatBypass VIP subnets (10.1.x.x, 100.64.x.x)
-				if (ip[0] == 10 && ip[1] == 1) || (ip[0] == 100 && (ip[1]&0xC0) == 64) {
-					continue
-				}
-
-				ipStr := ip.String()
-				u1 := "http://" + ipStr + ":80"
-				u2 := "https://" + ipStr + ":443"
-				if !seen[u1] {
-					seen[u1] = true
-					// Prioritize router LAN bridge br0
-					if strings.Contains(nameLower, "br") || strings.Contains(nameLower, "lan") {
-						targets = append([]string{u1, u2}, targets...)
-					} else {
-						targets = append(targets, u1, u2)
+			if strings.Contains(nameLower, "br") || strings.Contains(nameLower, "lan") {
+				if addrs, err := i.Addrs(); err == nil {
+					for _, addr := range addrs {
+						if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil && !ipnet.IP.IsLoopback() {
+							ipStr := ipnet.IP.String()
+							addCandidate("http://" + ipStr + ":80")
+							addCandidate("https://" + ipStr + ":443")
+						}
 					}
 				}
 			}
 		}
 	}
-	return targets
+
+	// 3. Fallback common Keenetic default subnets
+	addCandidate("http://192.168.1.1:80")
+	addCandidate("https://192.168.1.1:443")
+	addCandidate("http://192.168.0.1:80")
+	addCandidate("https://192.168.0.1:443")
+
+	return candidates
 }
 
 // verifyKeeneticRCIChallenge performs the official KeeneticOS 2-step challenge-response authentication:
@@ -239,218 +337,219 @@ func getKeeneticProbeTargets() []string {
 //      auth_hash = sha256(challenge + hex(md5_hash))
 // 3. POST /auth with {"login": username, "password": auth_hash} -> 200 OK
 func verifyKeeneticRCIChallenge(username, password string) bool {
-	targets := getKeeneticProbeTargets()
-
-	var wg sync.WaitGroup
-	var authSuccess int32
-
-	for _, target := range targets {
-		wg.Add(1)
-		go func(tgt string) {
-			defer wg.Done()
-			if atomic.LoadInt32(&authSuccess) == 1 {
-				return
-			}
-
-			jar, _ := cookiejar.New(nil)
-			client := &http.Client{
-				Jar:     jar,
-				Timeout: 3500 * time.Millisecond,
-				CheckRedirect: func(req *http.Request, via []*http.Request) error {
-					return http.ErrUseLastResponse
-				},
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-					DialContext: (&net.Dialer{
-						Timeout: 1800 * time.Millisecond,
-					}).DialContext,
-				},
-			}
-
-			// Step 1: Request challenge
-			postURL := tgt + "/auth"
-			req, err := http.NewRequest("GET", tgt+"/auth", nil)
-			if err != nil {
-				return
-			}
-			resp, err := client.Do(req)
-			if err != nil {
-				return
-			}
-
-			// Handle HTTP to HTTPS redirect on /auth
-			if resp.StatusCode == http.StatusMovedPermanently || resp.StatusCode == http.StatusFound ||
-				resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == 308 {
-				loc := resp.Header.Get("Location")
-				_, _ = io.Copy(io.Discard, resp.Body)
-				resp.Body.Close()
-				if loc != "" {
-					if strings.HasPrefix(loc, "/") {
-						loc = tgt + loc
-					}
-					postURL = loc
-					reqRedir, rErr := http.NewRequest("GET", loc, nil)
-					if rErr == nil {
-						resp, err = client.Do(reqRedir)
-						if err != nil {
-							return
-						}
-					}
-				}
-			}
-
-			challenge := resp.Header.Get("X-NDM-Challenge")
-			realm := resp.Header.Get("X-NDM-Realm")
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-
-			if challenge == "" {
-				return
-			}
-
-			if realm != "" {
-				keeneticCacheMu.Lock()
-				keeneticRealmHttp = realm
-				keeneticCacheMu.Unlock()
-			}
-
-			realmsToTry := []string{}
-			if realm != "" {
-				// Exact realm returned directly by router /auth endpoint
-				realmsToTry = append(realmsToTry, realm)
-			} else {
-				realmsToTry = append(realmsToTry, "Keenetic", "KeeneticOS")
-				if keeneticHostnameCache != "" {
-					realmsToTry = append(realmsToTry, keeneticHostnameCache)
-				}
-				if keeneticModelCache != "" {
-					realmsToTry = append(realmsToTry, keeneticModelCache)
-				}
-			}
-
-			for idx, r := range realmsToTry {
-				if atomic.LoadInt32(&authSuccess) == 1 {
-					return
-				}
-
-				// If this is a retry with an alternative realm, request a fresh challenge because Keenetic burns used challenges
-				curChallenge := challenge
-				if idx > 0 {
-					cReq, cErr := http.NewRequest("GET", postURL, nil)
-					if cErr == nil {
-						if cResp, cErr := client.Do(cReq); cErr == nil {
-							newChal := cResp.Header.Get("X-NDM-Challenge")
-							_, _ = io.Copy(io.Discard, cResp.Body)
-							cResp.Body.Close()
-							if newChal != "" {
-								curChallenge = newChal
-							}
-						}
-					}
-				}
-
-				// Official Keenetic RCI:
-				// 1. md5_hash = hex(md5(username:realm:password))
-				// 2. auth_hash = hex(sha256(challenge + md5_hash))
-				md5Raw := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
-				md5Hex := hex.EncodeToString(md5Raw[:])
-
-				sha256Raw := sha256.Sum256([]byte(curChallenge + md5Hex))
-				sha256Hex := hex.EncodeToString(sha256Raw[:])
-
-				payload, _ := json.Marshal(map[string]string{
-					"login":    username,
-					"password": sha256Hex,
-				})
-
-				pReq, pErr := http.NewRequest("POST", postURL, bytes.NewReader(payload))
-				if pErr != nil {
-					continue
-				}
-				pReq.Header.Set("Content-Type", "application/json; charset=utf-8")
-				pResp, pErr := client.Do(pReq)
-				if pErr == nil {
-					_, _ = io.Copy(io.Discard, pResp.Body)
-					pResp.Body.Close()
-					if pResp.StatusCode >= 200 && pResp.StatusCode < 300 {
-						atomic.StoreInt32(&authSuccess, 1)
-						return
-					}
-				}
-
-				if atomic.LoadInt32(&authSuccess) == 1 {
-					return
-				}
-
-				// Alternative: SHA256 of login:realm:password
-				sha256P := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%s", username, r, password)))
-				sha256PHex := hex.EncodeToString(sha256P[:])
-				cSha := sha256.Sum256([]byte(curChallenge + sha256PHex))
-				cShaHex := hex.EncodeToString(cSha[:])
-
-				payload2, _ := json.Marshal(map[string]string{
-					"login":    username,
-					"password": cShaHex,
-				})
-				pReq2, pErr2 := http.NewRequest("POST", postURL, bytes.NewReader(payload2))
-				if pErr2 == nil {
-					pReq2.Header.Set("Content-Type", "application/json; charset=utf-8")
-					pResp2, pErr2 := client.Do(pReq2)
-					if pErr2 == nil {
-						_, _ = io.Copy(io.Discard, pResp2.Body)
-						pResp2.Body.Close()
-						if pResp2.StatusCode >= 200 && pResp2.StatusCode < 300 {
-							atomic.StoreInt32(&authSuccess, 1)
-							return
-						}
-					}
-				}
-			}
-		}(target)
+	tgt := getKeeneticWorkingTarget()
+	if tgt == "" {
+		return false
 	}
 
-	wg.Wait()
-	return atomic.LoadInt32(&authSuccess) == 1
-}
-
-// verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
-func verifyViaLocalKeeneticHTTP(username, password string) bool {
+	jar, _ := cookiejar.New(nil)
 	client := &http.Client{
-		Timeout: 2500 * time.Millisecond,
+		Jar:     jar,
+		Timeout: 3500 * time.Millisecond,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("stopped after 5 redirects")
+			}
+			return nil
+		},
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			DialContext: (&net.Dialer{
-				Timeout: 1500 * time.Millisecond,
+				Timeout: 1800 * time.Millisecond,
 			}).DialContext,
 		},
 	}
 
-	targets := getKeeneticProbeTargets()
-	var wg sync.WaitGroup
-	var success int32
+	// Step 1: Request challenge via GET /auth
+	req, err := http.NewRequest("GET", tgt+"/auth", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "NatBypass-Auth/1.0")
 
-	for _, target := range targets {
-		wg.Add(1)
-		go func(tgt string) {
-			defer wg.Done()
-			if atomic.LoadInt32(&success) == 1 {
-				return
-			}
-			req, err := http.NewRequest("GET", tgt+"/rci/show/version", nil)
-			if err == nil {
-				req.SetBasicAuth(username, password)
-				if resp, err := client.Do(req); err == nil {
-					_, _ = io.Copy(io.Discard, resp.Body)
-					resp.Body.Close()
-					if resp.StatusCode == http.StatusOK {
-						atomic.StoreInt32(&success, 1)
+	resp, err := client.Do(req)
+	if err != nil {
+		invalidateKeeneticTarget()
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		return false
+	}
+
+	challenge := resp.Header.Get("X-NDM-Challenge")
+	realm := resp.Header.Get("X-NDM-Realm")
+	if challenge == "" {
+		return false
+	}
+	if realm == "" {
+		realm = "Keenetic"
+	}
+
+	finalURL := resp.Request.URL.String()
+
+	// Step 2: Calculate Challenge-Response Hash:
+	// 1. md5_hash = hex(md5(username:realm:password))
+	// 2. auth_hash = hex(sha256(challenge + md5_hash))
+	md5Raw := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, realm, password)))
+	md5Hex := hex.EncodeToString(md5Raw[:])
+
+	shaRaw := sha256.Sum256([]byte(challenge + md5Hex))
+	shaHex := hex.EncodeToString(shaRaw[:])
+
+	payload, err := json.Marshal(map[string]string{
+		"login":    username,
+		"password": shaHex,
+	})
+	if err != nil {
+		return false
+	}
+
+	// Step 3: POST /auth with authenticated JSON payload
+	postReq, err := http.NewRequest("POST", finalURL, bytes.NewReader(payload))
+	if err != nil {
+		return false
+	}
+	postReq.Header.Set("Content-Type", "application/json; charset=utf-8")
+	postReq.Header.Set("User-Agent", "NatBypass-Auth/1.0")
+
+	postResp, err := client.Do(postReq)
+	if err != nil {
+		return false
+	}
+	defer postResp.Body.Close()
+	_, _ = io.Copy(io.Discard, postResp.Body)
+
+	if postResp.StatusCode >= 200 && postResp.StatusCode < 300 {
+		return true
+	}
+
+	// Step 4: If username has uppercase letters, retry with lowercase (Keenetic logins are case-sensitive)
+	lowerUser := strings.ToLower(username)
+	if lowerUser != username {
+		// Keenetic invalidates consumed challenges, request a fresh challenge for the retry
+		cReq, cErr := http.NewRequest("GET", finalURL, nil)
+		if cErr == nil {
+			cReq.Header.Set("User-Agent", "NatBypass-Auth/1.0")
+			if cResp, cErr := client.Do(cReq); cErr == nil {
+				newChal := cResp.Header.Get("X-NDM-Challenge")
+				_, _ = io.Copy(io.Discard, cResp.Body)
+				cResp.Body.Close()
+				if newChal != "" {
+					md5Raw2 := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", lowerUser, realm, password)))
+					md5Hex2 := hex.EncodeToString(md5Raw2[:])
+					shaRaw2 := sha256.Sum256([]byte(newChal + md5Hex2))
+					shaHex2 := hex.EncodeToString(shaRaw2[:])
+
+					payload2, _ := json.Marshal(map[string]string{
+						"login":    lowerUser,
+						"password": shaHex2,
+					})
+					pReq2, pErr2 := http.NewRequest("POST", finalURL, bytes.NewReader(payload2))
+					if pErr2 == nil {
+						pReq2.Header.Set("Content-Type", "application/json; charset=utf-8")
+						pReq2.Header.Set("User-Agent", "NatBypass-Auth/1.0")
+						if pResp2, pErr2 := client.Do(pReq2); pErr2 == nil {
+							_, _ = io.Copy(io.Discard, pResp2.Body)
+							pResp2.Body.Close()
+							if pResp2.StatusCode >= 200 && pResp2.StatusCode < 300 {
+								return true
+							}
+						}
 					}
 				}
 			}
-		}(target)
+		}
 	}
-	wg.Wait()
-	return atomic.LoadInt32(&success) == 1
+
+	return false
+}
+
+// verifyViaLocalTelnet performs a fast local Telnet CLI authentication check against 127.0.0.1:23.
+func verifyViaLocalTelnet(username, password string) bool {
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:23", 800*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(2500 * time.Millisecond))
+
+	buf := make([]byte, 512)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return false
+	}
+	prompt := string(buf[:n])
+	if !strings.Contains(strings.ToLower(prompt), "login") {
+		return false
+	}
+
+	// Send username
+	if _, err := conn.Write([]byte(username + "\r\n")); err != nil {
+		return false
+	}
+
+	// Read password prompt
+	n, err = conn.Read(buf)
+	if err != nil {
+		return false
+	}
+	prompt = string(buf[:n])
+	if !strings.Contains(strings.ToLower(prompt), "password") {
+		return false
+	}
+
+	// Send password
+	if _, err := conn.Write([]byte(password + "\r\n")); err != nil {
+		return false
+	}
+
+	// Read response
+	time.Sleep(200 * time.Millisecond)
+	n, err = conn.Read(buf)
+	if err != nil {
+		return false
+	}
+	resp := string(buf[:n])
+	lower := strings.ToLower(resp)
+	if strings.Contains(lower, "(config") || strings.Contains(resp, ">") || strings.Contains(resp, "#") {
+		return true
+	}
+	return false
+}
+
+// verifyViaLocalKeeneticHTTP checks credentials against local Keenetic Web API with Basic Auth
+func verifyViaLocalKeeneticHTTP(username, password string) bool {
+	tgt := getKeeneticWorkingTarget()
+	if tgt == "" {
+		return false
+	}
+
+	client := &http.Client{
+		Timeout: 2000 * time.Millisecond,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			DialContext: (&net.Dialer{
+				Timeout: 1200 * time.Millisecond,
+			}).DialContext,
+		},
+	}
+
+	req, err := http.NewRequest("GET", tgt+"/rci/show/version", nil)
+	if err != nil {
+		return false
+	}
+	req.SetBasicAuth(username, password)
+	if resp, err := client.Do(req); err == nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return true
+		}
+	}
+	return false
 }
 
 // GetKeeneticUsers parses KeeneticOS configuration files and returns discovered users.
@@ -532,7 +631,7 @@ func GetKeeneticUsers() []KeeneticUser {
 				cmdPath = ndmc
 			}
 			if cmdPath != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+				ctx, cancel := context.WithTimeout(context.Background(), 5000*time.Millisecond)
 				cmd := exec.CommandContext(ctx, cmdPath, "-c", "show running-config")
 				cmd.Stdin = bytes.NewReader(nil)
 				out, err := cmd.Output()
@@ -672,6 +771,11 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 			continue
 		}
 
+		// Flush current user block if a new unindented command starts
+		if currentUser != nil && !strings.HasPrefix(rawLine, " ") && !strings.HasPrefix(rawLine, "\t") {
+			flushCurrentUser()
+		}
+
 		// Detect system hostname
 		if (fields[0] == "system" && len(fields) >= 3 && fields[1] == "hostname") ||
 			(fields[0] == "hostname" && len(fields) >= 2) {
@@ -711,11 +815,6 @@ func parseKeeneticConfigFile(r io.Reader) ([]KeeneticUser, string) {
 		// Other indented user attributes (tag http, tag cli, etc.): keep currentUser open
 		if currentUser != nil && (strings.HasPrefix(rawLine, " ") || strings.HasPrefix(rawLine, "\t")) {
 			continue
-		}
-
-		// End of submode block if unindented command starts
-		if currentUser != nil && !strings.HasPrefix(rawLine, " ") && !strings.HasPrefix(rawLine, "\t") {
-			flushCurrentUser()
 		}
 	}
 
