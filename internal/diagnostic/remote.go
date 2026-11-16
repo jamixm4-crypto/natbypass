@@ -211,7 +211,7 @@ func HandleRemoteDiagSignal(
 
 		go func() {
 			defer isUpdatingInProgress.Store(false)
-			updateCtx, updateCancel := context.WithTimeout(context.Background(), 120*time.Second)
+			updateCtx, updateCancel := context.WithTimeout(context.Background(), 360*time.Second)
 			defer updateCancel()
 
 			// Send intermediate progress signal

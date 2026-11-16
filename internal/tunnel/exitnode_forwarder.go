@@ -70,6 +70,8 @@ type tcpSessionEntry struct {
 	clientNextSeq    atomic.Uint32
 	serverNextSeq    atomic.Uint32
 	lastClientAckSeq atomic.Uint32
+	lastSeenAck      atomic.Uint32
+	dupAckCount      atomic.Uint32
 	clientWindow     atomic.Uint32
 	lastActive       atomic.Int64
 	closed           atomic.Bool
@@ -711,7 +713,6 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 
 	// Case 6: Pure ACK (completing 3-way handshake or acknowledging received data)
 	if ackNum > 0 {
-		entry.lastClientAckSeq.Store(ackNum)
 		win := uint32(binary.BigEndian.Uint16(tcpHdr[14:16]))
 		if win > 0 {
 			scaledWin := win * 16
@@ -720,22 +721,31 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 			}
 			entry.clientWindow.Store(scaledWin)
 		}
-		curServerSeq := entry.serverNextSeq.Load()
-		if ackNum < curServerSeq {
-			// Fast Retransmit: client missed segment starting at ackNum
-			if lostSeg := entry.getRecentSegment(ackNum); lostSeg != nil {
-				curClientSeq := entry.clientNextSeq.Load()
-				retransPkt := buildIPv4TCPPacket(
-					destIP, dstPort,
-					srcIP, srcPort,
-					lostSeg.seq,
-					curClientSeq,
-					0x18, // PSH | ACK
-					64240,
-					lostSeg.data,
-				)
-				tf.deliverToClient(srcIP, retransPkt)
+		prevAck := entry.lastSeenAck.Load()
+		if ackNum == prevAck {
+			// Duplicate ACK received
+			count := entry.dupAckCount.Add(1)
+			if count == 3 {
+				// RFC 5681 Fast Retransmit: exactly 3 duplicate ACKs trigger retransmission of the lost segment
+				if lostSeg := entry.getRecentSegment(ackNum); lostSeg != nil {
+					curClientSeq := entry.clientNextSeq.Load()
+					retransPkt := buildIPv4TCPPacket(
+						destIP, dstPort,
+						srcIP, srcPort,
+						lostSeg.seq,
+						curClientSeq,
+						0x18, // PSH | ACK
+						64240,
+						lostSeg.data,
+					)
+					tf.deliverToClient(srcIP, retransPkt)
+				}
 			}
+		} else if ackNum > prevAck {
+			// Advancing ACK: new data acknowledged
+			entry.lastSeenAck.Store(ackNum)
+			entry.lastClientAckSeq.Store(ackNum)
+			entry.dupAckCount.Store(0)
 		}
 	}
 	return true
@@ -748,7 +758,7 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 		tf.tcpSessions.Delete(key)
 	}()
 
-	buf := make([]byte, 1360)
+	buf := make([]byte, 32768)
 	for {
 		select {
 		case <-tf.closed:
@@ -775,24 +785,33 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 		n, err := entry.conn.Read(buf)
 		if n > 0 {
 			entry.lastActive.Store(time.Now().Unix())
-			curServerSeq := entry.serverNextSeq.Load()
-			curClientSeq := entry.clientNextSeq.Load()
-			entry.serverNextSeq.Add(uint32(n))
+			offset := 0
+			for offset < n {
+				chunkSize := n - offset
+				if chunkSize > 1360 {
+					chunkSize = 1360
+				}
+				chunk := buf[offset : offset+chunkSize]
+				curSeq := entry.serverNextSeq.Load()
+				curClientSeq := entry.clientNextSeq.Load()
+				entry.serverNextSeq.Add(uint32(chunkSize))
 
-			dataCopy := make([]byte, n)
-			copy(dataCopy, buf[:n])
-			entry.addRecentSegment(curServerSeq, dataCopy)
+				dataCopy := make([]byte, chunkSize)
+				copy(dataCopy, chunk)
+				entry.addRecentSegment(curSeq, dataCopy)
 
-			dataPkt := buildIPv4TCPPacket(
-				entry.dstIP, entry.dstPort,
-				entry.clientVIP, entry.clientPort,
-				curServerSeq,
-				curClientSeq,
-				0x18, // PSH | ACK
-				64240,
-				buf[:n],
-			)
-			tf.deliverToClient(entry.clientVIP, dataPkt)
+				dataPkt := buildIPv4TCPPacket(
+					entry.dstIP, entry.dstPort,
+					entry.clientVIP, entry.clientPort,
+					curSeq,
+					curClientSeq,
+					0x18, // PSH | ACK
+					64240,
+					chunk,
+				)
+				tf.deliverToClient(entry.clientVIP, dataPkt)
+				offset += chunkSize
+			}
 		}
 		if err != nil {
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
@@ -995,7 +1014,22 @@ func calculateTCPChecksum(srcIP, dstIP net.IP, tcpHeader []byte, data []byte) ui
 
 // buildIPv4TCPPacket constructs an IPv4 packet encapsulating a TCP segment with correct checksums.
 func buildIPv4TCPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, seqNum uint32, ackNum uint32, flags byte, window uint16, payload []byte) []byte {
-	tcpHdrLen := 20
+	var tcpHdrLen int
+	var options []byte
+	if flags == 0x12 { // SYN|ACK
+		// Include MSS (1360 = 0x0550), Window Scale (7), SACK Permitted, NOP padding to 32 bytes
+		options = []byte{
+			0x02, 0x04, 0x05, 0x50, // MSS = 1360
+			0x01,                   // NOP
+			0x03, 0x03, 0x07,       // Window Scale = 7
+			0x04, 0x02,             // SACK Permitted
+			0x01, 0x01,             // NOP, NOP padding
+		}
+		tcpHdrLen = 20 + len(options) // 32 bytes
+	} else {
+		tcpHdrLen = 20
+	}
+
 	totalTCP := tcpHdrLen + len(payload)
 	totalIP := 20 + totalTCP
 
@@ -1012,20 +1046,24 @@ func buildIPv4TCPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint
 	binary.BigEndian.PutUint16(pkt[10:12], ipCS)
 
 	// TCP Header
-	tcpHdr := pkt[20:40]
+	tcpHdr := pkt[20 : 20+tcpHdrLen]
 	binary.BigEndian.PutUint16(tcpHdr[0:2], srcPort)
 	binary.BigEndian.PutUint16(tcpHdr[2:4], dstPort)
 	binary.BigEndian.PutUint32(tcpHdr[4:8], seqNum)
 	binary.BigEndian.PutUint32(tcpHdr[8:12], ackNum)
-	tcpHdr[12] = 0x50 // Data offset 5 (20 bytes)
+	tcpHdr[12] = byte((tcpHdrLen / 4) << 4) // Data offset: 5 (20B) or 8 (32B)
 	tcpHdr[13] = flags
 	if window == 0 {
 		window = 64240
 	}
 	binary.BigEndian.PutUint16(tcpHdr[14:16], window)
 
+	if len(options) > 0 {
+		copy(tcpHdr[20:], options)
+	}
+
 	if len(payload) > 0 {
-		copy(pkt[40:], payload)
+		copy(pkt[20+tcpHdrLen:], payload)
 	}
 
 	tcpCS := calculateTCPChecksum(srcIP, dstIP, tcpHdr, payload)

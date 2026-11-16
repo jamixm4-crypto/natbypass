@@ -729,7 +729,9 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 			setStatus(true, pct, statusText, "", false)
 		}
 
-		downloadErr = DownloadFile(ctx, dlURL, tmpPath, dlCfg)
+		mirrorCtx, mirrorCancel := context.WithTimeout(ctx, 45*time.Second)
+		downloadErr = DownloadFile(mirrorCtx, dlURL, tmpPath, dlCfg)
+		mirrorCancel()
 		if downloadErr == nil {
 			usedURL = dlURL
 			break

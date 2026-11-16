@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.32"
+	Version = "1.9.507-beta.33"
 	Commit  = "release"
 )
 
@@ -5702,6 +5702,17 @@ func startEngineFromConfig(c *config.Config) {
 			// 2. Direct UDP / AWG (WireGuard line-rate architecture)
 			// Always attempt direct UDP packet transmission if a target endpoint is known.
 			// This maintains and proactively restores NAT pinholes without stalling.
+			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+			isICMP := len(packet) >= 20 && packet[9] == 1
+			isTransitOrInternet := false
+			if len(packet) >= 20 && (packet[0]>>4) == 4 {
+				pSrc := net.IPv4(packet[12], packet[13], packet[14], packet[15])
+				pDst := net.IPv4(packet[16], packet[17], packet[18], packet[19])
+				if !isMeshSubnetIP(pSrc, cleanVIP) || !isMeshSubnetIP(pDst, cleanVIP) {
+					isTransitOrInternet = true
+				}
+			}
+
 			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
@@ -5718,7 +5729,7 @@ func startEngineFromConfig(c *config.Config) {
 					pmax = destPeer.AWG.Pmax
 				}
 				if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
-					if destPeer.DirectP2P && bilateralOK {
+					if (destPeer.DirectP2P && bilateralOK) || (isTransitOrInternet && !isICMP) {
 						return nil
 					}
 				}
@@ -5768,7 +5779,11 @@ func startEngineFromConfig(c *config.Config) {
 					return nil
 				}
 			}
-			// 4. Central MQTT Relay fallback with encryption
+			// Transit/Internet streaming traffic MUST NEVER be published to central MQTT signaling broker!
+			if isTransitOrInternet && !isICMP {
+				return nil
+			}
+			// 5. Central MQTT Relay fallback with encryption (restricted to ICMP and mesh overlay traffic)
 			if len(sigChannels) > 0 {
 				dataToSend := packet
 				if cfg != nil {

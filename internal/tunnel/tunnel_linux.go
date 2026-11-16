@@ -416,10 +416,23 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 			ensureRule("", "_NDM_OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
 		}
 
-		// 3. Таблица mangle: маркировка пакетов mesh (0x4e) для NAT masquerade и выхода в WAN
+		// 3. Таблица mangle: маркировка пакетов mesh (0x4e) для NAT masquerade и выхода в WAN + TCPMSS clamping
 		_ = exec.Command("iptables", "-w", "2", "-t", "mangle", "-D", "PREROUTING", "-i", d.AdapterName, "-j", "ACCEPT").Run()
 		ensureRule("mangle", "PREROUTING", "-i", d.AdapterName, "-j", "MARK", "--set-mark", "0x4e")
 		ensureRule("mangle", "OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
+		ensureRule("mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+		if isKeeneticDevice() {
+			ensureRule("mangle", "_NDM_FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+		}
+
+		// 3b. Таблица nat: MASQUERADE для транзитного интернета через Exit Node (аппаратный line-rate)
+		targetSubnet := prefix + ".0/24"
+		ensureRule("nat", "POSTROUTING", "-m", "mark", "--mark", "0x4e", "!", "-o", d.AdapterName, "-j", "MASQUERADE")
+		ensureRule("nat", "POSTROUTING", "-s", targetSubnet, "!", "-o", d.AdapterName, "-j", "MASQUERADE")
+		if isKeeneticDevice() {
+			ensureRule("nat", "_NDM_POSTROUTING", "-m", "mark", "--mark", "0x4e", "!", "-o", d.AdapterName, "-j", "MASQUERADE")
+			ensureRule("nat", "_NDM_POSTROUTING", "-s", targetSubnet, "!", "-o", d.AdapterName, "-j", "MASQUERADE")
+		}
 
 		// 4. Разрешение входящих UDP и TCP портов (Mesh P2P, WireGuard и ShadowTLS)
 		ensureRule("", "INPUT", "-p", "udp", "--dport", "47832", "-j", "ACCEPT")
@@ -458,28 +471,36 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	if isKeeneticDevice() {
 		if _, err := os.Stat("/opt/etc"); err == nil {
 			_ = os.MkdirAll("/opt/etc/ndm/netfilter.d", 0755)
+			targetSub := prefix + ".0/24"
 			hookContent := fmt.Sprintf(`#!/bin/sh
 [ "$type" = "ip6tables" ] && exit 0
 
 if [ "$table" = "filter" ]; then
-    iptables -C INPUT -i %s -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i %s -j ACCEPT
-    iptables -C FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %s -j ACCEPT
-    iptables -C OUTPUT -o %s -j ACCEPT 2>/dev/null || iptables -I OUTPUT 1 -o %s -j ACCEPT
-    iptables -C _NDM_INPUT -i %s -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i %s -j ACCEPT 2>/dev/null || true
-    iptables -C _NDM_FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i %s -j ACCEPT 2>/dev/null || true
-    iptables -C _NDM_OUTPUT -o %s -j ACCEPT 2>/dev/null || iptables -I _NDM_OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || true
+    iptables -C INPUT -i %[1]s -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i %[1]s -j ACCEPT
+    iptables -C FORWARD -i %[1]s -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %[1]s -j ACCEPT
+    iptables -C FORWARD -o %[1]s -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %[1]s -j ACCEPT
+    iptables -C OUTPUT -o %[1]s -j ACCEPT 2>/dev/null || iptables -I OUTPUT 1 -o %[1]s -j ACCEPT
+    iptables -C _NDM_INPUT -i %[1]s -j ACCEPT 2>/dev/null || iptables -I _NDM_INPUT 1 -i %[1]s -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_FORWARD -i %[1]s -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -i %[1]s -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_FORWARD -o %[1]s -j ACCEPT 2>/dev/null || iptables -I _NDM_FORWARD 1 -o %[1]s -j ACCEPT 2>/dev/null || true
+    iptables -C _NDM_OUTPUT -o %[1]s -j ACCEPT 2>/dev/null || iptables -I _NDM_OUTPUT 1 -o %[1]s -j ACCEPT 2>/dev/null || true
 fi
 
 if [ "$table" = "mangle" ]; then
-    iptables -t mangle -D PREROUTING -i %s -j ACCEPT 2>/dev/null || true
-    iptables -t mangle -C PREROUTING -i %s -j MARK --set-mark 0x4e 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i %s -j MARK --set-mark 0x4e 2>/dev/null || true
-    iptables -t mangle -C OUTPUT -o %s -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o %s -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -i %[1]s -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -C PREROUTING -i %[1]s -j MARK --set-mark 0x4e 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i %[1]s -j MARK --set-mark 0x4e 2>/dev/null || true
+    iptables -t mangle -C OUTPUT -o %[1]s -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o %[1]s -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+    iptables -t mangle -C _NDM_FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I _NDM_FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 fi
 
 if [ "$table" = "nat" ]; then
-    iptables -t nat -C POSTROUTING -m mark --mark 0x4e ! -o %s -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -m mark --mark 0x4e ! -o %s -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -C POSTROUTING -m mark --mark 0x4e ! -o %[1]s -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -m mark --mark 0x4e ! -o %[1]s -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -C POSTROUTING -s %[2]s ! -o %[1]s -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING 1 -s %[2]s ! -o %[1]s -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -C _NDM_POSTROUTING -m mark --mark 0x4e ! -o %[1]s -j MASQUERADE 2>/dev/null || iptables -t nat -I _NDM_POSTROUTING 1 -m mark --mark 0x4e ! -o %[1]s -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -C _NDM_POSTROUTING -s %[2]s ! -o %[1]s -j MASQUERADE 2>/dev/null || iptables -t nat -I _NDM_POSTROUTING 1 -s %[2]s ! -o %[1]s -j MASQUERADE 2>/dev/null || true
 fi
-`, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName, d.AdapterName)
+`, d.AdapterName, targetSub)
 			hookPath := "/opt/etc/ndm/netfilter.d/010-natbypass.sh"
 			if cur, rErr := os.ReadFile(hookPath); rErr != nil || string(cur) != hookContent {
 				_ = os.WriteFile(hookPath, []byte(hookContent), 0755)

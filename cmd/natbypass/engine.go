@@ -1148,6 +1148,30 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// 2. Direct UDP / AWG (WireGuard line-rate architecture)
 			// Always attempt direct UDP packet transmission if a target endpoint is known.
 			// This maintains and proactively restores NAT pinholes without stalling.
+			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+			isICMP := len(packet) >= 20 && packet[9] == 1
+			isTransitOrInternet := false
+			if len(packet) >= 20 && (packet[0]>>4) == 4 {
+				pSrc := net.IPv4(packet[12], packet[13], packet[14], packet[15]).String()
+				pDst := net.IPv4(packet[16], packet[17], packet[18], packet[19]).String()
+				isMeshSubnet24 := func(ipStr, localVIP string) bool {
+					cIP := net.ParseIP(ipStr)
+					lIP := net.ParseIP(localVIP)
+					if cIP == nil || lIP == nil {
+						return false
+					}
+					c4 := cIP.To4()
+					l4 := lIP.To4()
+					if c4 == nil || l4 == nil {
+						return false
+					}
+					return c4[0] == l4[0] && c4[1] == l4[1] && c4[2] == l4[2]
+				}
+				if !isMeshSubnet24(pSrc, cleanVIP) || !isMeshSubnet24(pDst, cleanVIP) {
+					isTransitOrInternet = true
+				}
+			}
+
 			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
@@ -1164,7 +1188,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					pmax = destPeer.AWG.Pmax
 				}
 				if err := puncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
-					if destPeer.DirectP2P && bilateralOK {
+					if (destPeer.DirectP2P && bilateralOK) || (isTransitOrInternet && !isICMP) {
 						return nil
 					}
 				}
@@ -1214,7 +1238,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					return nil
 				}
 			}
-			// 4. Central MQTT Relay fallback with encryption
+			// Transit/Internet streaming traffic MUST NEVER be published to central MQTT signaling broker!
+			if isTransitOrInternet && !isICMP {
+				return nil
+			}
+			// 5. Central MQTT Relay fallback with encryption (restricted to ICMP and mesh overlay traffic)
 			if sigMgr != nil {
 				dataToSend := packet
 				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {

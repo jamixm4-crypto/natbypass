@@ -288,8 +288,8 @@ object AppUpdateManager {
             val u = URL(currentUrl)
             val conn = u.openConnection() as HttpURLConnection
             conn.instanceFollowRedirects = false // Keep manual control so Range is never dropped on redirect!
-            conn.connectTimeout = 8000
-            conn.readTimeout = 7000 // Fast socket timeout to detect stalls and failover quickly
+            conn.connectTimeout = 15000
+            conn.readTimeout = 20000 // Resilient socket timeout for mobile networks in Russia
             conn.setRequestProperty("User-Agent", "NatBypass-Android-App")
             conn.setRequestProperty("Accept-Encoding", "identity")
             conn.setRequestProperty("Connection", "keep-alive")
@@ -405,7 +405,15 @@ object AppUpdateManager {
                     }
 
                     if (!streamConn.isPartial && downloadedBytes > 0) {
-                        // Server ignored Range header and sent entire file from 0
+                        // Server ignored Range header and sent entire file from 0.
+                        // Skip this mirror if we have already downloaded significant data to preserve progress!
+                        if (downloadedBytes > 1024 * 1024 && attempts < maxAttempts - 2) {
+                            Log.w(TAG, "Mirror $targetUrl ignored Range header, skipping to next mirror to preserve $downloadedBytes bytes")
+                            streamConn.connection.disconnect()
+                            mirrorIndex++
+                            attempts++
+                            continue
+                        }
                         Log.w(TAG, "Server ignored Range request, resetting to offset 0")
                         downloadedBytes = 0L
                         raf.seek(0)
@@ -422,13 +430,13 @@ object AppUpdateManager {
                     var bytesSinceReport = 0L
                     var smoothedSpeed = 0f
 
-                    // Active watchdog: detect TSPU stall if no data received for 4.5 seconds
+                    // Active watchdog: detect stall if no data received for 20 seconds
                     val watchdogJob = launch(Dispatchers.IO) {
                         while (isActive && !downloadCancelled) {
                             delay(1000)
                             val elapsedSinceRead = System.currentTimeMillis() - lastReadTime
-                            if (elapsedSinceRead > 4500) {
-                                Log.w(TAG, "Stream stalled (>4.5s without data), aborting connection for failover")
+                            if (elapsedSinceRead > 20000) {
+                                Log.w(TAG, "Stream stalled (>20s without data), aborting connection for failover")
                                 try {
                                     streamConn.connection.disconnect()
                                 } catch (_: Throwable) {}

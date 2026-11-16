@@ -40,7 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.32"
+const Version = "1.9.507-beta.33"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -154,6 +154,21 @@ var (
 	leaderPunchMobileMu       sync.Mutex
 	logger                    zerolog.Logger
 )
+
+// isMeshSubnet24 checks if an IP belongs to the same /24 subnet as localVIP.
+func isMeshSubnet24(ipStr, localVIP string) bool {
+	cIP := net.ParseIP(strings.TrimSpace(strings.Split(ipStr, "/")[0]))
+	lIP := net.ParseIP(strings.TrimSpace(strings.Split(localVIP, "/")[0]))
+	if cIP == nil || lIP == nil {
+		return false
+	}
+	c4 := cIP.To4()
+	l4 := lIP.To4()
+	if c4 == nil || l4 == nil {
+		return false
+	}
+	return c4[0] == l4[0] && c4[1] == l4[1] && c4[2] == l4[2]
+}
 
 // atomicGetVIP возвращает текущий виртуальный IP атомарно (без блокировки engineMu).
 func atomicGetVIP() string {
@@ -481,6 +496,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					p.Transport = "udp_direct"
 				}
 				p.LastDirectSeen = time.Now()
+				p.LastBilateralSeen = time.Now()
 				p.PingMs = rtt.Milliseconds()
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.75 + float64(rtt)*0.25)
@@ -494,6 +510,7 @@ func StartEngine(configYAML string, tunFd int) string {
 					p.Transport = "udp_direct"
 				}
 				p.LastDirectSeen = time.Now()
+				p.LastBilateralSeen = time.Now()
 			}
 			// Determine exact 5-tier punch method
 			isCoord := false
@@ -636,7 +653,19 @@ func StartEngine(configYAML string, tunFd int) string {
 				p.LastSeen = time.Now()
 				globalRegistry.Upsert(p)
 			} else if globalExitNode != "" {
-				if ep, ok := globalRegistry.Get(globalExitNode); ok && ep != nil {
+				var ep *peer.Peer
+				if p, ok := globalRegistry.Get(globalExitNode); ok && p != nil {
+					ep = p
+				} else {
+					for _, p := range globalRegistry.List() {
+						pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+						if p.DeviceID == globalExitNode || pVIP == globalExitNode || p.Nickname == globalExitNode || p.DeviceName == globalExitNode {
+							ep = p
+							break
+						}
+					}
+				}
+				if ep != nil {
 					ep.DirectP2P = true
 					ep.DirectTCP = true
 					ep.LastDirectSeen = time.Now()
@@ -1645,7 +1674,19 @@ func attachTUNLocked(tunFd int) {
 				} else if globalExitNode != "" && srcAddr != nil {
 					// Интернет-трафик, возвращающийся от Exit Node
 					fromStr := srcAddr.String()
-					if ep, ok := globalRegistry.Get(globalExitNode); ok && ep != nil {
+					var ep *peer.Peer
+					if p, ok := globalRegistry.Get(globalExitNode); ok && p != nil {
+						ep = p
+					} else {
+						for _, p := range globalRegistry.List() {
+							pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+							if p.DeviceID == globalExitNode || pVIP == globalExitNode || p.Nickname == globalExitNode || p.DeviceName == globalExitNode {
+								ep = p
+								break
+							}
+						}
+					}
+					if ep != nil {
 						if ep.ActiveEndpoint == fromStr || ep.STUNAddr == fromStr || (srcAddr.IP != nil && (srcAddr.IP.String() == ep.PublicIP || strings.HasPrefix(ep.ActiveEndpoint, srcAddr.IP.String()+":"))) {
 							ep.DirectP2P = true
 							ep.LastDirectSeen = time.Now()
@@ -1816,10 +1857,20 @@ func attachTUNLocked(tunFd int) {
 							isForceTCP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_tcp"
 							isForceUDP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_udp"
 
+							isICMP := len(pkt) >= 20 && pkt[9] == 1
+							cleanExit := strings.TrimSpace(strings.Split(globalExitNode, "/")[0])
+							targetVIP := strings.TrimSpace(strings.Split(targetPeer.VirtualIP, "/")[0])
+							isExitPeer := globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetVIP == cleanExit || targetPeer.Nickname == globalExitNode || targetPeer.DeviceName == globalExitNode)
+							isInternetDest := !isMeshSubnet24(destIP.String(), cleanVIP)
+							isExitOrInternet := !isICMP && (isExitPeer || isInternetDest || (cleanVIP != "" && srcIP.String() != cleanVIP))
+
 							if !isForceUDP && globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
 								if tcpErr := globalTCPDirectMgr.SendPacket(targetPeer.DeviceID, pkt); tcpErr == nil {
 									sentDirect = true
 									sentTCP = true
+									if isExitOrInternet {
+										continue
+									}
 								}
 							}
 
@@ -1827,12 +1878,18 @@ func attachTUNLocked(tunFd int) {
 							if !isForceTCP && !sentTCP && targetEP != "" && globalPuncher != nil {
 								if err := globalPuncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
 									sentDirect = true
+									if isExitOrInternet {
+										continue
+									}
 								}
 							}
 							// Dual-send to LocalAddr for LAN peers ONLY if direct send hasn't succeeded and different from targetEP
 							if !isForceTCP && !sentTCP && !sentDirect && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && globalPuncher != nil {
 								if err := globalPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, pkt, pmin, pmax); err == nil {
 									sentDirect = true
+									if isExitOrInternet {
+										continue
+									}
 								}
 							}
 							bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
@@ -1840,6 +1897,9 @@ func attachTUNLocked(tunFd int) {
 							if !isForceTCP && !sentTCP && !sentDirect && (!targetPeer.DirectP2P || !bilateralOK) && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 								if err := globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax); err == nil {
 									sentDirect = true
+									if isExitOrInternet {
+										continue
+									}
 								}
 							}
 
@@ -1924,8 +1984,6 @@ func attachTUNLocked(tunFd int) {
 							// Fallback Relay Rule: Multi-Hop mesh relay fallback if direct transmission is unconfirmed
 							// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
 							// Массовый интернет-трафик СТРОГО запрещен к публикации в центральный MQTT-брокер во избежание перегрузки.
-							isICMP := len(pkt) >= 20 && pkt[9] == 1
-							isExitOrInternet := !isICMP && ((globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetPeer.VirtualIP == globalExitNode)) || (cleanVIP != "" && srcIP.String() != cleanVIP))
 							directVerified := sentTCP || (sentDirect && targetPeer.DirectP2P && bilateralOK)
 							needsRelay := !directVerified
 							needsMQTTRelay := needsRelay && (!isExitOrInternet || isICMP)
