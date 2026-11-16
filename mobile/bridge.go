@@ -40,7 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.37"
+const Version = "1.9.507-beta.38"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -1738,9 +1738,13 @@ func attachTUNLocked(tunFd int) {
 				default:
 					n, err := tf.Read(buf)
 					if err != nil {
-						// On Android 15/16 with non-blocking fd or temporary empty buffer: do not exit!
+						// On Android with non-blocking fd or temporary empty buffer:
+						// wait for fd to become readable via kernel poll (instant sub-ms wakeup on packet arrival, 0% CPU idle)
 						if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
-							time.Sleep(15 * time.Millisecond)
+							if myTunCtx.Err() != nil {
+								return
+							}
+							waitTunReadable(int(tf.Fd()), 50)
 							continue
 						}
 						if myTunCtx.Err() != nil {
@@ -1751,7 +1755,7 @@ func attachTUNLocked(tunFd int) {
 						continue
 					}
 					if n == 0 {
-						time.Sleep(15 * time.Millisecond)
+						waitTunReadable(int(tf.Fd()), 50)
 						continue
 					}
 					pkt := buf[:n]

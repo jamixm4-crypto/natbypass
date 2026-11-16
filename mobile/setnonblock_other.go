@@ -9,6 +9,8 @@
 
 package mobile
 
+import "time"
+
 // setTunNonblock is a no-op on non-Linux platforms (Windows, macOS).
 // The mobile package is only compiled and used on Android (Linux),
 // so this stub exists solely to allow `go build ./...` on development machines.
@@ -17,3 +19,8 @@ func setTunNonblock(_ int) error {
 }
 
 func closeTunFd(_ int) {}
+
+func waitTunReadable(_ int, timeoutMs int) bool {
+	time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
+	return true
+}
