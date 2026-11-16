@@ -775,6 +775,8 @@ func (p *Profile) GetDeterministicVIP(deviceID string) string {
 		prefix = ExtractSubnetPrefix(p.Subnet)
 	} else if p.VirtualIP != "" {
 		prefix = ExtractSubnetPrefix(p.VirtualIP)
+	} else {
+		prefix = DeriveSubnetPrefixFromProfile(p)
 	}
 	return GenerateSubnetIP(prefix, deviceID)
 }
@@ -945,6 +947,12 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 			prefix := ExtractSubnetPrefix(activeProf.Subnet)
 			return GenerateSubnetIP(prefix, deviceID)
 		}
+		// If neither VirtualIP nor Subnet is explicitly set in active profile,
+		// derive subnet deterministically from NetworkKey or MQTTTopic
+		prefix := DeriveSubnetPrefixFromProfile(activeProf)
+		if prefix != "" && prefix != "100.64.200" {
+			return GenerateSubnetIP(prefix, deviceID)
+		}
 	}
 
 	// 2. Прямой Network.Address в конфигурации (если в профиле не задана своя подсеть)
@@ -962,6 +970,12 @@ func ResolveVirtualIP(cfg *Config, deviceID string) string {
 	}
 
 	// 3. Дефолтный fallback (только если нигде ничего не задано)
+	if activeProf := cfg.EnsureActiveProfile(); activeProf != nil {
+		prefix := DeriveSubnetPrefixFromProfile(activeProf)
+		if prefix != "" && prefix != "100.64.200" {
+			return GenerateSubnetIP(prefix, deviceID)
+		}
+	}
 	return GenerateSubnetIP("100.64.200", deviceID)
 }
 

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/signaling"
 )
 
@@ -250,7 +251,7 @@ func TestRegistry_DynamicP2PDemotion(t *testing.T) {
 		DeviceID:       "dev-p2p",
 		DirectP2P:      true,
 		ActiveEndpoint: "198.51.100.1:47832",
-		LastDirectSeen: time.Now().Add(-50 * time.Second), // Stale direct UDP > BilateralDemotionThreshold
+		LastDirectSeen: time.Now().Add(-(constants.BilateralDemotionThreshold + 10*time.Second)), // Stale direct UDP > BilateralDemotionThreshold
 		LastSeen:       time.Now(),
 	}
 

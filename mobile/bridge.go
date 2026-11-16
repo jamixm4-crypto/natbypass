@@ -40,7 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.31"
+const Version = "1.9.507-beta.32"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -183,18 +183,21 @@ func SetBatteryLow(low bool) {
 func deriveInitialVirtualIP(devID string) string {
 	if globalConfig != nil {
 		vip := config.ResolveVirtualIP(globalConfig, devID)
-		if vip != "" {
+		if vip != "" && !strings.HasPrefix(vip, "100.64.200.") {
 			return vip
 		}
 	}
-	if devID == "" {
-		return "100.64.200.10"
-	}
-	prefix := "100.64.200"
+	prefix := "10.1.2"
 	if globalConfig != nil {
 		if active := globalConfig.EnsureActiveProfile(); active != nil {
-			prefix = config.DeriveSubnetPrefixFromProfile(active)
+			pfx := config.DeriveSubnetPrefixFromProfile(active)
+			if pfx != "" && pfx != "100.64.200" {
+				prefix = pfx
+			}
 		}
+	}
+	if devID == "" {
+		return prefix + ".10"
 	}
 	return config.GenerateSubnetIP(prefix, devID)
 }
@@ -215,8 +218,16 @@ func ResolveConfigVirtualIP(configYAML string) string {
 		devID = "Android-" + crypto.KeyToHex(pubKey)[:8]
 	}
 	vip := config.ResolveVirtualIP(cfg, devID)
-	if vip != "" {
+	if vip != "" && !strings.HasPrefix(vip, "100.64.200.") {
 		return vip
+	}
+	if cfg != nil {
+		if active := cfg.EnsureActiveProfile(); active != nil {
+			prefix := config.DeriveSubnetPrefixFromProfile(active)
+			if prefix != "" && prefix != "100.64.200" {
+				return config.GenerateSubnetIP(prefix, devID)
+			}
+		}
 	}
 	return GetVirtualIP()
 }
@@ -613,6 +624,27 @@ func StartEngine(configYAML string, tunFd int) string {
 				}
 			}
 			return
+		}
+		if len(payload) >= 20 && (payload[0]>>4) == 4 && globalRegistry != nil {
+			srcVIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
+			if p, ok := globalRegistry.GetByVirtualIP(srcVIP); ok && p != nil {
+				p.DirectP2P = true
+				p.DirectTCP = true
+				p.Transport = "tcp_shadowtls"
+				p.LastDirectSeen = time.Now()
+				p.LastBilateralSeen = time.Now()
+				p.LastSeen = time.Now()
+				globalRegistry.Upsert(p)
+			} else if globalExitNode != "" {
+				if ep, ok := globalRegistry.Get(globalExitNode); ok && ep != nil {
+					ep.DirectP2P = true
+					ep.DirectTCP = true
+					ep.LastDirectSeen = time.Now()
+					ep.LastBilateralSeen = time.Now()
+					ep.LastSeen = time.Now()
+					globalRegistry.Upsert(ep)
+				}
+			}
 		}
 		respondICMPEcho(payload, srcAddr)
 		engineMu.Lock()
@@ -1614,9 +1646,10 @@ func attachTUNLocked(tunFd int) {
 					// Интернет-трафик, возвращающийся от Exit Node
 					fromStr := srcAddr.String()
 					if ep, ok := globalRegistry.Get(globalExitNode); ok && ep != nil {
-						if ep.ActiveEndpoint == fromStr || ep.STUNAddr == fromStr || (srcAddr.IP != nil && strings.HasPrefix(ep.ActiveEndpoint, srcAddr.IP.String()+":")) {
+						if ep.ActiveEndpoint == fromStr || ep.STUNAddr == fromStr || (srcAddr.IP != nil && (srcAddr.IP.String() == ep.PublicIP || strings.HasPrefix(ep.ActiveEndpoint, srcAddr.IP.String()+":"))) {
 							ep.DirectP2P = true
 							ep.LastDirectSeen = time.Now()
+							ep.LastBilateralSeen = time.Now()
 							ep.LastSeen = time.Now()
 							ep.ActiveEndpoint = fromStr
 							globalRegistry.Upsert(ep)
@@ -2639,13 +2672,21 @@ func SetVirtualIP(vip string) {
 func GetVirtualIP() string {
 	engineMu.Lock()
 	defer engineMu.Unlock()
-	if atomicGetVIP() != "" {
-		return atomicGetVIP()
+	cur := atomicGetVIP()
+	if cur != "" && !strings.HasPrefix(cur, "100.64.200.") {
+		return cur
 	}
 	if globalDevID != "" {
-		return deriveInitialVirtualIP(globalDevID)
+		resolved := deriveInitialVirtualIP(globalDevID)
+		if resolved != "" && !strings.HasPrefix(resolved, "100.64.200.") {
+			atomicSetVIP(resolved)
+			return resolved
+		}
 	}
-	return "100.64.200.10"
+	if cur != "" {
+		return cur
+	}
+	return "10.1.2.10"
 }
 
 // GetPublicIP возвращает текущий публичный IP

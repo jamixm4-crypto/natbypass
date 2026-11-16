@@ -1145,7 +1145,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					return nil
 				}
 			}
-			// 2. Direct UDP / AWG (ONLY if direct P2P is verified and bilateral check passes)
+			// 2. Direct UDP / AWG (WireGuard line-rate architecture)
+			// Always attempt direct UDP packet transmission if a target endpoint is known.
+			// This maintains and proactively restores NAT pinholes without stalling.
 			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
@@ -1154,7 +1156,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if targetEP == "" {
 				targetEP = destPeer.LocalAddr
 			}
-			if destPeer.DirectP2P && bilateralOK && puncher != nil && targetEP != "" {
+			if puncher != nil && targetEP != "" {
 				pmin := 0
 				pmax := 0
 				if destPeer.AWG != nil {
@@ -1162,7 +1164,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					pmax = destPeer.AWG.Pmax
 				}
 				if err := puncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
-					return nil
+					if destPeer.DirectP2P && bilateralOK {
+						return nil
+					}
 				}
 			}
 			// 3. Multi-Hop Mesh Relay fallback (route via intermediate peer e.g. public IP node)
@@ -1554,10 +1558,27 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 			log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Int("len", len(payload)).Msg("📥 UDP→TUN inbound write")
 
+			// Check if inbound packet is transit traffic destined for the public Internet
+			isTransit := false
+			if transitForwarder != nil {
+				isTransit, _, _ = transitForwarder.IsTransitPacket(payload)
+			}
+
+			// On Windows (or if tunDev is nil), kernel NAT is unsupported for Wintun adapters.
+			// Transit packets to the Internet MUST be handled by TransitForwarder (userspace proxy)
+			// to avoid immediate un-NATted blackholing by Windows tcpip.sys and ISP egress filters.
+			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
+				if runtime.GOOS == "windows" || tunDev == nil {
+					if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
+						log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder")
+						return
+					}
+				}
+			}
+
 			// Inbound L3 Packet Delivery:
 			// 1. If tunDev is present and active, deliver directly to OS kernel network stack (Wintun / nb0).
-			// If allowExitNode is true, Windows NetNat or Linux iptables MASQUERADE forwards transit traffic
-			// to the physical WAN at hardware line-rate with full kernel TCP stack (WireGuard architecture).
+			// On Linux/Keenetic with iptables MASQUERADE, this forwards transit traffic at hardware line-rate.
 			if tunDev != nil {
 				if inSrcIP != "" {
 					tunnel.EnsurePeerHostRoute(inSrcIP)
@@ -1585,9 +1606,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// 2. Userspace Transit Forwarder fallback:
 			// If tunDev is nil (e.g. running without Admin rights or adapter creation failed),
 			// userspace transit forwarder proxies ICMP, UDP (DNS), and TCP.
-			if tunDev == nil && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
+			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
 				if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
-					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder")
+					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder fallback")
 					return
 				}
 			}

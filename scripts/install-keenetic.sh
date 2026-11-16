@@ -8,7 +8,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.31"
+    DEFAULT_BETA="v1.9.507-beta.32"
     BETA_MODE=0
 
     # Parse CLI flags

@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.31"
+	Version = "1.9.507-beta.32"
 	Commit  = "release"
 )
 
@@ -2197,6 +2197,27 @@ func setExitNodePeer(targetPeer *peer.Peer) {
 			}
 			if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TGToken != "" {
 				addBypass("api.telegram.org")
+			}
+		}
+		if registry != nil {
+			for _, p := range registry.List() {
+				if p.DeviceID == myDevID {
+					continue
+				}
+				if p.PublicIP != "" {
+					addBypass(p.PublicIP)
+				}
+				if p.ActiveEndpoint != "" {
+					addBypass(p.ActiveEndpoint)
+				}
+				if p.STUNAddr != "" {
+					addBypass(p.STUNAddr)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" {
+						addBypass(cand)
+					}
+				}
 			}
 		}
 
@@ -5590,10 +5611,28 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}
 
+			// Check if inbound packet is transit traffic destined for the public Internet
+			isTransit := false
+			if guiTransitForwarder != nil {
+				isTransit, _, _ = guiTransitForwarder.IsTransitPacket(payload)
+			}
+
+			// On Windows (or if tunDev is nil), kernel NAT is unsupported for Wintun adapters.
+			// Transit packets to the Internet MUST be handled by TransitForwarder (userspace proxy)
+			// to avoid immediate un-NATted blackholing by Windows tcpip.sys and ISP egress filters.
+			if isTransit && guiTransitForwarder != nil && allowExitNode {
+				if runtime.GOOS == "windows" || tunDev == nil {
+					if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
+						atomic.AddUint64(&packetsRecvCount, 1)
+						atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
+						return
+					}
+				}
+			}
+
 			// Inbound L3 Packet Delivery:
 			// 1. If tunDev is present and active, deliver directly to OS kernel network stack (Wintun / nb0).
-			// If allowExitNode is true, Windows NetNat or Linux iptables MASQUERADE forwards transit traffic
-			// to the physical WAN at hardware line-rate with full kernel TCP stack (WireGuard architecture).
+			// On Linux/Keenetic with iptables MASQUERADE, this forwards transit traffic at hardware line-rate.
 			if tunDev != nil {
 				tunnel.EnsurePeerHostRoute(inSrcIP)
 				// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
@@ -5634,7 +5673,7 @@ func startEngineFromConfig(c *config.Config) {
 			// 2. Userspace Transit Forwarder fallback:
 			// If tunDev is nil (e.g. running without Admin rights or adapter creation failed),
 			// userspace transit forwarder proxies ICMP, UDP (DNS), and TCP.
-			if guiTransitForwarder != nil && allowExitNode {
+			if isTransit && guiTransitForwarder != nil && allowExitNode {
 				if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 					atomic.AddUint64(&packetsRecvCount, 1)
 					atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
@@ -5660,7 +5699,9 @@ func startEngineFromConfig(c *config.Config) {
 					return nil
 				}
 			}
-			// 2. Direct UDP / AWG (ONLY if direct P2P is verified and bilateral check passes)
+			// 2. Direct UDP / AWG (WireGuard line-rate architecture)
+			// Always attempt direct UDP packet transmission if a target endpoint is known.
+			// This maintains and proactively restores NAT pinholes without stalling.
 			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
@@ -5669,7 +5710,7 @@ func startEngineFromConfig(c *config.Config) {
 			if targetEP == "" {
 				targetEP = destPeer.LocalAddr
 			}
-			if destPeer.DirectP2P && bilateralOK && udpPuncher != nil && targetEP != "" {
+			if udpPuncher != nil && targetEP != "" {
 				pmin := 0
 				pmax := 0
 				if destPeer.AWG != nil {
@@ -5677,7 +5718,9 @@ func startEngineFromConfig(c *config.Config) {
 					pmax = destPeer.AWG.Pmax
 				}
 				if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
-					return nil
+					if destPeer.DirectP2P && bilateralOK {
+						return nil
+					}
 				}
 			}
 			// 3. Multi-Hop Mesh Relay fallback (route via intermediate peer e.g. public IP node)

@@ -273,3 +273,38 @@ func TestGetMeshSubnets(t *testing.T) {
 		t.Errorf("unexpected subnets: %v", subnets)
 	}
 }
+
+func TestResolveVirtualIPDerivedSubnet(t *testing.T) {
+	// Case 1: Explicit Subnet in profile
+	cfgWithSubnet := &Config{
+		Profiles: []Profile{
+			{
+				ID:       "p1",
+				IsActive: true,
+				Subnet:   "10.1.2.0/24",
+			},
+		},
+	}
+	vip1 := ResolveVirtualIP(cfgWithSubnet, "Android-52508ade")
+	if !strings.HasPrefix(vip1, "10.1.2.") {
+		t.Fatalf("expected VIP to start with 10.1.2., got: %s", vip1)
+	}
+
+	// Case 2: Subnet derived from NetworkKey
+	cfgDerived := &Config{
+		Profiles: []Profile{
+			{
+				ID:         "p2",
+				IsActive:   true,
+				NetworkKey: "69afe43aa341e588dc25cb2bb464aa42",
+				MQTTTopic:  "s_ba61c079b62b4a05",
+			},
+		},
+	}
+	vip2 := ResolveVirtualIP(cfgDerived, "Android-52508ade")
+	expectedPrefix := DeriveSubnetPrefixFromProfile(&cfgDerived.Profiles[0])
+	if !strings.HasPrefix(vip2, expectedPrefix+".") {
+		t.Fatalf("expected VIP to start with derived prefix %s., got: %s", expectedPrefix, vip2)
+	}
+}
+

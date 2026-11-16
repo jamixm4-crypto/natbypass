@@ -83,7 +83,7 @@ type tcpSessionEntry struct {
 func (e *tcpSessionEntry) addRecentSegment(seq uint32, data []byte) {
 	e.recentPktsMu.Lock()
 	defer e.recentPktsMu.Unlock()
-	if len(e.recentPkts) >= 64 {
+	if len(e.recentPkts) >= 256 {
 		e.recentPkts = e.recentPkts[1:]
 	}
 	e.recentPkts = append(e.recentPkts, tcpSentSegment{seq: seq, data: data})
@@ -681,7 +681,11 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 		}
 		win := uint32(binary.BigEndian.Uint16(tcpHdr[14:16]))
 		if win > 0 {
-			entry.clientWindow.Store(win)
+			scaledWin := win * 16
+			if scaledWin < 1048576 {
+				scaledWin = 1048576
+			}
+			entry.clientWindow.Store(scaledWin)
 		}
 
 		if (flags & 0x01) != 0 {
@@ -710,7 +714,11 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 		entry.lastClientAckSeq.Store(ackNum)
 		win := uint32(binary.BigEndian.Uint16(tcpHdr[14:16]))
 		if win > 0 {
-			entry.clientWindow.Store(win)
+			scaledWin := win * 16
+			if scaledWin < 1048576 {
+				scaledWin = 1048576
+			}
+			entry.clientWindow.Store(scaledWin)
 		}
 		curServerSeq := entry.serverNextSeq.Load()
 		if ackNum < curServerSeq {
@@ -753,13 +761,14 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 
 		// TCP flow control: pause if unacknowledged data in flight exceeds client's receive window
 		cWin := entry.clientWindow.Load()
-		if cWin == 0 {
-			cWin = 64240
+		if cWin < 1048576 {
+			cWin = 1048576
 		}
 		curServerSeq := entry.serverNextSeq.Load()
 		lastAck := entry.lastClientAckSeq.Load()
 		if curServerSeq > lastAck && (curServerSeq-lastAck) > cWin {
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(1 * time.Millisecond)
+			continue
 		}
 
 		_ = entry.conn.SetReadDeadline(time.Now().Add(30 * time.Second))

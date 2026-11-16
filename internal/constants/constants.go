@@ -27,8 +27,8 @@ const (
 	DefaultVirtualIPSubnet   = "100.64.200.0/24"
 
 	// Peer registry lifecycle and timeouts
-	PeerOfflineThreshold       = 45 * time.Second
-	BilateralDemotionThreshold = 45 * time.Second
+	PeerOfflineThreshold       = 90 * time.Second
+	BilateralDemotionThreshold = 90 * time.Second
 	ICMPPingInterval           = 45 * time.Second
 	MaxProbeBackoffInterval    = 20 * time.Second
 	PeerCleanupInterval        = 4 * time.Minute

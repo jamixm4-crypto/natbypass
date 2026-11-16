@@ -159,14 +159,17 @@ class NatBypassVpnService : VpnService() {
             val configYaml = if (configFile.exists()) configFile.readText() else "{}"
             val prefVip = prefs.getString("virtual_ip", "")?.trim() ?: ""
 
-            var resolvedVip = ""
-            if (prefVip.isNotEmpty() && prefVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+(/\\d+)?$"))) {
-                resolvedVip = prefVip
-            } else {
-                resolvedVip = org.natbypass.app.util.MobileBridge.resolveConfigVirtualIP(configYaml).trim()
+            // Очищаем устаревшую подсеть 100.64.200.x из сохраненных настроек пользователя
+            if (prefVip.startsWith("100.64.200.")) {
+                prefs.edit().remove("virtual_ip").apply()
             }
-            if (resolvedVip.isEmpty()) {
+
+            var resolvedVip = org.natbypass.app.util.MobileBridge.resolveConfigVirtualIP(configYaml).trim()
+            if (resolvedVip.isEmpty() || resolvedVip.startsWith("100.64.200.")) {
                 resolvedVip = org.natbypass.app.util.MobileBridge.getVirtualIP().trim()
+            }
+            if (prefVip.isNotEmpty() && !prefVip.startsWith("100.64.200.") && prefVip.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+(/\\d+)?$"))) {
+                resolvedVip = prefVip
             }
 
             val parsedVip = resolvedVip.substringBefore("/").trim()
