@@ -153,6 +153,11 @@ class NatBypassVpnService : VpnService() {
         if (isRunning && !forceReconfigure) return
         isDisconnecting.set(false)
 
+        if (forceReconfigure) {
+            serviceJob?.cancel()
+            serviceJob = null
+        }
+
         try {
             val prefs = getSharedPreferences("natbypass_prefs", Context.MODE_PRIVATE)
             val configFile = File(filesDir, "config.yaml")
@@ -261,11 +266,15 @@ class NatBypassVpnService : VpnService() {
                 Log.w(TAG, "addDisallowedApplication error: ${e.message}")
             }
 
-            // WireGuard Android standard: НЕ ограничиваем семейства адресов (allowFamily).
-            // По спецификации AOSP VpnService, вызов allowFamily(AF_INET) приводит к тому,
-            // что весь IPv6-трафик блокируется файрволом ОС, из-за чего системный Private DNS (DoT / netd)
-            // на Android 9-16 падает с ошибкой "Частный DNS-сервер недоступен" и блокирует всё разрешение имен.
-            // При отсутствии ограничений allowFamily оба семейства разрешены, а IPv4 маршрутизируется по addRoute.
+            // WireGuard Android standard for IPv4-only VPN tunnel:
+            // Explicitly call allowFamily(AF_INET) to prevent OS resolver and apps from attempting
+            // dead IPv6 routing/resolution on an IPv4-only interface.
+            try {
+                builder.allowFamily(android.system.OsConstants.AF_INET)
+                Log.i(TAG, "builder.allowFamily(AF_INET) applied (IPv4-only tunnel)")
+            } catch (e: Throwable) {
+                Log.w(TAG, "builder.allowFamily error: ${e.message}")
+            }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 try { builder.setMetered(false) } catch (_: Throwable) {}
@@ -369,13 +378,18 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
-            // Close any previous detached TUN fd before re-establishing to prevent fd leaks
-            if (tunRawFd > 0) {
+            // Bionic libc fdsan protection: Detach previous TUN in Go runtime and clear references.
+            // NEVER call ParcelFileDescriptor.adoptFd(rawFd).close() in Kotlin! That triggers fatal
+            // Bionic fdsan SIGABRT due to double-close or closed fd reuse when the kernel reassigns
+            // the exact same fd number to the new TUN interface.
+            if (tunRawFd > 0 || forceReconfigure) {
                 try {
-                    ParcelFileDescriptor.adoptFd(tunRawFd).close()
+                    org.natbypass.app.util.MobileBridge.detachTUN()
                 } catch (_: Throwable) {}
                 tunRawFd = -1
             }
+            try { vpnInterface?.close() } catch (_: Throwable) {}
+            vpnInterface = null
 
             // WireGuard Android standard: setUnderlyingNetworks(null) allows the system
             // to seamlessly auto-track and transition between Wi-Fi and Cellular without stalls.
@@ -469,7 +483,11 @@ class NatBypassVpnService : VpnService() {
 
             serviceScope.launch {
                 delay(500)
-                org.natbypass.app.util.MobileBridge.refreshPublicIP()
+                try {
+                    org.natbypass.app.util.MobileBridge.refreshPublicIP()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "refreshPublicIP error: ${t.message}")
+                }
             }
 
             serviceJob = serviceScope.launch {
@@ -640,6 +658,12 @@ class NatBypassVpnService : VpnService() {
 
     private fun registerNetworkCallback() {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        try {
+            if (networkCallback != null) {
+                try { cm.unregisterNetworkCallback(networkCallback!!) } catch (_: Throwable) {}
+                networkCallback = null
+            }
+        } catch (_: Throwable) {}
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 super.onAvailable(network)

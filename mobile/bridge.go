@@ -40,7 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.35"
+const Version = "1.9.507-beta.37"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -1627,7 +1627,10 @@ func attachTUNLocked(tunFd int) {
 		globalTunCancel = nil
 	}
 	if globalTunFile != nil {
-		_ = globalTunFile.Close()
+		oldFd := int(globalTunFile.Fd())
+		if oldFd != tunFd {
+			_ = globalTunFile.Close()
+		}
 		globalTunFile = nil
 	}
 	// BUG-A2 fix: Переводим fd в non-blocking режим чтобы tf.Read() возвращал EAGAIN
@@ -1737,7 +1740,7 @@ func attachTUNLocked(tunFd int) {
 					if err != nil {
 						// On Android 15/16 with non-blocking fd or temporary empty buffer: do not exit!
 						if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
-							time.Sleep(2 * time.Millisecond)
+							time.Sleep(15 * time.Millisecond)
 							continue
 						}
 						if myTunCtx.Err() != nil {
@@ -1748,7 +1751,7 @@ func attachTUNLocked(tunFd int) {
 						continue
 					}
 					if n == 0 {
-						time.Sleep(2 * time.Millisecond)
+						time.Sleep(15 * time.Millisecond)
 						continue
 					}
 					pkt := buf[:n]
