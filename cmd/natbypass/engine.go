@@ -1365,6 +1365,25 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 
+			// WireGuard-standard Dynamic Peer Endpoint Learning:
+			// If packet is authenticated from a mesh subnet client but peer was not in registry yet,
+			// auto-register it immediately so Internet and transit traffic can route back to it without dropping.
+			if targetPeer == nil && directAddr != nil && isMeshSubnet(srcIP, cleanVIP) {
+				targetPeer = &peer.Peer{
+					DeviceID:          fmt.Sprintf("peer-%s", strings.ReplaceAll(srcIP, ".", "-")),
+					VirtualIP:         srcIP,
+					ActiveEndpoint:    directAddr.String(),
+					STUNAddr:          directAddr.String(),
+					DirectP2P:         true,
+					Transport:         "udp_direct",
+					Online:            true,
+					LastSeen:          time.Now(),
+					LastDirectSeen:    time.Now(),
+					LastBilateralSeen: time.Now(),
+				}
+				registry.Upsert(targetPeer)
+			}
+
 			if targetPeer != nil {
 				if directAddr != nil && !isRelay {
 					var myPubIP string

@@ -370,15 +370,20 @@ class NatBypassVpnService : VpnService() {
                 }
             }
 
-            val activeNet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork else null
-            val underlyingNets = if (activeNet != null) arrayOf(activeNet) else null
+            // Close any previous detached TUN fd before re-establishing to prevent fd leaks
+            if (tunRawFd > 0) {
+                try {
+                    ParcelFileDescriptor.adoptFd(tunRawFd).close()
+                } catch (_: Throwable) {}
+                tunRawFd = -1
+            }
 
-            // 1. Привязка физической сети на уровне Builder (API 33+ Android 13/14/15/16)
-            // Как и в эталонном WireGuard for Android, передаем активную физическую сеть
+            // WireGuard Android standard: setUnderlyingNetworks(null) allows the system
+            // to seamlessly auto-track and transition between Wi-Fi and Cellular without stalls.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 try {
-                    builder.setUnderlyingNetworks(underlyingNets)
-                    Log.i(TAG, "builder.setUnderlyingNetworks applied: activeNet=$activeNet")
+                    builder.setUnderlyingNetworks(null)
+                    Log.i(TAG, "builder.setUnderlyingNetworks(null) applied (WireGuard standard)")
                 } catch (t: Throwable) {
                     Log.w(TAG, "builder.setUnderlyingNetworks error: ${t.message}")
                 }
@@ -398,11 +403,11 @@ class NatBypassVpnService : VpnService() {
                 return
             }
 
-            // 2. Дублируем привязку physical underlying network после establish()
+            // 2. WireGuard Android standard: setUnderlyingNetworks(null) post-establish
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                 try {
-                    setUnderlyingNetworks(underlyingNets)
-                    Log.i(TAG, "VpnService.setUnderlyingNetworks applied: activeNet=$activeNet")
+                    setUnderlyingNetworks(null)
+                    Log.i(TAG, "VpnService.setUnderlyingNetworks(null) applied (WireGuard standard)")
                 } catch (t: Throwable) {
                     Log.w(TAG, "VpnService.setUnderlyingNetworks error: ${t.message}")
                 }

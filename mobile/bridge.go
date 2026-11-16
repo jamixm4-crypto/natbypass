@@ -40,7 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.33"
+const Version = "1.9.507-beta.34"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -1687,14 +1687,14 @@ func attachTUNLocked(tunFd int) {
 						}
 					}
 					if ep != nil {
-						if ep.ActiveEndpoint == fromStr || ep.STUNAddr == fromStr || (srcAddr.IP != nil && (srcAddr.IP.String() == ep.PublicIP || strings.HasPrefix(ep.ActiveEndpoint, srcAddr.IP.String()+":"))) {
-							ep.DirectP2P = true
-							ep.LastDirectSeen = time.Now()
-							ep.LastBilateralSeen = time.Now()
-							ep.LastSeen = time.Now()
-							ep.ActiveEndpoint = fromStr
-							globalRegistry.Upsert(ep)
-						}
+						// WireGuard Endpoint Roaming: an authenticated data packet returning from the Exit Node
+						// immediately updates active endpoint and confirms direct P2P connectivity.
+						ep.DirectP2P = true
+						ep.LastDirectSeen = time.Now()
+						ep.LastBilateralSeen = time.Now()
+						ep.LastSeen = time.Now()
+						ep.ActiveEndpoint = fromStr
+						globalRegistry.Upsert(ep)
 					}
 				}
 			}
@@ -2829,7 +2829,7 @@ func SelectExitNode(deviceID string) {
 			} else {
 				for _, item := range reg.List() {
 					pVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
-					if item.DeviceID == epDev || pVIP == epDev {
+					if item.DeviceID == epDev || pVIP == epDev || item.Nickname == epDev || item.DeviceName == epDev {
 						p = item
 						break
 					}
@@ -2850,9 +2850,19 @@ func SelectExitNode(deviceID string) {
 				}
 				if targetEP != "" {
 					puncher.AddKeepAliveTarget(targetEP)
+					_ = puncher.SendHolePunchProbe(targetEP)
 				}
 				if p.LocalAddr != "" && p.LocalAddr != targetEP {
 					puncher.AddKeepAliveTarget(p.LocalAddr)
+					_ = puncher.SendHolePunchProbe(p.LocalAddr)
+				}
+				if p.STUNAddr != "" && p.STUNAddr != targetEP {
+					_ = puncher.SendHolePunchProbeWithDelta(p.STUNAddr, p.NATDelta)
+				}
+				for _, cand := range p.Candidates {
+					if cand != "" && cand != targetEP && cand != p.STUNAddr {
+						_ = puncher.SendHolePunchProbe(cand)
+					}
 				}
 				puncher.StartKeepAliveLoop()
 

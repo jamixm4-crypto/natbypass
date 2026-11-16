@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.33"
+	Version = "1.9.507-beta.34"
 	Commit  = "release"
 )
 
@@ -5405,6 +5405,25 @@ func startEngineFromConfig(c *config.Config) {
 							targetPeer.VirtualIP = srcIPStr
 						}
 					}
+				}
+
+				// WireGuard-standard Dynamic Peer Endpoint Learning:
+				// If packet is authenticated from a mesh subnet client but peer was not in registry yet,
+				// auto-register it immediately so Internet and transit traffic can route back to it without dropping.
+				if targetPeer == nil && srcAddr != nil && isMeshSubnetIP(srcIP, cleanVIP) {
+					targetPeer = &peer.Peer{
+						DeviceID:          fmt.Sprintf("peer-%s", strings.ReplaceAll(srcIPStr, ".", "-")),
+						VirtualIP:         srcIPStr,
+						ActiveEndpoint:    srcAddr.String(),
+						STUNAddr:          srcAddr.String(),
+						DirectP2P:         true,
+						Transport:         "udp_direct",
+						Online:            true,
+						LastSeen:          time.Now(),
+						LastDirectSeen:    time.Now(),
+						LastBilateralSeen: time.Now(),
+					}
+					registry.Upsert(targetPeer)
 				}
 
 				if targetPeer != nil {
