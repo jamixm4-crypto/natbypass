@@ -174,3 +174,72 @@ func TestBuildIPv4UDPPacket(t *testing.T) {
 		t.Errorf("UDP checksum verification failed: 0x%04x, want 0", ^uint16(pseudoSum))
 	}
 }
+
+func TestTransitForwarder_DoTRejection(t *testing.T) {
+	myVIP := "10.1.2.1/24"
+	var deliveredPacket []byte
+
+	mockPeer := &peer.Peer{
+		DeviceID:  "android-client",
+		VirtualIP: "10.1.2.55/24",
+	}
+
+	tf := NewTransitForwarder(
+		myVIP,
+		func(vipOrID string) *peer.Peer {
+			if vipOrID == "10.1.2.55" || vipOrID == "android-client" {
+				return mockPeer
+			}
+			return nil
+		},
+		func(destPeer *peer.Peer, packet []byte) error {
+			deliveredPacket = make([]byte, len(packet))
+			copy(deliveredPacket, packet)
+			return nil
+		},
+	)
+	defer tf.Close()
+
+	// Simulate Android sending a TCP SYN to 1.1.1.1:853 (DNS-over-TLS)
+	clientIP := net.ParseIP("10.1.2.55")
+	dotServerIP := net.ParseIP("1.1.1.1")
+	synPkt := buildIPv4TCPPacket(clientIP, 54321, dotServerIP, 853, 1000, 0, 0x02, 64240, nil)
+
+	handled := tf.HandleTransitPacketWithSender(synPkt, mockPeer)
+	if !handled {
+		t.Fatalf("HandleTransitPacketWithSender returned false for DoT SYN packet")
+	}
+
+	if deliveredPacket == nil {
+		t.Fatalf("Expected immediate TCP RST packet to be delivered, got nil")
+	}
+
+	// Verify the delivered packet is a TCP RST (flags 0x14)
+	if len(deliveredPacket) < 40 {
+		t.Fatalf("Delivered packet too short: %d bytes", len(deliveredPacket))
+	}
+
+	srcIP := GetSrcIP(deliveredPacket)
+	dstIP := GetDestIP(deliveredPacket)
+	if !srcIP.Equal(dotServerIP) {
+		t.Errorf("RST SrcIP = %v, want %v", srcIP, dotServerIP)
+	}
+	if !dstIP.Equal(clientIP) {
+		t.Errorf("RST DstIP = %v, want %v", dstIP, clientIP)
+	}
+
+	tcpHdr := deliveredPacket[20:]
+	srcPort := binary.BigEndian.Uint16(tcpHdr[0:2])
+	dstPort := binary.BigEndian.Uint16(tcpHdr[2:4])
+	if srcPort != 853 {
+		t.Errorf("RST srcPort = %d, want 853", srcPort)
+	}
+	if dstPort != 54321 {
+		t.Errorf("RST dstPort = %d, want 54321", dstPort)
+	}
+
+	flags := tcpHdr[13]
+	if flags != 0x14 { // RST|ACK
+		t.Errorf("RST flags = 0x%02x, want 0x14 (RST|ACK)", flags)
+	}
+}

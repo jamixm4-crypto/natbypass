@@ -527,6 +527,12 @@ if [ "$table" = "mangle" ]; then
 fi
 
 if [ "$table" = "nat" ]; then
+    iptables -t nat -C PREROUTING -i nb0 -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I PREROUTING 1 -i nb0 -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C PREROUTING -i nb0 -p tcp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I PREROUTING 1 -i nb0 -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C PREROUTING -i nb0 -p tcp --dport 853 -j ACCEPT 2>/dev/null || iptables -t nat -I PREROUTING 1 -i nb0 -p tcp --dport 853 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C _NDM_PREROUTING -i nb0 -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I _NDM_PREROUTING 1 -i nb0 -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C _NDM_PREROUTING -i nb0 -p tcp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I _NDM_PREROUTING 1 -i nb0 -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C _NDM_PREROUTING -i nb0 -p tcp --dport 853 -j ACCEPT 2>/dev/null || iptables -t nat -I _NDM_PREROUTING 1 -i nb0 -p tcp --dport 853 -j ACCEPT 2>/dev/null || true
     iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 80 -j REDIRECT --to-ports 80 2>/dev/null || true
     iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 443 -j REDIRECT --to-ports 443 2>/dev/null || true
     iptables -t nat -D PREROUTING -i nb0 -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true

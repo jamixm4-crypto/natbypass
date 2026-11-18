@@ -8,7 +8,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.40"
+    DEFAULT_BETA="v1.9.507-beta.41"
     BETA_MODE=0
 
     # Parse CLI flags
@@ -521,6 +521,12 @@ if [ "$table" = "mangle" ]; then
 fi
 
 if [ "$table" = "nat" ]; then
+    iptables -t nat -C PREROUTING -i nb0 -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I PREROUTING 1 -i nb0 -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C PREROUTING -i nb0 -p tcp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I PREROUTING 1 -i nb0 -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C PREROUTING -i nb0 -p tcp --dport 853 -j ACCEPT 2>/dev/null || iptables -t nat -I PREROUTING 1 -i nb0 -p tcp --dport 853 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C _NDM_PREROUTING -i nb0 -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I _NDM_PREROUTING 1 -i nb0 -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C _NDM_PREROUTING -i nb0 -p tcp --dport 53 -j ACCEPT 2>/dev/null || iptables -t nat -I _NDM_PREROUTING 1 -i nb0 -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C _NDM_PREROUTING -i nb0 -p tcp --dport 853 -j ACCEPT 2>/dev/null || iptables -t nat -I _NDM_PREROUTING 1 -i nb0 -p tcp --dport 853 -j ACCEPT 2>/dev/null || true
     iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 80 -j REDIRECT --to-ports 80 2>/dev/null || true
     iptables -t nat -D PREROUTING -i nb0 -p tcp --dport 443 -j REDIRECT --to-ports 443 2>/dev/null || true
     iptables -t nat -D PREROUTING -i nb0 -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true

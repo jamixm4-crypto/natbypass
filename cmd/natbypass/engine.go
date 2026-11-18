@@ -1640,14 +1640,21 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// On Windows (or if tunDev is nil), kernel NAT is unsupported for Wintun adapters.
 			// Transit packets to the Internet MUST be handled by TransitForwarder (userspace proxy)
 			// to avoid immediate un-NATted blackholing by Windows tcpip.sys and ISP egress filters.
-			// Transit DNS queries (UDP port 53) are ALSO handled by TransitForwarder in userspace on Linux/Keenetic
-			// to guarantee that router firmware (Keenetic NDM dnsproxy / SafeDNS / AdGuard) never hijacks or corrupts DNS responses.
+			// Transit DNS queries (UDP/TCP port 53 and DoT port 853) are ALSO handled by TransitForwarder in userspace on Linux/Keenetic
+			// to guarantee that router firmware (Keenetic NDM dnsproxy / SafeDNS / AdGuard) never hijacks or corrupts DNS responses,
+			// and to immediately reject DoT port 853 so Android OS instantly falls back to UDP 53 without failing validation.
 			isDNS := false
-			if len(payload) >= 28 && payload[9] == 17 {
+			if len(payload) >= 28 {
+				proto := payload[9]
 				ihl := int(payload[0]&0x0F) * 4
-				if len(payload) >= ihl+8 {
+				if proto == 17 && len(payload) >= ihl+8 { // UDP 53
 					dstPort := binary.BigEndian.Uint16(payload[ihl+2 : ihl+4])
 					if dstPort == 53 {
+						isDNS = true
+					}
+				} else if proto == 6 && len(payload) >= ihl+20 { // TCP 53 or 853 (DoT)
+					dstPort := binary.BigEndian.Uint16(payload[ihl+2 : ihl+4])
+					if dstPort == 53 || dstPort == 853 {
 						isDNS = true
 					}
 				}

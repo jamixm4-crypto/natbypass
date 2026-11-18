@@ -421,11 +421,17 @@ func (tf *TransitForwarder) handleTransitUDP(payload []byte, ihl int, srcIP, des
 		dstPort:      dstPort,
 	}
 
-	val, ok := tf.udpSessions.Load(key)
 	var entry *udpSessionEntry
-	if ok {
-		entry = val.(*udpSessionEntry)
-	} else {
+	if val, ok := tf.udpSessions.Load(key); ok && val != nil {
+		e := val.(*udpSessionEntry)
+		if !e.closed.Load() && e.conn != nil {
+			entry = e
+		} else {
+			tf.udpSessions.Delete(key)
+		}
+	}
+
+	if entry == nil {
 		// Create new outbound UDP connection
 		targetAddr := &net.UDPAddr{IP: destIP, Port: int(dstPort)}
 		conn, err := net.DialUDP("udp4", nil, targetAddr)
@@ -450,7 +456,15 @@ func (tf *TransitForwarder) handleTransitUDP(payload []byte, ihl int, srcIP, des
 	entry.lastActive.Store(time.Now().Unix())
 	_ = entry.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	_, err := entry.conn.Write(udpData)
-	return err == nil
+	if err != nil {
+		entry.closed.Store(true)
+		if entry.conn != nil {
+			_ = entry.conn.Close()
+		}
+		tf.udpSessions.Delete(key)
+		return false
+	}
+	return true
 }
 
 // udpSessionReader listens for responses on an outbound UDP socket and forwards them back to the mesh client.
@@ -556,6 +570,18 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 
 	// Case 1: SYN packet (new outbound connection or SYN retransmit)
 	if (flags & 0x02) != 0 {
+		if dstPort == 853 {
+			// DoT (DNS-over-TLS, TCP port 853):
+			// Most Russian ISPs and TSPU censor/drop port 853 packets, causing 2-10s timeouts.
+			// Android's Private DNS probe hangs on timeouts and marks the entire connection as
+			// "DNS validation failed", which blocks all app DNS resolution across the device.
+			// By immediately returning TCP RST (Connection Refused), Android's DnsResolver
+			// instantly detects that DoT is not supported and falls back to plaintext UDP 53 in 0ms!
+			rstPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, 0, seqNum+1, 0x14, 0, nil)
+			tf.deliverToClient(srcIP, rstPkt)
+			return true
+		}
+
 		if found {
 			if oldEntry, ok := val.(*tcpSessionEntry); ok && oldEntry != nil && !oldEntry.closed.Load() {
 				if oldEntry.clientISN == seqNum {
@@ -877,6 +903,23 @@ func (tf *TransitForwarder) cleanupWorker() {
 					if nowSec-entry.lastActive.Load() > 120 || entry.closed.Load() {
 						entry.close()
 						tf.tcpSessions.Delete(key)
+					}
+				}
+				return true
+			})
+
+			tf.udpSessions.Range(func(key, val any) bool {
+				if entry, ok := val.(*udpSessionEntry); ok && entry != nil {
+					maxIdle := int64(60)
+					if entry.dstPort == 53 {
+						maxIdle = 15
+					}
+					if nowSec-entry.lastActive.Load() > maxIdle || entry.closed.Load() {
+						entry.closed.Store(true)
+						if entry.conn != nil {
+							_ = entry.conn.Close()
+						}
+						tf.udpSessions.Delete(key)
 					}
 				}
 				return true
