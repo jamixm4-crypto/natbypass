@@ -391,7 +391,6 @@ class NatBypassVpnService : VpnService() {
             try { vpnInterface?.close() } catch (_: Throwable) {}
             vpnInterface = null
 
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val activeNet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork else null
             val underlyingNets = if (activeNet != null) arrayOf(activeNet) else null
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
