@@ -25,6 +25,13 @@ func resolveConfigPath(path string) string {
 	if filepath.IsAbs(path) {
 		return path
 	}
+	// Prefer relative path in current working directory if it exists
+	if _, err := os.Stat(path); err == nil {
+		if abs, err := filepath.Abs(path); err == nil {
+			return abs
+		}
+		return path
+	}
 	exePath, err := os.Executable()
 	if err != nil {
 		return path

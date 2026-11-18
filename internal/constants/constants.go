@@ -22,13 +22,14 @@ const (
 	DefaultWGMTU             = 1280
 	MTUMedium                = 1360
 	MTUMinimum               = 1280
-	DefaultClampedMSS        = 1240
+	DefaultClampedMSS        = 1220 // MTU 1280 - 60 (IPv4 20 + TCP 20 + TCP Options 20) to prevent PMTU blackhole
 	MaxCandidateEndpoints    = 3
 	DefaultVirtualIPSubnet   = "100.64.200.0/24"
 
 	// Peer registry lifecycle and timeouts
 	PeerOfflineThreshold       = 90 * time.Second
 	BilateralDemotionThreshold = 90 * time.Second
+	BilateralFreshThreshold    = 10 * time.Second // Active 2-way path freshness required before suppressing reactive hole punching / fallback
 	ICMPPingInterval           = 45 * time.Second
 	MaxProbeBackoffInterval    = 20 * time.Second
 	PeerCleanupInterval        = 4 * time.Minute

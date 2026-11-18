@@ -604,6 +604,15 @@ func (r *Registry) MarkDeviceOffline(deviceID string) {
 	}
 }
 
+// isSyntheticDynamicPeer returns true if p is an auto-learned transient dummy peer (peer-X-X-X-X)
+// without cryptographic public key, nickname, or device name.
+func isSyntheticDynamicPeer(p *Peer) bool {
+	if p == nil {
+		return false
+	}
+	return strings.HasPrefix(p.DeviceID, "peer-") && p.Nickname == "" && p.DeviceName == "" && p.PublicKey == ""
+}
+
 // Upsert adds or updates a peer in the registry while preserving active connection state.
 func (r *Registry) Upsert(p *Peer) {
 	r.mu.Lock()
@@ -675,6 +684,24 @@ func (r *Registry) Upsert(p *Peer) {
 				continue
 			}
 
+			// В. Существующий узел является синтетическим фантомом (peer-10-x-x-x):
+			// Настоящий узел ВСЕГДА безусловно вытесняет синтетический фантом!
+			if isSyntheticDynamicPeer(existing) {
+				p.MergeFrom(existing)
+				staleConflictingIDs = append(staleConflictingIDs, id)
+				log.Info().
+					Str("ghost_id", id).
+					Str("real_id", p.DeviceID).
+					Str("vip", cleanPVIP).
+					Msg("👻 Evicted synthetic dynamic ghost peer in favor of authentic device")
+				continue
+			}
+
+			// Если входящий узел сам является синтетическим фантомом, он никогда не может вытеснить настоящий узел
+			if isSyntheticDynamicPeer(p) {
+				return
+			}
+
 			existingIsActive := existing.Online && now.Sub(existing.LastSeen) < constants.PeerOfflineThreshold
 
 			if existingIsActive {
@@ -682,8 +709,8 @@ func (r *Registry) Upsert(p *Peer) {
 					// Входящий конфликтный маяк старее текущего активного узла — отбрасываем фантом
 					return
 				}
-				// Если конфликт вызван дефолтным адресом подсети (например, 100.64.200.1 или .0):
-				if strings.HasSuffix(cleanPVIP, ".1") || strings.HasSuffix(cleanPVIP, ".0") {
+				// Если конфликт вызван дефолтным адресом подсети 100.64.200.1 или .0:
+				if strings.HasPrefix(cleanPVIP, "100.64.200.") && (strings.HasSuffix(cleanPVIP, ".1") || strings.HasSuffix(cleanPVIP, ".0")) {
 					prefix := "100.64.200"
 					parts := strings.Split(cleanPVIP, ".")
 					if len(parts) >= 3 {
@@ -835,7 +862,7 @@ func (r *Registry) List() []*Peer {
 		key := ""
 		if p.PublicKey != "" {
 			key = "pk:" + p.PublicKey
-		} else if p.VirtualIP != "" && !strings.HasSuffix(p.VirtualIP, ".1") && !strings.HasSuffix(p.VirtualIP, ".0") {
+		} else if p.VirtualIP != "" && !strings.HasPrefix(p.VirtualIP, "100.64.200.1") && !strings.HasPrefix(p.VirtualIP, "100.64.200.0") {
 			key = "vip:" + strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 		} else {
 			key = "id:" + p.DeviceID
@@ -844,6 +871,13 @@ func (r *Registry) List() []*Peer {
 		existing, exists := devMap[key]
 		if !exists {
 			devMap[key] = p
+			continue
+		}
+		// Prefer authentic peer over synthetic phantom peer (peer-10-x-x-x)
+		if isSyntheticDynamicPeer(existing) && !isSyntheticDynamicPeer(p) {
+			devMap[key] = p
+			continue
+		} else if !isSyntheticDynamicPeer(existing) && isSyntheticDynamicPeer(p) {
 			continue
 		}
 		// Pick the more active or fresher peer record
@@ -973,6 +1007,17 @@ func (r *Registry) Cleanup(maxAge time.Duration) {
 		// BUG-12 FIX: Guard against zero LastSeen — newly created peers should not be evicted
 		if !p.LastSeen.IsZero() && p.LastSeen.Before(threshold) {
 			delete(r.peers, id)
+			continue
+		}
+		// Also clean up any orphan synthetic ghost peers whose VIP belongs to a real peer
+		if isSyntheticDynamicPeer(p) {
+			cleanVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+			for realID, realP := range r.peers {
+				if realID != id && !isSyntheticDynamicPeer(realP) && strings.TrimSpace(strings.Split(realP.VirtualIP, "/")[0]) == cleanVIP {
+					delete(r.peers, id)
+					break
+				}
+			}
 		}
 	}
 }

@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.38"
+	Version = "1.9.507-beta.39"
 	Commit  = "release"
 )
 
@@ -2285,6 +2285,7 @@ func disableExitNode() {
 					continue
 				}
 				p.ProbeCount = 0
+				p.LastBilateralSeen = time.Time{}
 				targets := []string{}
 				if p.ActiveEndpoint != "" {
 					targets = append(targets, p.ActiveEndpoint)
@@ -5158,6 +5159,7 @@ func startEngineFromConfig(c *config.Config) {
 				p.LastBilateralSeen = time.Now()
 				p.ConsecutiveDrops = 0
 				p.ProbeCount = 0
+				p.LastBilateralSeen = time.Time{}
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.70 + float64(rtt)*0.30)
 				} else {
@@ -5173,6 +5175,7 @@ func startEngineFromConfig(c *config.Config) {
 				p.LastBilateralSeen = time.Now()
 				p.ConsecutiveDrops = 0
 				p.ProbeCount = 0
+				p.LastBilateralSeen = time.Time{}
 			}
 			var myPubIP string
 			if puncher != nil {
@@ -5409,7 +5412,8 @@ func startEngineFromConfig(c *config.Config) {
 
 				// WireGuard-standard Dynamic Peer Endpoint Learning:
 				// If packet is authenticated from a mesh subnet client but peer was not in registry yet,
-				// auto-register it immediately so Internet and transit traffic can route back to it without dropping.
+				// construct a transient targetPeer for routing reply packets, but DO NOT upsert into global registry
+				// to avoid generating ghost peers (peer-10-x-x-x) or conflicting with authoritative beacons.
 				if targetPeer == nil && srcAddr != nil && isMeshSubnetIP(srcIP, cleanVIP) {
 					targetPeer = &peer.Peer{
 						DeviceID:          fmt.Sprintf("peer-%s", strings.ReplaceAll(srcIPStr, ".", "-")),
@@ -5423,7 +5427,6 @@ func startEngineFromConfig(c *config.Config) {
 						LastDirectSeen:    time.Now(),
 						LastBilateralSeen: time.Now(),
 					}
-					registry.Upsert(targetPeer)
 				}
 
 				if targetPeer != nil {
@@ -5475,7 +5478,7 @@ func startEngineFromConfig(c *config.Config) {
 						}
 						if udpPuncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
 							udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
-							if !targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second) {
+							if !targetPeer.IsBilateralP2P(constants.BilateralFreshThreshold) {
 								_ = udpPuncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
 							}
 						}
@@ -5745,7 +5748,7 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}
 
-			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
+			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
 			targetEP := destPeer.ActiveEndpoint
 			if targetEP == "" {
 				targetEP = destPeer.STUNAddr
@@ -6063,7 +6066,7 @@ func startEngineFromConfig(c *config.Config) {
 									}
 								}
 
-								bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
+								bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
 
 								// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
 								if !isForceTCP && !sentTCP && udpPuncher != nil && targetEP != "" {

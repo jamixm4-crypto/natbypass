@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Target = "all" # all, bin, aar, apk
 )
 
@@ -29,7 +29,7 @@ if ($Target -eq "all" -or $Target -eq "bin") {
     & $GoExe build -trimpath -ldflags="-s -w" -o $binOut "./cmd/natbypass-cli"
     if ($LASTEXITCODE -eq 0) {
         $sz = [math]::Round((Get-Item $binOut).Length / 1MB, 2)
-        Write-Host "   ✓ Успешно: dist\natbypass-android-arm64 ($sz MB)" -ForegroundColor Green
+        Write-Host "   ✓ Успешно: dist\natbypass-android-arm64 (${sz} MB)" -ForegroundColor Green
     }
 }
 
@@ -38,7 +38,7 @@ if ($Target -eq "all" -or $Target -eq "aar") {
     Write-Host "`n[2/3] Сборка Android AAR библиотеки (для Kotlin/Java приложений)..." -ForegroundColor Yellow
     if (Get-Command gomobile -ErrorAction SilentlyContinue) {
         $aarOut = Join-Path $DistDir "natbypass.aar"
-        & gomobile bind -target=android/arm64,android/arm,android/amd64 -o $aarOut "./pkg/mobile"
+        & gomobile bind "-target=android/arm64,android/arm,android/amd64" -o $aarOut "./pkg/mobile"
         if ($LASTEXITCODE -eq 0) {
             Write-Host "   ✓ Успешно: dist\natbypass.aar" -ForegroundColor Green
         }

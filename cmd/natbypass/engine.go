@@ -981,6 +981,14 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							activeExitVIP = ""
 							consecutiveFailures = 0
 							log.Info().Msg("ℹ️ Exit node deselected: restored physical internet gateway")
+							if registry != nil && puncher != nil {
+								for _, p := range registry.List() {
+									p.LastBilateralSeen = time.Time{}
+									if p.ActiveEndpoint != "" {
+										_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
+									}
+								}
+							}
 						}
 						exitRoutingMu.Unlock()
 						continue
@@ -1370,7 +1378,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 			// WireGuard-standard Dynamic Peer Endpoint Learning:
 			// If packet is authenticated from a mesh subnet client but peer was not in registry yet,
-			// auto-register it immediately so Internet and transit traffic can route back to it without dropping.
+			// construct a transient targetPeer for routing reply packets, but DO NOT upsert into global registry
+			// to avoid generating ghost peers (peer-10-x-x-x) or conflicting with authoritative beacons.
 			if targetPeer == nil && directAddr != nil && isMeshSubnet(srcIP, cleanVIP) {
 				targetPeer = &peer.Peer{
 					DeviceID:          fmt.Sprintf("peer-%s", strings.ReplaceAll(srcIP, ".", "-")),
@@ -1384,7 +1393,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					LastDirectSeen:    time.Now(),
 					LastBilateralSeen: time.Now(),
 				}
-				registry.Upsert(targetPeer)
 			}
 
 			if targetPeer != nil {
@@ -1931,7 +1939,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								sentDirect = true
 							}
 						}
-						bilateralOK := p.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
+						bilateralOK := p.IsBilateralP2P(constants.BilateralFreshThreshold)
 
 						// Also try STUNAddr ONLY IF direct send hasn't succeeded
 						if !isForceTCP && !sentTCP && !sentDirect && (!p.DirectP2P || !bilateralOK) && puncher != nil && p.STUNAddr != "" && p.STUNAddr != targetEP {

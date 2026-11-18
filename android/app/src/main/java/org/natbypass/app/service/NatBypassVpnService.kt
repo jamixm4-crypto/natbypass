@@ -391,12 +391,13 @@ class NatBypassVpnService : VpnService() {
             try { vpnInterface?.close() } catch (_: Throwable) {}
             vpnInterface = null
 
-            // WireGuard Android standard: setUnderlyingNetworks(null) allows the system
-            // to seamlessly auto-track and transition between Wi-Fi and Cellular without stalls.
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val activeNet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) cm.activeNetwork else null
+            val underlyingNets = if (activeNet != null) arrayOf(activeNet) else null
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 try {
-                    builder.setUnderlyingNetworks(null)
-                    Log.i(TAG, "builder.setUnderlyingNetworks(null) applied (WireGuard standard)")
+                    builder.setUnderlyingNetworks(underlyingNets)
+                    Log.i(TAG, "builder.setUnderlyingNetworks(activeNet=$activeNet) applied")
                 } catch (t: Throwable) {
                     Log.w(TAG, "builder.setUnderlyingNetworks error: ${t.message}")
                 }
@@ -416,11 +417,11 @@ class NatBypassVpnService : VpnService() {
                 return
             }
 
-            // 2. WireGuard Android standard: setUnderlyingNetworks(null) post-establish
+            // 2. Direct network binding to physical underlying adapter (Wi-Fi / Cellular)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                 try {
-                    setUnderlyingNetworks(null)
-                    Log.i(TAG, "VpnService.setUnderlyingNetworks(null) applied (WireGuard standard)")
+                    setUnderlyingNetworks(underlyingNets)
+                    Log.i(TAG, "VpnService.setUnderlyingNetworks(activeNet=$activeNet) applied")
                 } catch (t: Throwable) {
                     Log.w(TAG, "VpnService.setUnderlyingNetworks error: ${t.message}")
                 }

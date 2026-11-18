@@ -667,31 +667,36 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 		return err
 	}
 
-	// Формируем список URLs для скачивания: основной + зеркала (если манифест загружен)
-	downloadURLs := []string{assetURL}
+	// Формируем список URLs для скачивания:
+	// В регионах с замедлением прямого GitHub CDN (РФ/РБ) приоритезируем скоростные зеркала (ghfast.top, gh-proxy.com),
+	// сохраняя оригинальный GitHub URL как надежный fallback. Все ассеты криптографически валидируются по Ed25519 и SHA-256.
+	var fastMirrors []string
+	if strings.Contains(assetURL, "github.com/"+GithubRepo+"/releases/download/") {
+		for _, proxyPrefix := range []string{"https://ghfast.top/", "https://gh-proxy.com/", "https://ghproxy.net/"} {
+			proxyURL := proxyPrefix + assetURL
+			fastMirrors = append(fastMirrors, proxyURL)
+		}
+	}
+
+	downloadURLs := append([]string{}, fastMirrors...)
+	downloadURLs = append(downloadURLs, assetURL)
+
 	if lastMirrorManifest != nil {
 		exeName := currentExeName()
 		assetKey := mirrorAssetKey(runtime.GOOS, runtime.GOARCH, exeName)
 		mirrorURLs := GetMirrorAssetURLs(lastMirrorManifest, assetKey)
 		for _, mu := range mirrorURLs {
 			if mu != assetURL && IsValidAssetURL(mu) {
-				downloadURLs = append(downloadURLs, mu)
-			}
-		}
-	}
-	// Fallback mirrors: для любых файлов с GitHub всегда добавляем скоростные зеркала ghproxy (актуально для РФ)
-	if strings.Contains(assetURL, "github.com/"+GithubRepo+"/releases/download/") {
-		for _, proxyPrefix := range []string{"https://gh-proxy.com/", "https://ghfast.top/", "https://ghproxy.net/"} {
-			proxyURL := proxyPrefix + assetURL
-			alreadyIn := false
-			for _, u := range downloadURLs {
-				if u == proxyURL {
-					alreadyIn = true
-					break
+				already := false
+				for _, u := range downloadURLs {
+					if u == mu {
+						already = true
+						break
+					}
 				}
-			}
-			if !alreadyIn {
-				downloadURLs = append(downloadURLs, proxyURL)
+				if !already {
+					downloadURLs = append(downloadURLs, mu)
+				}
 			}
 		}
 	}

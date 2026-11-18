@@ -145,15 +145,36 @@ var (
 	globalTCPRelayClient      *relay.TCPRelayClient
 	globalTCPRelayServer      *relay.TCPRelayServer
 	globalTunFile             *os.File
-	globalTunCancel           context.CancelFunc // controls TUN read goroutine lifecycle
+	globalTunCancel           context.CancelFunc // controls TUN goroutines lifecycle
+	globalTunRxCh             chan []byte        // decoupled high-throughput TUN write queue (4096 packets)
+	globalTunRxMu             sync.RWMutex
 	globalTxBytes             atomic.Uint64
 	globalRxBytes             atomic.Uint64
 	lastReactivePunchMobile   = make(map[string]time.Time)
 	lastReactiveDialMobile    = make(map[string]time.Time)
+	reactiveMobileMu          sync.Mutex
 	lastLeaderSyncPunchMobile = make(map[string]time.Time)
 	leaderPunchMobileMu       sync.Mutex
 	logger                    zerolog.Logger
 )
+
+// enqueueTunRx delivers an inbound packet to the decoupled TUN write queue.
+// It is non-blocking to prevent UDP socket buffer overflow on Android.
+func enqueueTunRx(payload []byte) {
+	globalTunRxMu.RLock()
+	rxCh := globalTunRxCh
+	globalTunRxMu.RUnlock()
+	if rxCh == nil || len(payload) == 0 {
+		return
+	}
+	pktCopy := make([]byte, len(payload))
+	copy(pktCopy, payload)
+	select {
+	case rxCh <- pktCopy:
+	default:
+		// Queue full: drop packet without stalling caller UDP/Relay read loop
+	}
+}
 
 // isMeshSubnet24 checks if an IP belongs to the same /24 subnet as localVIP.
 func isMeshSubnet24(ipStr, localVIP string) bool {
@@ -464,13 +485,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		// Юзерспейс-ответ на входящие ICMP Echo запросы через Relay
 		respondICMPEcho(dataToProcess, nil)
 
-		engineMu.Lock()
-		tf := globalTunFile
-		engineMu.Unlock()
-		if tf != nil {
-			ensureValidIPv4Checksum(dataToProcess)
-			_, _ = tf.Write(dataToProcess)
-		}
+		enqueueTunRx(dataToProcess)
 	})
 
 	// UDP Puncher для P2P сокетов
@@ -677,13 +692,7 @@ func StartEngine(configYAML string, tunFd int) string {
 			}
 		}
 		respondICMPEcho(payload, srcAddr)
-		engineMu.Lock()
-		tf := globalTunFile
-		engineMu.Unlock()
-		if tf != nil {
-			ensureValidIPv4Checksum(payload)
-			_, _ = tf.Write(payload)
-		}
+		enqueueTunRx(payload)
 	})
 	globalTCPDirectMgr.SetOnPeerUp(func(peerID string, remoteAddr string) {
 		logger.Info().Str("peer", peerID).Str("addr", remoteAddr).Msg("⚡ Android Direct P2P TCP (ShadowTLS) ACTIVE")
@@ -720,14 +729,7 @@ func StartEngine(configYAML string, tunFd int) string {
 		},
 		func(srcID string, payload []byte) error {
 			if len(payload) >= 20 {
-				engineMu.Lock()
-				tf := globalTunFile
-				engineMu.Unlock()
-				if tf != nil {
-					ensureValidIPv4Checksum(payload)
-					_, err := tf.Write(payload)
-					return err
-				}
+				enqueueTunRx(payload)
 			}
 			return nil
 		},
@@ -980,32 +982,6 @@ func StartEngine(configYAML string, tunFd int) string {
 			}
 		}
 	}()
-
-	// Level 2 MQTT L3 Tunnel subscription
-	if globalSigMgr != nil {
-		globalSigMgr.SubscribeTunnelData(devID, func(pkt []byte) {
-			engineMu.Lock()
-			tf := globalTunFile
-			cfg := globalConfig
-			engineMu.Unlock()
-			if tf == nil || len(pkt) == 0 {
-				return
-			}
-			dataToWrite := pkt
-			if cfg != nil {
-				if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-					cKey := crypto.DeriveKey(activeProf.NetworkKey)
-					epoch := crypto.GetCurrentEpoch()
-					if dec, _, _, err := crypto.DecryptWithEpochSeq(pkt, cKey[:], epoch); err == nil && len(dec) > 0 {
-						dataToWrite = dec
-					} else if dec, err := crypto.DecryptSelf(pkt, cKey); err == nil && len(dec) > 0 {
-						dataToWrite = dec
-					}
-				}
-			}
-			_, _ = tf.Write(dataToWrite)
-		})
-	}
 
 	// Цикл приёма от сигнального канала
 	go func() {
@@ -1621,11 +1597,15 @@ func attachTUNLocked(tunFd int) {
 	if tunFd <= 0 {
 		return
 	}
-	// F2: Останавливаем предыдущую TUN-горутину перед запуском новой
+	// Останавливаем предыдущую TUN-горутину перед запуском новой
 	if globalTunCancel != nil {
 		globalTunCancel()
 		globalTunCancel = nil
 	}
+	globalTunRxMu.Lock()
+	globalTunRxCh = nil
+	globalTunRxMu.Unlock()
+
 	if globalTunFile != nil {
 		oldFd := int(globalTunFile.Fd())
 		if oldFd != tunFd {
@@ -1633,17 +1613,52 @@ func attachTUNLocked(tunFd int) {
 		}
 		globalTunFile = nil
 	}
-	// BUG-A2 fix: Переводим fd в non-blocking режим чтобы tf.Read() возвращал EAGAIN
-	// вместо блокировки навсегда. Без этого горутина TUN read loop не может проверить
-	// myTunCtx.Done() пока нет входящих данных — отключение зависало.
+	// Переводим fd в non-blocking режим
 	if err := setTunNonblock(tunFd); err != nil {
 		logger.Warn().Err(err).Int("fd", tunFd).Msg("SetNonblock TUN fd failed, disconnect may be slow")
 	}
 	globalTunFile = os.NewFile(uintptr(tunFd), "tun")
 
-	// Создаём отдельный контекст для TUN горутины (независим от engineCtx)
 	tunCtx, tunCancel := context.WithCancel(engineCtx)
 	globalTunCancel = tunCancel
+
+	// Высокопроизводительные кольцевые буферы (4096 пакетов)
+	tunRxCh := make(chan []byte, 4096)
+	tunTxCh := make(chan []byte, 4096)
+
+	globalTunRxMu.Lock()
+	globalTunRxCh = tunRxCh
+	globalTunRxMu.Unlock()
+
+	rawTunFd := tunFd
+	tf := globalTunFile
+
+	// 1. Выделенная асинхронная горутина записи в TUN (Inbound UDP/Relay -> OS TUN)
+	// Полностью изолирует UDPPuncher.readLoop() от блокирующих сисколлов tf.Write(),
+	// предотвращая переполнение SO_RCVBUF сокета ядра Android и устраняя 90%+ потерь пакетов.
+	go func(ctx context.Context, f *os.File, rxCh <-chan []byte) {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Warn().Msg(fmt.Sprintf("TUN writer recovered: %v", r))
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case pkt, ok := <-rxCh:
+				if !ok {
+					return
+				}
+				if f != nil && len(pkt) >= 20 {
+					if pkt[0]>>4 == 4 {
+						ensureValidIPv4Checksum(pkt)
+					}
+					_, _ = f.Write(pkt)
+				}
+			}
+		}
+	}(tunCtx, tf, tunRxCh)
 
 	if globalPuncher != nil && globalTunFile != nil {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
@@ -1708,429 +1723,454 @@ func attachTUNLocked(tunFd int) {
 			// Юзерспейс-ответ на входящие ICMP Echo запросы (чтобы другие узлы могли пинговать Android)
 			respondICMPEcho(payload, srcAddr)
 
-			engineMu.Lock()
-			tf := globalTunFile
-			engineMu.Unlock()
-			if tf != nil {
-				ensureValidIPv4Checksum(payload)
-				_, _ = tf.Write(payload)
-			}
+			// Неблокирующая доставка в буфер записи TUN
+			enqueueTunRx(payload)
 		})
 
-		go func(myTunCtx context.Context) {
+		// 2. Выделенная горутина чтения из OS TUN -> tunTxCh
+		// Изолирует сисколлы чтения от маршрутизации и шифрования, устраняя 50ms поллинг-задержки.
+		go func(myTunCtx context.Context, f *os.File, fd int, txCh chan<- []byte) {
 			defer func() {
 				if r := recover(); r != nil {
-					logger.Warn().Msg(fmt.Sprintf("TUN read loop recovered: %v", r))
+					logger.Warn().Msg(fmt.Sprintf("TUN reader recovered: %v", r))
 				}
 			}()
-			buf := make([]byte, 65535)
+			readBuf := make([]byte, 65535)
 			for {
-				engineMu.Lock()
-				tf := globalTunFile
-				engineMu.Unlock()
-
-				if tf == nil {
+				if myTunCtx.Err() != nil {
 					return
 				}
-				select {
-				case <-myTunCtx.Done():
-					return
-				default:
-					n, err := tf.Read(buf)
-					if err != nil {
-						// On Android with non-blocking fd or temporary empty buffer:
-						// wait for fd to become readable via kernel poll (instant sub-ms wakeup on packet arrival, 0% CPU idle)
-						if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
-							if myTunCtx.Err() != nil {
-								return
-							}
-							waitTunReadable(int(tf.Fd()), 50)
-							continue
-						}
+				n, err := f.Read(readBuf)
+				if err != nil {
+					if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
 						if myTunCtx.Err() != nil {
 							return
 						}
-						logger.Warn().Err(err).Msg("TUN read error, retrying...")
-						time.Sleep(20 * time.Millisecond)
+						// Быстрый 2ms опрос через ядро Linux epoll/poll вместо 50ms задержки
+						waitTunReadable(fd, 2)
 						continue
 					}
-					if n == 0 {
-						waitTunReadable(int(tf.Fd()), 50)
+					if myTunCtx.Err() != nil {
+						return
+					}
+					logger.Warn().Err(err).Msg("TUN read error, retrying...")
+					time.Sleep(10 * time.Millisecond)
+					continue
+				}
+				if n == 0 {
+					waitTunReadable(fd, 2)
+					continue
+				}
+				globalTxBytes.Add(uint64(n))
+
+				pkt := make([]byte, n)
+				copy(pkt, readBuf[:n])
+
+				select {
+				case txCh <- pkt:
+				default:
+					// Буфер переполнен: мягкий сброс во избежание backpressure
+				}
+			}
+		}(tunCtx, tf, rawTunFd, tunTxCh)
+
+		// 3. Пул параллельных воркеров обработки исходящего трафика (LPM, MSS Clamp, P2P send)
+		numWorkers := runtime.NumCPU() / 2
+		if numWorkers < 2 {
+			numWorkers = 2
+		}
+		if numWorkers > 4 {
+			numWorkers = 4
+		}
+		for i := 0; i < numWorkers; i++ {
+			go func(workerID int, myTunCtx context.Context, txCh <-chan []byte) {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Warn().Msg(fmt.Sprintf("TUN worker %d recovered: %v", workerID, r))
+					}
+				}()
+				for {
+					select {
+					case <-myTunCtx.Done():
+						return
+					case pkt, ok := <-txCh:
+						if !ok {
+							return
+						}
+						processOutboundPacket(myTunCtx, pkt)
+					}
+				}
+			}(i, tunCtx, tunTxCh)
+		}
+	}
+}
+
+// processOutboundPacket обрабатывает один исходящий IP-пакет из очереди TUN в пуле воркеров.
+func processOutboundPacket(ctx context.Context, pkt []byte) {
+	if len(pkt) < 20 || (pkt[0]>>4) != 4 {
+		return
+	}
+	destIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
+	srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15])
+
+	cleanVIP := strings.TrimSpace(strings.Split(atomicGetVIP(), "/")[0])
+
+	// Защита от бродкаст-штормов, петель и паразитного трафика
+	if tunnel.IsParasiticOrBroadcast(pkt, cleanVIP) {
+		return
+	}
+
+	// Userspace TCP MSS Clamping to prevent PMTU blackholes
+	_ = tunnel.ClampTCPMSS(pkt, constants.DefaultClampedMSS)
+
+	var targetPeer *peer.Peer
+	if globalRegistry != nil {
+		if best, ok := globalRegistry.GetByVirtualIP(destIP.String()); ok && best != nil {
+			targetPeer = best
+		} else {
+			for _, p := range globalRegistry.List() {
+				pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+				if pVIP != "" && pVIP == destIP.String() {
+					targetPeer = p
+					break
+				}
+				for _, route := range p.AdvertisedRoutes {
+					r := strings.TrimSpace(route)
+					if r == "0.0.0.0/0" || r == "::/0" {
 						continue
 					}
-					pkt := buf[:n]
-					globalTxBytes.Add(uint64(n))
+					if _, ipNet, err := net.ParseCIDR(r); err == nil && ipNet.Contains(destIP) {
+						targetPeer = p
+						break
+					}
+				}
+			}
+		}
+	}
 
-					if len(pkt) >= 20 && (pkt[0]>>4) == 4 {
-						destIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
-						srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15])
+	if destIP.String() == cleanVIP {
+		enqueueTunRx(pkt)
+		return
+	}
 
-						cleanVIP := strings.TrimSpace(strings.Split(atomicGetVIP(), "/")[0])
+	if targetPeer == nil && globalExitNode != "" && globalRegistry != nil {
+		if ep, ok := globalRegistry.Get(globalExitNode); ok && ep != nil {
+			targetPeer = ep
+		} else {
+			for _, p := range globalRegistry.List() {
+				pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+				if p.DeviceID == globalExitNode || pVIP == globalExitNode || p.Nickname == globalExitNode || p.DeviceName == globalExitNode {
+					targetPeer = p
+					break
+				}
+			}
+		}
+	}
 
-						// Защита от бродкаст-штормов, петель и паразитного трафика
-						if tunnel.IsParasiticOrBroadcast(pkt, cleanVIP) {
-							continue
+	if targetPeer == nil {
+		return
+	}
+
+	pmin := 0
+	pmax := 0
+	if targetPeer.AWG != nil {
+		pmin = targetPeer.AWG.Pmin
+		pmax = targetPeer.AWG.Pmax
+	}
+
+	targetEP := targetPeer.ActiveEndpoint
+	// LAN Peer Priority Rule:
+	// If peer is on the same local network (shares Public IP or LocalAddr is in private LAN range),
+	// prefer LocalAddr over STUNAddr to eliminate hairpin NAT blackhole on Wi-Fi routers!
+	myLocal := ""
+	if globalPuncher != nil {
+		myLocal = globalPuncher.LocalAddr()
+	}
+	if targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, globalPublicIP) {
+		targetEP = targetPeer.LocalAddr
+	} else if (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+		targetEP = targetPeer.IPv6Addr
+	}
+	if targetEP == "" && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+		targetEP = targetPeer.IPv6Addr
+	}
+	if targetEP == "" {
+		targetEP = targetPeer.ActiveEndpoint
+	}
+	if targetEP == "" {
+		targetEP = targetPeer.STUNAddr
+	}
+	if targetEP == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
+		targetEP = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
+	}
+	if targetEP == "" && len(targetPeer.Candidates) > 0 {
+		targetEP = targetPeer.Candidates[0]
+	}
+	if targetEP == "" {
+		targetEP = targetPeer.LocalAddr
+	}
+
+	// 1. Direct TCP ShadowTLS path:
+	sentDirect := false
+	sentTCP := false
+	isForceTCP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_tcp"
+	isForceUDP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_udp"
+
+	isICMP := len(pkt) >= 20 && pkt[9] == 1
+	cleanExit := strings.TrimSpace(strings.Split(globalExitNode, "/")[0])
+	targetVIP := strings.TrimSpace(strings.Split(targetPeer.VirtualIP, "/")[0])
+	isExitPeer := globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetVIP == cleanExit || targetPeer.Nickname == globalExitNode || targetPeer.DeviceName == globalExitNode)
+	isInternetDest := !isMeshSubnet24(destIP.String(), cleanVIP)
+	isExitOrInternet := !isICMP && (isExitPeer || isInternetDest || (cleanVIP != "" && srcIP.String() != cleanVIP))
+
+	if !isForceUDP && globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+		if tcpErr := globalTCPDirectMgr.SendPacket(targetPeer.DeviceID, pkt); tcpErr == nil {
+			sentDirect = true
+			sentTCP = true
+			if isExitOrInternet {
+				return
+			}
+		}
+	}
+
+	// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
+	if !isForceTCP && !sentTCP && targetEP != "" && globalPuncher != nil {
+		if err := globalPuncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
+			sentDirect = true
+			if isExitOrInternet {
+				return
+			}
+		}
+	}
+	// Dual-send to LocalAddr for LAN peers ONLY if direct send hasn't succeeded and different from targetEP
+	if !isForceTCP && !sentTCP && !sentDirect && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && globalPuncher != nil {
+		if err := globalPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, pkt, pmin, pmax); err == nil {
+			sentDirect = true
+			if isExitOrInternet {
+				return
+			}
+		}
+	}
+	bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
+	// Also try STUNAddr ONLY if direct send hasn't succeeded and different from targetEP
+	if !isForceTCP && !sentTCP && !sentDirect && (!targetPeer.DirectP2P || !bilateralOK) && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+		if err := globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax); err == nil {
+			sentDirect = true
+			if isExitOrInternet {
+				return
+			}
+		}
+	}
+
+	// 1c. Троттлированное реактивное пробитие NAT при невозможности прямой отправки (не чаще 1 раза в 2 сек на пир)
+	now := time.Now()
+	if !isForceTCP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && globalPuncher != nil {
+		reactiveMobileMu.Lock()
+		lastPunch := lastReactivePunchMobile[targetPeer.DeviceID]
+		shouldPunch := now.Sub(lastPunch) > 2*time.Second
+		if shouldPunch {
+			lastReactivePunchMobile[targetPeer.DeviceID] = now
+		}
+		reactiveMobileMu.Unlock()
+
+		if shouldPunch {
+			if targetEP != "" {
+				_ = globalPuncher.SendHolePunchProbe(targetEP)
+			}
+			if targetPeer.IPv6Addr != "" && targetPeer.IPv6Addr != targetEP && network.HasGlobalIPv6() {
+				_ = globalPuncher.SendHolePunchProbe(targetPeer.IPv6Addr)
+			}
+			if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
+				_ = globalPuncher.SendHolePunchProbeWithDelta(targetPeer.STUNAddr, targetPeer.NATDelta)
+			}
+			for _, cand := range targetPeer.Candidates {
+				if cand != "" && cand != targetEP && cand != targetPeer.STUNAddr {
+					_ = globalPuncher.SendHolePunchProbe(cand)
+				}
+			}
+		}
+	}
+
+	// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (троттлинг 1 раз в 4 сек)
+	if !isForceUDP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+		reactiveMobileMu.Lock()
+		lastDial := lastReactiveDialMobile[targetPeer.DeviceID]
+		shouldDial := now.Sub(lastDial) > 4*time.Second
+		if shouldDial {
+			lastReactiveDialMobile[targetPeer.DeviceID] = now
+		}
+		reactiveMobileMu.Unlock()
+
+		if shouldDial {
+			defTCPPort := 8443
+			netKey := ""
+			if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil {
+				if activeProf.TCPPort > 0 {
+					defTCPPort = activeProf.TCPPort
+				}
+				netKey = activeProf.NetworkKey
+			}
+			tcpTarget := targetPeer.TCPAddr
+			if tcpTarget == "" {
+				host := targetPeer.PublicIP
+				if host == "" && targetPeer.STUNAddr != "" {
+					host = strings.Split(targetPeer.STUNAddr, ":")[0]
+				}
+				if host != "" && host != "0.0.0.0" {
+					tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
+				} else if targetPeer.LocalAddr != "" {
+					localHost := strings.Split(targetPeer.LocalAddr, ":")[0]
+					tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
+				}
+			}
+			if tcpTarget != "" {
+				lPort := globalTCPDirectMgr.Port()
+				if lPort <= 0 && globalPuncher != nil {
+					lPort = globalPuncher.LocalPort()
+				}
+				go func(devID, target string, localP int) {
+					_ = globalTCPDirectMgr.ConnectPeer(devID, target, localP)
+				}(targetPeer.DeviceID, tcpTarget, lPort)
+
+				if globalSigMgr != nil {
+					sendTCPConnectSignal(ctx, globalSigMgr, globalDevID, targetPeer.DeviceID, globalPuncher, globalTCPDirectMgr, defTCPPort, netKey)
+				}
+			}
+		}
+	}
+
+	bilateralOK = targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
+	if sentDirect && (targetPeer.DirectP2P || sentTCP) && bilateralOK {
+		targetPeer.RelayedViaDevID = ""
+		targetPeer.RelayedViaName = ""
+		targetPeer.RelayedViaVIP = ""
+		if targetPeer.Transport == "relay_mesh" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" {
+			if sentTCP {
+				targetPeer.Transport = "tcp_tls"
+			} else {
+				targetPeer.Transport = "udp_direct"
+			}
+		}
+	}
+
+	directVerified := sentTCP || (sentDirect && targetPeer.DirectP2P && bilateralOK)
+	needsRelay := !directVerified
+	needsMQTTRelay := needsRelay && (!isExitOrInternet || isICMP)
+
+	// 1e. Mesh Userspace Relay Fallback (encapsulated in Multi-Hop header)
+	if needsRelay && !isForceUDP && globalRegistry != nil {
+		relayPkt, mhErr := network.EncodeMultiHopPacket(globalDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, pkt)
+		if mhErr == nil {
+			relayed := false
+			for _, rp := range globalRegistry.List() {
+				if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
+					continue
+				}
+				vip := strings.TrimSpace(strings.Split(rp.VirtualIP, "/")[0])
+				isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(rp.DeviceName), "serv") || strings.Contains(strings.ToLower(rp.Nickname), "serv")
+				if isServ {
+					if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(rp.DeviceID) {
+						if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
+							relayed = true
+							sentDirect = true
+							rName := rp.DeviceName
+							if rName == "" {
+								rName = rp.Nickname
+							}
+							targetPeer.RelayedViaDevID = rp.DeviceID
+							targetPeer.RelayedViaName = rName
+							targetPeer.RelayedViaVIP = rp.VirtualIP
+							targetPeer.Transport = "relay_mesh"
+							break
 						}
-
-						// Userspace TCP MSS Clamping to prevent PMTU blackholes
-						_ = tunnel.ClampTCPMSS(pkt, constants.DefaultClampedMSS)
-
-						var targetPeer *peer.Peer
-						if globalRegistry != nil {
-							if best, ok := globalRegistry.GetByVirtualIP(destIP.String()); ok && best != nil {
-								targetPeer = best
-							} else {
-								for _, p := range globalRegistry.List() {
-									pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-									if pVIP != "" && pVIP == destIP.String() {
-										targetPeer = p
-										break
-									}
-									for _, route := range p.AdvertisedRoutes {
-										r := strings.TrimSpace(route)
-										if r == "0.0.0.0/0" || r == "::/0" {
-											continue
-										}
-										if _, ipNet, err := net.ParseCIDR(r); err == nil && ipNet.Contains(destIP) {
-											targetPeer = p
-											break
-										}
-									}
-								}
+					} else if globalPuncher != nil && rp.DirectP2P && rp.ActiveEndpoint != "" {
+						if err := globalPuncher.SendDataPacketWithPadding(rp.ActiveEndpoint, relayPkt, 0, 0); err == nil {
+							relayed = true
+							sentDirect = true
+							rName := rp.DeviceName
+							if rName == "" {
+								rName = rp.Nickname
 							}
-						}
-
-						if destIP.String() == cleanVIP {
-							if tf != nil {
-								_, _ = tf.Write(pkt)
-							}
-							continue
-						}
-
-						if targetPeer == nil && globalExitNode != "" && globalRegistry != nil {
-							if ep, ok := globalRegistry.Get(globalExitNode); ok && ep != nil {
-								targetPeer = ep
-							} else {
-								for _, p := range globalRegistry.List() {
-									pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-									if p.DeviceID == globalExitNode || pVIP == globalExitNode || p.Nickname == globalExitNode || p.DeviceName == globalExitNode {
-										targetPeer = p
-										break
-									}
-								}
-							}
-						}
-
-						if targetPeer != nil {
-							pmin := 0
-							pmax := 0
-							if targetPeer.AWG != nil {
-								pmin = targetPeer.AWG.Pmin
-								pmax = targetPeer.AWG.Pmax
-							}
-
-							targetEP := targetPeer.ActiveEndpoint
-							// LAN Peer Priority Rule:
-							// If peer is on the same local network (shares Public IP or LocalAddr is in private LAN range),
-							// prefer LocalAddr over STUNAddr to eliminate hairpin NAT blackhole on Wi-Fi routers!
-							myLocal := ""
-							if globalPuncher != nil {
-								myLocal = globalPuncher.LocalAddr()
-							}
-							if targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, globalPublicIP) {
-								targetEP = targetPeer.LocalAddr
-							} else if (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
-								targetEP = targetPeer.IPv6Addr
-							}
-							if targetEP == "" && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
-								targetEP = targetPeer.IPv6Addr
-							}
-							if targetEP == "" {
-								targetEP = targetPeer.ActiveEndpoint
-							}
-							if targetEP == "" {
-								targetEP = targetPeer.STUNAddr
-							}
-							if targetEP == "" && targetPeer.PublicIP != "" && targetPeer.WGPort > 0 {
-								targetEP = fmt.Sprintf("%s:%d", targetPeer.PublicIP, targetPeer.WGPort)
-							}
-							if targetEP == "" && len(targetPeer.Candidates) > 0 {
-								targetEP = targetPeer.Candidates[0]
-							}
-							if targetEP == "" {
-								targetEP = targetPeer.LocalAddr
-							}
-
-							// 1. Direct TCP ShadowTLS path:
-							// If an active direct TCP ShadowTLS stream is connected, send through it (bypasses UDP DPI)
-							sentDirect := false
-							sentTCP := false
-							isForceTCP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_tcp"
-							isForceUDP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_udp"
-
-							isICMP := len(pkt) >= 20 && pkt[9] == 1
-							cleanExit := strings.TrimSpace(strings.Split(globalExitNode, "/")[0])
-							targetVIP := strings.TrimSpace(strings.Split(targetPeer.VirtualIP, "/")[0])
-							isExitPeer := globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetVIP == cleanExit || targetPeer.Nickname == globalExitNode || targetPeer.DeviceName == globalExitNode)
-							isInternetDest := !isMeshSubnet24(destIP.String(), cleanVIP)
-							isExitOrInternet := !isICMP && (isExitPeer || isInternetDest || (cleanVIP != "" && srcIP.String() != cleanVIP))
-
-							if !isForceUDP && globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
-								if tcpErr := globalTCPDirectMgr.SendPacket(targetPeer.DeviceID, pkt); tcpErr == nil {
-									sentDirect = true
-									sentTCP = true
-									if isExitOrInternet {
-										continue
-									}
-								}
-							}
-
-							// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
-							if !isForceTCP && !sentTCP && targetEP != "" && globalPuncher != nil {
-								if err := globalPuncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
-									sentDirect = true
-									if isExitOrInternet {
-										continue
-									}
-								}
-							}
-							// Dual-send to LocalAddr for LAN peers ONLY if direct send hasn't succeeded and different from targetEP
-							if !isForceTCP && !sentTCP && !sentDirect && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && globalPuncher != nil {
-								if err := globalPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, pkt, pmin, pmax); err == nil {
-									sentDirect = true
-									if isExitOrInternet {
-										continue
-									}
-								}
-							}
-							bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
-							// Also try STUNAddr ONLY if direct send hasn't succeeded and different from targetEP
-							if !isForceTCP && !sentTCP && !sentDirect && (!targetPeer.DirectP2P || !bilateralOK) && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
-								if err := globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax); err == nil {
-									sentDirect = true
-									if isExitOrInternet {
-										continue
-									}
-								}
-							}
-
-							// 1c. Троттлированное реактивное пробитие NAT при невозможности прямой отправки (не чаще 1 раза в 2 сек на пир)
-							now := time.Now()
-							if !isForceTCP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && globalPuncher != nil {
-								if now.Sub(lastReactivePunchMobile[targetPeer.DeviceID]) > 2*time.Second {
-									lastReactivePunchMobile[targetPeer.DeviceID] = now
-									if targetEP != "" {
-										_ = globalPuncher.SendHolePunchProbe(targetEP)
-									}
-									if targetPeer.IPv6Addr != "" && targetPeer.IPv6Addr != targetEP && network.HasGlobalIPv6() {
-										_ = globalPuncher.SendHolePunchProbe(targetPeer.IPv6Addr)
-									}
-									if targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
-										_ = globalPuncher.SendHolePunchProbeWithDelta(targetPeer.STUNAddr, targetPeer.NATDelta)
-									}
-									for _, cand := range targetPeer.Candidates {
-										if cand != "" && cand != targetEP && cand != targetPeer.STUNAddr {
-											_ = globalPuncher.SendHolePunchProbe(cand)
-										}
-									}
-								}
-							}
-
-							// 1d. Reactive TCP ShadowTLS dial if TCP not connected and UDP failing (троттлинг 1 раз в 4 сек)
-							if !isForceUDP && !sentTCP && (!targetPeer.DirectP2P || !bilateralOK) && globalTCPDirectMgr != nil && !globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
-								if now.Sub(lastReactiveDialMobile[targetPeer.DeviceID]) > 4*time.Second {
-									lastReactiveDialMobile[targetPeer.DeviceID] = now
-									defTCPPort := 8443
-									netKey := ""
-									if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil {
-										if activeProf.TCPPort > 0 {
-											defTCPPort = activeProf.TCPPort
-										}
-										netKey = activeProf.NetworkKey
-									}
-									tcpTarget := targetPeer.TCPAddr
-									if tcpTarget == "" {
-										host := targetPeer.PublicIP
-										if host == "" && targetPeer.STUNAddr != "" {
-											host = strings.Split(targetPeer.STUNAddr, ":")[0]
-										}
-										if host != "" && host != "0.0.0.0" {
-											tcpTarget = fmt.Sprintf("%s:%d", host, defTCPPort)
-										} else if targetPeer.LocalAddr != "" {
-											localHost := strings.Split(targetPeer.LocalAddr, ":")[0]
-											tcpTarget = fmt.Sprintf("%s:%d", localHost, defTCPPort)
-										}
-									}
-									if tcpTarget != "" {
-										lPort := globalTCPDirectMgr.Port()
-										if lPort <= 0 && globalPuncher != nil {
-											lPort = globalPuncher.LocalPort()
-										}
-										go func(devID, target string, localP int) {
-											_ = globalTCPDirectMgr.ConnectPeer(devID, target, localP)
-										}(targetPeer.DeviceID, tcpTarget, lPort)
-
-										// Send bilateral TCPConnect signal over MQTT for coordinated simultaneous open
-										if globalSigMgr != nil {
-											sendTCPConnectSignal(engineCtx, globalSigMgr, globalDevID, targetPeer.DeviceID, globalPuncher, globalTCPDirectMgr, defTCPPort, netKey)
-										}
-									}
-								}
-							}
-
-							bilateralOK = targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
-							if sentDirect && (targetPeer.DirectP2P || sentTCP) && bilateralOK {
-								targetPeer.RelayedViaDevID = ""
-								targetPeer.RelayedViaName = ""
-								targetPeer.RelayedViaVIP = ""
-								if targetPeer.Transport == "relay_mesh" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" {
-									if sentTCP {
-										targetPeer.Transport = "tcp_tls"
-									} else {
-										targetPeer.Transport = "udp_direct"
-									}
-								}
-							}
-
-							// Fallback Relay Rule: Multi-Hop mesh relay fallback if direct transmission is unconfirmed
-							// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
-							// Массовый интернет-трафик СТРОГО запрещен к публикации в центральный MQTT-брокер во избежание перегрузки.
-							directVerified := sentTCP || (sentDirect && targetPeer.DirectP2P && bilateralOK)
-							needsRelay := !directVerified
-							needsMQTTRelay := needsRelay && (!isExitOrInternet || isICMP)
-
-							// 1e. Mesh Userspace Relay Fallback (encapsulated in Multi-Hop header)
-							if needsRelay && !isForceUDP && globalRegistry != nil {
-								relayPkt, mhErr := network.EncodeMultiHopPacket(globalDevID, targetPeer.DeviceID, network.DefaultMaxTTL, 0x00, pkt)
-								if mhErr == nil {
-									relayed := false
-									// Try designated server or known relays first
-									for _, rp := range globalRegistry.List() {
-										if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
-											continue
-										}
-										vip := strings.TrimSpace(strings.Split(rp.VirtualIP, "/")[0])
-										isServ := vip == "10.1.1.102" || strings.Contains(strings.ToLower(rp.DeviceName), "serv") || strings.Contains(strings.ToLower(rp.Nickname), "serv")
-										if isServ {
-											if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(rp.DeviceID) {
-												if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
-													relayed = true
-													sentDirect = true
-													rName := rp.DeviceName
-													if rName == "" {
-														rName = rp.Nickname
-													}
-													targetPeer.RelayedViaDevID = rp.DeviceID
-													targetPeer.RelayedViaName = rName
-													targetPeer.RelayedViaVIP = rp.VirtualIP
-													targetPeer.Transport = "relay_mesh"
-													break
-												}
-											} else if globalPuncher != nil && rp.DirectP2P && rp.ActiveEndpoint != "" {
-												if err := globalPuncher.SendDataPacketWithPadding(rp.ActiveEndpoint, relayPkt, 0, 0); err == nil {
-													relayed = true
-													sentDirect = true
-													rName := rp.DeviceName
-													if rName == "" {
-														rName = rp.Nickname
-													}
-													targetPeer.RelayedViaDevID = rp.DeviceID
-													targetPeer.RelayedViaName = rName
-													targetPeer.RelayedViaVIP = rp.VirtualIP
-													targetPeer.Transport = "relay_mesh"
-													break
-												}
-											}
-										}
-									}
-									if !relayed {
-										for _, rp := range globalRegistry.List() {
-											if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
-												continue
-											}
-											if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(rp.DeviceID) {
-												if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
-													relayed = true
-													sentDirect = true
-													rName := rp.DeviceName
-													if rName == "" {
-														rName = rp.Nickname
-													}
-													targetPeer.RelayedViaDevID = rp.DeviceID
-													targetPeer.RelayedViaName = rName
-													targetPeer.RelayedViaVIP = rp.VirtualIP
-													targetPeer.Transport = "relay_mesh"
-													break
-												}
-											} else if globalPuncher != nil && rp.DirectP2P && rp.ActiveEndpoint != "" {
-												if err := globalPuncher.SendDataPacketWithPadding(rp.ActiveEndpoint, relayPkt, 0, 0); err == nil {
-													relayed = true
-													sentDirect = true
-													rName := rp.DeviceName
-													if rName == "" {
-														rName = rp.Nickname
-													}
-													targetPeer.RelayedViaDevID = rp.DeviceID
-													targetPeer.RelayedViaName = rName
-													targetPeer.RelayedViaVIP = rp.VirtualIP
-													targetPeer.Transport = "relay_mesh"
-													break
-												}
-											}
-										}
-									}
-								}
-							}
-
-							// Level 3: TCP Peer-as-Relay Fallback
-							if needsRelay && !sentDirect && !sentTCP {
-								engineMu.Lock()
-								tcpRelay := globalTCPRelayClient
-								engineMu.Unlock()
-								if tcpRelay != nil && tcpRelay.IsConnected() {
-									if err := tcpRelay.SendPacket(targetPeer.DeviceID, pkt); err == nil {
-										sentDirect = true
-										targetPeer.Transport = "tcp_relay"
-									}
-								}
-							}
-
-							// 1f. Fallback: relay via MQTT/Signaling when direct transmission is unconfirmed or failed (ASYNCHRONOUS, non-blocking)
-							if needsMQTTRelay && globalSigMgr != nil {
-								pktCopy := make([]byte, len(pkt))
-								copy(pktCopy, pkt)
-								tDevID := targetPeer.DeviceID
-								go func(targetID string, rawPkt []byte) {
-									dataToSend := rawPkt
-									if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
-										cKey := crypto.DeriveKey(activeProf.NetworkKey)
-										seq := targetPeer.NextOutboundSeq()
-										epoch := crypto.GetCurrentEpoch()
-										if enc, encErr := crypto.EncryptWithEpochSeq(rawPkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
-											dataToSend = enc
-										} else if enc, encErr := crypto.EncryptSelf(rawPkt, cKey); encErr == nil && len(enc) > 0 {
-											dataToSend = enc
-										}
-									}
-									_ = globalSigMgr.PublishTunnelData(targetID, dataToSend)
-								}(tDevID, pktCopy)
-							}
-
-							logger.Debug().
-								Str("dst", destIP.String()).
-								Str("peer", targetPeer.DeviceID).
-								Str("ep", targetEP).
-								Int("size", len(pkt)).
-								Msg("📤 TUN TX: пакет отправлен узлу")
-						} else {
-							logger.Debug().
-								Str("dst", destIP.String()).
-								Msg("🚫 TUN TX: пир не найден для destination IP")
+							targetPeer.RelayedViaDevID = rp.DeviceID
+							targetPeer.RelayedViaName = rName
+							targetPeer.RelayedViaVIP = rp.VirtualIP
+							targetPeer.Transport = "relay_mesh"
+							break
 						}
 					}
 				}
 			}
-		}(tunCtx)
+			if !relayed {
+				for _, rp := range globalRegistry.List() {
+					if rp.DeviceID == targetPeer.DeviceID || !rp.Online {
+						continue
+					}
+					if globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(rp.DeviceID) {
+						if err := globalTCPDirectMgr.SendPacket(rp.DeviceID, relayPkt); err == nil {
+							relayed = true
+							sentDirect = true
+							rName := rp.DeviceName
+							if rName == "" {
+								rName = rp.Nickname
+							}
+							targetPeer.RelayedViaDevID = rp.DeviceID
+							targetPeer.RelayedViaName = rName
+							targetPeer.RelayedViaVIP = rp.VirtualIP
+							targetPeer.Transport = "relay_mesh"
+							break
+						}
+					} else if globalPuncher != nil && rp.DirectP2P && rp.ActiveEndpoint != "" {
+						if err := globalPuncher.SendDataPacketWithPadding(rp.ActiveEndpoint, relayPkt, 0, 0); err == nil {
+							relayed = true
+							sentDirect = true
+							rName := rp.DeviceName
+							if rName == "" {
+								rName = rp.Nickname
+							}
+							targetPeer.RelayedViaDevID = rp.DeviceID
+							targetPeer.RelayedViaName = rName
+							targetPeer.RelayedViaVIP = rp.VirtualIP
+							targetPeer.Transport = "relay_mesh"
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Level 3: TCP Peer-as-Relay Fallback
+	if needsRelay && !sentDirect && !sentTCP {
+		engineMu.Lock()
+		tcpRelay := globalTCPRelayClient
+		engineMu.Unlock()
+		if tcpRelay != nil && tcpRelay.IsConnected() {
+			if err := tcpRelay.SendPacket(targetPeer.DeviceID, pkt); err == nil {
+				sentDirect = true
+				targetPeer.Transport = "tcp_relay"
+			}
+		}
+	}
+
+	// 1f. Fallback: relay via MQTT/Signaling when direct transmission is unconfirmed or failed (ASYNCHRONOUS, non-blocking)
+	if needsMQTTRelay && globalSigMgr != nil {
+		pktCopy := make([]byte, len(pkt))
+		copy(pktCopy, pkt)
+		tDevID := targetPeer.DeviceID
+		go func(targetID string, rawPkt []byte) {
+			dataToSend := rawPkt
+			if activeProf := globalConfig.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+				cKey := crypto.DeriveKey(activeProf.NetworkKey)
+				seq := targetPeer.NextOutboundSeq()
+				epoch := crypto.GetCurrentEpoch()
+				if enc, encErr := crypto.EncryptWithEpochSeq(rawPkt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
+					dataToSend = enc
+				} else if enc, encErr := crypto.EncryptSelf(rawPkt, cKey); encErr == nil && len(enc) > 0 {
+					dataToSend = enc
+				}
+			}
+			_ = globalSigMgr.PublishTunnelData(targetID, dataToSend)
+		}(tDevID, pktCopy)
 	}
 }
 
@@ -2315,6 +2355,9 @@ func AttachTUN(tunFd int) {
 func DetachTUN() {
 	engineMu.Lock()
 	defer engineMu.Unlock()
+	globalTunRxMu.Lock()
+	globalTunRxCh = nil
+	globalTunRxMu.Unlock()
 	if globalTunCancel != nil {
 		globalTunCancel()
 		globalTunCancel = nil
@@ -2495,11 +2538,8 @@ func ensureMobileTCPRelay(ctx context.Context, devID string) {
 	}
 
 	newClient := relay.NewTCPRelayClient(tcpAddr, devID, func(srcDevID string, payload []byte) {
-		engineMu.Lock()
-		tf := globalTunFile
-		engineMu.Unlock()
-		if tf != nil && len(payload) > 0 {
-			_, _ = tf.Write(payload)
+		if len(payload) > 0 {
+			enqueueTunRx(payload)
 		}
 	}, nil)
 

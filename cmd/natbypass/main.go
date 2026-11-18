@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	Version   = "1.9.507-beta.38"
+	Version   = "1.9.507-beta.39"
 	Commit    = "release"
 	BuildDate = "unknown"
 )
@@ -63,6 +63,14 @@ func main() {
 			os.Args[i] = "--silent"
 		} else if arg == "-updated" {
 			os.Args[i] = "--updated"
+		} else if arg == "-version" {
+			os.Args[i] = "--version"
+		} else if arg == "-help" {
+			os.Args[i] = "--help"
+		} else if arg == "-ui" {
+			os.Args[i] = "--ui"
+		} else if arg == "-no-webui" {
+			os.Args[i] = "--no-webui"
 		}
 	}
 
