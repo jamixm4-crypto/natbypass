@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.39"
+	Version = "1.9.507-beta.40"
 	Commit  = "release"
 )
 
@@ -5750,7 +5750,22 @@ func startEngineFromConfig(c *config.Config) {
 
 			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
 			targetEP := destPeer.ActiveEndpoint
-			if targetEP == "" {
+			if guiMagicSock != nil {
+				if bestEP, _, _ := guiMagicSock.GetActiveRoute(destPeer.DeviceID); bestEP != "" {
+					targetEP = bestEP
+				}
+			}
+			// LAN Peer Priority: If client is on the same local physical network (Wi-Fi/LAN),
+			// directly route traffic to LocalAddr, bypassing NAT hairpinning and WAN bottlenecks.
+			myLocal := ""
+			myPub := ""
+			if udpPuncher != nil {
+				myLocal = udpPuncher.LocalAddr()
+				myPub = udpPuncher.MappedIPString()
+			}
+			if destPeer.LocalAddr != "" && peer.IsLocalLANPeer(destPeer.LocalAddr, destPeer.PublicIP, myLocal, myPub) {
+				targetEP = destPeer.LocalAddr
+			} else if targetEP == "" {
 				targetEP = destPeer.STUNAddr
 			}
 			if targetEP == "" && len(destPeer.Candidates) > 0 {

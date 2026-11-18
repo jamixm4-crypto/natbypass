@@ -363,7 +363,9 @@ func EnableHostIPForwardingSubnet(subnet string) error {
 	// 5. Bi-directional TCP MSS Clamping to 1220 bytes (prevents PMTU Blackhole under tunnel encapsulation)
 	forceInsertIptablesRule(ipt, "mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
 	forceInsertIptablesRule(ipt, "mangle", "POSTROUTING", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
-	ensureIptablesRule(ipt, "mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+	if isKeeneticDevice() {
+		forceInsertIptablesRule(ipt, "mangle", "_NDM_FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
+	}
 
 	// 6. nftables fallback (Ubuntu 22.04+, Debian 12+)
 	if nft, err := exec.LookPath("nft"); err == nil {
@@ -519,8 +521,9 @@ fi
 if [ "$table" = "mangle" ]; then
     iptables -t mangle -C PREROUTING -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || true
     iptables -t mangle -C OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o nb0 -j ACCEPT 2>/dev/null || true
-    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
-    iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I POSTROUTING 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C _NDM_FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I _NDM_FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I POSTROUTING 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
 fi
 
 if [ "$table" = "nat" ]; then

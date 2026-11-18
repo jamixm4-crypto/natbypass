@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/natbypass/natbypass/internal/constants"
 	"github.com/natbypass/natbypass/internal/peer"
 )
 
@@ -797,8 +798,12 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 			offset := 0
 			for offset < n {
 				chunkSize := n - offset
-				if chunkSize > 1360 {
-					chunkSize = 1360
+				maxChunk := int(constants.DefaultClampedMSS)
+				if maxChunk <= 0 {
+					maxChunk = 1220
+				}
+				if chunkSize > maxChunk {
+					chunkSize = maxChunk
 				}
 				chunk := buf[offset : offset+chunkSize]
 				curSeq := entry.serverNextSeq.Load()
@@ -1026,13 +1031,19 @@ func buildIPv4TCPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint
 	var tcpHdrLen int
 	var options []byte
 	if flags == 0x12 { // SYN|ACK
-		// Include MSS (1360 = 0x0550), Window Scale (7), SACK Permitted, NOP padding to 32 bytes
+		// Include MSS (1220 = 0x04C4), Window Scale (7), SACK Permitted, NOP padding to 32 bytes
+		// MSS 1220 ensures total IPv4 packet (1220 + 40..60 = 1260..1280) never exceeds MTU 1280,
+		// preventing EINVAL drops in Linux/Android TUN drivers and avoiding PMTU blackholes.
+		mss := constants.DefaultClampedMSS
+		if mss <= 0 {
+			mss = 1220
+		}
 		options = []byte{
-			0x02, 0x04, 0x05, 0x50, // MSS = 1360
-			0x01,                   // NOP
-			0x03, 0x03, 0x07,       // Window Scale = 7
-			0x04, 0x02,             // SACK Permitted
-			0x01, 0x01,             // NOP, NOP padding
+			0x02, 0x04, byte(mss >> 8), byte(mss & 0xFF), // MSS = 1220 (0x04C4)
+			0x01,             // NOP
+			0x03, 0x03, 0x07, // Window Scale = 7
+			0x04, 0x02,       // SACK Permitted
+			0x01, 0x01,       // NOP, NOP padding
 		}
 		tcpHdrLen = 20 + len(options) // 32 bytes
 	} else {

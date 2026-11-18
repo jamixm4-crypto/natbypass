@@ -1182,7 +1182,22 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second)
 			targetEP := destPeer.ActiveEndpoint
-			if targetEP == "" {
+			if magicSock != nil {
+				if bestEP, _, _ := magicSock.GetActiveRoute(destPeer.DeviceID); bestEP != "" {
+					targetEP = bestEP
+				}
+			}
+			// LAN Peer Priority: If client is on the same local physical network (Wi-Fi/LAN),
+			// directly route traffic to LocalAddr, bypassing NAT hairpinning and WAN bottlenecks.
+			myLocal := ""
+			myPub := ""
+			if puncher != nil {
+				myLocal = puncher.LocalAddr()
+				myPub = puncher.MappedIPString()
+			}
+			if destPeer.LocalAddr != "" && peer.IsLocalLANPeer(destPeer.LocalAddr, destPeer.PublicIP, myLocal, myPub) {
+				targetEP = destPeer.LocalAddr
+			} else if targetEP == "" {
 				targetEP = destPeer.STUNAddr
 			}
 			if targetEP == "" && len(destPeer.Candidates) > 0 {
@@ -1758,12 +1773,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					case <-engineCtx.Done():
 						return
 					default:
-						// Brief yield only on error, not busy-spin (100ms on MIPS/ARM prevents CPU burn)
-						if isLowPowerArch() {
-							time.Sleep(100 * time.Millisecond)
-						} else {
-							time.Sleep(10 * time.Millisecond)
-						}
+						// Brief yield only on transient error (e.g. EAGAIN); never stall the pipeline with 100ms pauses!
+						time.Sleep(1 * time.Millisecond)
 					}
 					continue
 				}
