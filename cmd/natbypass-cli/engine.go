@@ -983,7 +983,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							log.Info().Msg("ℹ️ Exit node deselected: restored physical internet gateway")
 							if registry != nil && puncher != nil {
 								for _, p := range registry.List() {
-									p.LastBilateralSeen = time.Time{}
 									if p.ActiveEndpoint != "" {
 										_ = puncher.SendHolePunchProbe(p.ActiveEndpoint)
 									}
@@ -1475,7 +1474,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 				targetPeer.Online = true
 				targetPeer.LastSeen = time.Now()
-				registry.Upsert(targetPeer)
+				if !peer.IsSyntheticDynamicPeer(targetPeer) {
+					registry.Upsert(targetPeer)
+				}
 			}
 
 			// Recalculate IPv4 header checksum to guarantee Windows kernel Wintun accepts packet unconditionally
@@ -1660,7 +1661,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 
-			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
+			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice() || isDNS) {
 				if runtime.GOOS == "windows" || tunDev == nil || isDNS {
 					if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 						log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder")
@@ -1699,7 +1700,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// 2. Userspace Transit Forwarder fallback:
 			// If tunDev is nil (e.g. running without Admin rights or adapter creation failed),
 			// userspace transit forwarder proxies ICMP, UDP (DNS), and TCP.
-			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
+			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice() || isDNS) {
 				if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder fallback")
 					return

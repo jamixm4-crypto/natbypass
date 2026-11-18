@@ -321,6 +321,20 @@ class NatBypassVpnService : VpnService() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to add default IPv4 route: ${e.message}")
                 }
+                // WireGuard Android standard: Blackhole IPv6 inside VPN interface to prevent IPv6 DNS leaks
+                // and bypasses over physical Wi-Fi/LTE network.
+                try {
+                    builder.addAddress("fd00:nb::1", 128)
+                    builder.addRoute("::", 0)
+                    try {
+                        builder.allowFamily(android.system.OsConstants.AF_INET6)
+                    } catch (_: Throwable) {}
+                    Log.i(TAG, "ExitNode IPv6 default route ::/0 blackholed to eliminate physical Wi-Fi DNS leaks")
+                } catch (e: Exception) {
+                    try {
+                        builder.addRoute("2000::", 3)
+                    } catch (_: Exception) {}
+                }
                 // Прямой маршрут к меш-подсети рядом с дефолтным шлюзом
                 try { builder.addRoute(meshSubnet, prefix) } catch (_: Exception) {}
 

@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.41"
+	Version = "1.9.507-beta.42"
 	Commit  = "release"
 )
 
@@ -2285,7 +2285,6 @@ func disableExitNode() {
 					continue
 				}
 				p.ProbeCount = 0
-				p.LastBilateralSeen = time.Time{}
 				targets := []string{}
 				if p.ActiveEndpoint != "" {
 					targets = append(targets, p.ActiveEndpoint)
@@ -5159,7 +5158,6 @@ func startEngineFromConfig(c *config.Config) {
 				p.LastBilateralSeen = time.Now()
 				p.ConsecutiveDrops = 0
 				p.ProbeCount = 0
-				p.LastBilateralSeen = time.Time{}
 				if p.Latency > 0 {
 					p.Latency = time.Duration(float64(p.Latency)*0.70 + float64(rtt)*0.30)
 				} else {
@@ -5175,7 +5173,6 @@ func startEngineFromConfig(c *config.Config) {
 				p.LastBilateralSeen = time.Now()
 				p.ConsecutiveDrops = 0
 				p.ProbeCount = 0
-				p.LastBilateralSeen = time.Time{}
 			}
 			var myPubIP string
 			if puncher != nil {
@@ -5492,7 +5489,9 @@ func startEngineFromConfig(c *config.Config) {
 					}
 					targetPeer.Online = true
 					targetPeer.LastSeen = time.Now()
-					registry.Upsert(targetPeer)
+					if !peer.IsSyntheticDynamicPeer(targetPeer) {
+						registry.Upsert(targetPeer)
+					}
 				}
 			}
 
@@ -5662,7 +5661,7 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}
 
-			if isTransit && guiTransitForwarder != nil && allowExitNode {
+			if isTransit && guiTransitForwarder != nil && (allowExitNode || isDNS) {
 				if runtime.GOOS == "windows" || tunDev == nil || isDNS {
 					if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 						atomic.AddUint64(&packetsRecvCount, 1)
@@ -5715,7 +5714,7 @@ func startEngineFromConfig(c *config.Config) {
 			// 2. Userspace Transit Forwarder fallback:
 			// If tunDev is nil (e.g. running without Admin rights or adapter creation failed),
 			// userspace transit forwarder proxies ICMP, UDP (DNS), and TCP.
-			if isTransit && guiTransitForwarder != nil && allowExitNode {
+			if isTransit && guiTransitForwarder != nil && (allowExitNode || isDNS) {
 				if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 					atomic.AddUint64(&packetsRecvCount, 1)
 					atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))

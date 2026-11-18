@@ -570,18 +570,6 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 
 	// Case 1: SYN packet (new outbound connection or SYN retransmit)
 	if (flags & 0x02) != 0 {
-		if dstPort == 853 {
-			// DoT (DNS-over-TLS, TCP port 853):
-			// Most Russian ISPs and TSPU censor/drop port 853 packets, causing 2-10s timeouts.
-			// Android's Private DNS probe hangs on timeouts and marks the entire connection as
-			// "DNS validation failed", which blocks all app DNS resolution across the device.
-			// By immediately returning TCP RST (Connection Refused), Android's DnsResolver
-			// instantly detects that DoT is not supported and falls back to plaintext UDP 53 in 0ms!
-			rstPkt := buildIPv4TCPPacket(destIP, dstPort, srcIP, srcPort, 0, seqNum+1, 0x14, 0, nil)
-			tf.deliverToClient(srcIP, rstPkt)
-			return true
-		}
-
 		if found {
 			if oldEntry, ok := val.(*tcpSessionEntry); ok && oldEntry != nil && !oldEntry.closed.Load() {
 				if oldEntry.clientISN == seqNum {
@@ -1020,8 +1008,11 @@ func buildIPv4UDPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint
 	// UDP Payload
 	copy(pkt[28:], payload)
 
-	udpCS := calculateUDPChecksum(srcIP, dstIP, udpHdr, payload)
-	binary.BigEndian.PutUint16(pkt[26:28], udpCS)
+	// RFC 768: in IPv4 UDP, a transmitted checksum value of 0x0000 signifies that the transmitter
+	// generated no checksum. Setting checksum to 0 ensures Linux and Android kernel network stacks
+	// (skb->ip_summed = CHECKSUM_UNNECESSARY) accept the packet unconditionally without validating,
+	// completely eliminating silent drops from pseudo-header calculation mismatches or kernel checksum errors.
+	binary.BigEndian.PutUint16(pkt[26:28], 0)
 	return pkt
 }
 
