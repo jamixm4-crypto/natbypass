@@ -113,6 +113,30 @@
         "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/natbypass-router-mips"
       ]
     },
+    "android/arm64": {
+      "name": "NatBypass-v1.9.507-beta.40-arm64.apk",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-arm64.apk",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-arm64.apk.sig",
+      "size": 34404319,
+      "sha256": "4cc0db3d491ec05a59bb8baa5c2d3c93b8e98d5881f152ccab48ce903d30cef4",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-arm64.apk",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-arm64.apk",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-arm64.apk"
+      ]
+    },
+    "android/universal": {
+      "name": "NatBypass-v1.9.507-beta.40-universal.apk",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-universal.apk",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-universal.apk.sig",
+      "size": 75841339,
+      "sha256": "64a93e1c09b068331536c1263c27b96eed8f900a4e7e90a4c8567849eda95cd2",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-universal.apk",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-universal.apk",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass-v1.9.507-beta.40-universal.apk"
+      ]
+    },
     "windows/amd64/main": {
       "name": "NatBypass.exe",
       "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.40/NatBypass.exe",
