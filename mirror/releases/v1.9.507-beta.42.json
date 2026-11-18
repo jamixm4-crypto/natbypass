@@ -1,0 +1,33 @@
+{
+  "version": "v1.9.507-beta.42",
+  "published_at": "2026-11-18T16:28:01Z",
+  "prerelease": true,
+  "release_notes": "**Full Changelog**: https://github.com/jamixm4-crypto/natbypass/compare/v1.9.507-beta.41...v1.9.507-beta.42",
+  "html_url": "https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.42",
+  "assets": {
+    "android/arm64": {
+      "name": "NatBypass-v1.9.507-beta.42-arm64.apk",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-arm64.apk",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-arm64.apk.sig",
+      "size": 34404318,
+      "sha256": "63b85fd61045920752000cbbe3e35bd49529c1f921f21fe075868c094edd4039",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-arm64.apk",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-arm64.apk",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-arm64.apk"
+      ]
+    },
+    "android/universal": {
+      "name": "NatBypass-v1.9.507-beta.42-universal.apk",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-universal.apk",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-universal.apk.sig",
+      "size": 75841335,
+      "sha256": "752140b4a968999a05019f711dca34abb3fadf6a4f31ab8bfabb26475ce3152b",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-universal.apk",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-universal.apk",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.42/NatBypass-v1.9.507-beta.42-universal.apk"
+      ]
+    }
+  }
+}
