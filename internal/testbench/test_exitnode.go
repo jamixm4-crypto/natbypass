@@ -90,11 +90,16 @@ func testDNSResolutionViaExitNode(ctx context.Context, vm *VirtualMesh) TestResu
 	origSend := vm.ExitNode.TransitForwarder
 	_ = origSend
 
-	// We listen on client's UDPRecvChan
+	// Flush client TunOutboundChan before test
+	for len(client.TunOutboundChan) > 0 {
+		<-client.TunOutboundChan
+	}
+
+	// We listen on client's TunOutboundChan (where inbound overlay packets are delivered to TUN)
 	go func() {
 		for {
 			select {
-			case pkt, ok := <-client.UDPRecvChan:
+			case pkt, ok := <-client.TunOutboundChan:
 				if !ok {
 					return
 				}
@@ -307,10 +312,14 @@ func testHTTPInternetTransit(ctx context.Context, vm *VirtualMesh) TestResult {
 	var mu sync.Mutex
 	done := make(chan struct{})
 
+	for len(client.TunOutboundChan) > 0 {
+		<-client.TunOutboundChan
+	}
+
 	go func() {
 		for {
 			select {
-			case pkt, ok := <-client.UDPRecvChan:
+			case pkt, ok := <-client.TunOutboundChan:
 				if !ok {
 					return
 				}
