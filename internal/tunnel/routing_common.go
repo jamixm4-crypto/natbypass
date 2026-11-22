@@ -14,6 +14,11 @@ import (
 	"strings"
 )
 
+// ParseSubnetCIDR parses a CIDR string (e.g. 192.168.1.0/24) and returns the IPv4 network address and subnet mask.
+func ParseSubnetCIDR(subnetCIDR string) (string, string, error) {
+	return parseSubnetCIDR(subnetCIDR)
+}
+
 // parseSubnetCIDR parses a CIDR string (e.g. 192.168.1.0/24) and returns the IPv4 network address and subnet mask.
 func parseSubnetCIDR(subnetCIDR string) (string, string, error) {
 	_, ipNet, err := net.ParseCIDR(strings.TrimSpace(subnetCIDR))

@@ -916,6 +916,21 @@ func (tf *TransitForwarder) cleanupWorker() {
 	}
 }
 
+// BuildIPv4Packet constructs an IPv4 packet with recalculated checksum (exported for testbench).
+func BuildIPv4Packet(srcIP, dstIP net.IP, protocol byte, ttl byte, payload []byte) []byte {
+	return buildIPv4Packet(srcIP, dstIP, protocol, ttl, payload)
+}
+
+// BuildIPv4UDPPacket constructs an IPv4 packet encapsulating a UDP datagram (exported for testbench).
+func BuildIPv4UDPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte) []byte {
+	return buildIPv4UDPPacket(srcIP, srcPort, dstIP, dstPort, payload)
+}
+
+// BuildIPv4TCPPacket constructs an IPv4 packet encapsulating a TCP segment (exported for testbench).
+func BuildIPv4TCPPacket(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, seqNum uint32, ackNum uint32, flags byte, window uint16, payload []byte) []byte {
+	return buildIPv4TCPPacket(srcIP, srcPort, dstIP, dstPort, seqNum, ackNum, flags, window, payload)
+}
+
 // buildIPv4Packet constructs an IPv4 packet with recalculated checksum.
 func buildIPv4Packet(srcIP, dstIP net.IP, protocol byte, ttl byte, payload []byte) []byte {
 	totalLen := 20 + len(payload)

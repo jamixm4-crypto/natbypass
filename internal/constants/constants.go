@@ -11,6 +11,9 @@ package constants
 import "time"
 
 const (
+	// Version
+	CurrentVersion         = "1.9.507-beta.42"
+
 	// Network and service defaults
 	DefaultWebUIPort       = 8080
 	DefaultUDPPort         = 47832
