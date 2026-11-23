@@ -712,7 +712,7 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	execPath, _ = filepath.EvalSymlinks(execPath)
 
 	// Защита от "no space left on device": очистка старых артефактов и логов перед скачиванием
-	prepareStorageForUpdate(execPath)
+	PrepareStorageForUpdate(execPath)
 
 	// Проверка наличия свободного места на диске (минимум 18 МБ)
 	if free, err := getFreeDiskSpace(filepath.Dir(execPath)); err == nil && free > 0 && free < 18*1024*1024 {
@@ -947,10 +947,10 @@ func RunPreExitHooks() {
 	}
 }
 
-// prepareStorageForUpdate frees disk space on constrained environments (such as Keenetic / OpenWrt /opt)
+// PrepareStorageForUpdate frees disk space on constrained environments (such as Keenetic / OpenWrt /opt)
 // before downloading new binaries. It removes leftover temporary files (.part, .new, .old) and truncates
 // oversized log files (> 512 KB on embedded, > 4 MB on desktop) to ensure sufficient room for download.
-func prepareStorageForUpdate(execPath string) {
+func PrepareStorageForUpdate(execPath string) {
 	if execPath == "" {
 		return
 	}

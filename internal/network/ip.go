@@ -260,8 +260,11 @@ func GetLocalLANIP() string {
 			_ = conn.Close()
 			if ok && localAddr != nil && localAddr.IP != nil {
 				if ip4 := localAddr.IP.To4(); ip4 != nil && !ip4.IsLoopback() && !ip4.IsUnspecified() {
-					// Исключаем CGNAT меш-диапазон 100.64.0.0/10
-					if !(ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127) && ip4.IsPrivate() {
+					// Исключаем CGNAT (100.64.0.0/10) и оверлейные подсети mesh (10.1.0.0/16, 10.200.0.0/16)
+					if !(ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127) &&
+						!(ip4[0] == 10 && ip4[1] == 1) &&
+						!(ip4[0] == 10 && ip4[1] == 200) &&
+						ip4.IsPrivate() {
 						return ip4.String()
 					}
 				}
@@ -303,8 +306,10 @@ func GetLocalLANIP() string {
 				continue
 			}
 			if ip4 := ip.To4(); ip4 != nil {
-				// Пропускаем CGNAT подсеть 100.64.0.0/10
-				if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+				// Пропускаем CGNAT подсеть 100.64.0.0/10 и оверлейные подсети mesh 10.1.0.0/16, 10.200.0.0/16
+				if (ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127) ||
+					(ip4[0] == 10 && ip4[1] == 1) ||
+					(ip4[0] == 10 && ip4[1] == 200) {
 					continue
 				}
 				if ip4.IsPrivate() {

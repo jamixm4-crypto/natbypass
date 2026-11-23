@@ -3567,6 +3567,10 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if exe, err := os.Executable(); err == nil {
+		updater.PrepareStorageForUpdate(exe)
+	}
+
 	go func() {
 		_ = updater.ApplyUpdate(context.Background(), req.AssetURL)
 	}()

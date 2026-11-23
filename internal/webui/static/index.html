@@ -3645,7 +3645,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           qrPayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
         }
       } else if (mode === 'apk') {
-        const verDisplay = (window.currentAppVersion || 'v1.9.507-beta.44').replace(/^v?/, 'v');
+        const verDisplay = (window.currentAppVersion || 'v1.9.507-beta.45').replace(/^v?/, 'v');
         let directApkUrl = window.cachedApkDownloadUrl || '';
         if (!directApkUrl) {
           directApkUrl = `https://github.com/jamixm4-crypto/natbypass/releases/download/${verDisplay}/NatBypass-${verDisplay}-universal.apk`;
@@ -3991,6 +3991,23 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       }
     }
 
+    async function clearDiskLogAndRetryUpdate() {
+      const progStatus = document.getElementById('updateProgressStatus');
+      if (progStatus) {
+        progStatus.innerHTML = '<span style="color:#38bdf8;">🧹 Очистка natbypass.log и освобождение диска...</span>';
+      }
+      try {
+        const res = await fetch('/api/logs/clear', { method: 'POST' });
+        const json = await res.json();
+        showToast('✓ ' + (json.message || 'Журнал очищен, диск освобожден'));
+      } catch (e) {
+        console.error('Failed to clear log:', e);
+      }
+      setTimeout(() => {
+        applyUpdateNow();
+      }, 600);
+    }
+
     async function applyUpdateNow() {
       const btnApply = document.getElementById('btnApplyUpdate');
       const btnCheck = document.getElementById('btnCheckUpdate');
@@ -4062,8 +4079,16 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
               progStatus.innerText = d.status;
             }
             if (d.error) {
-              progStatus.innerText = 'Ошибка: ' + d.error;
-              progStatus.style.color = '#ef4444';
+              const isDiskSpace = /space|мест|диск|пам|device/i.test(d.error);
+              if (isDiskSpace) {
+                progStatus.innerHTML = '<div style="color:#ef4444; margin-bottom:8px;"><strong>Ошибка:</strong> ' + escapeHtml(d.error) + '</div>' +
+                  '<div style="font-size:0.83rem; color:#cbd5e1; margin-bottom:10px;">Раздел /opt переполнен (вероятно, файлом логов natbypass.log). Очистите диск в один клик:</div>' +
+                  '<button type="button" class="btn" style="background:#ef4444; color:#fff; padding:7px 14px; font-size:0.85rem; border-radius:8px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-weight:600;" onclick="clearDiskLogAndRetryUpdate()">' +
+                  '🧹 Очистить natbypass.log и повторить загрузку</button>';
+              } else {
+                progStatus.innerText = 'Ошибка: ' + d.error;
+                progStatus.style.color = '#ef4444';
+              }
               clearInterval(updatePollTimer);
               document.getElementById('btnCheckUpdate').style.display = 'inline-flex';
               return;
@@ -6193,6 +6218,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.width / dpr;
       const h = canvas.height / dpr;
+      const cx = w / 2;
+      const cy = h / 2;
 
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

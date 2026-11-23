@@ -1893,7 +1893,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							myLocal = puncher.LocalAddr()
 							myPub = puncher.MappedIPString()
 						}
-						if p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, myPub) {
+						isLocalLAN := p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, myPub)
+						if isLocalLAN && (!p.DirectP2P || targetEP == "" || targetEP == p.STUNAddr) {
 							targetEP = p.LocalAddr
 						} else if (!p.DirectP2P || targetEP == "" || targetEP == p.STUNAddr) && p.IPv6Addr != "" && network.HasGlobalIPv6() {
 							targetEP = p.IPv6Addr

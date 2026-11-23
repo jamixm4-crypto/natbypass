@@ -1100,6 +1100,13 @@ func IsLocalLANPeer(peerLocalAddr, peerPublicIP, myLocalAddr, myPublicIP string)
 		return false
 	}
 
+	// Never treat mesh overlay Virtual IPs as physical LAN addresses
+	if ip4 := pIP.To4(); ip4 != nil {
+		if (ip4[0] == 10 && ip4[1] == 1) || (ip4[0] == 10 && ip4[1] == 200) || (ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127) {
+			return false
+		}
+	}
+
 	// 1. Both peers share the same public IP -> behind the same NAT router (hairpin NAT scenario)
 	if peerPublicIP != "" && myPublicIP != "" && peerPublicIP == myPublicIP {
 		return true

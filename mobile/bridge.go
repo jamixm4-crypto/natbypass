@@ -38,7 +38,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.44"
+const Version = "1.9.507-beta.45"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -1875,7 +1875,8 @@ func processOutboundPacket(ctx context.Context, pkt []byte) {
 	if globalPuncher != nil {
 		myLocal = globalPuncher.LocalAddr()
 	}
-	if targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, globalPublicIP) {
+	isLocalLAN := targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, globalPublicIP)
+	if isLocalLAN && (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) {
 		targetEP = targetPeer.LocalAddr
 	} else if (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
 		targetEP = targetPeer.IPv6Addr
