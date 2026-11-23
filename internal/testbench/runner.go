@@ -75,6 +75,11 @@ func Run(parentCtx context.Context, cfg Config) (*SummaryReport, error) {
 		report.Results = append(report.Results, RunEngineTests(ctx, vm)...)
 	}
 
+	// 6. Real OS Sockets & Cryptographic Engine Benchmarks
+	if runAll || target == "socket" || target == "crypto" || target == "real" {
+		report.Results = append(report.Results, RunSocketCryptoTests(ctx, cfg.SpeedTestSizeMB)...)
+	}
+
 	// Compute summaries
 	report.TotalDuration = time.Since(startTime)
 	report.TotalTests = len(report.Results)
