@@ -1663,7 +1663,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// to avoid immediate un-NATted blackholing by Windows tcpip.sys and ISP egress filters.
 			// Transit DNS queries (UDP/TCP port 53 and DoT port 853) are ALSO handled by TransitForwarder in userspace on Linux/Keenetic
 			// to guarantee that router firmware (Keenetic NDM dnsproxy / SafeDNS / AdGuard) never hijacks or corrupts DNS responses,
-			// and to immediately reject DoT port 853 so Android OS instantly falls back to UDP 53 without failing validation.
+			// and to transparently proxy DoT port 853 end-to-end so Android Private DNS validates and works reliably.
 			isDNS := false
 			if len(payload) >= 28 {
 				proto := payload[9]
