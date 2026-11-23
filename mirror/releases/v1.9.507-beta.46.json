@@ -1,0 +1,129 @@
+{
+  "version": "v1.9.507-beta.46",
+  "published_at": "2026-11-23T10:58:00Z",
+  "prerelease": true,
+  "release_notes": "**Full Changelog**: https://github.com/jamixm4-crypto/natbypass/compare/v1.9.507-beta.44...v1.9.507-beta.46",
+  "html_url": "https://github.com/jamixm4-crypto/natbypass/releases/tag/v1.9.507-beta.46",
+  "assets": {
+    "windows/amd64/cli": {
+      "name": "natbypass-cli.exe",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-cli.exe",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-cli.exe.sig",
+      "size": 16440320,
+      "sha256": "8dd7dd391f7ff3df6a7d7178fe360a7a0553233b41e4f573ea83e7de53ba851e",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-cli.exe",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-cli.exe",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-cli.exe"
+      ]
+    },
+    "windows/amd64/gui": {
+      "name": "NatBypass-GUI.exe",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-GUI.exe",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-GUI.exe.sig",
+      "size": 13514240,
+      "sha256": "44d165c6daa55618895f1187b17c511a9ce7db8ff3743be98fe03f90f1c0f43b",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-GUI.exe",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-GUI.exe",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-GUI.exe"
+      ]
+    },
+    "linux/mipsle": {
+      "name": "natbypass-router-mipsle",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mipsle",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mipsle.sig",
+      "size": 17105087,
+      "sha256": "e1e21512a6e6774cdcbc6bc0d9770f946ae9446b6e3e9eb4ebe40bed0383e5d2",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mipsle",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mipsle",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mipsle"
+      ]
+    },
+    "linux/amd64": {
+      "name": "natbypass-linux-amd64",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-amd64",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-amd64.sig",
+      "size": 15712416,
+      "sha256": "82a054d20087f6ee20716fe0b1c5bc4a975c215f23f9d3e7fb798c4a4e830ab0",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-amd64",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-amd64",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-amd64"
+      ]
+    },
+    "linux/arm64": {
+      "name": "natbypass-linux-arm64",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-arm64",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-arm64.sig",
+      "size": 14549152,
+      "sha256": "b8307af3e70113cf87b1308e1a8a57991c7066220e5eb7f0f92110b958c58d4f",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-arm64",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-arm64",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-linux-arm64"
+      ]
+    },
+    "linux/arm": {
+      "name": "natbypass-router-armv7",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-armv7",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-armv7.sig",
+      "size": 15138976,
+      "sha256": "e6dfffd9830c934a065db5cc96eeedd134540007b0bf5d8da7e97866ad2af18d",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-armv7",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-armv7",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-armv7"
+      ]
+    },
+    "linux/amd64/probe": {
+      "name": "natbypass-probe-linux-amd64",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-probe-linux-amd64",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-probe-linux-amd64.sig",
+      "size": 7839904,
+      "sha256": "0f1b1b472845a5519535f4312becb2995d7bab084b2af9091dceb6a75fbfe66d",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-probe-linux-amd64",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-probe-linux-amd64",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-probe-linux-amd64"
+      ]
+    },
+    "windows/amd64/probe": {
+      "name": "NatBypass-Probe.exe",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-Probe.exe",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-Probe.exe.sig",
+      "size": 8229376,
+      "sha256": "d55ed0038f5301760993fd1fd6bfedda834fc3fbc6ef93429cf1c8aa03a2ce76",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-Probe.exe",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-Probe.exe",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass-Probe.exe"
+      ]
+    },
+    "linux/mips": {
+      "name": "natbypass-router-mips",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mips",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mips.sig",
+      "size": 17105087,
+      "sha256": "c9ad89042d363a7644a34e026bc0eec59f1110c13b08d2b38ad4af8be28f7927",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mips",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mips",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/natbypass-router-mips"
+      ]
+    },
+    "windows/amd64/main": {
+      "name": "NatBypass.exe",
+      "url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass.exe",
+      "sig_url": "https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass.exe.sig",
+      "size": 16818688,
+      "sha256": "6174ce6de6e2d137be2b7b197f3067a9022cfd458b61d5a4156dd1fbbedb9104",
+      "mirrors": [
+        "https://gh-proxy.com/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass.exe",
+        "https://ghfast.top/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass.exe",
+        "https://ghproxy.net/https://github.com/jamixm4-crypto/natbypass/releases/download/v1.9.507-beta.46/NatBypass.exe"
+      ]
+    }
+  }
+}
