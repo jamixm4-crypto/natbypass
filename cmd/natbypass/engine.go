@@ -1158,6 +1158,24 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// This maintains and proactively restores NAT pinholes without stalling.
 			cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
 			isICMP := len(packet) >= 20 && packet[9] == 1
+			isDNS := false
+			if len(packet) >= 28 {
+				proto := packet[9]
+				ihl := int(packet[0]&0x0F) * 4
+				if proto == 17 && len(packet) >= ihl+8 {
+					srcPort := binary.BigEndian.Uint16(packet[ihl : ihl+2])
+					dstPort := binary.BigEndian.Uint16(packet[ihl+2 : ihl+4])
+					if srcPort == 53 || dstPort == 53 {
+						isDNS = true
+					}
+				} else if proto == 6 && len(packet) >= ihl+20 {
+					srcPort := binary.BigEndian.Uint16(packet[ihl : ihl+2])
+					dstPort := binary.BigEndian.Uint16(packet[ihl+2 : ihl+4])
+					if srcPort == 53 || dstPort == 53 || srcPort == 853 || dstPort == 853 {
+						isDNS = true
+					}
+				}
+			}
 			isTransitOrInternet := false
 			if len(packet) >= 20 && (packet[0]>>4) == 4 {
 				pSrc := net.IPv4(packet[12], packet[13], packet[14], packet[15]).String()
@@ -1265,7 +1283,8 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 			// Transit/Internet streaming traffic MUST NEVER be published to central MQTT signaling broker!
-			if isTransitOrInternet && !isICMP {
+			// ICMP and DNS queries/replies are lightweight control packets and ALWAYS allowed as fallback.
+			if isTransitOrInternet && !isICMP && !isDNS {
 				return nil
 			}
 			// 5. Central MQTT Relay fallback with encryption (restricted to ICMP and mesh overlay traffic)
@@ -2043,6 +2062,24 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 
 						outSrcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
 						isICMP := len(pkt) >= 20 && pkt[9] == 1
+						isDNS := false
+						if len(pkt) >= 28 {
+							proto := pkt[9]
+							ihl := int(pkt[0]&0x0F) * 4
+							if proto == 17 && len(pkt) >= ihl+8 {
+								srcPort := binary.BigEndian.Uint16(pkt[ihl : ihl+2])
+								dstPort := binary.BigEndian.Uint16(pkt[ihl+2 : ihl+4])
+								if srcPort == 53 || dstPort == 53 {
+									isDNS = true
+								}
+							} else if proto == 6 && len(pkt) >= ihl+20 {
+								srcPort := binary.BigEndian.Uint16(pkt[ihl : ihl+2])
+								dstPort := binary.BigEndian.Uint16(pkt[ihl+2 : ihl+4])
+								if srcPort == 53 || dstPort == 53 || srcPort == 853 || dstPort == 853 {
+									isDNS = true
+								}
+							}
+						}
 
 						// Check if traffic is Internet transit (client -> exit node, or exit node -> client)
 						isExitNodeTraffic := false
@@ -2058,11 +2095,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						isForwardedInternet := !isICMP && ((cleanVIP != "" && outSrcIP != cleanVIP) || isExitNodeTraffic)
 
 						// Dual-Path Shadow Relay Rule: ONLY if direct transmission completely failed AND NOT internet traffic!
-						// ICMP служебный трафик (ping) ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов.
+						// ICMP и DNS служебный трафик ВСЕГДА разрешен к релею для обеспечения мгновенной доступности узлов и резолвинга имён.
 						// Массовый интернет-трафик СТРОГО запрещен к публикации в MQTT, чтобы не вызывать перегрузку брокера и таймауты сигналинга.
 						directVerified := sentTCP || (sentDirect && p.DirectP2P && bilateralOK)
 						needsRelay := !directVerified
-						needsMQTTRelay := needsRelay && (!isForwardedInternet || isICMP)
+						needsMQTTRelay := needsRelay && (!isForwardedInternet || isICMP || isDNS)
 
 						// 1e. Mesh Userspace Multi-Hop Relay Fallback:
 						if needsRelay && !isForceUDP {

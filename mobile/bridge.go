@@ -38,7 +38,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.45"
+const Version = "1.9.507-beta.46"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -1907,6 +1907,24 @@ func processOutboundPacket(ctx context.Context, pkt []byte) {
 	isForceUDP := globalTCPDirectMgr != nil && globalTCPDirectMgr.TransportMode() == "force_udp"
 
 	isICMP := len(pkt) >= 20 && pkt[9] == 1
+	isDNS := false
+	if len(pkt) >= 28 {
+		proto := pkt[9]
+		ihl := int(pkt[0]&0x0F) * 4
+		if proto == 17 && len(pkt) >= ihl+8 {
+			srcPort := binary.BigEndian.Uint16(pkt[ihl : ihl+2])
+			dstPort := binary.BigEndian.Uint16(pkt[ihl+2 : ihl+4])
+			if srcPort == 53 || dstPort == 53 {
+				isDNS = true
+			}
+		} else if proto == 6 && len(pkt) >= ihl+20 {
+			srcPort := binary.BigEndian.Uint16(pkt[ihl : ihl+2])
+			dstPort := binary.BigEndian.Uint16(pkt[ihl+2 : ihl+4])
+			if srcPort == 53 || dstPort == 53 || srcPort == 853 || dstPort == 853 {
+				isDNS = true
+			}
+		}
+	}
 	cleanExit := strings.TrimSpace(strings.Split(globalExitNode, "/")[0])
 	targetVIP := strings.TrimSpace(strings.Split(targetPeer.VirtualIP, "/")[0])
 	isExitPeer := globalExitNode != "" && (targetPeer.DeviceID == globalExitNode || targetVIP == cleanExit || targetPeer.Nickname == globalExitNode || targetPeer.DeviceName == globalExitNode)
@@ -2045,7 +2063,7 @@ func processOutboundPacket(ctx context.Context, pkt []byte) {
 
 	directVerified := sentTCP || (sentDirect && targetPeer.DirectP2P && bilateralOK)
 	needsRelay := !directVerified
-	needsMQTTRelay := needsRelay && (!isExitOrInternet || isICMP)
+	needsMQTTRelay := needsRelay && (!isExitOrInternet || isICMP || isDNS)
 
 	// 1e. Mesh Userspace Relay Fallback (encapsulated in Multi-Hop header)
 	if needsRelay && !isForceUDP && globalRegistry != nil {
