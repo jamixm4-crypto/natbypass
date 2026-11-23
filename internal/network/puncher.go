@@ -1738,11 +1738,11 @@ func (p *UDPPuncher) SendKeepAlive(targetAddr string) error {
 		}
 		// 2. Резерв: зашифрованная проба с переменным случайным паддингом (16..47 байт)
 		var b [1]byte
-		_ = crypto.SafeRandomBytes(b[:])
+		crypto.FastJitterBytes(b[:])
 		padLen := 16 + int(b[0]%32)
 		paddedProbe := make([]byte, len(probeData)+padLen)
 		copy(paddedProbe, probeData)
-		_ = crypto.SafeRandomBytes(paddedProbe[len(probeData):])
+		crypto.FastJitterBytes(paddedProbe[len(probeData):])
 
 		if enc, encErr := crypto.EncryptSelf(paddedProbe, cKey); encErr == nil && len(enc) > 0 {
 			_, err = p.writeToUDP(enc, rAddr)
@@ -1798,7 +1798,7 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			padLen := pmin
 			if diff := pmax - pmin; diff > 0 {
 				var b [1]byte
-				_ = crypto.SafeRandomBytes(b[:])
+				crypto.FastJitterBytes(b[:])
 				padLen += int(b[0]) % (diff + 1)
 			}
 			// Защита от фрагментации на мобильных операторах (MTU 1280):
@@ -1815,7 +1815,7 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 				padded := make([]byte, 2+len(payload)+padLen)
 				binary.BigEndian.PutUint16(padded[:2], pLen)
 				copy(padded[2:], payload)
-				_ = crypto.SafeRandomBytes(padded[2+len(payload):])
+				crypto.FastJitterBytes(padded[2+len(payload):])
 				payloadToEncrypt = padded
 			}
 		} else {
@@ -1828,11 +1828,11 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			} else if len(payload) < 512 {
 				// Default light jitter padding for small packets (<512B) to mask keystrokes / interactive traffic
 				var b [1]byte
-				_ = crypto.SafeRandomBytes(b[:])
+				crypto.FastJitterBytes(b[:])
 				padLen := 16 + int(b[0]%48) // 16-63 bytes
 				padded := make([]byte, len(payload)+padLen)
 				copy(padded, payload)
-				_ = crypto.SafeRandomBytes(padded[len(payload):])
+				crypto.FastJitterBytes(padded[len(payload):])
 				payloadToEncrypt = padded
 			}
 		}

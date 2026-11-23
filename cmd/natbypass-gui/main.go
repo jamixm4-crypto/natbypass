@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.43"
+	Version = "1.9.507-beta.44"
 	Commit  = "release"
 )
 
@@ -5939,22 +5939,16 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}()
 
-			numWorkers := runtime.NumCPU()
-			if numWorkers < 4 {
-				numWorkers = 4
-			} else if numWorkers > 16 {
-				numWorkers = 16
-			}
-			for w := 0; w < numWorkers; w++ {
-				go func() {
-					for {
-						select {
-						case <-ctx.Done():
+			// Single sequential FIFO worker to guarantee zero TCP packet reordering
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case packet, ok := <-pktCh:
+						if !ok {
 							return
-						case packet, ok := <-pktCh:
-							if !ok {
-								return
-							}
+						}
 						srcIP := tunnel.GetSrcIP(packet)
 						destIP := tunnel.GetDestIP(packet)
 						if srcIP == nil || destIP == nil {
@@ -6265,7 +6259,6 @@ func startEngineFromConfig(c *config.Config) {
 					}
 				}
 			}()
-		}
 		} else {
 			warnMsg := fmt.Sprintf("⚠️ Wintun адаптер: %s (Для полного ping запустите от Администратора)", tErr.Error())
 			addLog(warnMsg)

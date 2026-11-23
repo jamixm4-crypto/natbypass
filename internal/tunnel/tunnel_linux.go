@@ -420,9 +420,11 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 		_ = exec.Command("iptables", "-w", "2", "-t", "mangle", "-D", "PREROUTING", "-i", d.AdapterName, "-j", "ACCEPT").Run()
 		ensureRule("mangle", "PREROUTING", "-i", d.AdapterName, "-j", "MARK", "--set-mark", "0x4e")
 		ensureRule("mangle", "OUTPUT", "-o", d.AdapterName, "-j", "ACCEPT")
-		ensureRule("mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
+		ensureRule("mangle", "FORWARD", "-o", d.AdapterName, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
+		ensureRule("mangle", "FORWARD", "-i", d.AdapterName, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
 		if isKeeneticDevice() {
-			ensureRule("mangle", "_NDM_FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
+			ensureRule("mangle", "_NDM_FORWARD", "-o", d.AdapterName, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
+			ensureRule("mangle", "_NDM_FORWARD", "-i", d.AdapterName, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1220")
 		}
 
 		// 3b. Таблица nat: MASQUERADE для транзитного интернета через Exit Node (аппаратный line-rate)
@@ -500,9 +502,11 @@ if [ "$table" = "mangle" ]; then
     iptables -t mangle -D PREROUTING -i %[1]s -j ACCEPT 2>/dev/null || true
     iptables -t mangle -C PREROUTING -i %[1]s -j MARK --set-mark 0x4e 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i %[1]s -j MARK --set-mark 0x4e 2>/dev/null || true
     iptables -t mangle -C OUTPUT -o %[1]s -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o %[1]s -j ACCEPT 2>/dev/null || true
-    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
-    iptables -t mangle -C _NDM_FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I _NDM_FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
-    iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I POSTROUTING 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C FORWARD -o %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I FORWARD 1 -o %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C FORWARD -i %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I FORWARD 1 -i %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C _NDM_FORWARD -o %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I _NDM_FORWARD 1 -o %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C _NDM_FORWARD -i %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I _NDM_FORWARD 1 -i %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C POSTROUTING -o %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I POSTROUTING 1 -o %[1]s -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
 fi
 
 if [ "$table" = "nat" ]; then

@@ -8,7 +8,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.43"
+    DEFAULT_BETA="v1.9.507-beta.44"
     BETA_MODE=0
 
     # Parse CLI flags
@@ -517,9 +517,11 @@ fi
 if [ "$table" = "mangle" ]; then
     iptables -t mangle -C PREROUTING -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i nb0 -j MARK --set-mark 0x4e 2>/dev/null || true
     iptables -t mangle -C OUTPUT -o nb0 -j ACCEPT 2>/dev/null || iptables -t mangle -I OUTPUT 1 -o nb0 -j ACCEPT 2>/dev/null || true
-    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
-    iptables -t mangle -C _NDM_FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I _NDM_FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
-    iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I POSTROUTING 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C FORWARD -o nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I FORWARD 1 -o nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C FORWARD -i nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I FORWARD 1 -i nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C _NDM_FORWARD -o nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I _NDM_FORWARD 1 -o nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C _NDM_FORWARD -i nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I _NDM_FORWARD 1 -i nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
+    iptables -t mangle -C POSTROUTING -o nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || iptables -t mangle -I POSTROUTING 1 -o nb0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1220 2>/dev/null || true
 fi
 
 if [ "$table" = "nat" ]; then

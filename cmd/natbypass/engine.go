@@ -1797,22 +1797,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 		}()
 
-		numEngineWorkers := runtime.NumCPU()
-		if numEngineWorkers < 4 {
-			numEngineWorkers = 4
-		} else if numEngineWorkers > 16 {
-			numEngineWorkers = 16
-		}
-		for w := 0; w < numEngineWorkers; w++ {
-			go func() {
-				for {
-					select {
-					case <-engineCtx.Done():
+		// Single sequential FIFO worker to guarantee zero TCP packet reordering.
+		// Multiple parallel workers cause out-of-order delivery, triggering DUP-ACKs and collapsing TCP CWND.
+		go func() {
+			for {
+				select {
+				case <-engineCtx.Done():
+					return
+				case pkt, ok := <-pktCh:
+					if !ok {
 						return
-					case pkt, ok := <-pktCh:
-						if !ok {
-							return
-						}
+					}
 					if len(pkt) < 20 || pkt[0]>>4 != 4 {
 						continue
 					}
@@ -2199,7 +2194,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 		}()
-	}
 	}
 
 	// Dedicated keepalive & probe loop for maintaining carrier CGNAT mappings.

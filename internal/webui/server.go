@@ -3352,6 +3352,17 @@ func (s *Server) handleLogsClear(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = os.Remove(p + ".1")
 	}
+
+	// Also clean leftover update artifacts (.part, .new, .old) in binary dirs to immediately free disk
+	cleanDirs := []string{"/opt/bin"}
+	if exe, err := os.Executable(); err == nil {
+		cleanDirs = append(cleanDirs, filepath.Dir(exe))
+	}
+	for _, d := range cleanDirs {
+		for _, name := range []string{"natbypass.new", "natbypass.new.part", "natbypass.part", "natbypass.old"} {
+			_ = os.Remove(filepath.Join(d, name))
+		}
+	}
 	if cleared {
 		s.jsonResponse(w, http.StatusOK, map[string]interface{}{"ok": true, "message": "Файл журнала natbypass.log успешно очищен (0 байт)"}, "")
 	} else {

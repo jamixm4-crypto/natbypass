@@ -22,6 +22,22 @@ import (
 
 var fallbackCounter uint64
 
+// FastJitterBytes fills buf with non-cryptographic fast pseudorandom bytes (zero-syscall).
+// Used exclusively for packet trailer padding noise and jitter where entropy syscalls
+// (/dev/urandom) would introduce context switch bottlenecks on embedded MIPS routers.
+func FastJitterBytes(buf []byte) {
+	if len(buf) == 0 {
+		return
+	}
+	s := atomic.AddUint64(&fallbackCounter, 0x9e3779b97f4a7c15) ^ uint64(time.Now().UnixNano())
+	for i := 0; i < len(buf); i++ {
+		s ^= s >> 12
+		s ^= s << 25
+		s ^= s >> 27
+		buf[i] = byte(s * 0x2545F4914F6CDD1D >> 56)
+	}
+}
+
 // SafeRandomBytes fills buf with cryptographically secure random bytes from crypto/rand.
 // If crypto/rand fails (e.g. system entropy exhaustion or file descriptor exhaustion
 // on low-resource routers running Keenetic/OpenWrt MIPS/ARM), it logs a warning and
