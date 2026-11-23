@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -710,8 +711,19 @@ func ApplyUpdate(ctx context.Context, assetURL string) error {
 	}
 	execPath, _ = filepath.EvalSymlinks(execPath)
 
+	// Защита от "no space left on device": очистка старых артефактов и логов перед скачиванием
+	prepareStorageForUpdate(execPath)
+
+	// Проверка наличия свободного места на диске (минимум 18 МБ)
+	if free, err := getFreeDiskSpace(filepath.Dir(execPath)); err == nil && free > 0 && free < 18*1024*1024 {
+		errStr := fmt.Sprintf("Недостаточно свободного места на диске: доступно %0.1f МБ, требуется минимум 18 МБ. Очистите раздел /opt на роутере.", float64(free)/(1024*1024))
+		setStatus(false, 0, "", errStr, false)
+		return errors.New(errStr)
+	}
+
 	tmpPath := execPath + ".new"
 	_ = os.Remove(tmpPath)
+	_ = os.Remove(tmpPath + ".part")
 
 	var downloadErr error
 	var usedURL string
@@ -931,6 +943,69 @@ func RunPreExitHooks() {
 				defer func() { recover() }()
 				h()
 			}()
+		}
+	}
+}
+
+// prepareStorageForUpdate frees disk space on constrained environments (such as Keenetic / OpenWrt /opt)
+// before downloading new binaries. It removes leftover temporary files (.part, .new, .old) and truncates
+// oversized log files (> 512 KB on embedded, > 4 MB on desktop) to ensure sufficient room for download.
+func prepareStorageForUpdate(execPath string) {
+	if execPath == "" {
+		return
+	}
+	dir := filepath.Dir(execPath)
+
+	// 1. Remove leftover update artifacts (.part, .new, .old)
+	cleanTargets := []string{
+		execPath + ".new",
+		execPath + ".new.part",
+		execPath + ".part",
+		execPath + ".old",
+		filepath.Join(dir, "natbypass.new"),
+		filepath.Join(dir, "natbypass.new.part"),
+		filepath.Join(dir, "natbypass.part"),
+		filepath.Join(dir, "natbypass.old"),
+	}
+	for _, f := range cleanTargets {
+		_ = os.Remove(f)
+	}
+
+	// 2. Truncate bloated log files that cause "no space left on device"
+	logFiles := []string{
+		"/opt/var/log/natbypass.log",
+		"/var/log/natbypass.log",
+		filepath.Join(dir, "natbypass.log"),
+		filepath.Join(dir, "..", "var", "log", "natbypass.log"),
+	}
+	maxLogSize := int64(512 * 1024) // 512 KB on embedded
+	if runtime.GOARCH != "mips" && runtime.GOARCH != "mipsle" && runtime.GOARCH != "arm" {
+		maxLogSize = 4 * 1024 * 1024
+	}
+
+	for _, logFile := range logFiles {
+		if fi, err := os.Stat(logFile); err == nil && fi.Size() > maxLogSize {
+			_ = os.Truncate(logFile, 0)
+			_ = os.Remove(logFile + ".1")
+		}
+	}
+
+	// 3. If disk space is tight (< 25 MB on Linux/embedded), clean additional log & tmp files
+	if free, err := getFreeDiskSpace(dir); err == nil && free < 25*1024*1024 {
+		// Clean /opt/var/log/*.log and *.1
+		if entries, err := os.ReadDir("/opt/var/log"); err == nil {
+			for _, entry := range entries {
+				if strings.HasSuffix(entry.Name(), ".log") || strings.HasSuffix(entry.Name(), ".1") {
+					fullPath := filepath.Join("/opt/var/log", entry.Name())
+					_ = os.Truncate(fullPath, 0)
+				}
+			}
+		}
+		// Clean /opt/tmp
+		if entries, err := os.ReadDir("/opt/tmp"); err == nil {
+			for _, entry := range entries {
+				_ = os.RemoveAll(filepath.Join("/opt/tmp", entry.Name()))
+			}
 		}
 	}
 }

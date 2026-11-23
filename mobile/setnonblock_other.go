@@ -24,3 +24,8 @@ func waitTunReadable(_ int, timeoutMs int) bool {
 	time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
 	return true
 }
+
+func waitTunWritable(_ int, timeoutMs int) bool {
+	time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
+	return true
+}

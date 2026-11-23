@@ -40,7 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.42"
+const Version = "1.9.507-beta.43"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -1636,7 +1636,7 @@ func attachTUNLocked(tunFd int) {
 	// 1. Выделенная асинхронная горутина записи в TUN (Inbound UDP/Relay -> OS TUN)
 	// Полностью изолирует UDPPuncher.readLoop() от блокирующих сисколлов tf.Write(),
 	// предотвращая переполнение SO_RCVBUF сокета ядра Android и устраняя 90%+ потерь пакетов.
-	go func(ctx context.Context, f *os.File, rxCh <-chan []byte) {
+	go func(ctx context.Context, f *os.File, fd int, rxCh <-chan []byte) {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Warn().Msg(fmt.Sprintf("TUN writer recovered: %v", r))
@@ -1654,11 +1654,27 @@ func attachTUNLocked(tunFd int) {
 					if pkt[0]>>4 == 4 {
 						ensureValidIPv4Checksum(pkt)
 					}
-					_, _ = f.Write(pkt)
+					// Безопасная запись с повторами при EAGAIN/EWOULDBLOCK:
+					// предотвращает молчаливую потерю пакетов (silent drop) при всплесках трафика,
+					// сохраняя размер окна TCP (TCP window) и предотвращая коллапс скорости до 1-2 Мбит/с.
+					for retry := 0; retry < 5; retry++ {
+						_, err := f.Write(pkt)
+						if err == nil {
+							break
+						}
+						if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
+							if ctx.Err() != nil {
+								return
+							}
+							waitTunWritable(fd, 2)
+							continue
+						}
+						break
+					}
 				}
 			}
 		}
-	}(tunCtx, tf, tunRxCh)
+	}(tunCtx, tf, rawTunFd, tunRxCh)
 
 	if globalPuncher != nil && globalTunFile != nil {
 		globalPuncher.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
@@ -1677,21 +1693,27 @@ func attachTUNLocked(tunFd int) {
 			// Прямой UDP пакет от пира подтверждает P2P доступность
 			if len(payload) >= 20 && (payload[0]>>4) == 4 && globalRegistry != nil {
 				srcVIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
+				now := time.Now()
 				if p, ok := globalRegistry.GetByVirtualIP(srcVIP); ok {
-					p.DirectP2P = true
-					if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" || p.Transport == "relay_mesh" {
-						p.Transport = "udp_direct"
-						p.RelayedViaDevID = ""
-						p.RelayedViaName = ""
-						p.RelayedViaVIP = ""
+					// Троттлинг Upsert: обновляем запись пира в реестре ТОЛЬКО при смене эндпоинта
+					// или раз в 2 секунды, исключая 4000+ мьютекс-блокировок в секунду на быстром потоке данных
+					needUpdate := !p.DirectP2P || (srcAddr != nil && p.ActiveEndpoint != srcAddr.String()) || now.Sub(p.LastDirectSeen) > 2*time.Second
+					if needUpdate {
+						p.DirectP2P = true
+						if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" || p.Transport == "relay_mesh" {
+							p.Transport = "udp_direct"
+							p.RelayedViaDevID = ""
+							p.RelayedViaName = ""
+							p.RelayedViaVIP = ""
+						}
+						p.LastDirectSeen = now
+						p.LastBilateralSeen = now
+						p.LastSeen = now
+						if srcAddr != nil {
+							p.ActiveEndpoint = srcAddr.String()
+						}
+						globalRegistry.Upsert(p)
 					}
-					p.LastDirectSeen = time.Now()
-					p.LastBilateralSeen = time.Now()
-					p.LastSeen = time.Now()
-					if srcAddr != nil {
-						p.ActiveEndpoint = srcAddr.String()
-					}
-					globalRegistry.Upsert(p)
 				} else if globalExitNode != "" && srcAddr != nil {
 					// Интернет-трафик, возвращающийся от Exit Node
 					fromStr := srcAddr.String()
@@ -1708,14 +1730,16 @@ func attachTUNLocked(tunFd int) {
 						}
 					}
 					if ep != nil {
-						// WireGuard Endpoint Roaming: an authenticated data packet returning from the Exit Node
-						// immediately updates active endpoint and confirms direct P2P connectivity.
-						ep.DirectP2P = true
-						ep.LastDirectSeen = time.Now()
-						ep.LastBilateralSeen = time.Now()
-						ep.LastSeen = time.Now()
-						ep.ActiveEndpoint = fromStr
-						globalRegistry.Upsert(ep)
+						// WireGuard Endpoint Roaming: троттлинг обновления статуса Exit Node (не чаще 1 раза в 2с)
+						needUpdate := !ep.DirectP2P || ep.ActiveEndpoint != fromStr || now.Sub(ep.LastDirectSeen) > 2*time.Second
+						if needUpdate {
+							ep.DirectP2P = true
+							ep.LastDirectSeen = now
+							ep.LastBilateralSeen = now
+							ep.LastSeen = now
+							ep.ActiveEndpoint = fromStr
+							globalRegistry.Upsert(ep)
+						}
 					}
 				}
 			}

@@ -72,6 +72,7 @@ var (
 	lastLeaderSyncPunch = make(map[string]time.Time)
 	leaderPunchMu       sync.Mutex
 	asnCacheFile        string
+	lastSendWarnEngine  sync.Map
 )
 
 func triggerPublish() {
@@ -1949,7 +1950,11 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							if err == nil {
 								sentDirect = true
 							} else {
-								log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
+								nowUnix := time.Now().Unix()
+								if lastVal, ok := lastSendWarnEngine.Load(dstIP); !ok || nowUnix-lastVal.(int64) >= 5 {
+									lastSendWarnEngine.Store(dstIP, nowUnix)
+									log.Warn().Err(err).Str("dst", dstIP).Str("ep", targetEP).Msg("📤 TUN→UDP send error")
+								}
 							}
 						}
 						// Dual-send to LocalAddr for LAN clients ONLY if send to targetEP failed or targetEP empty

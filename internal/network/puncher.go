@@ -1801,6 +1801,15 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 				_ = crypto.SafeRandomBytes(b[:])
 				padLen += int(b[0]) % (diff + 1)
 			}
+			// Защита от фрагментации на мобильных операторах (MTU 1280):
+			// Ограничиваем паддинг, чтобы общий зашифрованный UDP-пакет не превышал 1280 байт
+			if len(payload)+2+padLen+56 > 1280 {
+				if maxPad := 1280 - len(payload) - 2 - 56; maxPad >= 0 {
+					padLen = maxPad
+				} else {
+					padLen = 0
+				}
+			}
 			if padLen > 0 {
 				pLen := uint16(len(payload))
 				padded := make([]byte, 2+len(payload)+padLen)
@@ -1830,6 +1839,7 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 
 		epoch := crypto.GetCurrentEpoch()
 		seq := uint64(atomic.AddUint32(&p.outboundSeq, 1))
+		targetConn := p.activeConnFor(rAddr)
 		if enc, encErr := crypto.EncryptWithEpochSeq(payloadToEncrypt, cKey[:], epoch, seq); encErr == nil && len(enc) > 0 {
 			if p.pacer != nil {
 				p.pacer.Pace()
@@ -1841,10 +1851,10 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			p.mu.Unlock()
 
 			if shaper != nil && shaper.IsEnabled() {
-				return shaper.SendPacket(p.conn, rAddr, enc)
+				return shaper.SendPacket(targetConn, rAddr, enc)
 			}
 
-			_, err = p.conn.WriteToUDP(enc, rAddr)
+			_, err = targetConn.WriteToUDP(enc, rAddr)
 			return err
 		} else if enc, encErr := crypto.EncryptSelf(payloadToEncrypt, cKey); encErr == nil && len(enc) > 0 {
 			if p.pacer != nil {
@@ -1857,10 +1867,10 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			p.mu.Unlock()
 
 			if shaper != nil && shaper.IsEnabled() {
-				return shaper.SendPacket(p.conn, rAddr, enc)
+				return shaper.SendPacket(targetConn, rAddr, enc)
 			}
 
-			_, err = p.conn.WriteToUDP(enc, rAddr)
+			_, err = targetConn.WriteToUDP(enc, rAddr)
 			return err
 		}
 	}

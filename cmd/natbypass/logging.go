@@ -141,4 +141,76 @@ func setupLogging(level, logFile string) {
 		With().
 		Timestamp().
 		Logger()
+
+	// Активная защита роутера от переполнения /opt из-за перенаправления stderr в лог (> natbypass.log)
+	startLogGuard(logFile)
+}
+
+var logGuardOnce sync.Once
+
+// startLogGuard запускает периодическую фоновую проверку (раз в 2 минуты), которая защищает
+// раздел флеш-памяти роутера (Keenetic / OpenWrt /opt) от переполнения диска ("No space left on device")
+// из-за шелл-редиректа os.Stderr (> /opt/var/log/natbypass.log) или зациклившихся ошибок.
+func startLogGuard(configuredLog string) {
+	logGuardOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(2 * time.Minute)
+			defer ticker.Stop()
+
+			maxAllowed := int64(1024 * 1024) // 1 МБ на роутерах (Keenetic / OpenWrt / MIPS / ARM)
+			if runtime.GOARCH != "mips" && runtime.GOARCH != "mipsle" && runtime.GOARCH != "arm" {
+				maxAllowed = 10 * 1024 * 1024 // 10 МБ на ПК/сервере
+			}
+
+			targets := []string{
+				"/opt/var/log/natbypass.log",
+				"/var/log/natbypass.log",
+			}
+			if configuredLog != "" {
+				targets = append(targets, configuredLog)
+			}
+
+			for range ticker.C {
+				for _, p := range targets {
+					if p == "" {
+						continue
+					}
+					fi, err := os.Stat(p)
+					if err != nil {
+						continue
+					}
+					if fi.Size() > maxAllowed {
+						// Сохраняем последние 32 КБ для диагностики, остальное усекаем на месте
+						truncateKeepTail(p, 32*1024)
+					}
+				}
+			}
+		}()
+	})
+}
+
+// truncateKeepTail безопасно обрезает файл лога на месте, сохраняя последние tailBytes.
+func truncateKeepTail(path string, tailBytes int64) {
+	f, err := os.OpenFile(path, os.O_RDWR, 0644)
+	if err != nil {
+		_ = os.Truncate(path, 0)
+		return
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil || fi.Size() <= tailBytes {
+		return
+	}
+
+	buf := make([]byte, tailBytes)
+	_, err = f.ReadAt(buf, fi.Size()-tailBytes)
+	if err != nil {
+		_ = f.Truncate(0)
+		return
+	}
+
+	_ = f.Truncate(0)
+	_, _ = f.Seek(0, 0)
+	_, _ = f.Write(buf)
 }

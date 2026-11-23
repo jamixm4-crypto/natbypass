@@ -623,6 +623,11 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 			entry.serverISN = sISN
 			entry.clientNextSeq.Store(cISN + 1)
 			entry.serverNextSeq.Store(sISN + 1)
+			// Предотвращаем деградацию скорости и freeze при старте сессии:
+			// инициализируем lastClientAckSeq значением sISN+1, чтобы flow control не блокировал чтение до первого ACK
+			entry.lastClientAckSeq.Store(sISN + 1)
+			entry.lastSeenAck.Store(sISN + 1)
+			entry.clientWindow.Store(2097152) // 2 MB буфер окна для максимальной скорости (line-rate)
 			entry.lastActive.Store(time.Now().Unix())
 			entry.dialing.Store(false)
 
@@ -765,8 +770,8 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 					tf.deliverToClient(srcIP, retransPkt)
 				}
 			}
-		} else if ackNum > prevAck {
-			// Advancing ACK: new data acknowledged
+		} else if int32(ackNum-prevAck) > 0 {
+			// Advancing ACK: new data acknowledged (RFC 793 знаковая разность корректно обрабатывает wrap-around на 2^32)
 			entry.lastSeenAck.Store(ackNum)
 			entry.lastClientAckSeq.Store(ackNum)
 			entry.dupAckCount.Store(0)
@@ -782,7 +787,7 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 		tf.tcpSessions.Delete(key)
 	}()
 
-	buf := make([]byte, 32768)
+	buf := make([]byte, 65536)
 	for {
 		select {
 		case <-tf.closed:
@@ -793,14 +798,16 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 			return
 		}
 
-		// TCP flow control: pause if unacknowledged data in flight exceeds client's receive window
+		// TCP flow control: pause if unacknowledged data in flight exceeds client's receive window.
+		// RFC 793/1323 signed arithmetic int32(curServerSeq - lastAck) корректно работает при переходе 2^32
 		cWin := entry.clientWindow.Load()
-		if cWin < 1048576 {
-			cWin = 1048576
+		if cWin < 2097152 {
+			cWin = 2097152
 		}
 		curServerSeq := entry.serverNextSeq.Load()
 		lastAck := entry.lastClientAckSeq.Load()
-		if curServerSeq > lastAck && (curServerSeq-lastAck) > cWin {
+		inFlight := int32(curServerSeq - lastAck)
+		if lastAck != 0 && inFlight > int32(cWin) {
 			time.Sleep(1 * time.Millisecond)
 			continue
 		}

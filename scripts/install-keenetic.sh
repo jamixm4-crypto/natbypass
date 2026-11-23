@@ -8,7 +8,7 @@ set -e
 main() {
     REPO="jamixm4-crypto/natbypass"
     DEFAULT_STABLE="v1.9.504"
-    DEFAULT_BETA="v1.9.507-beta.42"
+    DEFAULT_BETA="v1.9.507-beta.43"
     BETA_MODE=0
 
     # Parse CLI flags
@@ -439,8 +439,10 @@ start() {
         return 0
     fi
     mkdir -p /opt/etc/natbypass /opt/var/log /var/run 2>/dev/null || true
+    # Очистка остатков обновления и усечение логов перед стартом службы
+    rm -f /opt/bin/natbypass.new* /opt/bin/natbypass.part* /opt/bin/natbypass.old* 2>/dev/null || true
     if [ -f "$LOGFILE" ] && [ "$(wc -c < "$LOGFILE" 2>/dev/null || echo 0)" -gt 524288 ]; then
-        tail -n 200 "$LOGFILE" > "${LOGFILE}.tmp" 2>/dev/null && mv -f "${LOGFILE}.tmp" "$LOGFILE" 2>/dev/null || true
+        tail -c 32768 "$LOGFILE" > "${LOGFILE}.tmp" 2>/dev/null && mv -f "${LOGFILE}.tmp" "$LOGFILE" 2>/dev/null || true
     fi
     if [ ! -c /dev/net/tun ]; then
         modprobe tun 2>/dev/null || insmod /lib/modules/$(uname -r)/tun.ko 2>/dev/null || insmod /lib/modules/tun.ko 2>/dev/null || true

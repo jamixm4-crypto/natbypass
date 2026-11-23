@@ -40,3 +40,15 @@ func waitTunReadable(fd int, timeoutMs int) bool {
 	n, err := unix.Poll(pfd, timeoutMs)
 	return err == nil && n > 0 && (pfd[0].Revents&unix.POLLIN != 0)
 }
+
+// waitTunWritable ожидает готовности буфера записи TUN дескриптора через poll() ядра Linux.
+// Предотвращает потерю пакетов (silent packet drop) при высокоскоростных всплесках трафика (bursts),
+// исключая деградацию TCP Window и коллапс скорости до 1-2 Мбит/с.
+func waitTunWritable(fd int, timeoutMs int) bool {
+	if fd <= 0 {
+		return false
+	}
+	pfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT | unix.POLLERR | unix.POLLHUP}}
+	n, err := unix.Poll(pfd, timeoutMs)
+	return err == nil && n > 0 && (pfd[0].Revents&unix.POLLOUT != 0)
+}
