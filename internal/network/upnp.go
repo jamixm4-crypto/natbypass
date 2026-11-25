@@ -11,6 +11,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync/atomic"
+	"time"
 
 	"github.com/huin/goupnp"
 	"github.com/huin/goupnp/dcps/internetgateway1"
@@ -146,11 +148,32 @@ func getLocalIP() (string, error) {
 	return localAddr.IP.String(), nil
 }
 
+type cachedLocalIP struct {
+	ip        string
+	expiresAt int64
+}
+
+var localIPCache atomic.Pointer[cachedLocalIP]
+
+// InvalidateLocalIPCache clears the cached local IPv4 address (e.g. after network roaming).
+func InvalidateLocalIPCache() {
+	localIPCache.Store(nil)
+}
+
 // GetLocalIP returns the primary local IPv4 address of this machine.
+// Cached for 3 seconds to avoid creating/closing kernel sockets on every packet in the data plane.
 func GetLocalIP() string {
-	ip, err := getLocalIP()
-	if err == nil && ip != "" {
-		return ip
+	now := time.Now().UnixNano()
+	if c := localIPCache.Load(); c != nil && now < c.expiresAt {
+		return c.ip
 	}
-	return ""
+	ip, err := getLocalIP()
+	if err != nil {
+		ip = ""
+	}
+	localIPCache.Store(&cachedLocalIP{
+		ip:        ip,
+		expiresAt: now + int64(3*time.Second),
+	})
+	return ip
 }

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -360,20 +361,42 @@ func GetPublicIPv6(ctx context.Context) string {
 	return ""
 }
 
-// GetLocalIPv6 РІРѕР·РІСЂР°С‰Р°РµС‚ РіР»РѕР±Р°Р»СЊРЅС‹Р№ IPv6-Р°РґСЂРµСЃ РёР· СЃРµС‚РµРІС‹С… Р°РґР°РїС‚РµСЂРѕРІ СѓСЃС‚СЂРѕР№СЃС‚РІР°
+type cachedLocalIPv6 struct {
+	ip        string
+	expiresAt int64
+}
+
+var localIPv6Cache atomic.Pointer[cachedLocalIPv6]
+
+// InvalidateLocalIPv6Cache clears the cached global IPv6 address (e.g. after network roaming).
+func InvalidateLocalIPv6Cache() {
+	localIPv6Cache.Store(nil)
+}
+
+// GetLocalIPv6 возвращает глобальный IPv6-адрес из сетевых адаптеров устройства.
+// Кэшируется на 3 секунды, чтобы не вызывать net.InterfaceAddrs() на каждый пакет.
 func GetLocalIPv6() string {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return ""
+	now := time.Now().UnixNano()
+	if c := localIPv6Cache.Load(); c != nil && now < c.expiresAt {
+		return c.ip
 	}
-	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok {
-			ip := ipNet.IP
-			if ip.To4() == nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsPrivate() {
-				return ip.String()
+	var found string
+	addrs, err := net.InterfaceAddrs()
+	if err == nil {
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				ip := ipNet.IP
+				if ip.To4() == nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsPrivate() {
+					found = ip.String()
+					break
+				}
 			}
 		}
 	}
-	return ""
+	localIPv6Cache.Store(&cachedLocalIPv6{
+		ip:        found,
+		expiresAt: now + int64(3*time.Second),
+	})
+	return found
 }
 

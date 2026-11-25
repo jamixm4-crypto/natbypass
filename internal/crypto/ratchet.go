@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -233,9 +234,16 @@ func GetCurrentEpoch() uint64 {
 	return uint64(time.Now().Unix()) / uint64(EpochDuration.Seconds())
 }
 
+type latestEpochEntry struct {
+	baseKey  [32]byte
+	epoch    uint64
+	epochKey [32]byte
+}
+
 var (
-	epochCacheMu sync.RWMutex
-	epochCache   = make(map[string][32]byte)
+	epochCacheMu     sync.RWMutex
+	epochCache       = make(map[string][32]byte)
+	latestEpochCache atomic.Pointer[latestEpochEntry]
 )
 
 func epochCacheKey(baseKey []byte, epoch uint64) string {
@@ -253,10 +261,23 @@ func epochCacheKey(baseKey []byte, epoch uint64) string {
 // This ensures that compromise of a long-term network key in the future does not compromise past epoch keys.
 // Derivations are cached in memory to eliminate per-packet HKDF CPU overhead.
 func DeriveEpochKey(baseKey []byte, epoch uint64) ([32]byte, error) {
+	if len(baseKey) == 32 {
+		if c := latestEpochCache.Load(); c != nil && c.epoch == epoch && [32]byte(baseKey) == c.baseKey {
+			return c.epochKey, nil
+		}
+	}
+
 	ck := epochCacheKey(baseKey, epoch)
 	epochCacheMu.RLock()
 	if cached, ok := epochCache[ck]; ok {
 		epochCacheMu.RUnlock()
+		if len(baseKey) == 32 {
+			latestEpochCache.Store(&latestEpochEntry{
+				baseKey:  [32]byte(baseKey),
+				epoch:    epoch,
+				epochKey: cached,
+			})
+		}
 		return cached, nil
 	}
 	epochCacheMu.RUnlock()
@@ -276,6 +297,14 @@ func DeriveEpochKey(baseKey []byte, epoch uint64) ([32]byte, error) {
 	}
 	epochCache[ck] = epochKey
 	epochCacheMu.Unlock()
+
+	if len(baseKey) == 32 {
+		latestEpochCache.Store(&latestEpochEntry{
+			baseKey:  [32]byte(baseKey),
+			epoch:    epoch,
+			epochKey: epochKey,
+		})
+	}
 
 	return epochKey, nil
 }

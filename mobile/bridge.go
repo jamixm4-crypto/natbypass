@@ -38,7 +38,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.47"
+const Version = "1.9.507-beta.48"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -658,14 +658,18 @@ func StartEngine(configYAML string, tunFd int) string {
 		}
 		if len(payload) >= 20 && (payload[0]>>4) == 4 && globalRegistry != nil {
 			srcVIP := net.IPv4(payload[12], payload[13], payload[14], payload[15]).String()
+			now := time.Now()
 			if p, ok := globalRegistry.GetByVirtualIP(srcVIP); ok && p != nil {
-				p.DirectP2P = true
-				p.DirectTCP = true
-				p.Transport = "tcp_shadowtls"
-				p.LastDirectSeen = time.Now()
-				p.LastBilateralSeen = time.Now()
-				p.LastSeen = time.Now()
-				globalRegistry.Upsert(p)
+				needUpdate := !p.DirectP2P || !p.DirectTCP || p.Transport != "tcp_shadowtls" || now.Sub(p.LastDirectSeen) > 2*time.Second
+				if needUpdate {
+					p.DirectP2P = true
+					p.DirectTCP = true
+					p.Transport = "tcp_shadowtls"
+					p.LastDirectSeen = now
+					p.LastBilateralSeen = now
+					p.LastSeen = now
+					globalRegistry.Upsert(p)
+				}
 			} else if globalExitNode != "" {
 				var ep *peer.Peer
 				if p, ok := globalRegistry.Get(globalExitNode); ok && p != nil {
@@ -680,12 +684,15 @@ func StartEngine(configYAML string, tunFd int) string {
 					}
 				}
 				if ep != nil {
-					ep.DirectP2P = true
-					ep.DirectTCP = true
-					ep.LastDirectSeen = time.Now()
-					ep.LastBilateralSeen = time.Now()
-					ep.LastSeen = time.Now()
-					globalRegistry.Upsert(ep)
+					needUpdate := !ep.DirectP2P || !ep.DirectTCP || now.Sub(ep.LastDirectSeen) > 2*time.Second
+					if needUpdate {
+						ep.DirectP2P = true
+						ep.DirectTCP = true
+						ep.LastDirectSeen = now
+						ep.LastBilateralSeen = now
+						ep.LastSeen = now
+						globalRegistry.Upsert(ep)
+					}
 				}
 			}
 		}
@@ -1681,7 +1688,7 @@ func attachTUNLocked(tunFd int) {
 					needUpdate := !p.DirectP2P || (srcAddr != nil && p.ActiveEndpoint != srcAddr.String()) || now.Sub(p.LastDirectSeen) > 2*time.Second
 					if needUpdate {
 						p.DirectP2P = true
-						if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" || p.Transport == "relay_mesh" {
+						if p.Transport == "" || p.Transport == "relay_mqtt" || p.Transport == "relay" || p.Transport == "mqtt" || p.Transport == "relay_mesh" || p.Transport == "tcp_tls" || p.Transport == "tcp_shadowtls" {
 							p.Transport = "udp_direct"
 							p.RelayedViaDevID = ""
 							p.RelayedViaName = ""
@@ -1814,27 +1821,7 @@ func processOutboundPacket(ctx context.Context, pkt []byte) {
 
 	var targetPeer *peer.Peer
 	if globalRegistry != nil {
-		if best, ok := globalRegistry.GetByVirtualIP(destIP.String()); ok && best != nil {
-			targetPeer = best
-		} else {
-			for _, p := range globalRegistry.List() {
-				pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-				if pVIP != "" && pVIP == destIP.String() {
-					targetPeer = p
-					break
-				}
-				for _, route := range p.AdvertisedRoutes {
-					r := strings.TrimSpace(route)
-					if r == "0.0.0.0/0" || r == "::/0" {
-						continue
-					}
-					if _, ipNet, err := net.ParseCIDR(r); err == nil && ipNet.Contains(destIP) {
-						targetPeer = p
-						break
-					}
-				}
-			}
-		}
+		targetPeer = globalRegistry.FindRelayDest(destIP.String(), globalDevID)
 	}
 
 	if destIP.String() == cleanVIP {
@@ -1931,7 +1918,23 @@ func processOutboundPacket(ctx context.Context, pkt []byte) {
 	isInternetDest := !isMeshSubnet24(destIP.String(), cleanVIP)
 	isExitOrInternet := !isICMP && (isExitPeer || isInternetDest || (cleanVIP != "" && srcIP.String() != cleanVIP))
 
-	if !isForceUDP && globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+	bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
+	hasTCPConn := !isForceUDP && globalTCPDirectMgr != nil && globalTCPDirectMgr.HasConn(targetPeer.DeviceID)
+	udpHealthy := !isForceTCP && targetEP != "" && globalPuncher != nil && targetPeer.DirectP2P && targetPeer.IsBilateralP2P(30*time.Second)
+
+	// 1. Pure P2P Direct UDP packet transmission (highest speed, zero TCP-over-TCP meltdown)
+	// Preferred in "auto" mode whenever bilateral UDP is healthy, or if no TCP stream is connected.
+	if !isForceTCP && targetEP != "" && globalPuncher != nil && (udpHealthy || isForceUDP || !hasTCPConn) {
+		if err := globalPuncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
+			sentDirect = true
+			if isExitOrInternet {
+				return
+			}
+		}
+	}
+
+	// 2. Direct TCP ShadowTLS path (used when force_tcp is enabled OR when UDP direct is unavailable/failing)
+	if !sentDirect && hasTCPConn {
 		if tcpErr := globalTCPDirectMgr.SendPacket(targetPeer.DeviceID, pkt); tcpErr == nil {
 			sentDirect = true
 			sentTCP = true
@@ -1941,15 +1944,6 @@ func processOutboundPacket(ctx context.Context, pkt []byte) {
 		}
 	}
 
-	// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
-	if !isForceTCP && !sentTCP && targetEP != "" && globalPuncher != nil {
-		if err := globalPuncher.SendDataPacketWithPadding(targetEP, pkt, pmin, pmax); err == nil {
-			sentDirect = true
-			if isExitOrInternet {
-				return
-			}
-		}
-	}
 	// Dual-send to LocalAddr for LAN peers ONLY if direct send hasn't succeeded and different from targetEP
 	if !isForceTCP && !sentTCP && !sentDirect && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && globalPuncher != nil {
 		if err := globalPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, pkt, pmin, pmax); err == nil {
@@ -1959,7 +1953,6 @@ func processOutboundPacket(ctx context.Context, pkt []byte) {
 			}
 		}
 	}
-	bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
 	// Also try STUNAddr ONLY if direct send hasn't succeeded and different from targetEP
 	if !isForceTCP && !sentTCP && !sentDirect && (!targetPeer.DirectP2P || !bilateralOK) && globalPuncher != nil && targetPeer.STUNAddr != "" && targetPeer.STUNAddr != targetEP {
 		if err := globalPuncher.SendDataPacketWithPadding(targetPeer.STUNAddr, pkt, pmin, pmax); err == nil {
@@ -2939,8 +2932,11 @@ func SelectExitNode(deviceID string) {
 				}
 				puncher.StartKeepAliveLoop()
 
-				// Проактивное подключение по Direct TCP ShadowTLS для высокоскоростного интернет-шлюза
-				if tcpDirectMgr != nil && !tcpDirectMgr.HasConn(p.DeviceID) {
+				// Запасное подключение по Direct TCP ShadowTLS для шлюза (только при force_tcp или если UDP P2P еще не пробит)
+				isForceTCPMode := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_tcp"
+				isForceUDPMode := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
+				udpReady := p.DirectP2P && p.IsBilateralP2P(constants.BilateralFreshThreshold)
+				if tcpDirectMgr != nil && !isForceUDPMode && (isForceTCPMode || !udpReady) && !tcpDirectMgr.HasConn(p.DeviceID) {
 					defTCPPort := 8443
 					if cfg != nil {
 						if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.TCPPort > 0 {

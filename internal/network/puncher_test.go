@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -662,6 +663,60 @@ func TestCandidatePortsAdvanced_MaxCandidateLimit(t *testing.T) {
 	candidates := p.CandidatePortsAdvanced(20100, nil, profPBA, 1)
 	if len(candidates) > MaxCandidatePorts {
 		t.Fatalf("expected candidate ports capped at %d, got %d", MaxCandidatePorts, len(candidates))
+	}
+}
+
+func TestUDPPuncher_EncryptedThroughput(t *testing.T) {
+	nodeB, err := NewUDPPuncher(0, "node-b-speed", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create nodeB: %v", err)
+	}
+	defer nodeB.Close()
+	nodeB.SetCipherKey("speed-test-shared-key-1234567890")
+
+	var recvBytes atomic.Uint64
+	var recvCount atomic.Int64
+	nodeB.SetDataCallback(func(srcAddr *net.UDPAddr, payload []byte) {
+		recvBytes.Add(uint64(len(payload)))
+		recvCount.Add(1)
+	})
+
+	nodeA, err := NewUDPPuncher(0, "node-a-speed", nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create nodeA: %v", err)
+	}
+	defer nodeA.Close()
+	nodeA.SetCipherKey("speed-test-shared-key-1234567890")
+
+	targetAddr := fmt.Sprintf("127.0.0.1:%d", nodeB.LocalPort())
+
+	// Build valid 1280-byte IPv4 UDP packet
+	pkt := make([]byte, 1280)
+	pkt[0] = 0x45
+	binary.BigEndian.PutUint16(pkt[2:4], 1280)
+	pkt[8] = 64
+	pkt[9] = 17
+	copy(pkt[12:16], []byte{10, 11, 12, 1})
+	copy(pkt[16:20], []byte{10, 11, 12, 2})
+
+	const totalPackets = 1600 // ~2 MB
+	start := time.Now()
+	for i := 0; i < totalPackets; i++ {
+		if err := nodeA.SendDataPacketWithPadding(targetAddr, pkt, 0, 0); err != nil {
+			t.Fatalf("SendDataPacketWithPadding failed: %v", err)
+		}
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for recvCount.Load() < totalPackets && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	elapsed := time.Since(start)
+	got := recvCount.Load()
+	mbps := float64(recvBytes.Load()*8) / (elapsed.Seconds() * 1000 * 1000)
+	t.Logf("UDPPuncher real encrypted path: %d/%d pkts in %v (%.2f Mbps)", got, totalPackets, elapsed.Round(time.Millisecond), mbps)
+	if got < totalPackets/2 {
+		t.Fatalf("excessive UDP packet loss: got %d / %d", got, totalPackets)
 	}
 }
 

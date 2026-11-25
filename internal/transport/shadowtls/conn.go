@@ -8,14 +8,14 @@
 package shadowtls
 
 import (
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/natbypass/natbypass/internal/crypto"
 )
 
 var (
@@ -98,23 +98,9 @@ func (c *ShadowTLSConn) WritePacket(payload []byte) error {
 		return ErrPayloadTooLarge
 	}
 
-	// Traffic shaping: inject micro-jitter (0..50ms) for interactive packets (<512 bytes)
-	// to disrupt uniform Inter-Arrival Time (IAT) analysis by TSPU/DPI classifiers.
-	if len(payload) < 512 {
-		var jitterByte [1]byte
-		if _, err := io.ReadFull(rand.Reader, jitterByte[:]); err == nil {
-			jitterMs := int(jitterByte[0] % 51) // 0..50 ms
-			if jitterMs > 0 {
-				time.Sleep(time.Duration(jitterMs) * time.Millisecond)
-			}
-		}
-	}
-
-	// 1. Calculate dynamic random padding (16..48 bytes)
+	// 1. Calculate dynamic random padding (16..48 bytes) with zero syscalls
 	var padRand [1]byte
-	if _, err := io.ReadFull(rand.Reader, padRand[:]); err != nil {
-		return fmt.Errorf("shadowtls csprng failure: %w", err)
-	}
+	crypto.FastJitterBytes(padRand[:])
 	padLen := 16 + int(padRand[0]%33)
 
 	realLen := uint16(len(payload))
@@ -128,9 +114,7 @@ func (c *ShadowTLSConn) WritePacket(payload []byte) error {
 	binary.BigEndian.PutUint16(frame[0:2], uint16(totalLen))
 	binary.BigEndian.PutUint16(frame[2:4], realLen)
 	copy(frame[4:4+len(payload)], payload)
-	if _, err := io.ReadFull(rand.Reader, frame[4+len(payload):]); err != nil {
-		return fmt.Errorf("shadowtls padding csprng failure: %w", err)
-	}
+	crypto.FastJitterBytes(frame[4+len(payload):])
 
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()

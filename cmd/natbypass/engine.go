@@ -1430,72 +1430,86 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			}
 
 			if targetPeer != nil {
+				now := time.Now()
 				if directAddr != nil && !isRelay {
-					var myPubIP string
-					if puncher != nil {
-						if cachedSTUN := puncher.GetCachedSTUNAddr(); cachedSTUN != "" {
-							if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
-								myPubIP = h
-							} else {
-								myPubIP = cachedSTUN
+					fromAddrStr := directAddr.String()
+					needUpdate := !targetPeer.DirectP2P || !targetPeer.Online || targetPeer.ActiveEndpoint != fromAddrStr ||
+						(isTCP && targetPeer.Transport != "tcp_tls") ||
+						(!isTCP && targetPeer.Transport != "udp_direct") ||
+						now.Sub(targetPeer.LastDirectSeen) > 2*time.Second
+					if needUpdate {
+						var myPubIP string
+						if puncher != nil {
+							if cachedSTUN := puncher.GetCachedSTUNAddr(); cachedSTUN != "" {
+								if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
+									myPubIP = h
+								} else {
+									myPubIP = cachedSTUN
+								}
 							}
 						}
-					}
-					fromAddrStr := directAddr.String()
-					oldEP := targetPeer.ActiveEndpoint
-					if isTCP {
-						targetPeer.DirectP2P = true
-						targetPeer.Transport = "tcp_tls"
-						targetPeer.RelayedViaDevID = ""
-						targetPeer.RelayedViaName = ""
-						targetPeer.RelayedViaVIP = ""
-						targetPeer.LastBilateralSeen = time.Now()
-					} else {
-						// For UDP: inbound data packet confirms direct UDP delivery from peer
-						targetPeer.DirectP2P = true
-						if targetPeer.Transport == "" || targetPeer.Transport == "mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay_mesh" {
-							targetPeer.Transport = "udp_direct"
+						oldEP := targetPeer.ActiveEndpoint
+						if isTCP {
+							targetPeer.DirectP2P = true
+							targetPeer.Transport = "tcp_tls"
 							targetPeer.RelayedViaDevID = ""
 							targetPeer.RelayedViaName = ""
 							targetPeer.RelayedViaVIP = ""
+							targetPeer.LastBilateralSeen = now
+						} else {
+							// For UDP: inbound data packet confirms direct UDP delivery from peer
+							targetPeer.DirectP2P = true
+							if targetPeer.Transport == "" || targetPeer.Transport == "mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay_mesh" || targetPeer.Transport == "tcp_tls" || targetPeer.Transport == "tcp_shadowtls" {
+								targetPeer.Transport = "udp_direct"
+								targetPeer.RelayedViaDevID = ""
+								targetPeer.RelayedViaName = ""
+								targetPeer.RelayedViaVIP = ""
+							}
+							targetPeer.LastBilateralSeen = now
 						}
-						targetPeer.LastBilateralSeen = time.Now()
-					}
-					if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
-						targetPeer.ActiveEndpoint = fromAddrStr
-					} else if targetPeer.ActiveEndpoint == "" {
-						if targetPeer.STUNAddr != "" {
-							targetPeer.ActiveEndpoint = targetPeer.STUNAddr
-						} else if targetPeer.LocalAddr != "" {
-							targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+						if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
+							targetPeer.ActiveEndpoint = fromAddrStr
+						} else if targetPeer.ActiveEndpoint == "" {
+							if targetPeer.STUNAddr != "" {
+								targetPeer.ActiveEndpoint = targetPeer.STUNAddr
+							} else if targetPeer.LocalAddr != "" {
+								targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+							}
 						}
-					}
-					targetPeer.LastDirectSeen = time.Now()
-					targetPeer.ProbeCount = 0 // Reset backoff on successful direct packet
-					if magicSock != nil && targetPeer.ActiveEndpoint != "" {
-						magicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
-					}
-					if puncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
-						if oldEP != "" && oldEP != targetPeer.ActiveEndpoint {
-							puncher.RemoveKeepAliveTarget(oldEP)
+						targetPeer.LastDirectSeen = now
+						targetPeer.ProbeCount = 0 // Reset backoff on successful direct packet
+						if magicSock != nil && targetPeer.ActiveEndpoint != "" {
+							magicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
 						}
-						puncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
-						// If bilateral connection is not verified within window, fire a reverse probe to test return path
-						if !targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second) {
-							_ = puncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
+						if puncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
+							if oldEP != "" && oldEP != targetPeer.ActiveEndpoint {
+								puncher.RemoveKeepAliveTarget(oldEP)
+							}
+							puncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
+							// If bilateral connection is not verified within window, fire a reverse probe to test return path
+							if !targetPeer.IsBilateralP2P(constants.BilateralDemotionThreshold - 10*time.Second) {
+								_ = puncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
+							}
+						}
+						targetPeer.Online = true
+						targetPeer.LastSeen = now
+						if !peer.IsSyntheticDynamicPeer(targetPeer) {
+							registry.Upsert(targetPeer)
 						}
 					}
 				} else if isRelay {
-					if !targetPeer.DirectP2P {
-						if targetPeer.Transport == "" || targetPeer.Transport == "udp_direct" || targetPeer.Transport == "offline" {
-							targetPeer.Transport = "relay"
+					if !targetPeer.DirectP2P || !targetPeer.Online || now.Sub(targetPeer.LastSeen) > 2*time.Second {
+						if !targetPeer.DirectP2P {
+							if targetPeer.Transport == "" || targetPeer.Transport == "udp_direct" || targetPeer.Transport == "offline" {
+								targetPeer.Transport = "relay"
+							}
+						}
+						targetPeer.Online = true
+						targetPeer.LastSeen = now
+						if !peer.IsSyntheticDynamicPeer(targetPeer) {
+							registry.Upsert(targetPeer)
 						}
 					}
-				}
-				targetPeer.Online = true
-				targetPeer.LastSeen = time.Now()
-				if !peer.IsSyntheticDynamicPeer(targetPeer) {
-					registry.Upsert(targetPeer)
 				}
 			}
 
@@ -1586,30 +1600,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// Mesh Userspace Relay Router:
 			// If destination is NOT my Virtual IP, forward directly to destination peer over active TCP/UDP connection
 			if inDstIP != cleanMyVIP && cleanMyVIP != "" && registry != nil {
-				var destPeer *peer.Peer
-				if p, ok := registry.GetByVirtualIP(inDstIP); ok && p != nil {
-					destPeer = p
-				} else {
-					// Check advertised subnets via Longest Prefix Match
-					destIP := net.ParseIP(inDstIP)
-					if destIP != nil {
-						bestPrefix := -1
-						for _, p := range registry.List() {
-							if p.DeviceID == deviceID {
-								continue
-							}
-							for _, r := range p.AdvertisedRoutes {
-								if _, ipNet, err := net.ParseCIDR(strings.TrimSpace(r)); err == nil && ipNet.Contains(destIP) {
-									ones, _ := ipNet.Mask.Size()
-									if ones > bestPrefix {
-										bestPrefix = ones
-										destPeer = p
-									}
-								}
-							}
-						}
-					}
-				}
+				destPeer := registry.FindRelayDest(inDstIP, deviceID)
 
 				if destPeer != nil && destPeer.DeviceID != deviceID {
 					// IPv4 TTL decrement to strictly prevent routing loops
@@ -1850,45 +1841,9 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					// Userspace TCP MSS Clamping to prevent PMTU blackholes
 					_ = tunnel.ClampTCPMSS(pkt, constants.DefaultClampedMSS)
 
-					var p *peer.Peer
-					var found bool
-
-					// 1. Direct match on Virtual IP
-					p, found = registry.GetByVirtualIP(dstIP)
-					if !found || p == nil {
-						for _, item := range registry.List() {
-							pVIP := strings.TrimSpace(strings.Split(item.VirtualIP, "/")[0])
-							if pVIP == dstIP && pVIP != "" {
-								p = item
-								found = true
-								break
-							}
-						}
-					}
-
-					// 2. Longest Prefix Match (LPM) on AdvertisedRoutes
-					if !found || p == nil {
-						bestPrefixLen := -1
-						for _, item := range registry.List() {
-							for _, route := range item.AdvertisedRoutes {
-								r := strings.TrimSpace(route)
-								// Security: NEVER allow 0.0.0.0/0, ::/0 or broad prefixes (/0 to /7)
-								// to be dynamically hijacked via AdvertisedRoutes.
-								// Default Internet routing MUST only occur via explicitly selected Exit Node.
-								if r == "0.0.0.0/0" || r == "::/0" {
-									continue
-								}
-								if _, ipNet, err2 := net.ParseCIDR(r); err2 == nil && ipNet.Contains(dstNetIP) {
-									ones, _ := ipNet.Mask.Size()
-									if ones >= 8 && ones > bestPrefixLen {
-										bestPrefixLen = ones
-										p = item
-										found = true
-									}
-								}
-							}
-						}
-					}
+					// 1. Direct Virtual IP + Longest Prefix Match (LPM) on AdvertisedRoutes (zero-alloc when no routes advertised)
+					p := registry.FindRelayDest(dstIP, deviceID)
+					found := p != nil
 
 					// 3. Fallback to Selected Exit Node for default Internet routing (0.0.0.0/0)
 					if (!found || p == nil) && cfg.Network.SelectedExitNode != "" {
@@ -1938,24 +1893,21 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							pmax = p.AWG.Pmax
 						}
 
-						// 1. Direct TCP ShadowTLS path:
-						// If an active direct TCP ShadowTLS stream is connected, send through it (bypasses UDP DPI)
+						// 1. Direct UDP P2P path (highest throughput, zero TCP-over-TCP meltdown)
+						// Preferred in "auto" mode whenever bilateral UDP is healthy or no TCP stream is connected.
 						sentDirect := false
 						sentTCP := false
 						isForceTCP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_tcp"
 						isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
+						bilateralOK := p.IsBilateralP2P(constants.BilateralFreshThreshold)
+						hasTCPConn := !isForceUDP && tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID)
+						udpHealthy := !isForceTCP && targetEP != "" && puncher != nil && p.DirectP2P && p.IsBilateralP2P(30*time.Second)
 
-						if !isForceUDP && tcpDirectMgr != nil && tcpDirectMgr.HasConn(p.DeviceID) {
-							if tcpErr := tcpDirectMgr.SendPacket(p.DeviceID, pkt); tcpErr == nil {
-								sentDirect = true
-								sentTCP = true
+						if !isForceTCP && targetEP != "" && puncher != nil && (udpHealthy || isForceUDP || !hasTCPConn) {
+							if dbg := log.Debug(); dbg.Enabled() {
+								srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
+								dbg.Str("src", srcIP).Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Int("len", len(pkt)).Msg("📤 TUN→UDP outbound")
 							}
-						}
-
-						// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
-						if !isForceTCP && !sentTCP && targetEP != "" && puncher != nil {
-							srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
-							log.Debug().Str("src", srcIP).Str("dst", dstIP).Str("peer", p.DeviceID).Str("ep", targetEP).Int("len", len(pkt)).Msg("📤 TUN→UDP outbound")
 							var err error
 							if p.Transport == "quic" {
 								err = puncher.SendQUICPacket(targetEP, pkt)
@@ -1972,13 +1924,21 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 								}
 							}
 						}
+
+						// 2. Direct TCP ShadowTLS path (used when force_tcp is enabled OR when UDP direct is unavailable/failing)
+						if !sentDirect && hasTCPConn {
+							if tcpErr := tcpDirectMgr.SendPacket(p.DeviceID, pkt); tcpErr == nil {
+								sentDirect = true
+								sentTCP = true
+							}
+						}
+
 						// Dual-send to LocalAddr for LAN clients ONLY if send to targetEP failed or targetEP empty
 						if !isForceTCP && !sentTCP && !sentDirect && p.LocalAddr != "" && p.LocalAddr != targetEP && puncher != nil {
 							if err := puncher.SendDataPacketWithPadding(p.LocalAddr, pkt, pmin, pmax); err == nil {
 								sentDirect = true
 							}
 						}
-						bilateralOK := p.IsBilateralP2P(constants.BilateralFreshThreshold)
 
 						// Also try STUNAddr ONLY IF direct send hasn't succeeded
 						if !isForceTCP && !sentTCP && !sentDirect && (!p.DirectP2P || !bilateralOK) && puncher != nil && p.STUNAddr != "" && p.STUNAddr != targetEP {

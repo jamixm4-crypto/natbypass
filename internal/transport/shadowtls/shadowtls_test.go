@@ -304,3 +304,67 @@ func TestExtractSNI(t *testing.T) {
 	}
 }
 
+func TestShadowTLS_SmallPacketThroughputNoStall(t *testing.T) {
+	key := crypto.DeriveKey("test-shadowtls-speed-key-123456")
+	sni := "gateway.icloud.com"
+
+	clientConn, serverConn, err := tcpLoopbackPair()
+	if err != nil {
+		t.Fatalf("tcpLoopbackPair failed: %v", err)
+	}
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var srvTLS, cliTLS *ShadowTLSConn
+	var srvErr, cliErr error
+	go func() {
+		defer wg.Done()
+		srvTLS, srvErr = ServerHandshake(serverConn, key, sni, 3*time.Second)
+	}()
+	go func() {
+		defer wg.Done()
+		cliTLS, _, cliErr = ClientHandshake(clientConn, sni, key, 3*time.Second)
+	}()
+	wg.Wait()
+	if srvErr != nil || cliErr != nil {
+		t.Fatalf("handshake failed: srv=%v cli=%v", srvErr, cliErr)
+	}
+
+	const pktCount = 200
+	smallACK := bytes.Repeat([]byte{0x45}, 60)
+
+	recvDone := make(chan error, 1)
+	go func() {
+		for i := 0; i < pktCount; i++ {
+			pkt, rErr := srvTLS.ReadPacket()
+			if rErr != nil {
+				recvDone <- rErr
+				return
+			}
+			if len(pkt) != len(smallACK) {
+				recvDone <- errors.New("unexpected packet length")
+				return
+			}
+		}
+		recvDone <- nil
+	}()
+
+	start := time.Now()
+	for i := 0; i < pktCount; i++ {
+		if wErr := cliTLS.WritePacket(smallACK); wErr != nil {
+			t.Fatalf("WritePacket failed at %d: %v", i, wErr)
+		}
+	}
+	if rErr := <-recvDone; rErr != nil {
+		t.Fatalf("receiver error: %v", rErr)
+	}
+	elapsed := time.Since(start)
+	t.Logf("ShadowTLS %d small packets (60B) sent+received in %v", pktCount, elapsed)
+	// Previously 200 packets * 25ms avg sleep took ~5000ms. Must now finish well under 500ms.
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("ShadowTLS small packet stall detected: took %v for %d packets", elapsed, pktCount)
+	}
+}
+

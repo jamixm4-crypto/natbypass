@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.47"
+	Version = "1.9.507-beta.48"
 	Commit  = "release"
 )
 
@@ -5427,70 +5427,88 @@ func startEngineFromConfig(c *config.Config) {
 				}
 
 				if targetPeer != nil {
+					now := time.Now()
 					if !isRelay {
-						var myPubIP string
-						if udpPuncher != nil {
-							if cachedSTUN := udpPuncher.GetCachedSTUNAddr(); cachedSTUN != "" {
-								if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
-									myPubIP = h
-								} else {
-									myPubIP = cachedSTUN
+						fromAddrStr := ""
+						if srcAddr != nil {
+							fromAddrStr = srcAddr.String()
+						}
+						needUpdate := !targetPeer.DirectP2P || !targetPeer.Online ||
+							(fromAddrStr != "" && targetPeer.ActiveEndpoint != fromAddrStr) ||
+							(isTCP && targetPeer.Transport != "tcp_tls") ||
+							(!isTCP && targetPeer.Transport != "udp_direct") ||
+							now.Sub(targetPeer.LastDirectSeen) > 2*time.Second
+						if needUpdate {
+							var myPubIP string
+							if udpPuncher != nil {
+								if cachedSTUN := udpPuncher.GetCachedSTUNAddr(); cachedSTUN != "" {
+									if h, _, err := net.SplitHostPort(cachedSTUN); err == nil {
+										myPubIP = h
+									} else {
+										myPubIP = cachedSTUN
+									}
 								}
 							}
-						}
-						if isTCP {
-							targetPeer.DirectP2P = true
-							targetPeer.Transport = "tcp_tls"
-							targetPeer.RelayedViaDevID = ""
-							targetPeer.RelayedViaName = ""
-							targetPeer.RelayedViaVIP = ""
-							targetPeer.LastBilateralSeen = time.Now()
-						} else {
-							// For UDP: verified inbound L3 packet from peer over direct socket.
-							targetPeer.DirectP2P = true
-							if targetPeer.Transport == "" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "mqtt" || targetPeer.Transport == "relay_mesh" {
-								targetPeer.Transport = "udp_direct"
+							if isTCP {
+								targetPeer.DirectP2P = true
+								targetPeer.Transport = "tcp_tls"
 								targetPeer.RelayedViaDevID = ""
 								targetPeer.RelayedViaName = ""
 								targetPeer.RelayedViaVIP = ""
+								targetPeer.LastBilateralSeen = now
+							} else {
+								// For UDP: verified inbound L3 packet from peer over direct socket.
+								targetPeer.DirectP2P = true
+								if targetPeer.Transport == "" || targetPeer.Transport == "relay_mqtt" || targetPeer.Transport == "relay" || targetPeer.Transport == "mqtt" || targetPeer.Transport == "relay_mesh" || targetPeer.Transport == "tcp_tls" || targetPeer.Transport == "tcp_shadowtls" {
+									targetPeer.Transport = "udp_direct"
+									targetPeer.RelayedViaDevID = ""
+									targetPeer.RelayedViaName = ""
+									targetPeer.RelayedViaVIP = ""
+								}
+								targetPeer.LastBilateralSeen = now
 							}
-							targetPeer.LastBilateralSeen = time.Now()
-						}
-						if srcAddr != nil {
-							fromAddrStr := srcAddr.String()
-							if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
-								targetPeer.ActiveEndpoint = fromAddrStr
-							} else if targetPeer.ActiveEndpoint == "" {
-								if targetPeer.STUNAddr != "" {
-									targetPeer.ActiveEndpoint = targetPeer.STUNAddr
-								} else if targetPeer.LocalAddr != "" {
-									targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+							if fromAddrStr != "" {
+								if peer.IsValidEndpointForPeer(fromAddrStr, targetPeer, myPubIP) {
+									targetPeer.ActiveEndpoint = fromAddrStr
+								} else if targetPeer.ActiveEndpoint == "" {
+									if targetPeer.STUNAddr != "" {
+										targetPeer.ActiveEndpoint = targetPeer.STUNAddr
+									} else if targetPeer.LocalAddr != "" {
+										targetPeer.ActiveEndpoint = targetPeer.LocalAddr
+									}
 								}
 							}
-						}
-						targetPeer.LastDirectSeen = time.Now()
-						targetPeer.ProbeCount = 0
-						if guiMagicSock != nil && targetPeer.ActiveEndpoint != "" {
-							guiMagicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
-						}
-						if udpPuncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
-							udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
-							if !targetPeer.IsBilateralP2P(constants.BilateralFreshThreshold) {
-								_ = udpPuncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
+							targetPeer.LastDirectSeen = now
+							targetPeer.ProbeCount = 0
+							if guiMagicSock != nil && targetPeer.ActiveEndpoint != "" {
+								guiMagicSock.RecordProbeSuccess(targetPeer.DeviceID, targetPeer.ActiveEndpoint, 0)
+							}
+							if udpPuncher != nil && targetPeer.ActiveEndpoint != "" && !isTCP {
+								udpPuncher.AddKeepAliveTarget(targetPeer.ActiveEndpoint)
+								if !targetPeer.IsBilateralP2P(constants.BilateralFreshThreshold) {
+									_ = udpPuncher.SendHolePunchProbe(targetPeer.ActiveEndpoint)
+								}
+							}
+							targetPeer.Online = true
+							targetPeer.LastSeen = now
+							if !peer.IsSyntheticDynamicPeer(targetPeer) {
+								registry.Upsert(targetPeer)
 							}
 						}
 					} else {
 						// Inbound traffic received via Relay (Mesh Multi-Hop or Central MQTT)
-						if !targetPeer.DirectP2P {
-							if targetPeer.Transport == "" || targetPeer.Transport == "udp_direct" || targetPeer.Transport == "offline" {
-								targetPeer.Transport = "relay"
+						if !targetPeer.DirectP2P || !targetPeer.Online || now.Sub(targetPeer.LastSeen) > 2*time.Second {
+							if !targetPeer.DirectP2P {
+								if targetPeer.Transport == "" || targetPeer.Transport == "udp_direct" || targetPeer.Transport == "offline" {
+									targetPeer.Transport = "relay"
+								}
+							}
+							targetPeer.Online = true
+							targetPeer.LastSeen = now
+							if !peer.IsSyntheticDynamicPeer(targetPeer) {
+								registry.Upsert(targetPeer)
 							}
 						}
-					}
-					targetPeer.Online = true
-					targetPeer.LastSeen = time.Now()
-					if !peer.IsSyntheticDynamicPeer(targetPeer) {
-						registry.Upsert(targetPeer)
 					}
 				}
 			}
@@ -6067,28 +6085,30 @@ func startEngineFromConfig(c *config.Config) {
 									pmax = targetPeer.AWG.Pmax
 								}
 
-								// 1. Direct TCP ShadowTLS path:
-								// If an active direct TCP ShadowTLS stream is connected, send through it (bypasses UDP DPI)
+								// 1. Direct UDP P2P path (highest speed, zero TCP-over-TCP meltdown)
+								// Preferred in "auto" mode whenever bilateral UDP is healthy or no TCP stream is connected.
 								sentDirect := false
 								sentTCP := false
 								isForceTCP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp"
 								isForceUDP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_udp"
+								bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
+								hasTCPConn := !isForceUDP && guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID)
+								udpHealthy := !isForceTCP && udpPuncher != nil && targetEP != "" && targetPeer.DirectP2P && targetPeer.IsBilateralP2P(30*time.Second)
 
-								if !isForceUDP && guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+								if !isForceTCP && udpPuncher != nil && targetEP != "" && (udpHealthy || isForceUDP || !hasTCPConn) {
+									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
+										sentDirect = true
+									}
+								}
+
+								// 2. Direct TCP ShadowTLS path (used when force_tcp is enabled OR when UDP direct is unavailable/failing)
+								if !sentDirect && hasTCPConn {
 									if tcpErr := guiTCPDirectMgr.SendPacket(targetPeer.DeviceID, packet); tcpErr == nil {
 										sentDirect = true
 										sentTCP = true
 									}
 								}
 
-								bilateralOK := targetPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
-
-								// 2. Pure P2P Direct UDP packet transmission (bypassed if force_tcp)
-								if !isForceTCP && !sentTCP && udpPuncher != nil && targetEP != "" {
-									if err := udpPuncher.SendDataPacketWithPadding(targetEP, packet, pmin, pmax); err == nil {
-										sentDirect = true
-									}
-								}
 								// Dual-send to LocalAddr for LAN clients ONLY if send to targetEP failed or targetEP is empty
 								if !isForceTCP && !sentTCP && !sentDirect && targetPeer.LocalAddr != "" && targetPeer.LocalAddr != targetEP && udpPuncher != nil {
 									if err := udpPuncher.SendDataPacketWithPadding(targetPeer.LocalAddr, packet, pmin, pmax); err == nil {

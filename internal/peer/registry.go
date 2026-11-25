@@ -912,22 +912,33 @@ func (r *Registry) Get(deviceID string) (*Peer, bool) {
 	return p, ok
 }
 
+// stripCIDR strips /prefix without allocating a slice.
+func stripCIDR(s string) string {
+	if idx := strings.IndexByte(s, '/'); idx >= 0 {
+		s = s[:idx]
+	}
+	return strings.TrimSpace(s)
+}
+
 // GetByVirtualIP retrieves the best active peer by its VirtualIP (ignoring /CIDR mask).
 // Гарантированно выбирает живой узел (Online + DirectP2P + свежий LastSeen), исключая зависшие фантомные сессии.
 func (r *Registry) GetByVirtualIP(vip string) (*Peer, bool) {
 	if vip == "" {
 		return nil, false
 	}
+	targetIP := stripCIDR(vip)
+	if targetIP == "" {
+		return nil, false
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	targetIP := strings.TrimSpace(strings.Split(vip, "/")[0])
 	var bestPeer *Peer
 	for _, p := range r.peers {
 		if p == nil {
 			continue
 		}
-		pIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+		pIP := stripCIDR(p.VirtualIP)
 		if pIP == targetIP && pIP != "" {
 			if bestPeer == nil {
 				bestPeer = p
@@ -957,6 +968,56 @@ func (r *Registry) GetByVirtualIP(vip string) (*Peer, bool) {
 		return bestPeer, true
 	}
 	return nil, false
+}
+
+// FindRelayDest finds a peer owning dstIPStr (direct VIP or Longest Prefix Match over AdvertisedRoutes)
+// without allocating a sorted List() slice. Excludes excludeDevID.
+func (r *Registry) FindRelayDest(dstIPStr string, excludeDevID string) *Peer {
+	if dstIPStr == "" {
+		return nil
+	}
+	if p, ok := r.GetByVirtualIP(dstIPStr); ok && p != nil && p.DeviceID != excludeDevID {
+		return p
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	hasRoutes := false
+	for _, p := range r.peers {
+		if p != nil && p.DeviceID != excludeDevID && len(p.AdvertisedRoutes) > 0 {
+			hasRoutes = true
+			break
+		}
+	}
+	if !hasRoutes {
+		return nil
+	}
+
+	destIP := net.ParseIP(dstIPStr)
+	if destIP == nil {
+		return nil
+	}
+	var bestPeer *Peer
+	bestPrefix := -1
+	for _, p := range r.peers {
+		if p == nil || p.DeviceID == excludeDevID || len(p.AdvertisedRoutes) == 0 {
+			continue
+		}
+		for _, route := range p.AdvertisedRoutes {
+			r := strings.TrimSpace(route)
+			if r == "0.0.0.0/0" || r == "::/0" {
+				continue
+			}
+			if _, ipNet, err := net.ParseCIDR(r); err == nil && ipNet.Contains(destIP) {
+				ones, _ := ipNet.Mask.Size()
+				if ones >= 8 && ones > bestPrefix {
+					bestPrefix = ones
+					bestPeer = p
+				}
+			}
+		}
+	}
+	return bestPeer
 }
 
 // GetByIDOrVIP retrieves a peer by DeviceID or VirtualIP (with or without CIDR mask).
@@ -1053,33 +1114,61 @@ func (r *Registry) Exists(deviceID string) bool {
 	return ok
 }
 
+type cachedLANSubnets struct {
+	nets      []*net.IPNet
+	expiresAt int64
+}
+
+var lanSubnetsCache atomic.Pointer[cachedLANSubnets]
+
+// InvalidateLANSubnetsCache clears the cached physical LAN subnets.
+func InvalidateLANSubnetsCache() {
+	lanSubnetsCache.Store(nil)
+}
+
+func getLocalLANSubnetsCached() []*net.IPNet {
+	now := time.Now().UnixNano()
+	if c := lanSubnetsCache.Load(); c != nil && now < c.expiresAt {
+		return c.nets
+	}
+	var nets []*net.IPNet
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			nameLower := strings.ToLower(iface.Name)
+			if strings.HasPrefix(nameLower, "nb") || strings.HasPrefix(nameLower, "tun") || strings.HasPrefix(nameLower, "tap") {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, a := range addrs {
+				if ipNet, ok := a.(*net.IPNet); ok {
+					nets = append(nets, ipNet)
+				}
+			}
+		}
+	}
+	lanSubnetsCache.Store(&cachedLANSubnets{
+		nets:      nets,
+		expiresAt: now + int64(3*time.Second),
+	})
+	return nets
+}
+
 // IsSameLANSubnet checks if an IP belongs to one of the local physical subnets on this machine.
+// Uses a 3-second TTL cache to avoid net.Interfaces() syscalls per packet.
 func IsSameLANSubnet(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return false
-	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		nameLower := strings.ToLower(iface.Name)
-		if strings.HasPrefix(nameLower, "nb") || strings.HasPrefix(nameLower, "tun") || strings.HasPrefix(nameLower, "tap") {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			if ipNet, ok := a.(*net.IPNet); ok {
-				if ipNet.Contains(ip) {
-					return true
-				}
-			}
+	for _, ipNet := range getLocalLANSubnetsCached() {
+		if ipNet.Contains(ip) {
+			return true
 		}
 	}
 	return false
