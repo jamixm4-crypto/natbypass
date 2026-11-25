@@ -3540,6 +3540,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     let currentTab = 'dashboard';
     let currentChannelMode = 'parallel';
     let cachedPeers = [];
+    let currentStatus = null;
 
     function formatPeersCount(n) {
       n = Math.abs(n || 0);
@@ -3645,7 +3646,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           qrPayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
         }
       } else if (mode === 'apk') {
-        const verDisplay = (window.currentAppVersion || 'v1.9.507-beta.49').replace(/^v?/, 'v');
+        const verDisplay = (window.currentAppVersion || 'v1.9.507-beta.50').replace(/^v?/, 'v');
         let directApkUrl = window.cachedApkDownloadUrl || '';
         if (!directApkUrl) {
           directApkUrl = `https://github.com/jamixm4-crypto/natbypass/releases/download/${verDisplay}/NatBypass-${verDisplay}-universal.apk`;
@@ -4685,6 +4686,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         const json = await res.json();
         if (json.ok && json.data) {
           const d = json.data;
+          currentStatus = d;
           const totalPeers = (d.total_peers !== undefined) ? d.total_peers : (d.peer_count || 0);
           const onlinePeers = (d.online_peers !== undefined) ? d.online_peers : totalPeers;
           const p2pActive = d.p2p_active || 0;
@@ -5018,7 +5020,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
             <div style="font-size:0.98rem; font-weight:700; color:var(--text-main);">Нет активных устройств в сети</div>
             <div style="font-size:0.8rem; color:var(--text-muted); line-height:1.45;">Подключите ваш смартфон, второй компьютер или роутер Keenetic к этой зашифрованной P2P сети с помощью QR-кода профиля.</div>
             <div style="display:flex; gap:10px; margin-top:4px; flex-wrap:wrap; justify-content:center;">
-              <button class="btn btn-primary" onclick="openQrModal()" style="display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; padding:8px 16px;">
+              <button class="btn btn-primary" onclick="openQRModal()" style="display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; padding:8px 16px;">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
                 <span>Поделиться через QR-код</span>
               </button>
@@ -5384,10 +5386,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const pings = directPeers.map(p => (p.latency_ms && p.latency_ms > 0) ? p.latency_ms : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0))).filter(v => v > 0);
       const avgPing = pings.length > 0 ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) : 0;
 
-      const myName = (currentStatus && (currentStatus.device_name || currentStatus.nickname)) || (currentStatus && currentStatus.device_id) || 'Этот компьютер';
-      const myVip = (currentStatus && currentStatus.virtual_ip) || '10.8.0.x';
+      const myName = (currentStatus && (currentStatus.device_name || currentStatus.nickname)) || (currentStatus && currentStatus.device_id) || (document.getElementById('userNameLabel') ? document.getElementById('userNameLabel').innerText : '') || 'Этот узел';
+      const myVip = (currentStatus && currentStatus.virtual_ip) || (document.getElementById('topVipLabel') ? document.getElementById('topVipLabel').innerText : '') || '100.64.200.1';
       const myNat = (currentStatus && currentStatus.nat_type) || 'Full Cone NAT';
-      const myPort = (currentStatus && currentStatus.listen_port) || '51820';
+      const myPort = (currentStatus && (currentStatus.listen_port || currentStatus.wg_port)) || '51820';
 
       let directCardsHtml = '';
       if (directPeers.length === 0) {
@@ -6772,8 +6774,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
     }
 
     function fillFirstPeerTarget() {
-      if (currentPeersList && currentPeersList.length > 0) {
-        const first = currentPeersList[0];
+      if (typeof cachedPeers !== 'undefined' && cachedPeers && cachedPeers.length > 0) {
+        const first = cachedPeers[0];
         const vip = (first.virtual_ip || '').split('/')[0].trim();
         if (vip) setDiagTarget(vip);
       } else {
