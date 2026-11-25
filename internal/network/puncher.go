@@ -425,7 +425,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 				_ = c6.SetWriteBuffer(udpSocketBufSize)
 				DisableUDPConnReset(c6)
 				p.conn6 = c6
-				go p.readLoopIPv6(c6)
+				go p.readLoopIPv6(c6, ctx)
 			}
 		}
 		if p.conn6 == nil {
@@ -435,7 +435,7 @@ func NewUDPPuncher(preferredPort int, myDevID string, stunServers []string, onPi
 					_ = c6.SetWriteBuffer(udpSocketBufSize)
 					DisableUDPConnReset(c6)
 					p.conn6 = c6
-					go p.readLoopIPv6(c6)
+					go p.readLoopIPv6(c6, ctx)
 				}
 			}
 		}
@@ -786,9 +786,12 @@ func (p *UDPPuncher) SetUPnPTCPPort(tcpPort int) {
 	if tcpPort <= 0 {
 		return
 	}
+	p.mu.Lock()
+	ctx := p.ctx
+	p.mu.Unlock()
 	go func() {
 		upnpClient := NewUPnPClient()
-		_ = upnpClient.AddPortMapping(p.ctx, tcpPort, tcpPort, "TCP", "NatBypass P2P TCP (ShadowTLS)", 3600)
+		_ = upnpClient.AddPortMapping(ctx, tcpPort, tcpPort, "TCP", "NatBypass P2P TCP (ShadowTLS)", 3600)
 	}()
 }
 
@@ -1644,7 +1647,10 @@ func (p *UDPPuncher) SendHolePunchBurstWithDelta(targets []string, bursts int, p
 // StartKeepAliveLoop запускает автоматическую отправку keepalive для активных пиров
 // с динамическим рандомизированным джиттером (9–23 сек) против поведенческого анализа ТСПУ/DPI ("метроном").
 func (p *UDPPuncher) StartKeepAliveLoop() {
-	go func() {
+	p.mu.Lock()
+	ctx := p.ctx
+	p.mu.Unlock()
+	go func(loopCtx context.Context) {
 		for {
 			// Рандомизированный интервал 9..23 сек (zero-heap allocation)
 			var b [1]byte
@@ -1653,7 +1659,7 @@ func (p *UDPPuncher) StartKeepAliveLoop() {
 			timer := time.NewTimer(time.Duration(jitterSec) * time.Second)
 
 			select {
-			case <-p.ctx.Done():
+			case <-loopCtx.Done():
 				timer.Stop()
 				return
 			case <-timer.C:
@@ -1672,7 +1678,7 @@ func (p *UDPPuncher) StartKeepAliveLoop() {
 				}
 			}
 		}
-	}()
+	}(ctx)
 }
 
 // AddKeepAliveTarget добавляет адрес для автоматической отправки keepalive
@@ -2251,13 +2257,13 @@ func (p *UDPPuncher) readLoop() {
 	}
 }
 
-func (p *UDPPuncher) readLoopIPv6(c6 *net.UDPConn) {
+func (p *UDPPuncher) readLoopIPv6(c6 *net.UDPConn, ctx context.Context) {
 	bufPtr := packetBufferPool.Get().(*[]byte)
 	defer packetBufferPool.Put(bufPtr)
 	buf := *bufPtr
 	for {
 		select {
-		case <-p.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
@@ -2472,7 +2478,8 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	}
 
 	// 4. Создаём новый контекст
-	p.ctx, p.cancel = context.WithCancel(context.Background())
+	hopCtx, hopCancel := context.WithCancel(context.Background())
+	p.ctx, p.cancel = hopCtx, hopCancel
 
 	// 5. Открываем новый сокет (предпочтительно udp4)
 	lAddr4, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:0")
@@ -2510,11 +2517,11 @@ func (p *UDPPuncher) HopPort() (int, error) {
 	p.StartKeepAliveLoop()
 
 	// 7. Обновляем STUN mapping
-	go func() {
-		ctx, cancel := context.WithTimeout(p.ctx, 5*time.Second)
+	go func(dCtx context.Context) {
+		ctx, cancel := context.WithTimeout(dCtx, 5*time.Second)
 		defer cancel()
 		_, _, _ = p.DiscoverMappedAddress(ctx)
-	}()
+	}(hopCtx)
 
 	return newPort, nil
 }

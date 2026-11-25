@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -88,7 +89,7 @@ type EventEntry struct {
 
 // Server — встроенный Web UI HTTP-сервер
 type Server struct {
-	port       int
+	port       atomic.Int32
 	user       string
 	password   string
 	configPath string
@@ -230,8 +231,7 @@ func NewServer(port int, user, password string, registry *peer.Registry, sigMgr 
 		password = "admin"
 		slog.Info("🔐 Web UI защищен авторизацией по умолчанию (admin/admin)", "username", user)
 	}
-	return &Server{
-		port:       port,
+	s := &Server{
 		user:       user,
 		password:   password,
 		configPath: "config.yaml",
@@ -243,6 +243,8 @@ func NewServer(port int, user, password string, registry *peer.Registry, sigMgr 
 		},
 		readyCh: make(chan struct{}),
 	}
+	s.port.Store(int32(port))
+	return s
 }
 
 // SetConfigPath задает путь к файлу конфигурации
@@ -353,7 +355,7 @@ func (s *Server) GetDeviceName() string {
 
 // GetPort возвращает актуальный порт, на котором работает сервер
 func (s *Server) GetPort() int {
-	return s.port
+	return int(s.port.Load())
 }
 
 // WaitForReady blocks until the WebUI HTTP listener is actively accepting TCP connections and answering HTTP /healthz.
@@ -429,7 +431,7 @@ func (s *Server) AddEvent(eventType, message, detail string) {
 
 // Port возвращает текущий порт сервера
 func (s *Server) Port() int {
-	return s.port
+	return int(s.port.Load())
 }
 
 // Start запускает HTTP-сервер и ждёт отмены контекста (с авто-перебором порта при занятости)
@@ -522,7 +524,7 @@ func (s *Server) Start(ctx context.Context) error {
 	var listener net.Listener
 
 	var err error
-	initialPort := s.port
+	initialPort := int(s.port.Load())
 	if initialPort <= 0 {
 		initialPort = 8080
 	}
@@ -537,7 +539,7 @@ func (s *Server) Start(ctx context.Context) error {
 	for p := initialPort; p < initialPort+20; p++ {
 		listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", listenIP, p))
 		if err == nil {
-			s.port = p
+			s.port.Store(int32(p))
 			break
 		}
 	}
@@ -547,7 +549,7 @@ func (s *Server) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("не удалось найти свободный порт для Web UI: %w", err)
 		}
-		s.port = listener.Addr().(*net.TCPAddr).Port
+		s.port.Store(int32(listener.Addr().(*net.TCPAddr).Port))
 	}
 
 	s.srv = &http.Server{
@@ -606,7 +608,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
-	slog.Info("WebUI server listening", "address", listener.Addr().String(), "port", s.port, "url", fmt.Sprintf("http://127.0.0.1:%d", s.port))
+	slog.Info("WebUI server listening", "address", listener.Addr().String(), "port", s.GetPort(), "url", fmt.Sprintf("http://127.0.0.1:%d", s.GetPort()))
 	if err := s.srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("ошибка Web UI сервера: %w", err)
 	}
@@ -1288,7 +1290,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		cfg, err := config.Load(cfgPath)
 		if err != nil || cfg == nil {
 			cfg = &config.Config{}
-			cfg.WebUI.Port = s.port
+			cfg.WebUI.Port = s.GetPort()
 			cfg.WebUI.Enabled = true
 		}
 		if s.cfg != nil && s.cfg.App.DeviceName != "" {

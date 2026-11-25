@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.48"
+	Version = "1.9.507-beta.49"
 	Commit  = "release"
 )
 
@@ -5519,19 +5519,15 @@ func startEngineFromConfig(c *config.Config) {
 			if inDstIP == cleanVIP && len(payload) >= ihl+8 && payload[9] == 1 && payload[ihl] == 8 {
 				if reply := createICMPEchoReply(payload); len(reply) > 0 {
 					sent := false
-					// 1. If active TCP ShadowTLS connection exists with peer, return via TCP
-					if targetPeer != nil && guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
-						if err := guiTCPDirectMgr.SendPacket(targetPeer.DeviceID, reply); err == nil {
-							sent = true
-						}
-					}
-					// 2. If direct UDP
-					if !sent && srcAddr != nil && udpPuncher != nil && !isTCP && !isRelay {
+					isForceTCP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp"
+					isForceUDP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_udp"
+					// 1. If incoming over direct UDP (or UDP preferred in auto mode), reply over direct UDP
+					if !isForceTCP && srcAddr != nil && udpPuncher != nil && !isTCP && !isRelay {
 						if err := udpPuncher.SendDataPacketWithPadding(srcAddr.String(), reply, 0, 0); err == nil {
 							sent = true
 						}
 					}
-					if !sent && targetPeer != nil && udpPuncher != nil && !isRelay {
+					if !sent && !isForceTCP && targetPeer != nil && udpPuncher != nil && !isTCP && !isRelay {
 						ep := targetPeer.ActiveEndpoint
 						if ep == "" {
 							ep = targetPeer.STUNAddr
@@ -5540,6 +5536,12 @@ func startEngineFromConfig(c *config.Config) {
 							if err := udpPuncher.SendDataPacketWithPadding(ep, reply, 0, 0); err == nil {
 								sent = true
 							}
+						}
+					}
+					// 2. Active TCP ShadowTLS connection fallback (or when incoming packet was over TCP)
+					if !sent && !isForceUDP && targetPeer != nil && guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(targetPeer.DeviceID) {
+						if err := guiTCPDirectMgr.SendPacket(targetPeer.DeviceID, reply); err == nil {
+							sent = true
 						}
 					}
 					// 3. Multi-Hop Mesh Relay fallback: route echo reply through mesh relay peer (TCP or UDP P2P)
@@ -5594,30 +5596,7 @@ func startEngineFromConfig(c *config.Config) {
 			// Mesh Userspace Relay Router:
 			// If packet is destined for another mesh peer or remote advertised subnet, forward directly in userspace
 			if inDstIP != cleanVIP && cleanVIP != "" && registry != nil {
-				var destPeer *peer.Peer
-				if p, ok := registry.GetByVirtualIP(inDstIP); ok && p != nil {
-					destPeer = p
-				} else {
-					// Check advertised subnets via Longest Prefix Match
-					destIP := net.ParseIP(inDstIP)
-					if destIP != nil {
-						bestPrefix := -1
-						for _, p := range registry.List() {
-							if p.DeviceID == myDevID {
-								continue
-							}
-							for _, r := range p.AdvertisedRoutes {
-								if _, ipNet, err := net.ParseCIDR(strings.TrimSpace(r)); err == nil && ipNet.Contains(destIP) {
-									ones, _ := ipNet.Mask.Size()
-									if ones > bestPrefix {
-										bestPrefix = ones
-										destPeer = p
-									}
-								}
-							}
-						}
-					}
-				}
+				destPeer := registry.FindRelayDest(inDstIP, myDevID)
 
 				if destPeer != nil && destPeer.DeviceID != myDevID {
 					if len(payload) >= 20 && payload[0]>>4 == 4 {
@@ -5752,8 +5731,14 @@ func startEngineFromConfig(c *config.Config) {
 			if destPeer == nil {
 				return fmt.Errorf("nil peer")
 			}
-			// 1. Direct TCP ShadowTLS stream
-			if guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(destPeer.DeviceID) {
+			isForceTCP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_tcp"
+			isForceUDP := guiTCPDirectMgr != nil && guiTCPDirectMgr.TransportMode() == "force_udp"
+			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
+			hasTCPConn := !isForceUDP && guiTCPDirectMgr != nil && guiTCPDirectMgr.HasConn(destPeer.DeviceID)
+			udpHealthy := !isForceTCP && udpPuncher != nil && destPeer.DirectP2P && destPeer.IsBilateralP2P(30*time.Second)
+
+			// 1. Direct TCP ShadowTLS stream ONLY when force_tcp is enabled OR UDP is unhealthy
+			if hasTCPConn && (isForceTCP || !udpHealthy) {
 				if err := guiTCPDirectMgr.SendPacket(destPeer.DeviceID, packet); err == nil {
 					return nil
 				}
@@ -5772,7 +5757,6 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}
 
-			bilateralOK := destPeer.IsBilateralP2P(constants.BilateralFreshThreshold)
 			targetEP := destPeer.ActiveEndpoint
 			if guiMagicSock != nil {
 				if bestEP, _, _ := guiMagicSock.GetActiveRoute(destPeer.DeviceID); bestEP != "" {
@@ -5983,35 +5967,7 @@ func startEngineFromConfig(c *config.Config) {
 						_ = tunnel.ClampTCPMSS(packet, constants.DefaultClampedMSS)
 
 						if registry != nil {
-							peers := registry.List()
-							var targetPeer *peer.Peer
-
-							for _, p := range peers {
-								pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
-								if p.DeviceID != myDevID && (p.VirtualIP == destStr || pVIP == destStr) {
-									targetPeer = p
-									break
-								}
-							}
-
-							// 2. Маршрут к подсети пира с Longest Prefix Match (LPM)
-							if targetPeer == nil {
-								bestPrefixLen := -1
-								for _, p := range peers {
-									if p.DeviceID == myDevID {
-										continue
-									}
-									for _, route := range p.AdvertisedRoutes {
-										if _, ipNet, err := net.ParseCIDR(strings.TrimSpace(route)); err == nil && ipNet.Contains(destIP) {
-											ones, _ := ipNet.Mask.Size()
-											if ones > bestPrefixLen {
-												bestPrefixLen = ones
-												targetPeer = p
-											}
-										}
-									}
-								}
-							}
+							targetPeer := registry.FindRelayDest(destStr, myDevID)
 
 							// 3. Маршрутизация через Exit Node
 							exitID := activeExitNodeID
@@ -6023,7 +5979,7 @@ func startEngineFromConfig(c *config.Config) {
 									targetPeer = ep
 								} else {
 									cleanExit := strings.TrimSpace(strings.Split(exitID, "/")[0])
-									for _, p := range peers {
+									for _, p := range registry.List() {
 										pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
 										if p.DeviceID == exitID || pVIP == cleanExit {
 											targetPeer = p

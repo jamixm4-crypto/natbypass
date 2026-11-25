@@ -1538,23 +1538,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if inDstIP == cleanMyVIP && len(payload) >= ihl+8 && payload[9] == 1 && payload[ihl] == 8 {
 				if reply := createICMPEchoReply(payload); len(reply) > 0 {
 					sent := false
+					isForceTCP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_tcp"
+					isForceUDP := tcpDirectMgr != nil && tcpDirectMgr.TransportMode() == "force_udp"
 					var senderPeer *peer.Peer
 					if registry != nil {
 						senderPeer, _ = registry.GetByVirtualIP(inSrcIP)
 					}
-					// 1. If active TCP ShadowTLS connection with peer, return via TCP
-					if senderPeer != nil && tcpDirectMgr != nil && tcpDirectMgr.HasConn(senderPeer.DeviceID) {
-						if err := tcpDirectMgr.SendPacket(senderPeer.DeviceID, reply); err == nil {
-							sent = true
-						}
-					}
-					// 2. If direct UDP
-					if !sent && directAddr != nil && puncher != nil && !isTCP && !isRelay {
+					// 1. If direct UDP (preferred when ping arrived via UDP and not force_tcp)
+					if !isForceTCP && directAddr != nil && puncher != nil && !isTCP && !isRelay {
 						if err := puncher.SendDataPacketWithPadding(directAddr.String(), reply, 0, 0); err == nil {
 							sent = true
 						}
 					}
-					if !sent && senderPeer != nil && puncher != nil && !isRelay {
+					if !sent && !isForceTCP && senderPeer != nil && puncher != nil && !isTCP && !isRelay {
 						ep := senderPeer.ActiveEndpoint
 						if ep == "" {
 							ep = senderPeer.STUNAddr
@@ -1563,6 +1559,12 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							if err := puncher.SendDataPacketWithPadding(ep, reply, 0, 0); err == nil {
 								sent = true
 							}
+						}
+					}
+					// 2. If active TCP ShadowTLS connection with peer, return via TCP
+					if !sent && !isForceUDP && senderPeer != nil && tcpDirectMgr != nil && tcpDirectMgr.HasConn(senderPeer.DeviceID) {
+						if err := tcpDirectMgr.SendPacket(senderPeer.DeviceID, reply); err == nil {
+							sent = true
 						}
 					}
 					// 3. Multi-Hop Mesh Relay fallback: route echo reply through mesh relay peer (TCP or UDP P2P)
@@ -1687,22 +1689,6 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			if tunDev != nil {
 				if inSrcIP != "" {
 					tunnel.EnsurePeerHostRoute(inSrcIP)
-				}
-				// Recalculate IPv4 header checksum so Windows Wintun driver accepts packet unconditionally
-				if len(payload) >= 20 && payload[0]>>4 == 4 {
-					ihl := int(payload[0]&0x0F) * 4
-					if ihl >= 20 && ihl <= len(payload) {
-						payload[10] = 0
-						payload[11] = 0
-						var sum uint32
-						for i := 0; i < ihl; i += 2 {
-							sum += uint32(binary.BigEndian.Uint16(payload[i : i+2]))
-						}
-						for sum > 0xFFFF {
-							sum = (sum & 0xFFFF) + (sum >> 16)
-						}
-						binary.BigEndian.PutUint16(payload[10:12], ^uint16(sum))
-					}
 				}
 				_ = tunDev.WritePacket(payload)
 				return

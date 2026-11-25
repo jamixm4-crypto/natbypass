@@ -38,7 +38,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.48"
+const Version = "1.9.507-beta.49"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -2560,6 +2560,9 @@ func ensureMobileTCPRelay(ctx context.Context, devID string) {
 // RebindSockets closes the old UDP socket and binds a new one, returning the new raw file descriptor.
 // Must be called on network switch (Wi-Fi <-> Mobile data) so the new socket routes through the new network.
 func RebindSockets() int {
+	network.InvalidateLocalIPCache()
+	network.InvalidateLocalIPv6Cache()
+	peer.InvalidateLANSubnetsCache()
 	engineMu.Lock()
 	puncher := globalPuncher
 	engineMu.Unlock()
@@ -2579,6 +2582,9 @@ func RebindSockets() int {
 // или по нажатию кнопки «Синхронизация»/«Обновить» в интерфейсе.
 // Принудительно пересматривает публичный IP и STUN-mapped адрес, затем публикует обновлённый маяк.
 func RefreshPublicIP() {
+	network.InvalidateLocalIPCache()
+	network.InvalidateLocalIPv6Cache()
+	peer.InvalidateLANSubnetsCache()
 	engineMu.Lock()
 	defer engineMu.Unlock()
 
