@@ -14,6 +14,7 @@ import (
 	"net"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,7 +30,7 @@ const (
 
 // TrafficShaper маскирует VPN-трафик под видеоконференции (WebRTC/Zoom) или потоковое видео (YouTube).
 type TrafficShaper struct {
-	enabled      bool
+	enabled      atomic.Bool
 	profile      TrafficProfile
 	jitterMin    time.Duration // 5ms
 	jitterMax    time.Duration // 50ms
@@ -40,14 +41,15 @@ type TrafficShaper struct {
 
 // NewTrafficShaper создаёт новый экземпляр TrafficShaper.
 func NewTrafficShaper(enabled bool) *TrafficShaper {
-	return &TrafficShaper{
-		enabled:      enabled,
+	ts := &TrafficShaper{
 		profile:      ProfileWebRTC,
 		jitterMin:    5 * time.Millisecond,
 		jitterMax:    50 * time.Millisecond,
 		maxFrameSize: 1350,
 		fakeAckProb:  0.30,
 	}
+	ts.enabled.Store(enabled)
+	return ts
 }
 
 // SetProfile configures shaping parameters for specific camouflage profile (YouTube, Zoom, WebRTC).
@@ -87,16 +89,12 @@ func (s *TrafficShaper) GetProfile() TrafficProfile {
 
 // SetEnabled включает или отключает маскировку трафика.
 func (s *TrafficShaper) SetEnabled(enabled bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.enabled = enabled
+	s.enabled.Store(enabled)
 }
 
 // IsEnabled возвращает текущее состояние шейпера.
 func (s *TrafficShaper) IsEnabled() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.enabled
+	return s.enabled.Load()
 }
 
 // SendPacket отправляет IP-пакет с динамическим джиттером, нарезкой на кадры и генерацией Fake ACK.
@@ -105,8 +103,8 @@ func (s *TrafficShaper) SendPacket(conn *net.UDPConn, addr *net.UDPAddr, payload
 		return nil
 	}
 
+	enabled := s.enabled.Load()
 	s.mu.RLock()
-	enabled := s.enabled
 	jMin := s.jitterMin
 	jMax := s.jitterMax
 	frameSize := s.maxFrameSize

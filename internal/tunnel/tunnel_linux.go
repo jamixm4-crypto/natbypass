@@ -269,8 +269,8 @@ func (d *Device) SetVirtualIP(virtualIP string) error {
 	d.mu.Unlock()
 	mtuStr := strconv.Itoa(mtu)
 
-	// 2. ГАРАНТИРОВАННО поднимаем интерфейс первым делом (LINK UP + MTU)
-	_ = exec.CommandContext(ctx, ipBin, "link", "set", "dev", d.AdapterName, "mtu", mtuStr).Run()
+	// 2. ГАРАНТИРОВАННО поднимаем интерфейс первым делом (LINK UP + MTU + enlarged txqueuelen for burst throughput)
+	_ = exec.CommandContext(ctx, ipBin, "link", "set", "dev", d.AdapterName, "mtu", mtuStr, "txqueuelen", "1000").Run()
 	_ = exec.CommandContext(ctx, ipBin, "link", "set", d.AdapterName, "up").Run()
 
 	// 3. Очистка старых IP-адресов на интерфейсе

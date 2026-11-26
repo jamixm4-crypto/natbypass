@@ -8,6 +8,7 @@
 package shadowtls
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -32,10 +33,18 @@ var (
 type ShadowTLSConn struct {
 	net.Conn
 	key           [32]byte
+	br            *bufio.Reader
 	readBuf       []byte
 	handshakeDone bool
 	readMu        sync.Mutex
 	writeMu       sync.Mutex
+}
+
+var shadowFramePool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 2048)
+		return &b
+	},
 }
 
 // NewShadowTLSConn creates a new framed TLS 1.3 connection.
@@ -44,6 +53,7 @@ func NewShadowTLSConn(conn net.Conn, key [32]byte) *ShadowTLSConn {
 	return &ShadowTLSConn{
 		Conn:          conn,
 		key:           key,
+		br:            bufio.NewReaderSize(conn, 65536),
 		readBuf:       nil,
 		handshakeDone: true,
 	}
@@ -54,6 +64,7 @@ func NewUnverifiedShadowTLSConn(rawConn net.Conn, key [32]byte) *ShadowTLSConn {
 	return &ShadowTLSConn{
 		Conn:          rawConn,
 		key:           key,
+		br:            bufio.NewReaderSize(rawConn, 65536),
 		readBuf:       nil,
 		handshakeDone: false,
 	}
@@ -110,17 +121,28 @@ func (c *ShadowTLSConn) WritePacket(payload []byte) error {
 	}
 
 	// 2. Build framed payload: [uint16 totalLen][uint16 realLen][payload][random padding]
-	frame := make([]byte, 2+totalLen)
+	frameLen := 2 + totalLen
+	var pooledPtr *[]byte
+	var frame []byte
+	if frameLen <= 2048 {
+		pooledPtr = shadowFramePool.Get().(*[]byte)
+		frame = (*pooledPtr)[:frameLen]
+	} else {
+		frame = make([]byte, frameLen)
+	}
 	binary.BigEndian.PutUint16(frame[0:2], uint16(totalLen))
 	binary.BigEndian.PutUint16(frame[2:4], realLen)
 	copy(frame[4:4+len(payload)], payload)
 	crypto.FastJitterBytes(frame[4+len(payload):])
 
 	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
 	// Write directly to c.Conn (*tls.Conn). Go's standard library crypto/tls encrypts
 	// the frame into genuine TLS 1.3 Application Data records with AEAD and sequence numbers.
 	_, err := c.Conn.Write(frame)
+	c.writeMu.Unlock()
+	if pooledPtr != nil {
+		shadowFramePool.Put(pooledPtr)
+	}
 	return err
 }
 
@@ -134,8 +156,12 @@ func (c *ShadowTLSConn) ReadPacket() ([]byte, error) {
 	c.readMu.Lock()
 	defer c.readMu.Unlock()
 
+	if c.br == nil {
+		c.br = bufio.NewReaderSize(c.Conn, 65536)
+	}
+
 	var lenHdr [2]byte
-	if _, err := io.ReadFull(c.Conn, lenHdr[:]); err != nil {
+	if _, err := io.ReadFull(c.br, lenHdr[:]); err != nil {
 		return nil, err
 	}
 	totalLen := int(binary.BigEndian.Uint16(lenHdr[:]))
@@ -143,18 +169,34 @@ func (c *ShadowTLSConn) ReadPacket() ([]byte, error) {
 		return nil, ErrRecordTooShort
 	}
 
-	frame := make([]byte, totalLen)
-	if _, err := io.ReadFull(c.Conn, frame); err != nil {
+	var pooledPtr *[]byte
+	var frame []byte
+	if totalLen <= 2048 {
+		pooledPtr = shadowFramePool.Get().(*[]byte)
+		frame = (*pooledPtr)[:totalLen]
+	} else {
+		frame = make([]byte, totalLen)
+	}
+	if _, err := io.ReadFull(c.br, frame); err != nil {
+		if pooledPtr != nil {
+			shadowFramePool.Put(pooledPtr)
+		}
 		return nil, err
 	}
 
 	realLen := int(binary.BigEndian.Uint16(frame[:2]))
 	if realLen <= 0 || 2+realLen > totalLen {
+		if pooledPtr != nil {
+			shadowFramePool.Put(pooledPtr)
+		}
 		return nil, ErrInvalidRecord
 	}
 
 	pkt := make([]byte, realLen)
 	copy(pkt, frame[2:2+realLen])
+	if pooledPtr != nil {
+		shadowFramePool.Put(pooledPtr)
+	}
 	return pkt, nil
 }
 

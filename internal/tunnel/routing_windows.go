@@ -264,12 +264,27 @@ func EnableHostIPForwarding() error {
 	return EnableHostIPForwardingSubnet("100.64.200.0/24")
 }
 
+var peerHostRoutesWindows sync.Map // cleanVIP -> int64 unix timestamp
+
 // EnsurePeerHostRoute adds a /32 host route for a peer's VirtualIP via the NatBypass Wintun interface using NetIO API.
+// Uses a 60-second TTL cache so per-packet inbound calls avoid redundant GetTUNStatus locks and NetIO kernel syscalls.
 func EnsurePeerHostRoute(peerVIP string) {
 	if peerVIP == "" {
 		return
 	}
-	cleanVIP := strings.TrimSpace(strings.Split(peerVIP, "/")[0])
+	cleanVIP := peerVIP
+	if idx := strings.IndexByte(cleanVIP, '/'); idx >= 0 {
+		cleanVIP = cleanVIP[:idx]
+	}
+	cleanVIP = strings.TrimSpace(cleanVIP)
+
+	now := time.Now().Unix()
+	if prev, loaded := peerHostRoutesWindows.Load(cleanVIP); loaded {
+		if ts, ok := prev.(int64); ok && ts > now-60 {
+			return
+		}
+	}
+
 	addr, err := netip.ParseAddr(cleanVIP)
 	if err != nil || !addr.Is4() {
 		return
@@ -293,6 +308,7 @@ func EnsurePeerHostRoute(peerVIP string) {
 
 	prefix := netip.PrefixFrom(addr, 32)
 	_ = tunLUID.AddRoute(prefix, netip.IPv4Unspecified(), 5)
+	peerHostRoutesWindows.Store(cleanVIP, now)
 }
 
 // DisableHostIPForwarding disables IP forwarding and cleans up NetNat rule.

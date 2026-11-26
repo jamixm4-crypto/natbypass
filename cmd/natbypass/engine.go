@@ -1752,11 +1752,19 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		// All data plane traffic flows strictly peer-to-peer over direct UDP.
 
 		// L3 Data-plane: Outbound packets from TUN -> Dispatch to peer over UDP Direct or MQTT Relay
-		pktCh := make(chan []byte, 8192)
+		type pooledTunPacket struct {
+			data    []byte
+			release func()
+		}
+		type pooledPacketReader interface {
+			ReadPacketPooled() ([]byte, func(), error)
+		}
+		pktCh := make(chan pooledTunPacket, 8192)
 		var reactiveEngineMu sync.Mutex
 		lastReactivePunchEngine := make(map[string]time.Time)
 		lastReactiveDialEngine := make(map[string]time.Time)
 		go func() {
+			var pReader pooledPacketReader
 			for {
 				select {
 				case <-engineCtx.Done():
@@ -1764,6 +1772,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				default:
 				}
 				if tunDev == nil {
+					pReader = nil
 					select {
 					case <-engineCtx.Done():
 						return
@@ -1771,8 +1780,20 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 						continue
 					}
 				}
+				if pReader == nil {
+					if pr, ok := any(tunDev).(pooledPacketReader); ok {
+						pReader = pr
+					}
+				}
 				// Blocking read: tunDev blocks until data arrives — no CPU spin
-				pkt, err := tunDev.ReadPacket()
+				var pkt []byte
+				var rel func()
+				var err error
+				if pReader != nil {
+					pkt, rel, err = pReader.ReadPacketPooled()
+				} else {
+					pkt, err = tunDev.ReadPacket()
+				}
 				if err != nil {
 					// Transient errors (e.g. EAGAIN on non-blocking fd): yield briefly
 					select {
@@ -1785,11 +1806,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 					continue
 				}
 				if len(pkt) < 20 {
+					if rel != nil {
+						rel()
+					}
 					continue
 				}
 				select {
-				case pktCh <- pkt:
+				case pktCh <- pooledTunPacket{data: pkt, release: rel}:
 				default:
+					if rel != nil {
+						rel()
+					}
 				}
 			}
 		}()
@@ -1797,72 +1824,79 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 		// Single sequential FIFO worker to guarantee zero TCP packet reordering.
 		// Multiple parallel workers cause out-of-order delivery, triggering DUP-ACKs and collapsing TCP CWND.
 		go func() {
-			for {
-				select {
-				case <-engineCtx.Done():
+			cleanVIP := myVirtualIP
+			if idx := strings.IndexByte(cleanVIP, '/'); idx >= 0 {
+				cleanVIP = cleanVIP[:idx]
+			}
+			cleanVIP = strings.TrimSpace(cleanVIP)
+			var myLocal, myPub string
+			var hasIPv6 bool
+			var lastAddrSnap time.Time
+
+			handleOutbound := func(item pooledTunPacket) {
+				if item.release != nil {
+					defer item.release()
+				}
+				pkt := item.data
+				if len(pkt) < 20 || pkt[0]>>4 != 4 {
 					return
-				case pkt, ok := <-pktCh:
-					if !ok {
-						return
-					}
-					if len(pkt) < 20 || pkt[0]>>4 != 4 {
-						continue
-					}
-					dstNetIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
-					dstIP := dstNetIP.String()
-					cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
+				}
+				dstNetIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
+				dstIP := dstNetIP.String()
 
-					// Self-loopback: reflect local virtual IP packets directly back to TUN
-					if dstIP == cleanVIP {
-						if tunDev != nil {
-							_ = tunDev.WritePacket(pkt)
+				// Self-loopback: reflect local virtual IP packets directly back to TUN
+				if dstIP == cleanVIP {
+					if tunDev != nil {
+						_ = tunDev.WritePacket(pkt)
+					}
+					return
+				}
+
+				// Ignore multicast, broadcast, link-local and noise
+				if tunnel.IsParasiticOrBroadcast(pkt, cleanVIP) {
+					return
+				}
+
+				// Userspace TCP MSS Clamping to prevent PMTU blackholes
+				_ = tunnel.ClampTCPMSS(pkt, constants.DefaultClampedMSS)
+
+				// 1. Direct Virtual IP + Longest Prefix Match (LPM) on AdvertisedRoutes (zero-alloc when no routes advertised)
+				p := registry.FindRelayDest(dstIP, deviceID)
+				found := p != nil
+
+				// 3. Fallback to Selected Exit Node for default Internet routing (0.0.0.0/0)
+				if (!found || p == nil) && cfg.Network.SelectedExitNode != "" {
+					if exitPeer, ok := registry.GetByIDOrVIP(cfg.Network.SelectedExitNode); ok && exitPeer != nil {
+						p = exitPeer
+						found = true
+					}
+				}
+
+				if found && p != nil {
+					targetEP := p.ActiveEndpoint
+					if magicSock != nil {
+						if bestEP, _, _ := magicSock.GetActiveRoute(p.DeviceID); bestEP != "" {
+							targetEP = bestEP
 						}
-						continue
 					}
-
-					// Ignore multicast, broadcast, link-local and noise
-					if tunnel.IsParasiticOrBroadcast(pkt, myVirtualIP) {
-						continue
-					}
-
-					// Userspace TCP MSS Clamping to prevent PMTU blackholes
-					_ = tunnel.ClampTCPMSS(pkt, constants.DefaultClampedMSS)
-
-					// 1. Direct Virtual IP + Longest Prefix Match (LPM) on AdvertisedRoutes (zero-alloc when no routes advertised)
-					p := registry.FindRelayDest(dstIP, deviceID)
-					found := p != nil
-
-					// 3. Fallback to Selected Exit Node for default Internet routing (0.0.0.0/0)
-					if (!found || p == nil) && cfg.Network.SelectedExitNode != "" {
-						if exitPeer, ok := registry.GetByIDOrVIP(cfg.Network.SelectedExitNode); ok && exitPeer != nil {
-							p = exitPeer
-							found = true
-						}
-					}
-
-					if found && p != nil {
-						targetEP := p.ActiveEndpoint
-						if magicSock != nil {
-							if bestEP, _, _ := magicSock.GetActiveRoute(p.DeviceID); bestEP != "" {
-								targetEP = bestEP
-							}
-						}
-						// LAN Peer Priority: If client has a LocalAddr and is on local network, prefer LocalAddr!
-						myLocal := ""
-						myPub := ""
+					if now := time.Now(); now.Sub(lastAddrSnap) >= 2*time.Second {
+						lastAddrSnap = now
 						if puncher != nil {
 							myLocal = puncher.LocalAddr()
 							myPub = puncher.MappedIPString()
 						}
-						isLocalLAN := p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, myPub)
-						if isLocalLAN && (!p.DirectP2P || targetEP == "" || targetEP == p.STUNAddr) {
-							targetEP = p.LocalAddr
-						} else if (!p.DirectP2P || targetEP == "" || targetEP == p.STUNAddr) && p.IPv6Addr != "" && network.HasGlobalIPv6() {
-							targetEP = p.IPv6Addr
-						}
-						if targetEP == "" && p.IPv6Addr != "" && network.HasGlobalIPv6() {
-							targetEP = p.IPv6Addr
-						}
+						hasIPv6 = network.HasGlobalIPv6()
+					}
+					// LAN Peer Priority: If client has a LocalAddr and is on local network, prefer LocalAddr!
+					isLocalLAN := p.LocalAddr != "" && peer.IsLocalLANPeer(p.LocalAddr, p.PublicIP, myLocal, myPub)
+					if isLocalLAN && (!p.DirectP2P || targetEP == "" || targetEP == p.STUNAddr) {
+						targetEP = p.LocalAddr
+					} else if (!p.DirectP2P || targetEP == "" || targetEP == p.STUNAddr) && p.IPv6Addr != "" && hasIPv6 {
+						targetEP = p.IPv6Addr
+					}
+					if targetEP == "" && p.IPv6Addr != "" && hasIPv6 {
+						targetEP = p.IPv6Addr
+					}
 						if targetEP == "" {
 							targetEP = p.STUNAddr
 						}
@@ -2176,6 +2210,17 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 							}
 						}
 					}
+				}
+
+			for {
+				select {
+				case <-engineCtx.Done():
+					return
+				case item, ok := <-pktCh:
+					if !ok {
+						return
+					}
+					handleOutbound(item)
 				}
 			}
 		}()
