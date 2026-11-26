@@ -617,20 +617,60 @@ func (s *Server) Start(ctx context.Context) error {
 
 // isAuthRequired checks if authentication is mandatory for this server instance.
 func (s *Server) isAuthRequired() bool {
-	// В версии для Windows (NatBypass.exe / desktop) авторизация полностью отключена
-	if runtime.GOOS == "windows" {
-		return false
-	}
-	// Если сервер слушает на всех интерфейсах (0.0.0.0 или LAN IP), авторизация строго обязательна!
+	// Если сервер слушает на всех интерфейсах (0.0.0.0 или LAN IP), авторизация строго обязательна на любой ОС!
 	if s.isExposedToLAN() {
 		return true
+	}
+	// На Windows для локального loopback без заданного пароля вход автоматический,
+	// но при задании не-дефолтного пароля авторизация включается.
+	if runtime.GOOS == "windows" {
+		return (s.password != "" && s.password != "admin") || s.customAuth != nil
 	}
 	return s.password != "" || s.customAuth != nil || IsKeeneticOS()
 }
 
 func (s *Server) isExposedToLAN() bool {
-	if s.cfg != nil && s.cfg.WebUI.ListenHost != "" && s.cfg.WebUI.ListenHost != "127.0.0.1" && s.cfg.WebUI.ListenHost != "localhost" {
+	if s.cfg != nil && s.cfg.WebUI.ListenHost != "" {
+		lh := strings.TrimSpace(strings.ToLower(s.cfg.WebUI.ListenHost))
+		if lh != "127.0.0.1" && lh != "localhost" && lh != "::1" && lh != "[::1]" {
+			return true
+		}
+	}
+	return IsKeeneticOS()
+}
+
+func isTrustedLocalURL(raw string) bool {
+	if raw == "" {
 		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return false
+	}
+	h := strings.TrimSpace(strings.ToLower(u.Hostname()))
+	return h == "127.0.0.1" || h == "localhost" || h == "::1"
+}
+
+func isTrustedCORSOrigin(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return false
+	}
+	h := strings.TrimSpace(strings.ToLower(u.Hostname()))
+	if h == "127.0.0.1" || h == "localhost" || h == "::1" {
+		return true
+	}
+	if IsKeeneticOS() {
+		if strings.HasSuffix(h, ".keenetic.net") || strings.HasSuffix(h, ".keenetic.pro") ||
+			strings.HasSuffix(h, ".keenetic.io") || strings.HasSuffix(h, ".keenetic.name") {
+			return true
+		}
+		if ip := net.ParseIP(h); ip != nil && ip.IsPrivate() {
+			return true
+		}
 	}
 	return false
 }
@@ -688,8 +728,8 @@ func (s *Server) csrfMiddleware(next http.Handler) http.Handler {
 			// to prevent reverse-proxy bypass by external clients faking loopback origin.
 			origin := r.Header.Get("Origin")
 			referer := r.Header.Get("Referer")
-			isLocalOrigin := origin == "" || strings.HasPrefix(origin, "http://127.0.0.1") || strings.HasPrefix(origin, "http://localhost")
-			isLocalReferer := referer == "" || strings.HasPrefix(referer, "http://127.0.0.1") || strings.HasPrefix(referer, "http://localhost")
+			isLocalOrigin := isTrustedLocalURL(origin)
+			isLocalReferer := isTrustedLocalURL(referer)
 			if isDirectLoopback(r) && isLocalOrigin && isLocalReferer {
 				next.ServeHTTP(w, r)
 				return
@@ -765,7 +805,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 0. Разрешить локальный read-only опрос статуса, пиров, дашборда и топологии (localhost 127.0.0.1 / ::1) строго по GET
-		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck" || r.URL.Path == "/api/signaling/brokers" || r.URL.Path == "/api/logs/download") && r.Method == http.MethodGet {
+		if (r.URL.Path == "/api/status" || r.URL.Path == "/api/peers" || r.URL.Path == "/api/dashboard" || r.URL.Path == "/api/mesh/topology" || r.URL.Path == "/api/telemetry" || r.URL.Path == "/api/diagnostics/netcheck" || r.URL.Path == "/api/signaling/brokers") && r.Method == http.MethodGet {
 			if isDirectLoopback(r) {
 				next.ServeHTTP(w, r)
 				return
@@ -800,11 +840,8 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			// Разрешаем только доверенные локальные источники
-			if strings.HasPrefix(origin, "http://127.0.0.1") ||
-				strings.HasPrefix(origin, "http://localhost") ||
-				strings.HasPrefix(origin, "http://[::1]") ||
-				(IsKeeneticOS() && (strings.Contains(origin, ".keenetic.") || strings.HasPrefix(origin, "http://192.168."))) {
+			// Разрешаем только строго проверенные доверенные источники (защита от *.attacker.com bypass)
+			if isTrustedCORSOrigin(origin) {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -836,10 +873,14 @@ func (s *Server) hostValidationMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 2. На роутерах Keenetic разрешены внутренние домены Keenetic и частные IP
+		// 2. На роутерах Keenetic разрешены внутренние домены Keenetic и реальные частные IP (RFC1918)
 		if IsKeeneticOS() {
 			if strings.HasSuffix(host, ".keenetic.net") || strings.HasSuffix(host, ".keenetic.pro") ||
-				strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "172.") {
+				strings.HasSuffix(host, ".keenetic.io") || strings.HasSuffix(host, ".keenetic.name") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if parsedHostIP := net.ParseIP(host); parsedHostIP != nil && parsedHostIP.IsPrivate() {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -911,8 +952,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 1. On Windows, automatically set session cookie so any browser/WebView request has valid session
-	if runtime.GOOS == "windows" {
+	// 1. On Windows, automatically set session cookie ONLY for local loopback when auth is not required
+	if runtime.GOOS == "windows" && !s.isAuthRequired() && isDirectLoopback(r) {
 		if c, err := r.Cookie("nb_session"); err != nil || !isValidSession(c.Value) {
 			sessionToken := createSession("admin")
 			http.SetCookie(w, &http.Cookie{
@@ -1282,6 +1323,62 @@ func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
 	s.jsonResponse(w, http.StatusOK, statuses, "")
 }
 
+const maskedSecretPlaceholder = "********"
+
+var tgTokenPattern = regexp.MustCompile(`^[0-9]{4,16}:[A-Za-z0-9_-]{20,64}$`)
+
+func redactConfigSecrets(src *config.Config) *config.Config {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	if cp.WebUI.Password != "" {
+		cp.WebUI.Password = maskedSecretPlaceholder
+	}
+	if len(src.Profiles) > 0 {
+		cp.Profiles = make([]config.Profile, len(src.Profiles))
+		for i, p := range src.Profiles {
+			if p.NetworkKey != "" {
+				p.NetworkKey = maskedSecretPlaceholder
+			}
+			cp.Profiles[i] = p
+		}
+	}
+	if len(src.Signaling.Channels) > 0 {
+		cp.Signaling.Channels = make([]config.ChannelConfig, len(src.Signaling.Channels))
+		for i, ch := range src.Signaling.Channels {
+			if len(ch.Params) > 0 {
+				pCopy := make(map[string]string, len(ch.Params))
+				for k, v := range ch.Params {
+					kl := strings.ToLower(k)
+					if v != "" && (kl == "token" || kl == "password" || kl == "secret") {
+						pCopy[k] = maskedSecretPlaceholder
+					} else {
+						pCopy[k] = v
+					}
+				}
+				ch.Params = pCopy
+			}
+			cp.Signaling.Channels[i] = ch
+		}
+	}
+	return &cp
+}
+
+func isForbiddenProbeHost(host string) bool {
+	h := strings.TrimSpace(host)
+	if h == "" {
+		return true
+	}
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
+	}
+	return false
+}
+
 // handleConfig — GET & POST /api/config — чтение и сохранение настроек
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -1304,7 +1401,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if runtime.GOOS == "windows" {
 			cfg.App.AutoStart = autostart.IsAutoStartEnabled("NatBypass")
 		}
-		s.jsonResponse(w, http.StatusOK, cfg, "")
+		s.jsonResponse(w, http.StatusOK, redactConfigSecrets(cfg), "")
 
 	case http.MethodPost:
 		var req config.Config
@@ -1319,16 +1416,37 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if existingCfg == nil {
 			existingCfg = &req
 		} else {
+			prevPass := existingCfg.WebUI.Password
+			prevChannels := existingCfg.Signaling.Channels
 			// Обновляем общие секции настроек, сохраняя секцию profiles и active_profile
 			existingCfg.App = req.App
 			existingCfg.WebUI = req.WebUI
+			if existingCfg.WebUI.Password == maskedSecretPlaceholder {
+				existingCfg.WebUI.Password = prevPass
+			}
 			existingCfg.Network = req.Network
+			// Preserve masked channel secrets if unchanged
+			for i, ch := range req.Signaling.Channels {
+				for _, oldCh := range prevChannels {
+					if oldCh.Type == ch.Type {
+						for _, secretKey := range []string{"token", "password", "secret"} {
+							if ch.Params != nil && ch.Params[secretKey] == maskedSecretPlaceholder {
+								if oldVal := oldCh.Params[secretKey]; oldVal != "" {
+									ch.Params[secretKey] = oldVal
+								}
+							}
+						}
+						break
+					}
+				}
+				req.Signaling.Channels[i] = ch
+			}
 			existingCfg.Signaling = req.Signaling
 			existingCfg.WireGuard = req.WireGuard
 		}
 
 		_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
-		if err := config.Save(existingCfg, targetPath, false); err != nil {
+		if err := config.Save(existingCfg, targetPath, runtime.GOOS == "windows"); err != nil {
 			s.jsonResponse(w, http.StatusInternalServerError, nil, "ошибка записи файла: "+err.Error())
 			return
 		}
@@ -1374,25 +1492,39 @@ func (s *Server) handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 		s.jsonResponse(w, http.StatusBadRequest, nil, "некорректный JSON")
 		return
 	}
-	if req.Token == "" {
-		s.jsonResponse(w, http.StatusBadRequest, nil, "укажите токен бота")
+	token := strings.TrimSpace(req.Token)
+	if token == maskedSecretPlaceholder {
+		if cfg, err := config.Load(s.resolveConfigPath()); err == nil && cfg != nil {
+			for _, ch := range cfg.Signaling.Channels {
+				if ch.Type == "telegram" && ch.Params != nil && ch.Params["token"] != "" {
+					token = strings.TrimSpace(ch.Params["token"])
+					break
+				}
+			}
+		}
+	}
+	if !tgTokenPattern.MatchString(token) {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "некорректный формат токена бота Telegram")
 		return
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	if req.Proxy != "" {
-		if u, err := url.Parse(req.Proxy); err == nil && u.Scheme == "socks5" {
-			if dialer, err := proxy.SOCKS5("tcp", u.Host, nil, proxy.Direct); err == nil {
-				client.Transport = &http.Transport{
-					DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-						return dialer.Dial(network, addr)
-					},
-				}
+		u, err := url.Parse(req.Proxy)
+		if err != nil || u.Scheme != "socks5" || u.Host == "" || isForbiddenProbeHost(u.Hostname()) {
+			s.jsonResponse(w, http.StatusBadRequest, nil, "недопустимый адрес SOCKS5 прокси")
+			return
+		}
+		if dialer, err := proxy.SOCKS5("tcp", u.Host, nil, proxy.Direct); err == nil {
+			client.Transport = &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return dialer.Dial(network, addr)
+				},
 			}
 		}
 	}
 
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", req.Token)
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", url.PathEscape(token))
 	resp, err := client.Get(apiURL)
 	if err != nil {
 		s.jsonResponse(w, http.StatusBadRequest, nil, "ошибка подключения к Telegram API: "+err.Error())
@@ -1439,9 +1571,31 @@ func (s *Server) handleTestMQTT(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u, err := url.Parse(req.BrokerURL)
-	host := req.BrokerURL
-	if err == nil && u.Host != "" {
-		host = u.Host
+	if err != nil || u.Host == "" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "некорректный URL MQTT брокера")
+		return
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "tcp" && scheme != "ssl" && scheme != "tls" && scheme != "tcps" && scheme != "ws" && scheme != "wss" {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "неподдерживаемая схема MQTT брокера")
+		return
+	}
+	if isForbiddenProbeHost(u.Hostname()) {
+		s.jsonResponse(w, http.StatusBadRequest, nil, "проверка внутренних/loopback адресов запрещена")
+		return
+	}
+	host := u.Host
+	if u.Port() == "" {
+		switch scheme {
+		case "ssl", "tls", "tcps":
+			host = net.JoinHostPort(u.Hostname(), "8883")
+		case "wss":
+			host = net.JoinHostPort(u.Hostname(), "443")
+		case "ws":
+			host = net.JoinHostPort(u.Hostname(), "80")
+		default:
+			host = net.JoinHostPort(u.Hostname(), "1883")
+		}
 	}
 
 	conn, err := net.DialTimeout("tcp", host, 5*time.Second)
@@ -3214,10 +3368,12 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		if ch.Type == "telegram" {
 			hasTg = true
 			if ch.Params == nil { ch.Params = make(map[string]string) }
-			ch.Params["token"] = req.TgToken
+			if req.TgToken != maskedSecretPlaceholder {
+				ch.Params["token"] = req.TgToken
+			}
 			ch.Params["chat_id"] = req.TgChat
 			if req.TgProxy != "" { ch.Params["proxy"] = req.TgProxy }
-			ch.Enabled = req.TgToken != "" && req.TgChat != ""
+			ch.Enabled = ch.Params["token"] != "" && req.TgChat != ""
 			cfg.Signaling.Channels[i] = ch
 		}
 		if ch.Type == "mqtt" {
@@ -3226,24 +3382,28 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			ch.Params["broker_url"] = req.MqttBroker
 			ch.Params["topic"] = req.MqttTopic
 			if req.MqttUser != "" { ch.Params["username"] = req.MqttUser }
-			if req.MqttPass != "" { ch.Params["password"] = req.MqttPass }
+			if req.MqttPass != "" && req.MqttPass != maskedSecretPlaceholder {
+				ch.Params["password"] = req.MqttPass
+			}
 			ch.Enabled = req.MqttBroker != "" && req.MqttTopic != ""
 			cfg.Signaling.Channels[i] = ch
 		}
 	}
-	if !hasTg && (req.TgToken != "" || req.TgChat != "") {
-		params := map[string]string{"token": req.TgToken, "chat_id": req.TgChat}
+	if !hasTg && (req.TgToken != "" && req.TgToken != maskedSecretPlaceholder || req.TgChat != "") {
+		tok := req.TgToken
+		if tok == maskedSecretPlaceholder { tok = "" }
+		params := map[string]string{"token": tok, "chat_id": req.TgChat}
 		if req.TgProxy != "" { params["proxy"] = req.TgProxy }
 		cfg.Signaling.Channels = append(cfg.Signaling.Channels, config.ChannelConfig{
 			Type:    "telegram",
-			Enabled: req.TgToken != "" && req.TgChat != "",
+			Enabled: tok != "" && req.TgChat != "",
 			Params:  params,
 		})
 	}
 	if !hasMqtt && (req.MqttBroker != "" || req.MqttTopic != "") {
 		params := map[string]string{"broker_url": req.MqttBroker, "topic": req.MqttTopic}
 		if req.MqttUser != "" { params["username"] = req.MqttUser }
-		if req.MqttPass != "" { params["password"] = req.MqttPass }
+		if req.MqttPass != "" && req.MqttPass != maskedSecretPlaceholder { params["password"] = req.MqttPass }
 		cfg.Signaling.Channels = append(cfg.Signaling.Channels, config.ChannelConfig{
 			Type:    "mqtt",
 			Enabled: req.MqttBroker != "" && req.MqttTopic != "",
@@ -4547,7 +4707,11 @@ func (s *Server) handleAdminPasswordChange(w http.ResponseWriter, r *http.Reques
 		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte(s.password)) == 1 {
 			currentValid = true
 		}
-	} else {
+	} else if !IsKeeneticOS() {
+		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte("admin")) == 1 {
+			currentValid = true
+		}
+	} else if s.password == "admin" {
 		if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte("admin")) == 1 {
 			currentValid = true
 		}

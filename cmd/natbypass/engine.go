@@ -1314,6 +1314,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			},
 			sendPacketToPeer,
 		)
+		transitForwarder.SetAllowedSubnets(cfg.Network.AdvertisedSubnets)
 		defer transitForwarder.Close()
 
 		// L3 Data-plane: Inbound packets from UDP Puncher & MQTT Relay -> Write directly to kernel TUN
@@ -1674,7 +1675,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 				}
 			}
 
-			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice() || isDNS) {
+			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
 				if runtime.GOOS == "windows" || tunDev == nil || isDNS {
 					if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 						log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder")
@@ -1697,7 +1698,7 @@ func runEngine(ctx context.Context, cfg *config.Config, enableTray bool) error {
 			// 2. Userspace Transit Forwarder fallback:
 			// If tunDev is nil (e.g. running without Admin rights or adapter creation failed),
 			// userspace transit forwarder proxies ICMP, UDP (DNS), and TCP.
-			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice() || isDNS) {
+			if isTransit && transitForwarder != nil && (cfg.Network.AllowExitNode || tunnel.IsKeeneticDevice()) {
 				if transitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 					log.Debug().Str("src", inSrcIP).Str("dst", inDstIP).Msg("🌐 Exit Node Transit: handled packet in userspace transit forwarder fallback")
 					return
@@ -3648,6 +3649,9 @@ func receiveLoop(
 					// Сбрасываем пакет, чтобы не отравлять реестр пустыми полями!
 					continue
 				}
+			} else if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+				// Reject unencrypted signaling payloads from any channel when NetworkKey is active
+				continue
 			}
 			if p.DeviceID == "" || p.DeviceID == deviceID {
 				continue

@@ -2,6 +2,8 @@ package org.natbypass.app.util
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.FileProvider
@@ -22,6 +24,7 @@ import java.io.InputStream
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 sealed class UpdateState {
@@ -64,6 +67,29 @@ object AppUpdateManager {
         "https://ghproxy.net/",
         "https://ghfast.top/"
     )
+
+    private val ALLOWED_UPDATE_HOSTS = setOf(
+        "github.com",
+        "api.github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+        "raw.githubusercontent.com",
+        "codeload.github.com",
+        "gh-proxy.com",
+        "ghproxy.net",
+        "ghfast.top"
+    )
+
+    private fun isTrustedUpdateUrl(rawUrl: String): Boolean {
+        return try {
+            val u = URL(rawUrl)
+            if (!u.protocol.equals("https", ignoreCase = true)) return false
+            val host = u.host.lowercase()
+            host in ALLOWED_UPDATE_HOSTS || host.endsWith(".githubusercontent.com")
+        } catch (_: Throwable) {
+            false
+        }
+    }
 
     fun getDownloadMirrors(apkUrl: String): List<String> {
         val mirrors = mutableListOf<String>()
@@ -248,10 +274,12 @@ object AppUpdateManager {
         }
 
         if (apkUrl.isNotBlank()) {
-            val isNewer = if (includePrerelease) {
-                version != currentVersion.removePrefix("v")
-            } else {
-                isNewerVersion(currentVersion, version)
+            if (!isTrustedUpdateUrl(apkUrl)) {
+                throw IOException("Untrusted APK download URL in mirror manifest")
+            }
+            val isNewer = isNewerVersion(currentVersion, version)
+            if (!isNewer) {
+                throw IOException("Mirror manifest version $version is not newer than $currentVersion (rollback rejected)")
             }
             val state = UpdateState.Available(
                 version      = version,
@@ -285,6 +313,9 @@ object AppUpdateManager {
         val maxHops = 6
 
         while (hops < maxHops) {
+            if (!isTrustedUpdateUrl(currentUrl)) {
+                throw IOException("Blocked untrusted or non-HTTPS update URL: $currentUrl")
+            }
             val u = URL(currentUrl)
             val conn = u.openConnection() as HttpURLConnection
             conn.instanceFollowRedirects = false // Keep manual control so Range is never dropped on redirect!
@@ -304,7 +335,11 @@ object AppUpdateManager {
                 if (location.isNullOrBlank()) {
                     throw IOException("HTTP $code redirect without Location header from $currentUrl")
                 }
-                currentUrl = URL(u, location).toString()
+                val resolvedUrl = URL(u, location).toString()
+                if (!isTrustedUpdateUrl(resolvedUrl)) {
+                    throw IOException("Blocked redirect to untrusted or non-HTTPS host: $resolvedUrl")
+                }
+                currentUrl = resolvedUrl
                 hops++
                 continue
             }
@@ -351,8 +386,8 @@ object AppUpdateManager {
         val destFile = File(context.cacheDir, "NatBypass-v$version.apk")
         val partFile = File(context.cacheDir, "NatBypass-v$version.apk.part")
 
-        // If completed valid APK already exists in cache, launch immediately!
-        if (destFile.exists() && isValidApk(destFile)) {
+        // If completed valid APK already exists in cache, verify signature and launch immediately!
+        if (destFile.exists() && isValidApk(context, destFile)) {
             _updateState.value = UpdateState.ReadyToInstall(destFile)
             launchInstaller(context, destFile)
             isDownloading.set(false)
@@ -526,16 +561,61 @@ object AppUpdateManager {
 
         if (success && partFile.exists() && partFile.length() > 500 * 1024) {
             if (destFile.exists()) destFile.delete()
-            if (partFile.renameTo(destFile) && isValidApk(destFile)) {
+            if (partFile.renameTo(destFile) && isValidApk(context, destFile)) {
                 _updateState.value = UpdateState.ReadyToInstall(destFile)
                 launchInstaller(context, destFile)
             } else {
-                _updateState.value = UpdateState.Error("Файл APK повреждён или не прошёл проверку целостности")
+                destFile.delete()
+                _updateState.value = UpdateState.Error("Файл APK повреждён или не прошёл проверку подписи и целостности")
             }
         } else {
             _updateState.value = UpdateState.Error("Не удалось загрузить обновление (превышено число попыток)")
         }
         isDownloading.set(false)
+    }
+
+    private fun extractCertSha256Set(pkgInfo: PackageInfo?): Set<String> {
+        if (pkgInfo == null) return emptySet()
+        val digest = MessageDigest.getInstance("SHA-256")
+        val sigs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signingInfo = pkgInfo.signingInfo ?: return emptySet()
+            if (signingInfo.hasMultipleSigners()) signingInfo.apkContentsSigners else signingInfo.signingCertificateHistory
+        } else {
+            @Suppress("DEPRECATION")
+            pkgInfo.signatures
+        } ?: return emptySet()
+        return sigs.map { sig ->
+            digest.digest(sig.toByteArray()).joinToString("") { "%02x".format(it) }
+        }.toSet()
+    }
+
+    fun isValidApk(context: Context, file: File): Boolean {
+        if (!isValidApk(file)) return false
+        return try {
+            val pm = context.packageManager
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                @Suppress("DEPRECATION")
+                PackageManager.GET_SIGNATURES
+            }
+            val installedInfo = pm.getPackageInfo(context.packageName, flags)
+            val archiveInfo = pm.getPackageArchiveInfo(file.absolutePath, flags) ?: return false
+            if (archiveInfo.packageName != context.packageName) {
+                Log.e(TAG, "APK security check failed: package mismatch ${archiveInfo.packageName} != ${context.packageName}")
+                return false
+            }
+            val installedDigests = extractCertSha256Set(installedInfo)
+            val archiveDigests = extractCertSha256Set(archiveInfo)
+            val sigMatch = installedDigests.isNotEmpty() && archiveDigests.any { it in installedDigests }
+            if (!sigMatch) {
+                Log.e(TAG, "APK security check failed: signing certificate mismatch")
+            }
+            sigMatch
+        } catch (e: Throwable) {
+            Log.e(TAG, "APK security verification error: ${e.message}")
+            false
+        }
     }
 
     fun isValidApk(file: File): Boolean {

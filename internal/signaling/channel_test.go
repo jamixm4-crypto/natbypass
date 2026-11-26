@@ -428,5 +428,16 @@ func TestSignatureBypass_RejectedWhenKeyActive(t *testing.T) {
 	}
 }
 
+func TestDecryptPayloadWithKey_RejectsPlaintextWhenKeyConfigured(t *testing.T) {
+	plaintext := &Payload{
+		DeviceID:  "spoofed-peer",
+		VirtualIP: "10.1.1.99",
+		PublicKey: "deadbeef",
+	}
+	if _, err := DecryptPayloadWithKey(plaintext, "my-secret-network-key"); err == nil {
+		t.Fatal("expected DecryptPayloadWithKey to reject plaintext payload when NetworkKey is configured")
+	}
+}
+
 
 

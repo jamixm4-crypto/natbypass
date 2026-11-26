@@ -8,6 +8,7 @@
 package tunnel
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"net"
 	"strconv"
@@ -117,17 +118,72 @@ func (e *tcpSessionEntry) close() {
 // on an Exit Node so that mesh clients can ping external hosts, resolve DNS, and browse web services (HTTP/HTTPS)
 // without relying on host OS NAT drivers (like Windows WinNAT).
 type TransitForwarder struct {
-	mu                sync.RWMutex
-	myVIP             string
-	lookupPeer        func(vipOrID string) *peer.Peer
-	sendToPeer        func(destPeer *peer.Peer, packet []byte) error
-	icmpConn          net.PacketConn
-	icmpSessions      sync.Map // map[icmpSessionKey]icmpSessionEntry
-	udpSessions       sync.Map // map[udpSessionKey]*udpSessionEntry
-	tcpSessions       sync.Map // map[tcpSessionKey]*tcpSessionEntry
-	recentSenderPeers sync.Map // map[string]*peer.Peer (clientVIP -> *peer.Peer)
-	closed            chan struct{}
-	closeOnce         sync.Once
+	mu                 sync.RWMutex
+	myVIP              string
+	allowedPrivateNets []*net.IPNet
+	lookupPeer         func(vipOrID string) *peer.Peer
+	sendToPeer         func(destPeer *peer.Peer, packet []byte) error
+	icmpConn           net.PacketConn
+	icmpSessions       sync.Map // map[icmpSessionKey]icmpSessionEntry
+	udpSessions        sync.Map // map[udpSessionKey]*udpSessionEntry
+	tcpSessions        sync.Map // map[tcpSessionKey]*tcpSessionEntry
+	recentSenderPeers  sync.Map // map[string]*peer.Peer (clientVIP -> *peer.Peer)
+	closed             chan struct{}
+	closeOnce          sync.Once
+}
+
+// SetAllowedSubnets configures explicit private/LAN CIDR subnets reachable through this forwarder
+// (from AdvertisedSubnets). All other RFC1918 and CGNAT destinations are blocked to prevent SSRF.
+func (tf *TransitForwarder) SetAllowedSubnets(cidrs []string) {
+	var parsed []*net.IPNet
+	for _, raw := range cidrs {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if !strings.Contains(raw, "/") {
+			raw += "/32"
+		}
+		if _, ipNet, err := net.ParseCIDR(raw); err == nil && ipNet != nil {
+			parsed = append(parsed, ipNet)
+		}
+	}
+	tf.mu.Lock()
+	tf.allowedPrivateNets = parsed
+	tf.mu.Unlock()
+}
+
+func (tf *TransitForwarder) isAllowedPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	tf.mu.RLock()
+	nets := tf.allowedPrivateNets
+	tf.mu.RUnlock()
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+var cgnatCIDR = func() *net.IPNet {
+	_, n, _ := net.ParseCIDR("100.64.0.0/10")
+	return n
+}()
+
+func isPrivateOrCGNAT(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip.IsPrivate() {
+		return true
+	}
+	if cgnatCIDR != nil && cgnatCIDR.Contains(ip) {
+		return true
+	}
+	return false
 }
 
 // NewTransitForwarder creates and initializes a userspace transit forwarder.
@@ -189,7 +245,7 @@ func (tf *TransitForwarder) IsTransitPacket(payload []byte) (bool, net.IP, net.I
 	}
 
 	// Ignore loopback, multicast, broadcast, link-local
-	if destIP.IsLoopback() || destIP.IsMulticast() || destIP.IsUnspecified() || destIP.IsLinkLocalUnicast() {
+	if destIP.IsLoopback() || destIP.IsMulticast() || destIP.IsUnspecified() || destIP.IsLinkLocalUnicast() || destIP.IsLinkLocalMulticast() {
 		return false, srcIP, destIP
 	}
 	destStr := destIP.String()
@@ -222,7 +278,36 @@ func (tf *TransitForwarder) IsTransitPacket(payload []byte) (bool, net.IP, net.I
 		}
 	}
 
+	// Prevent SSRF into Exit Node's private LAN / router admin UI / CGNAT unless explicitly advertised
+	if isPrivateOrCGNAT(destIP) && !tf.isAllowedPrivateIP(destIP) {
+		return false, srcIP, destIP
+	}
+
 	return true, srcIP, destIP
+}
+
+// isAuthorizedSenderSource checks whether srcIP is owned by senderPeer (either its VirtualIP or one of its AdvertisedRoutes).
+func isAuthorizedSenderSource(srcIP net.IP, senderPeer *peer.Peer) bool {
+	if senderPeer == nil || srcIP == nil {
+		return true
+	}
+	cleanSenderVIP := strings.TrimSpace(strings.Split(senderPeer.VirtualIP, "/")[0])
+	if cleanSenderVIP == "" || srcIP.String() == cleanSenderVIP {
+		return true
+	}
+	for _, cidr := range senderPeer.AdvertisedRoutes {
+		c := strings.TrimSpace(cidr)
+		if c == "" {
+			continue
+		}
+		if !strings.Contains(c, "/") {
+			c += "/32"
+		}
+		if _, ipNet, err := net.ParseCIDR(c); err == nil && ipNet != nil && ipNet.Contains(srcIP) {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleTransitPacketWithSender inspects an inbound packet, associates client IP with sender peer,
@@ -231,6 +316,10 @@ func (tf *TransitForwarder) HandleTransitPacketWithSender(payload []byte, sender
 	if senderPeer != nil && len(payload) >= 20 {
 		srcIP := GetSrcIP(payload)
 		if srcIP != nil {
+			if !isAuthorizedSenderSource(srcIP, senderPeer) {
+				// Reject packets attempting to spoof another peer's VirtualIP
+				return false
+			}
 			tf.recentSenderPeers.Store(srcIP.String(), senderPeer)
 			clean := strings.TrimSpace(strings.Split(srcIP.String(), "/")[0])
 			tf.recentSenderPeers.Store(clean, senderPeer)
@@ -618,7 +707,16 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 				return
 			}
 
-			sISN := uint32(time.Now().UnixNano()) & 0x7FFFFFFF
+			var isnBuf [4]byte
+			var sISN uint32
+			if _, rErr := rand.Read(isnBuf[:]); rErr == nil {
+				sISN = binary.BigEndian.Uint32(isnBuf[:]) & 0x7FFFFFFF
+			} else {
+				sISN = uint32(time.Now().UnixNano()) & 0x7FFFFFFF
+			}
+			if sISN == 0 {
+				sISN = 1
+			}
 			entry.conn = conn
 			entry.serverISN = sISN
 			entry.clientNextSeq.Store(cISN + 1)

@@ -130,6 +130,10 @@ func NewMeshClientTLSConfig(cert tls.Certificate, networkKey [32]byte, sni strin
 			if err != nil {
 				return fmt.Errorf("failed to parse peer certificate: %w", err)
 			}
+			now := time.Now()
+			if now.Before(peerCert.NotBefore) || now.After(peerCert.NotAfter) {
+				return fmt.Errorf("peer certificate expired or not yet valid")
+			}
 			// Verify mesh organization HMAC tag
 			h := hmac.New(sha256.New, networkKey[:])
 			h.Write([]byte(peerCert.Subject.CommonName))
@@ -157,6 +161,10 @@ func NewMeshServerTLSConfig(cert tls.Certificate, networkKey [32]byte) *tls.Conf
 			clientCert, err := x509.ParseCertificate(rawCerts[0])
 			if err != nil {
 				return fmt.Errorf("failed to parse client certificate: %w", err)
+			}
+			now := time.Now()
+			if now.Before(clientCert.NotBefore) || now.After(clientCert.NotAfter) {
+				return fmt.Errorf("client certificate expired or not yet valid")
 			}
 			h := hmac.New(sha256.New, networkKey[:])
 			h.Write([]byte(clientCert.Subject.CommonName))

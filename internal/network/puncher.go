@@ -153,6 +153,7 @@ type UDPPuncher struct {
 	cipherKey    [32]byte
 	hasCipherKey bool
 	cipherMu     sync.RWMutex
+	replayFilters sync.Map // map[string]*crypto.ReplayFilter ("ip:port:epoch" -> sliding replay window)
 
 	// IPv6 dual-stack socket & discovery (Level 1)
 	conn6          *net.UDPConn
@@ -185,6 +186,7 @@ func (p *UDPPuncher) SetCipherKey(key string) {
 	p.cipherMu.Lock()
 	defer p.cipherMu.Unlock()
 	p.addrCache.Range(func(k, v any) bool { p.addrCache.Delete(k); return true })
+	p.replayFilters.Range(func(k, v any) bool { p.replayFilters.Delete(k); return true })
 	if key == "" {
 		p.hasCipherKey = false
 		p.cipherKey = [32]byte{}
@@ -2160,6 +2162,21 @@ var (
 	tunHeaderBytes       = []byte(constants.TunHeader)
 )
 
+// validateUDPReplay enforces RFC 6479 sliding-window anti-replay protection on decrypted UDP packets.
+func (p *UDPPuncher) validateUDPReplay(remoteAddr *net.UDPAddr, msgEpoch, seq uint64) bool {
+	srcKey := "unknown"
+	if remoteAddr != nil {
+		srcKey = remoteAddr.String()
+	}
+	filterKey := fmt.Sprintf("%s:%d", srcKey, msgEpoch)
+	if v, ok := p.replayFilters.Load(filterKey); ok {
+		return v.(*crypto.ReplayFilter).ValidateAndAccept(seq)
+	}
+	nf := crypto.NewReplayFilter()
+	actual, _ := p.replayFilters.LoadOrStore(filterKey, nf)
+	return actual.(*crypto.ReplayFilter).ValidateAndAccept(seq)
+}
+
 // dispatchDecryptedPacket routes an already-decrypted, caller-owned UDP payload without extra string/slice copies.
 func (p *UDPPuncher) dispatchDecryptedPacket(dec []byte, remoteAddr *net.UDPAddr) bool {
 	if len(dec) == 0 {
@@ -2400,7 +2417,10 @@ func (p *UDPPuncher) dispatchPacket(buf []byte, remoteAddr *net.UDPAddr) {
 			// 1. Try modern Epoch + Seq encrypted packets (RFC 6479 + PFS)
 			if n >= 16+24+16 {
 				curEpoch := crypto.GetCurrentEpoch()
-				if dec, _, _, err := crypto.DecryptWithEpochSeq(buf[:n], cKey[:], curEpoch); err == nil && len(dec) > 0 {
+				if dec, msgEpoch, seq, err := crypto.DecryptWithEpochSeq(buf[:n], cKey[:], curEpoch); err == nil && len(dec) > 0 {
+					if !p.validateUDPReplay(remoteAddr, msgEpoch, seq) {
+						return
+					}
 					if p.dispatchDecryptedPacket(dec, remoteAddr) {
 						return
 					}

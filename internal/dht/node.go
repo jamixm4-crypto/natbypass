@@ -8,12 +8,15 @@
 package dht
 
 import (
-	"encoding/hex"
 	"bytes"
+	"crypto/hmac"
 	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +44,7 @@ type Node struct {
 	DeviceID     string
 	NodeID       [20]byte
 	Address      string
+	networkKey   string
 	RoutingTable [160][]*NodeInfo
 	Store        map[[20]byte][]byte
 	conn         *net.UDPConn
@@ -48,6 +52,13 @@ type Node struct {
 	onPunchNow   func(senderID, senderSTUN string)
 	mu           sync.RWMutex
 	ctxDone      chan struct{}
+}
+
+// SetNetworkKey configures the shared mesh key used to authenticate PUNCH_NOW signals.
+func (n *Node) SetNetworkKey(key string) {
+	n.mu.Lock()
+	n.networkKey = key
+	n.mu.Unlock()
 }
 
 // NewNode создаёт новый DHT-узел с хэшем DeviceID.
@@ -267,7 +278,20 @@ func (n *Node) SendPunchNow(targetID, targetAddr, mySTUN string) error {
 	if err != nil {
 		return err
 	}
-	msg := fmt.Sprintf("%s%s:%s:%d:%s", dhtPunchNowPrefix, targetID, n.DeviceID, time.Now().UnixMilli(), mySTUN)
+	n.mu.RLock()
+	netKey := n.networkKey
+	n.mu.RUnlock()
+
+	ts := time.Now().UnixMilli()
+	body := fmt.Sprintf("%s:%s:%d:%s", targetID, n.DeviceID, ts, mySTUN)
+	if netKey != "" {
+		mac := hmac.New(sha256.New, []byte("NatBypass-DHT-Punch:"+netKey))
+		mac.Write([]byte(body))
+		sig := hex.EncodeToString(mac.Sum(nil)[:16])
+		msg := fmt.Sprintf("%s%s|%s", dhtPunchNowPrefix, body, sig)
+		return n.sendPacket([]byte(msg), rAddr)
+	}
+	msg := fmt.Sprintf("%s%s", dhtPunchNowPrefix, body)
 	return n.sendPacket([]byte(msg), rAddr)
 }
 
@@ -302,20 +326,59 @@ func (n *Node) HandlePacket(buf []byte, rAddr *net.UDPAddr) {
 			}
 		}
 	} else if strings.HasPrefix(data, dhtPunchNowPrefix) {
-		// NATBYPASS:DHT:PUNCH_NOW:<TargetID>:<SenderID>:<Timestamp>:<SenderSTUN>
+		// NATBYPASS:DHT:PUNCH_NOW:<TargetID>:<SenderID>:<Timestamp>:<SenderSTUN>[|<HMAC32>]
 		payload := strings.TrimPrefix(data, dhtPunchNowPrefix)
-		parts := strings.SplitN(payload, ":", 4)
+		n.mu.RLock()
+		netKey := n.networkKey
+		h := n.onPunchNow
+		n.mu.RUnlock()
+
+		body := payload
+		sigHex := ""
+		if idx := strings.LastIndex(payload, "|"); idx > 0 {
+			body = payload[:idx]
+			sigHex = payload[idx+1:]
+		}
+		if netKey != "" {
+			if sigHex == "" {
+				return
+			}
+			mac := hmac.New(sha256.New, []byte("NatBypass-DHT-Punch:"+netKey))
+			mac.Write([]byte(body))
+			expectedSig, err := hex.DecodeString(sigHex)
+			if err != nil || !hmac.Equal(expectedSig, mac.Sum(nil)[:16]) {
+				return
+			}
+		}
+
+		parts := strings.SplitN(body, ":", 4)
 		if len(parts) == 4 {
 			targetID := parts[0]
 			senderID := parts[1]
+			tsMs, tsErr := strconv.ParseInt(parts[2], 10, 64)
 			senderSTUN := parts[3]
-			if targetID == n.DeviceID || targetID == "" {
-				n.mu.RLock()
-				h := n.onPunchNow
-				n.mu.RUnlock()
-				if h != nil {
-					h(senderID, senderSTUN)
+			if tsErr == nil {
+				diff := time.Now().UnixMilli() - tsMs
+				if diff < 0 {
+					diff = -diff
 				}
+				if diff > 120000 {
+					return
+				}
+			}
+			// Validate senderSTUN endpoint to block UDP amplification/reflection toward loopback/multicast/port 0
+			sHost, sPortStr, splitErr := net.SplitHostPort(senderSTUN)
+			if splitErr != nil {
+				return
+			}
+			sPort, portErr := strconv.Atoi(sPortStr)
+			sIP := net.ParseIP(sHost)
+			if portErr != nil || sPort <= 0 || sPort > 65535 || sIP == nil ||
+				sIP.IsLoopback() || sIP.IsMulticast() || sIP.IsUnspecified() || sIP.IsLinkLocalUnicast() || sIP.IsLinkLocalMulticast() {
+				return
+			}
+			if (targetID == n.DeviceID || targetID == "") && h != nil {
+				h(senderID, senderSTUN)
 			}
 		}
 	}

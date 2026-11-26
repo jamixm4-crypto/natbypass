@@ -108,13 +108,31 @@ jobs:
           $TAG = "${{ github.ref_name }}"
           $isPre = $TAG.Contains("-")
           
-          # Check if release exists; if not, create as published prerelease/latest
+          # Check if release exists; if not, create with retry against transient GitHub HTTP 5xx errors
           gh release view $TAG 2>&1 | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            if ($isPre) {
-              gh release create $TAG --target "${{ github.sha }}" --title "NatBypass $TAG" --generate-notes --prerelease
-            } else {
-              gh release create $TAG --target "${{ github.sha }}" --title "NatBypass $TAG" --generate-notes --latest
+            $relCreated = $false
+            for ($c = 1; $c -le 5; $c++) {
+              if ($isPre) {
+                gh release create $TAG --target "${{ github.sha }}" --title "NatBypass $TAG" --generate-notes --prerelease
+              } else {
+                gh release create $TAG --target "${{ github.sha }}" --title "NatBypass $TAG" --generate-notes --latest
+              }
+              if ($LASTEXITCODE -eq 0) {
+                $relCreated = $true
+                break
+              }
+              Start-Sleep -Seconds 5
+              gh release view $TAG 2>&1 | Out-Null
+              if ($LASTEXITCODE -eq 0) {
+                $relCreated = $true
+                break
+              }
+              Write-Host "Release create attempt $c failed, retrying in 5s..."
+            }
+            if (-not $relCreated) {
+              Write-Error "Failed to create or verify GitHub release $TAG after 5 attempts."
+              exit 1
             }
           }
 
@@ -148,11 +166,16 @@ jobs:
           Write-Host "Uploading $($files.Count) assets to release $TAG..."
           foreach ($file in $files) {
             Write-Host "Uploading $($file.Name)..."
+            $uploaded = $false
             for ($attempt=1; $attempt -le 5; $attempt++) {
               gh release upload $TAG $file.FullName --clobber
-              if ($LASTEXITCODE -eq 0) { break }
+              if ($LASTEXITCODE -eq 0) { $uploaded = $true; break }
               Write-Host "Upload attempt $attempt for $($file.Name) failed, retrying in 3s..."
               Start-Sleep -Seconds 3
+            }
+            if (-not $uploaded) {
+              Write-Error "Failed to upload $($file.Name) to release $TAG after 5 attempts."
+              exit 1
             }
           }
 

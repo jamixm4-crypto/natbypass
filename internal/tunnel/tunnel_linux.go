@@ -616,3 +616,8 @@ func (d *Device) Close() error {
 	}
 	return nil
 }
+
+// EnsureWintunDLL is a Windows-only helper; stubbed on Linux for cross-platform compilation.
+func EnsureWintunDLL() (string, error) {
+	return "", fmt.Errorf("wintun.dll is only supported on Windows")
+}

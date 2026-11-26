@@ -90,12 +90,12 @@ func ExecuteLocalUpdate(ctx context.Context, currentVersion string) string {
 
 var (
 	isUpdatingInProgress atomic.Bool
-	lastUpdateSessionID  string
+	seenUpdateSessions   = make(map[string]int64)
 	lastUpdateSessionMu  sync.Mutex
 )
 
 // HandleRemoteDiagSignal processes remote diagnostic and update requests.
-// Strictly active ONLY in beta builds (version string containing "beta").
+// Strictly active ONLY in beta builds (version string containing "beta") and requires a configured networkKey.
 func HandleRemoteDiagSignal(
 	ctx context.Context,
 	sig *signaling.RemoteDiagSignal,
@@ -107,9 +107,23 @@ func HandleRemoteDiagSignal(
 		return
 	}
 
-	// 1. Safety Gate: ONLY active in beta builds
-	if !strings.Contains(strings.ToLower(version), "beta") {
+	// 1. Safety Gate: ONLY active in beta builds AND requires non-empty NetworkKey
+	if !strings.Contains(strings.ToLower(version), "beta") || strings.TrimSpace(networkKey) == "" {
 		return
+	}
+
+	// 1b. Anti-replay timestamp window (±5 minutes)
+	if sig.Action == "request_diag" || sig.Action == "request_update" {
+		if sig.Timestamp <= 0 {
+			return
+		}
+		skew := time.Now().Unix() - sig.Timestamp
+		if skew < 0 {
+			skew = -skew
+		}
+		if skew > 300 {
+			return
+		}
 	}
 
 	// 2. Ignore requests addressed to another specific node
@@ -172,10 +186,18 @@ func HandleRemoteDiagSignal(
 		}()
 
 	case "request_update":
+		nowUnix := time.Now().Unix()
 		lastUpdateSessionMu.Lock()
-		if sig.SessionID != "" && sig.SessionID == lastUpdateSessionID {
-			lastUpdateSessionMu.Unlock()
-			return // Duplicate request_update from burst repeat, silently drop!
+		for sid, ts := range seenUpdateSessions {
+			if nowUnix-ts > 600 {
+				delete(seenUpdateSessions, sid)
+			}
+		}
+		if sig.SessionID != "" {
+			if _, seen := seenUpdateSessions[sig.SessionID]; seen {
+				lastUpdateSessionMu.Unlock()
+				return // Duplicate request_update from burst repeat or replay, silently drop!
+			}
 		}
 		if isUpdatingInProgress.Load() {
 			lastUpdateSessionMu.Unlock()
@@ -204,7 +226,7 @@ func HandleRemoteDiagSignal(
 			return
 		}
 		if sig.SessionID != "" {
-			lastUpdateSessionID = sig.SessionID
+			seenUpdateSessions[sig.SessionID] = nowUnix
 		}
 		isUpdatingInProgress.Store(true)
 		lastUpdateSessionMu.Unlock()

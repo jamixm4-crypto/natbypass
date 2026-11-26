@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.50"
+	Version = "1.9.507-beta.51"
 	Commit  = "release"
 )
 
@@ -5658,7 +5658,7 @@ func startEngineFromConfig(c *config.Config) {
 				}
 			}
 
-			if isTransit && guiTransitForwarder != nil && (allowExitNode || isDNS) {
+			if isTransit && guiTransitForwarder != nil && allowExitNode {
 				if runtime.GOOS == "windows" || tunDev == nil || isDNS {
 					if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 						atomic.AddUint64(&packetsRecvCount, 1)
@@ -5711,7 +5711,7 @@ func startEngineFromConfig(c *config.Config) {
 			// 2. Userspace Transit Forwarder fallback:
 			// If tunDev is nil (e.g. running without Admin rights or adapter creation failed),
 			// userspace transit forwarder proxies ICMP, UDP (DNS), and TCP.
-			if isTransit && guiTransitForwarder != nil && (allowExitNode || isDNS) {
+			if isTransit && guiTransitForwarder != nil && allowExitNode {
 				if guiTransitForwarder.HandleTransitPacketWithSender(payload, targetPeer) {
 					atomic.AddUint64(&packetsRecvCount, 1)
 					atomic.AddUint64(&bytesRecvCount, uint64(len(payload)))
@@ -5876,6 +5876,9 @@ func startEngineFromConfig(c *config.Config) {
 			},
 			sendPacketToPeerGUI,
 		)
+		if cfg != nil {
+			guiTransitForwarder.SetAllowedSubnets(cfg.Network.AdvertisedSubnets)
+		}
 
 		// Initialize Mesh Multi-Hop P2P Router for Windows GUI
 		guiMultiHopRouter = network.NewMultiHopRouter(
@@ -7226,6 +7229,13 @@ func startChannelReceiver(ctx context.Context, ch signaling.SignalingChannel, na
 						if dec, err := signaling.DecryptPayload(p, myPubKey, myPrivKey); err == nil && dec != nil {
 							p = dec
 						}
+					}
+					if len(p.Encrypted) > 0 {
+						continue
+					}
+				} else if cfg != nil {
+					if activeProf := cfg.EnsureActiveProfile(); activeProf != nil && activeProf.NetworkKey != "" {
+						continue
 					}
 				}
 

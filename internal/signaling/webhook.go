@@ -94,6 +94,20 @@ func (w *WebhookChannel) Receive(ctx context.Context) (<-chan *Payload, error) {
 				
 				if resp.StatusCode == http.StatusOK {
 					body, _ := io.ReadAll(resp.Body)
+					if w.secret != "" {
+						sigHex := resp.Header.Get("X-NatBypass-Sig")
+						sigBytes, decErr := hex.DecodeString(sigHex)
+						if decErr != nil {
+							resp.Body.Close()
+							continue
+						}
+						mac := hmac.New(sha256.New, []byte(w.secret))
+						mac.Write(body)
+						if !hmac.Equal(sigBytes, mac.Sum(nil)) {
+							resp.Body.Close()
+							continue
+						}
+					}
 					var p Payload
 					if err := json.Unmarshal(body, &p); err == nil {
 						select {

@@ -10,6 +10,7 @@ package signaling
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -534,11 +535,14 @@ func EncryptPayloadWithKey(p *Payload, keyStr string) (*Payload, error) {
 
 // DecryptPayloadWithKey расшифровывает маяк симметричным ключом комнаты.
 func DecryptPayloadWithKey(p *Payload, keyStr string) (*Payload, error) {
-	if len(p.Encrypted) == 0 {
-		return p, nil
+	if p == nil {
+		return nil, errors.New("nil payload")
 	}
 	if keyStr == "" {
 		return p, nil
+	}
+	if len(p.Encrypted) == 0 {
+		return nil, errors.New("plaintext signaling payload rejected when network key is configured")
 	}
 	key := crypto.DeriveKey(keyStr)
 	data, err := crypto.DecryptSelf(p.Encrypted, key)

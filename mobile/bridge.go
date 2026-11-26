@@ -38,7 +38,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.50"
+const Version = "1.9.507-beta.51"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -1003,14 +1003,14 @@ func StartEngine(configYAML string, tunFd int) string {
 					return
 				}
 				if p != nil {
+					var activeProf *config.Profile
+					if globalConfig != nil {
+						activeProf = globalConfig.EnsureActiveProfile()
+					} else if cfg != nil {
+						activeProf = cfg.EnsureActiveProfile()
+					}
 					// Расшифровка сквозного шифрования (E2E) сетевым ключом профиля
 					if len(p.Encrypted) > 0 {
-						var activeProf *config.Profile
-						if globalConfig != nil {
-							activeProf = globalConfig.EnsureActiveProfile()
-						} else if cfg != nil {
-							activeProf = cfg.EnsureActiveProfile()
-						}
 						if activeProf != nil {
 							kBytes := activeProf.GetNetworkKeyBytes()
 							if decBytes, err := crypto.DecryptSelf(p.Encrypted, kBytes); err == nil {
@@ -1020,6 +1020,9 @@ func StartEngine(configYAML string, tunFd int) string {
 								}
 							}
 						}
+					} else if activeProf != nil && activeProf.NetworkKey != "" {
+						// Reject unencrypted signaling payloads when NetworkKey is configured
+						continue
 					}
 				}
 				// FIX-3: если после попытки расшифровки поле Encrypted всё ещё заполнено,

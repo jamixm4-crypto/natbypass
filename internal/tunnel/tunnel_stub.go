@@ -52,3 +52,8 @@ func (d *Device) SetMTU(mtu int) error {
 func (d *Device) Close() error {
 	return nil
 }
+
+// EnsureWintunDLL is a Windows-only helper; stubbed here for cross-platform compilation.
+func EnsureWintunDLL() (string, error) {
+	return "", ErrTunnelNotSupported
+}

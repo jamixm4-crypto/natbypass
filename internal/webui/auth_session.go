@@ -89,8 +89,8 @@ func checkLoginRateLimit(ip string) (bool, time.Duration) {
 
 	maxAttempts := 5
 	blockDuration := 30 * time.Second
-	if isLocalOrPrivateIP(ip) || IsKeeneticOS() {
-		blockDuration = 5 * time.Second
+	if isLocalOrPrivateIP(ip) {
+		blockDuration = 15 * time.Second
 	}
 
 	if info.count >= maxAttempts {
@@ -117,8 +117,8 @@ func recordFailedLogin(ip string) {
 
 	maxAttempts := 5
 	blockDuration := 30 * time.Second
-	if isLocalOrPrivateIP(ip) || IsKeeneticOS() {
-		blockDuration = 5 * time.Second
+	if isLocalOrPrivateIP(ip) {
+		blockDuration = 15 * time.Second
 	}
 
 	info.count++
@@ -326,8 +326,8 @@ func (s *Server) checkCredentials(username, password string) bool {
 		}
 	}
 
-	// 3. Fallback when password is empty, default admin, OR on KeeneticOS as emergency recovery fallback
-	if IsKeeneticOS() || (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
+	// 3. Fallback when no custom password is set on non-Keenetic hosts (never bypass KeeneticOS or configured password)
+	if !IsKeeneticOS() && (s.user == "" || s.user == "admin") && (s.password == "" || s.password == "admin") {
 		if subtle.ConstantTimeCompare([]byte(username), []byte("admin")) == 1 &&
 			subtle.ConstantTimeCompare([]byte(password), []byte("admin")) == 1 {
 			return true
@@ -426,7 +426,8 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handleAuthCheck — GET /api/auth/check
 func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 	isWindows := (runtime.GOOS == "windows")
-	if isWindows {
+	authRequired := s.isAuthRequired()
+	if isWindows && !authRequired && isDirectLoopback(r) {
 		s.jsonResponse(w, http.StatusOK, map[string]interface{}{
 			"authenticated": true,
 			"auth_required": false,
@@ -437,8 +438,6 @@ func (s *Server) handleAuthCheck(w http.ResponseWriter, r *http.Request) {
 		}, "")
 		return
 	}
-
-	authRequired := (s.password != "" || s.customAuth != nil || IsKeeneticOS())
 	
 	// Check session cookie
 	if cookie, err := r.Cookie("nb_session"); err == nil && isValidSession(cookie.Value) {

@@ -36,6 +36,7 @@ var _ SignalingChannel = (*DHTChannel)(nil)
 func NewDHTChannel(myDevID, networkKey, listenAddr string) *DHTChannel {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := dht.NewNode(myDevID, listenAddr)
+	node.SetNetworkKey(networkKey)
 	ch := &DHTChannel{
 		node:       node,
 		myDevID:    myDevID,
@@ -68,7 +69,11 @@ func (c *DHTChannel) Name() string {
 func (c *DHTChannel) SetNetworkKey(key string) {
 	c.closeMu.Lock()
 	c.networkKey = key
+	node := c.node
 	c.closeMu.Unlock()
+	if node != nil {
+		node.SetNetworkKey(key)
+	}
 }
 
 func (c *DHTChannel) Send(ctx context.Context, payload *Payload) error {

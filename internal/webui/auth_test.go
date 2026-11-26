@@ -260,23 +260,60 @@ func TestKeeneticRCIChallengeMock(t *testing.T) {
 	}
 }
 
-func TestCheckCredentials_KeeneticFallback(t *testing.T) {
+func TestCheckCredentials_KeeneticNoAdminBackdoor(t *testing.T) {
 	isK := true
 	SetKeeneticOSOverrideForTest(&isK)
 	defer SetKeeneticOSOverrideForTest(nil)
 
-	// With any server config on Keenetic, admin/admin should always be accepted as emergency recovery
+	// Security fix: admin/admin MUST NOT bypass a configured password on KeeneticOS
 	s := NewServer(0, "admin", "RandomHexGeneratedPassword123", nil, nil)
-	// Fallback admin/admin
-	if !s.checkCredentials("admin", "admin") {
-		t.Fatal("expected admin/admin fallback to be accepted")
+	if s.checkCredentials("admin", "admin") {
+		t.Fatal("expected hardcoded admin/admin backdoor to be rejected when custom password is configured")
 	}
-	// Configured password should also be accepted
+	// Configured password should be accepted
 	if !s.checkCredentials("admin", "RandomHexGeneratedPassword123") {
 		t.Fatal("expected configured password to be accepted")
 	}
 	// Random wrong password should be rejected
 	if s.checkCredentials("admin", "completely_wrong") {
 		t.Fatal("expected completely_wrong password to be rejected")
+	}
+}
+
+func TestSecurity_CORSLocalHostAndRedaction(t *testing.T) {
+	if isTrustedCORSOrigin("http://localhost.attacker.com") {
+		t.Fatal("expected bypass origin http://localhost.attacker.com to be rejected")
+	}
+	if isTrustedCORSOrigin("http://127.0.0.1.nip.io") {
+		t.Fatal("expected bypass origin http://127.0.0.1.nip.io to be rejected")
+	}
+	if !isTrustedCORSOrigin("http://127.0.0.1:8080") || !isTrustedCORSOrigin("http://localhost:3000") {
+		t.Fatal("expected genuine local origins to be allowed")
+	}
+	if isTrustedLocalURL("http://localhost.evil.com:8080") {
+		t.Fatal("expected http://localhost.evil.com:8080 to be rejected by isTrustedLocalURL")
+	}
+
+	isK := true
+	SetKeeneticOSOverrideForTest(&isK)
+	if isTrustedCORSOrigin("https://evil.keenetic.attacker.com") {
+		t.Fatal("expected https://evil.keenetic.attacker.com to be rejected on KeeneticOS")
+	}
+	if isTrustedCORSOrigin("http://192.168.1.1.evil.com") {
+		t.Fatal("expected http://192.168.1.1.evil.com to be rejected on KeeneticOS")
+	}
+	if !isTrustedCORSOrigin("https://router.keenetic.net") || !isTrustedCORSOrigin("http://192.168.1.1") {
+		t.Fatal("expected legitimate Keenetic domain and private IP origin to be allowed")
+	}
+	SetKeeneticOSOverrideForTest(nil)
+
+	if !isForbiddenProbeHost("127.0.0.1") || !isForbiddenProbeHost("169.254.169.254") || !isForbiddenProbeHost("localhost") {
+		t.Fatal("expected loopback and link-local hosts to be forbidden for probe endpoints")
+	}
+	if !tgTokenPattern.MatchString("123456789:AABBCCDDEEFFGGHHIIJJKKLLMMNNOOPPQQR") {
+		t.Fatal("expected valid telegram token format to match")
+	}
+	if tgTokenPattern.MatchString("123456/../../getUpdates") {
+		t.Fatal("expected path traversal token to be rejected")
 	}
 }

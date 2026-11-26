@@ -3537,6 +3537,17 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         .replace(/'/g, '&#039;');
     }
 
+    function escapeAttrJs(str) {
+      if (str === null || str === undefined) return '';
+      return escapeHtml(String(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n')
+        .replace(/</g, '\\x3c')
+        .replace(/>/g, '\\x3e'));
+    }
+
     let currentTab = 'dashboard';
     let currentChannelMode = 'parallel';
     let cachedPeers = [];
@@ -3646,7 +3657,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           qrPayload = `natbypass://profile?id=default&name=Основная+сеть&topic=${encodeURIComponent(cfgTopic)}&broker=${encodeURIComponent(cfgBroker)}&awg=dpi`;
         }
       } else if (mode === 'apk') {
-        const verDisplay = (window.currentAppVersion || 'v1.9.507-beta.50').replace(/^v?/, 'v');
+        const verDisplay = (window.currentAppVersion || 'v1.9.507-beta.51').replace(/^v?/, 'v');
         let directApkUrl = window.cachedApkDownloadUrl || '';
         if (!directApkUrl) {
           directApkUrl = `https://github.com/jamixm4-crypto/natbypass/releases/download/${verDisplay}/NatBypass-${verDisplay}-universal.apk`;
@@ -5048,10 +5059,15 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
       peers.forEach((p, idx) => {
         const vIP = (p.virtual_ip ? p.virtual_ip.split('/')[0].trim() : '') || ('10.200.0.' + (idx + 2));
-        const name = p.nickname ? `⭐ ${p.nickname}` : p.device_id;
+        const safeVIP = escapeHtml(vIP);
+        const jsVIP = escapeAttrJs(vIP);
+        const safeDevID = escapeHtml(p.device_id);
+        const jsDevID = escapeAttrJs(p.device_id);
+        const rawName = p.nickname ? `⭐ ${p.nickname}` : p.device_id;
+        const name = escapeHtml(rawName);
         const isDirect = Boolean((p.direct_p2p && p.active_endpoint) || p.transport === 'tcp_tls' || p.transport === 'tcp_shadowtls' || p.transport === 'tcp_direct');
         const hasAWG = Boolean(p.awg || p.wg_pubkey || p.wg_pub_key || (p.public_key && p.public_key.length > 20));
-        const pAWGVer = (p.awg && p.awg.version) ? p.awg.version : '3.1';
+        const pAWGVer = escapeHtml((p.awg && p.awg.version) ? p.awg.version : '3.1');
         let p2pBadge = '';
         let ipConflictBadge = '';
         if (p.ip_conflict) {
@@ -5081,7 +5097,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         } else if (p.direct_p2p && !p.active_endpoint) {
           p2pBadge = '<span class="badge" style="background:rgba(234,179,8,0.15); border:1px solid rgba(234,179,8,0.4); color:#fde047; font-size:0.72rem;">🟡 Пробитие NAT... • 🛡️ AWG ' + pAWGVer + '</span>';
         } else if (punchMethod === 'relay_mesh' || p.relayed_via_name) {
-          const via = p.relayed_via_name || p.relayed_via_vip || 'Mesh Relay';
+          const via = escapeHtml(p.relayed_via_name || p.relayed_via_vip || 'Mesh Relay');
           p2pBadge = '<span class="badge" style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; font-size:0.72rem; padding:3px 8px;">🛡️ Relay: ' + via + ' • 🛡️ AWG ' + pAWGVer + '</span>';
         } else {
           p2pBadge = '<span class="badge badge-cyan" style="font-size:0.72rem;">☁️ Relay (MQTT) • 🛡️ AWG ' + pAWGVer + '</span>';
@@ -5093,7 +5109,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
         let latDisplay = `<span style="color:var(--text-dim);">—</span>`;
         if (punchMethod === 'relay_mesh' || p.relayed_via_name) {
-          const via = p.relayed_via_name || (p.relayed_via_vip ? p.relayed_via_vip : 'Mesh Relay');
+          const via = escapeHtml(p.relayed_via_name || (p.relayed_via_vip ? p.relayed_via_vip : 'Mesh Relay'));
           latDisplay = `<span class="badge" style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; font-size:0.72rem; padding:2px 7px;" title="Трафик маршрутизируется через Mesh Relay (Уровень 5)">🛡️ Relay: ${via}</span>`;
         } else if (isDirect && latMs > 0) {
           let dot = '🟢';
@@ -5156,31 +5172,35 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 
         if (canBeExit) {
           if (isExitActive) {
-            exitBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" title="Нажмите чтобы отключить шлюз">✅ Активен</span>`;
-            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-weight:700; padding:4px 9px; font-size:0.72rem; white-space:nowrap;" title="Отключить шлюз и восстановить прямой интернет">🔌 Выкл шлюз</button>`;
+            exitBadge = `<span class="badge badge-success" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${jsDevID}', '${jsVIP}', false)" title="Нажмите чтобы отключить шлюз">✅ Активен</span>`;
+            exitBtn = `<button onclick="toggleClientExitNode('${jsDevID}', '${jsVIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-weight:700; padding:4px 9px; font-size:0.72rem; white-space:nowrap;" title="Отключить шлюз и восстановить прямой интернет">🔌 Выкл шлюз</button>`;
           } else {
-            exitBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" title="Нажмите чтобы направить весь интернет через этот узел">🌐 Шлюз</span>`;
-            exitBtn = `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.4); padding:4px 9px; font-size:0.72rem; white-space:nowrap;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`;
+            exitBadge = `<span class="badge badge-cyan" style="font-size:0.72rem; padding:3px 8px; font-weight:700; cursor:pointer;" onclick="toggleClientExitNode('${jsDevID}', '${jsVIP}', true)" title="Нажмите чтобы направить весь интернет через этот узел">🌐 Шлюз</span>`;
+            exitBtn = `<button onclick="toggleClientExitNode('${jsDevID}', '${jsVIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.4); padding:4px 9px; font-size:0.72rem; white-space:nowrap;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`;
           }
         }
 
         let subnetBadges = '';
         if (p.advertised_routes && p.advertised_routes.length > 0) {
           p.advertised_routes.forEach(sub => {
+            const safeSub = escapeHtml(sub);
+            const jsSub = escapeAttrJs(sub);
             const isSubActive = currentActiveSubnetRoutes.includes(sub);
             if (isSubActive) {
-              subnetBadges += `<button onclick="toggleClientSubnet('${p.device_id}', '${vIP}', '${sub}', false)" class="btn-pill" style="background:#22c55e; color:#000; font-weight:700; padding:2px 7px; font-size:0.7rem; margin-right:3px;" title="Маршрут активен. Нажмите для отключения">🏠 ${sub} (ВКЛ)</button>`;
+              subnetBadges += `<button onclick="toggleClientSubnet('${jsDevID}', '${jsVIP}', '${jsSub}', false)" class="btn-pill" style="background:#22c55e; color:#000; font-weight:700; padding:2px 7px; font-size:0.7rem; margin-right:3px;" title="Маршрут активен. Нажмите для отключения">🏠 ${safeSub} (ВКЛ)</button>`;
             } else {
-              subnetBadges += `<button onclick="toggleClientSubnet('${p.device_id}', '${vIP}', '${sub}', true)" class="btn-pill" style="background:rgba(34,197,94,0.14); border:1px solid rgba(34,197,94,0.35); color:#4ade80; padding:2px 7px; font-size:0.7rem; margin-right:3px;" title="Нажмите чтобы подключить подсеть">🏠 ${sub}</button>`;
+              subnetBadges += `<button onclick="toggleClientSubnet('${jsDevID}', '${jsVIP}', '${jsSub}', true)" class="btn-pill" style="background:rgba(34,197,94,0.14); border:1px solid rgba(34,197,94,0.35); color:#4ade80; padding:2px 7px; font-size:0.7rem; margin-right:3px;" title="Нажмите чтобы подключить подсеть">🏠 ${safeSub}</button>`;
             }
           });
         }
 
         const osInfo = getPeerOsInfo(p);
         const platBadge = osInfo.badgeHtml;
-        const flag = p.country_flag || '🌐';
+        const flag = escapeHtml(p.country_flag || '🌐');
         const addrStr = p.stun_addr || p.public_ip || '—';
-        const ipDisplayWithFlag = `<span title="Геолокация IP" style="margin-right:3px;">${flag}</span><span style="font-size:0.8rem;">${addrStr}</span>`;
+        const safeAddrStr = escapeHtml(addrStr);
+        const jsAddrHost = escapeAttrJs(addrStr.split(':')[0]);
+        const ipDisplayWithFlag = `<span title="Геолокация IP" style="margin-right:3px;">${flag}</span><span style="font-size:0.8rem;">${safeAddrStr}</span>`;
 
         qHtml += `
           <tr class="peer-row">
@@ -5190,23 +5210,23 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                 ${platBadge}
               </div>
               <div style="display:flex; align-items:center; gap:6px; margin-top:3px; font-size:0.72rem; color:var(--text-muted);">
-                <span class="mono" style="opacity:0.8;">${p.device_id}</span>
+                <span class="mono" style="opacity:0.8;">${safeDevID}</span>
                 ${chanBadge}
               </div>
             </td>
-            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer; white-space:nowrap;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
+            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer; white-space:nowrap;" onclick="copyText('${jsVIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${safeVIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
             <td>
               <div style="display:flex; flex-direction:column; gap:3px;">
                 <div>${p2pBadge}</div>
                 <div style="font-size:0.74rem;">${latDisplay}</div>
               </div>
             </td>
-            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer; font-size:0.78rem; white-space:nowrap;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag}</td>
+            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer; font-size:0.78rem; white-space:nowrap;" onclick="copyText('${jsAddrHost}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag}</td>
             <td style="white-space:nowrap; text-align:right;">
               ${exitBtn}
               ${subnetBadges}
-              <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;" title="Послать прямой UDP пинг">⚡</button>
-              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;" title="Задать имя">⭐</button>
+              <button onclick="pingPeer('${jsDevID}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;" title="Послать прямой UDP пинг">⚡</button>
+              <button onclick="bookmarkPeer('${jsDevID}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;" title="Задать имя">⭐</button>
             </td>
           </tr>
         `;
@@ -5219,25 +5239,25 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                 ${platBadge}
               </div>
               <div style="display:flex; align-items:center; gap:6px; margin-top:3px; font-size:0.72rem; color:var(--text-muted);">
-                <span class="mono" style="opacity:0.8;">${p.device_id}</span>
+                <span class="mono" style="opacity:0.8;">${safeDevID}</span>
                 ${chanBadge}
               </div>
             </td>
-            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer; white-space:nowrap;" onclick="copyText('${vIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${vIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
+            <td class="mono" style="color:#38bdf8; font-weight:700; cursor:pointer; white-space:nowrap;" onclick="copyText('${jsVIP}', 'Virtual IP скопирован')" title="Нажмите, чтобы скопировать Virtual IP">${safeVIP} <span style="font-size:0.7rem; opacity:0.6;">📋</span></td>
             <td>
               <div style="display:flex; flex-direction:column; gap:3px;">
                 <div>${p2pBadge}</div>
                 <div style="font-size:0.74rem;">${latDisplay}</div>
               </div>
             </td>
-            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer; font-size:0.78rem; white-space:nowrap;" onclick="copyText('${addrStr.split(':')[0]}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag}</td>
+            <td class="col-desktop-only mono" style="color:var(--text-muted); cursor:pointer; font-size:0.78rem; white-space:nowrap;" onclick="copyText('${jsAddrHost}', 'Внешний IP скопирован')" title="Нажмите, чтобы скопировать внешний IP">${ipDisplayWithFlag}</td>
             <td class="col-desktop-only" style="white-space:nowrap;">${exitBadge}</td>
             <td style="white-space:nowrap; text-align:right;">
               ${exitBtn}
               ${subnetBadges}
-              <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⚡ Ping</button>
-              <button onclick="bookmarkPeer('${p.device_id}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⭐</button>
-              <button onclick="copyText('${vIP}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">📋 IP</button>
+              <button onclick="pingPeer('${jsDevID}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⚡ Ping</button>
+              <button onclick="bookmarkPeer('${jsDevID}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">⭐</button>
+              <button onclick="copyText('${jsVIP}')" class="btn btn-glass" style="padding:4px 8px; font-size:0.74rem;">📋 IP</button>
             </td>
           </tr>
         `;
@@ -5246,7 +5266,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         if (canBeExit) {
           exitNodesFound++;
           const isSel = (p.device_id === curVal || vIP === curVal || isExitActive) ? 'selected' : '';
-          exitOptions += `<option value="${p.device_id}" ${isSel}>🌐 ${name} (${vIP})</option>`;
+          exitOptions += `<option value="${safeDevID}" ${isSel}>🌐 ${name} (${safeVIP})</option>`;
         }
       });
 
@@ -5386,10 +5406,10 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       const pings = directPeers.map(p => (p.latency_ms && p.latency_ms > 0) ? p.latency_ms : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0))).filter(v => v > 0);
       const avgPing = pings.length > 0 ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) : 0;
 
-      const myName = (currentStatus && (currentStatus.device_name || currentStatus.nickname)) || (currentStatus && currentStatus.device_id) || (document.getElementById('userNameLabel') ? document.getElementById('userNameLabel').innerText : '') || 'Этот узел';
-      const myVip = (currentStatus && currentStatus.virtual_ip) || (document.getElementById('topVipLabel') ? document.getElementById('topVipLabel').innerText : '') || '100.64.200.1';
-      const myNat = (currentStatus && currentStatus.nat_type) || 'Full Cone NAT';
-      const myPort = (currentStatus && (currentStatus.listen_port || currentStatus.wg_port)) || '51820';
+      const myName = escapeHtml((currentStatus && (currentStatus.device_name || currentStatus.nickname)) || (currentStatus && currentStatus.device_id) || (document.getElementById('userNameLabel') ? document.getElementById('userNameLabel').innerText : '') || 'Этот узел');
+      const myVip = escapeHtml((currentStatus && currentStatus.virtual_ip) || (document.getElementById('topVipLabel') ? document.getElementById('topVipLabel').innerText : '') || '100.64.200.1');
+      const myNat = escapeHtml((currentStatus && currentStatus.nat_type) || 'Full Cone NAT');
+      const myPort = escapeHtml((currentStatus && (currentStatus.listen_port || currentStatus.wg_port)) || '51820');
 
       let directCardsHtml = '';
       if (directPeers.length === 0) {
@@ -5401,7 +5421,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         directPeers.forEach(p => {
           const os = getPeerOsInfo(p);
           const vIP = (p.virtual_ip || '').split('/')[0].trim();
-          const pName = p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10));
+          const safeVIP = escapeHtml(vIP);
+          const jsVIP = escapeAttrJs(vIP);
+          const jsDevID = escapeAttrJs(p.device_id);
+          const pName = escapeHtml(p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10)));
+          const safeEp = escapeHtml(p.active_endpoint || p.stun_addr || '—');
           const pingMs = (p.latency_ms && p.latency_ms > 0) ? p.latency_ms : (p.ping_ms || (p.latency ? Math.round(p.latency / 1000000) : 0));
           const pingColor = pingMs < 50 ? '#34d399' : (pingMs < 120 ? '#06b6d4' : (pingMs < 250 ? '#fbbf24' : '#f87171'));
           const isExitActive = Boolean(activeExit && activeExit.device_id === p.device_id);
@@ -5417,13 +5441,13 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                   <span class="badge ${os.cls}" style="font-size:0.65rem; padding:2px 6px;">${os.name}</span>
                 </div>
                 <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.3); border-radius:6px; padding:5px 8px; margin-bottom:8px;">
-                  <span style="font-family:monospace; font-size:0.8rem; color:#38bdf8; font-weight:700; cursor:pointer;" onclick="copyToClipboard('${vIP}')" title="Нажмите чтобы скопировать IP">${vIP}</span>
+                  <span style="font-family:monospace; font-size:0.8rem; color:#38bdf8; font-weight:700; cursor:pointer;" onclick="copyToClipboard('${jsVIP}')" title="Нажмите чтобы скопировать IP">${safeVIP}</span>
                   <span style="font-family:monospace; font-size:0.75rem; color:${pingColor}; font-weight:700;">🟢 ${pingMs > 0 ? pingMs + ' ms' : 'P2P'}</span>
                 </div>
                 <div style="font-size:0.72rem; color:var(--text-muted); display:flex; flex-direction:column; gap:3px;">
                   <div style="display:flex; justify-content:space-between;">
                     <span>Сокет:</span>
-                    <span class="mono" style="color:#cbd5e1;">${p.active_endpoint || p.stun_addr || '—'}</span>
+                    <span class="mono" style="color:#cbd5e1;">${safeEp}</span>
                   </div>
                   <div style="display:flex; justify-content:space-between;">
                     <span>Канал:</span>
@@ -5436,14 +5460,14 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                 </div>
               </div>
               <div style="display:flex; gap:6px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
-                <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="flex:1; font-size:0.72rem; padding:4px 6px; justify-content:center;">⚡ Пинг</button>
+                <button onclick="pingPeer('${jsDevID}')" class="btn btn-glass" style="flex:1; font-size:0.72rem; padding:4px 6px; justify-content:center;">⚡ Пинг</button>
                 ${isExitActive
-                  ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-size:0.72rem; padding:4px 8px; font-weight:700;">🔌 Выкл</button>`
+                  ? `<button onclick="toggleClientExitNode('${jsDevID}', '${jsVIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-size:0.72rem; padding:4px 8px; font-weight:700;">🔌 Выкл</button>`
                   : (p.is_exit_node
-                      ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.72rem; padding:4px 8px; font-weight:700;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`
+                      ? `<button onclick="toggleClientExitNode('${jsDevID}', '${jsVIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.72rem; padding:4px 8px; font-weight:700;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`
                       : '')
                 }
-                <button onclick="copyToClipboard('${vIP}')" class="btn btn-glass" style="font-size:0.72rem; padding:4px 8px;" title="Скопировать IP">📋</button>
+                <button onclick="copyToClipboard('${jsVIP}')" class="btn btn-glass" style="font-size:0.72rem; padding:4px 8px;" title="Скопировать IP">📋</button>
               </div>
             </div>`;
         });
@@ -5454,8 +5478,11 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
         relayPeers.forEach(p => {
           const os = getPeerOsInfo(p);
           const vIP = (p.virtual_ip || '').split('/')[0].trim();
-          const pName = p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10));
-          const relayVia = p.relayed_via_name || p.relayed_via_vip || 'Mesh Hub';
+          const safeVIP = escapeHtml(vIP);
+          const jsVIP = escapeAttrJs(vIP);
+          const jsDevID = escapeAttrJs(p.device_id);
+          const pName = escapeHtml(p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10)));
+          const relayVia = escapeHtml(p.relayed_via_name || p.relayed_via_vip || 'Mesh Hub');
           const isRelayExitActive = Boolean(activeExit && (activeExit.device_id === p.device_id || activeExit.virtual_ip === p.virtual_ip));
 
           relayCardsHtml += `
@@ -5482,19 +5509,19 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
                   </div>
                 </div>
                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem;">
-                  <span style="font-family:monospace; color:#38bdf8; font-weight:700;">${vIP}</span>
+                  <span style="font-family:monospace; color:#38bdf8; font-weight:700;">${safeVIP}</span>
                   <span class="badge" style="background:rgba(245,158,11,0.18); border:1px solid rgba(245,158,11,0.4); color:#fbbf24; font-size:0.68rem;">🛡️ Transit Relay</span>
                 </div>
               </div>
               <div style="display:flex; gap:6px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
-                <button onclick="pingPeer('${p.device_id}')" class="btn btn-glass" style="flex:1; font-size:0.72rem; padding:4px 6px; justify-content:center;">⚡ ICMP Пинг</button>
+                <button onclick="pingPeer('${jsDevID}')" class="btn btn-glass" style="flex:1; font-size:0.72rem; padding:4px 6px; justify-content:center;">⚡ ICMP Пинг</button>
                 ${isRelayExitActive
-                  ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-size:0.72rem; padding:4px 8px; font-weight:700;">🔌 Выкл</button>`
+                  ? `<button onclick="toggleClientExitNode('${jsDevID}', '${jsVIP}', false)" class="btn-pill" style="background:#ef4444; color:#fff; font-size:0.72rem; padding:4px 8px; font-weight:700;">🔌 Выкл</button>`
                   : (p.is_exit_node
-                      ? `<button onclick="toggleClientExitNode('${p.device_id}', '${vIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.72rem; padding:4px 8px; font-weight:700;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`
+                      ? `<button onclick="toggleClientExitNode('${jsDevID}', '${jsVIP}', true)" class="btn btn-glass" style="color:#38bdf8; border-color:rgba(56,189,248,0.3); font-size:0.72rem; padding:4px 8px; font-weight:700;" title="Направить весь интернет через это устройство">🌐 Шлюз</button>`
                       : '')
                 }
-                <button onclick="copyToClipboard('${vIP}')" class="btn btn-glass" style="font-size:0.72rem; padding:4px 8px;" title="Скопировать IP">📋</button>
+                <button onclick="copyToClipboard('${jsVIP}')" class="btn btn-glass" style="font-size:0.72rem; padding:4px 8px;" title="Скопировать IP">📋</button>
               </div>
             </div>`;
         });
@@ -5504,8 +5531,8 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
       if (offlinePeers.length > 0) {
         offlinePeers.forEach(p => {
           const os = getPeerOsInfo(p);
-          const vIP = (p.virtual_ip || '').split('/')[0].trim();
-          const pName = p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10));
+          const vIP = escapeHtml((p.virtual_ip || '').split('/')[0].trim());
+          const pName = escapeHtml(p.nickname ? `⭐ ${p.nickname}` : (p.device_name || p.device_id.substring(0, 10)));
 
           offlineCardsHtml += `
             <div style="background:rgba(15,23,42,0.5); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; opacity:0.65;">
@@ -5546,7 +5573,7 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
           <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px 14px;">
             <div style="font-size:0.68rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Выход в Интернет</div>
             <div style="font-size:0.95rem; font-weight:800; color:${activeExit ? '#10b981' : '#94a3b8'}; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-              ${activeExit ? '🌐 ' + (activeExit.nickname || activeExit.device_name || activeExit.device_id.substring(0, 10)) : '🏠 Прямой WAN (Локальный)'}
+              ${activeExit ? '🌐 ' + escapeHtml(activeExit.nickname || activeExit.device_name || activeExit.device_id.substring(0, 10)) : '🏠 Прямой WAN (Локальный)'}
             </div>
           </div>
         </div>
@@ -7540,9 +7567,9 @@ let lastNetcheckReport = null;
           }
           ls.innerHTML = json.data.map(e => `
             <div style="display:flex; gap:10px; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:3px;">
-              <span style="color:var(--text-dim);">${new Date(e.time).toLocaleTimeString()}</span>
-              <span style="color:#38bdf8; font-weight:700;">[${e.type}]</span>
-              <span>${e.message}</span>
+              <span style="color:var(--text-dim);">${escapeHtml(new Date(e.time).toLocaleTimeString())}</span>
+              <span style="color:#38bdf8; font-weight:700;">[${escapeHtml(e.type)}]</span>
+              <span>${escapeHtml(e.message)}</span>
             </div>
           `).join('');
           ls.scrollTop = ls.scrollHeight;

@@ -12,7 +12,7 @@ import "time"
 
 const (
 	// Version
-	CurrentVersion         = "1.9.507-beta.50"
+	CurrentVersion         = "1.9.507-beta.51"
 
 	// Network and service defaults
 	DefaultWebUIPort       = 8080

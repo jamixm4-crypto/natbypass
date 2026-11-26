@@ -239,3 +239,41 @@ func TestTransitForwarder_DoTHandling(t *testing.T) {
 		}
 	}
 }
+
+func TestTransitForwarder_SSRFRFC1918AndSourceSpoofing(t *testing.T) {
+	myVIP := "10.1.2.1/24"
+	mockPeer := &peer.Peer{
+		DeviceID:  "peer-a",
+		VirtualIP: "10.1.2.55/24",
+	}
+	tf := &TransitForwarder{
+		myVIP: myVIP,
+		lookupPeer: func(vipOrID string) *peer.Peer {
+			if vipOrID == "10.1.2.55" {
+				return mockPeer
+			}
+			return nil
+		},
+	}
+
+	// 1. Private LAN (router admin UI / host LAN) and CGNAT MUST be blocked by default
+	for _, blocked := range []string{"192.168.1.1", "10.0.0.5", "172.16.0.10", "100.64.1.1", "127.0.0.1", "169.254.169.254"} {
+		pkt := buildIPv4Packet(net.ParseIP("10.1.2.55"), net.ParseIP(blocked), 6, 64, make([]byte, 20))
+		if isTrans, _, _ := tf.IsTransitPacket(pkt); isTrans {
+			t.Errorf("IsTransitPacket allowed restricted SSRF target %s", blocked)
+		}
+	}
+
+	// 2. Explicitly advertised LAN subnet becomes reachable
+	tf.SetAllowedSubnets([]string{"192.168.50.0/24"})
+	allowedPkt := buildIPv4Packet(net.ParseIP("10.1.2.55"), net.ParseIP("192.168.50.10"), 6, 64, make([]byte, 20))
+	if isTrans, _, _ := tf.IsTransitPacket(allowedPkt); !isTrans {
+		t.Errorf("IsTransitPacket rejected explicitly advertised subnet 192.168.50.10")
+	}
+
+	// 3. Source VIP spoofing by another peer MUST be rejected
+	spoofPkt := buildIPv4Packet(net.ParseIP("10.1.2.99"), net.ParseIP("1.1.1.1"), 1, 64, []byte{8, 0, 0, 0, 0, 1, 0, 1})
+	if tf.HandleTransitPacketWithSender(spoofPkt, mockPeer) {
+		t.Errorf("HandleTransitPacketWithSender accepted spoofed source IP 10.1.2.99 from peer 10.1.2.55")
+	}
+}
