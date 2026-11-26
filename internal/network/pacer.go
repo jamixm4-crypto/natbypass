@@ -31,7 +31,7 @@ type AdaptivePacer struct {
 	lastWindow   time.Time
 	currentLoss  float64       // 0.0 to 1.0 (loss rate in current window)
 	maxBurst     int           // Maximum packets sent before pacing yield
-	burstCounter int
+	burstCounter atomic.Uint32 // 32-bit atomic is 100% safe against unaligned panic on MIPS/ARM
 }
 
 // NewAdaptivePacer creates a new adaptive congestion control and pacing engine.
@@ -112,9 +112,7 @@ func (p *AdaptivePacer) ForceEvaluateWindow() {
 
 // Pace maintains packet pacing statistics without stalling the kernel packet pipeline.
 func (p *AdaptivePacer) Pace() {
-	p.mu.Lock()
-	p.burstCounter++
-	p.mu.Unlock()
+	p.burstCounter.Add(1)
 }
 
 // KeepAliveMultiplier calculates a scaling factor (1.0 - 3.0) for keepalive intervals.

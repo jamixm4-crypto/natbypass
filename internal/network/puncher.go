@@ -109,7 +109,7 @@ type UDPPuncher struct {
 
 	awgVersion     string
 	awgHandler     AWGPacketHandler
-	trafficShaper   *TrafficShaper
+	trafficShaper  atomic.Pointer[TrafficShaper]
 	pacer          *AdaptivePacer
 	conn         *net.UDPConn
 	localPort    int
@@ -868,6 +868,9 @@ func (p *UDPPuncher) ResetSocket() (int, error) {
 	}
 
 	DisableUDPConnReset(newConn)
+	const udpSocketBufSize = 4 * 1024 * 1024 // Preserve 4 MB kernel buffers after network rebind
+	_ = newConn.SetReadBuffer(udpSocketBufSize)
+	_ = newConn.SetWriteBuffer(udpSocketBufSize)
 	oldConn := p.conn
 	p.conn = newConn
 	p.localPort = newConn.LocalAddr().(*net.UDPAddr).Port
@@ -1787,6 +1790,13 @@ func (p *UDPPuncher) SendDataPacket(targetAddr string, payload []byte) error {
 	return p.SendDataPacketWithPadding(targetAddr, payload, 0, 0)
 }
 
+var paddedPayloadPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 2048)
+		return &b
+	},
+}
+
 // SendDataPacketWithPadding applies Amnezia 3.x random trailer padding (pmin-pmax bytes) to disguise packet length.
 func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte, pmin, pmax int) error {
 	if targetAddr == "" || p.conn == nil || len(payload) == 0 {
@@ -1803,6 +1813,12 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 	p.cipherMu.RUnlock()
 
 	if hasCKey {
+		var padBufPtr *[]byte
+		defer func() {
+			if padBufPtr != nil {
+				paddedPayloadPool.Put(padBufPtr)
+			}
+		}()
 		payloadToEncrypt := payload
 		if pmax > 0 && pmax >= pmin {
 			padLen := pmin
@@ -1822,17 +1838,25 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 			}
 			if padLen > 0 {
 				pLen := uint16(len(payload))
-				padded := make([]byte, 2+len(payload)+padLen)
-				binary.BigEndian.PutUint16(padded[:2], pLen)
-				copy(padded[2:], payload)
-				crypto.FastJitterBytes(padded[2+len(payload):])
-				payloadToEncrypt = padded
+				need := 2 + len(payload) + padLen
+				if need <= 2048 {
+					padBufPtr = paddedPayloadPool.Get().(*[]byte)
+					padded := (*padBufPtr)[:need]
+					binary.BigEndian.PutUint16(padded[:2], pLen)
+					copy(padded[2:], payload)
+					crypto.FastJitterBytes(padded[2+len(payload):])
+					payloadToEncrypt = padded
+				} else {
+					padded := make([]byte, need)
+					binary.BigEndian.PutUint16(padded[:2], pLen)
+					copy(padded[2:], payload)
+					crypto.FastJitterBytes(padded[2+len(payload):])
+					payloadToEncrypt = padded
+				}
 			}
 		} else {
 			// Dynamic Packet Size Obfuscation (Anti-Flow Analysis for TSPU/DPI)
-			p.mu.Lock()
-			shaper := p.trafficShaper
-			p.mu.Unlock()
+			shaper := p.trafficShaper.Load()
 			if shaper != nil && shaper.IsEnabled() {
 				payloadToEncrypt = shaper.ApplyAdaptivePadding(payload)
 			} else if len(payload) < 512 {
@@ -1840,7 +1864,9 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 				var b [1]byte
 				crypto.FastJitterBytes(b[:])
 				padLen := 16 + int(b[0]%48) // 16-63 bytes
-				padded := make([]byte, len(payload)+padLen)
+				need := len(payload) + padLen
+				padBufPtr = paddedPayloadPool.Get().(*[]byte)
+				padded := (*padBufPtr)[:need]
 				copy(padded, payload)
 				crypto.FastJitterBytes(padded[len(payload):])
 				payloadToEncrypt = padded
@@ -1856,10 +1882,7 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 				p.pacer.RecordSent(len(enc))
 			}
 
-			p.mu.Lock()
-			shaper := p.trafficShaper
-			p.mu.Unlock()
-
+			shaper := p.trafficShaper.Load()
 			if shaper != nil && shaper.IsEnabled() {
 				return shaper.SendPacket(targetConn, rAddr, enc)
 			}
@@ -1872,10 +1895,7 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 				p.pacer.RecordSent(len(enc))
 			}
 
-			p.mu.Lock()
-			shaper := p.trafficShaper
-			p.mu.Unlock()
-
+			shaper := p.trafficShaper.Load()
 			if shaper != nil && shaper.IsEnabled() {
 				return shaper.SendPacket(targetConn, rAddr, enc)
 			}
@@ -1890,10 +1910,7 @@ func (p *UDPPuncher) SendDataPacketWithPadding(targetAddr string, payload []byte
 	copy(fullPkt, header)
 	copy(fullPkt[len(header):], payload)
 
-	p.mu.Lock()
-	shaper := p.trafficShaper
-	p.mu.Unlock()
-
+	shaper := p.trafficShaper.Load()
 	if shaper != nil && shaper.IsEnabled() {
 		return shaper.SendPacket(p.conn, rAddr, fullPkt)
 	}
@@ -1935,10 +1952,7 @@ func (p *UDPPuncher) SendDataPacketWithQUIC(targetAddr string, payload []byte) e
 		p.pacer.RecordSent(len(pkt))
 	}
 
-	p.mu.Lock()
-	shaper := p.trafficShaper
-	p.mu.Unlock()
-
+	shaper := p.trafficShaper.Load()
 	if shaper != nil && shaper.IsEnabled() {
 		return shaper.SendPacket(p.conn, rAddr, pkt)
 	}
@@ -2162,18 +2176,30 @@ var (
 	tunHeaderBytes       = []byte(constants.TunHeader)
 )
 
+type replayKey struct {
+	ip    [16]byte
+	port  uint16
+	epoch uint64
+}
+
 // validateUDPReplay enforces RFC 6479 sliding-window anti-replay protection on decrypted UDP packets.
+// Zero-alloc on the hot path using a comparable value key instead of string formatting.
 func (p *UDPPuncher) validateUDPReplay(remoteAddr *net.UDPAddr, msgEpoch, seq uint64) bool {
-	srcKey := "unknown"
+	var key replayKey
+	key.epoch = msgEpoch
 	if remoteAddr != nil {
-		srcKey = remoteAddr.String()
+		key.port = uint16(remoteAddr.Port)
+		if ip4 := remoteAddr.IP.To4(); ip4 != nil {
+			copy(key.ip[12:16], ip4)
+		} else if len(remoteAddr.IP) == 16 {
+			copy(key.ip[:], remoteAddr.IP)
+		}
 	}
-	filterKey := fmt.Sprintf("%s:%d", srcKey, msgEpoch)
-	if v, ok := p.replayFilters.Load(filterKey); ok {
+	if v, ok := p.replayFilters.Load(key); ok {
 		return v.(*crypto.ReplayFilter).ValidateAndAccept(seq)
 	}
 	nf := crypto.NewReplayFilter()
-	actual, _ := p.replayFilters.LoadOrStore(filterKey, nf)
+	actual, _ := p.replayFilters.LoadOrStore(key, nf)
 	return actual.(*crypto.ReplayFilter).ValidateAndAccept(seq)
 }
 
@@ -2466,9 +2492,7 @@ func (p *UDPPuncher) SetAWGVersion(version string) {
 }
 
 func (p *UDPPuncher) SetTrafficShaper(shaper *TrafficShaper) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.trafficShaper = shaper
+	p.trafficShaper.Store(shaper)
 }
 
 // GetPacer returns the AdaptivePacer instance used for congestion control and pacing.

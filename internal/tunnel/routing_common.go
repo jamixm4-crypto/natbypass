@@ -79,35 +79,76 @@ func CalculateChecksum(data []byte) uint16 {
 	return ^uint16(sum)
 }
 
+// parseIPv4Literal parses a dotted IPv4 address string without heap allocations.
+func parseIPv4Literal(s string) (a, b, c, d byte, ok bool) {
+	if idx := strings.IndexByte(s, '/'); idx >= 0 {
+		s = s[:idx]
+	}
+	s = strings.TrimSpace(s)
+	if len(s) < 7 || len(s) > 15 {
+		return 0, 0, 0, 0, false
+	}
+	var octets [4]byte
+	var val int
+	var hasDigit bool
+	part := 0
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch >= '0' && ch <= '9' {
+			val = val*10 + int(ch-'0')
+			if val > 255 {
+				return 0, 0, 0, 0, false
+			}
+			hasDigit = true
+		} else if ch == '.' {
+			if !hasDigit || part >= 3 {
+				return 0, 0, 0, 0, false
+			}
+			octets[part] = byte(val)
+			part++
+			val = 0
+			hasDigit = false
+		} else {
+			return 0, 0, 0, 0, false
+		}
+	}
+	if part != 3 || !hasDigit {
+		return 0, 0, 0, 0, false
+	}
+	octets[3] = byte(val)
+	return octets[0], octets[1], octets[2], octets[3], true
+}
+
 // IsParasiticOrBroadcast checks if an outbound packet is multicast, broadcast, loopback, link-local,
 // self-targeted, or local service noise (NetBIOS, LLMNR, SSDP, mDNS, WS-Discovery) that must not
-// be encrypted or routed into the NatBypass mesh.
+// be encrypted or routed into the NatBypass mesh. Zero-alloc on the hot path.
 func IsParasiticOrBroadcast(packet []byte, myVirtualIP string) bool {
 	if len(packet) < 20 || (packet[0]>>4) != 4 {
 		return true
 	}
-	srcIP := GetSrcIP(packet)
-	destIP := GetDestIP(packet)
-	if srcIP == nil || destIP == nil {
+	s0, s1, s2, s3 := packet[12], packet[13], packet[14], packet[15]
+	d0, d1, d2, d3 := packet[16], packet[17], packet[18], packet[19]
+
+	// Multicast (224.0.0.0/4), Unspecified (0.0.0.0), Loopback (127.0.0.0/8), Link-local (169.254.0.0/16)
+	if (d0&0xF0) == 0xE0 || d0 == 127 || (d0 == 0 && d1 == 0 && d2 == 0 && d3 == 0) || (d0 == 169 && d1 == 254) {
 		return true
 	}
 
-	// Multicast, link-local, unspecified, loopback
-	if destIP.IsMulticast() || destIP.IsUnspecified() || destIP.IsLoopback() ||
-		destIP.IsLinkLocalUnicast() || destIP.IsLinkLocalMulticast() {
+	// Global broadcast or subnet broadcast/network (.255, .0)
+	if d3 == 255 || d3 == 0 {
 		return true
 	}
 
-	destStr := destIP.String()
-	// Global broadcast or subnet broadcast/network
-	if destStr == "255.255.255.255" || strings.HasSuffix(destStr, ".255") || strings.HasSuffix(destStr, ".0") {
+	// Self reflection (src == dst)
+	if s0 == d0 && s1 == d1 && s2 == d2 && s3 == d3 {
 		return true
 	}
-
-	// Loopback / self reflection
-	cleanVIP := strings.TrimSpace(strings.Split(myVirtualIP, "/")[0])
-	if destStr == cleanVIP || srcIP.Equal(destIP) {
-		return true
+	if myVirtualIP != "" {
+		if m0, m1, m2, m3, ok := parseIPv4Literal(myVirtualIP); ok {
+			if d0 == m0 && d1 == m1 && d2 == m2 && d3 == m3 {
+				return true
+			}
+		}
 	}
 
 	// Filter common LAN discovery noise: UDP NetBIOS (137, 138), LLMNR (5355), mDNS (5353), SSDP (1900), WS-Discovery (3702)

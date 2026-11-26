@@ -277,3 +277,54 @@ func TestTransitForwarder_SSRFRFC1918AndSourceSpoofing(t *testing.T) {
 		t.Errorf("HandleTransitPacketWithSender accepted spoofed source IP 10.1.2.99 from peer 10.1.2.55")
 	}
 }
+
+func TestTCPWindowScaleAndSegmentPruning(t *testing.T) {
+	entry := &tcpSessionEntry{
+		clientVIP:    net.ParseIP("10.1.1.5"),
+		clientPort:   54321,
+		dstIP:        net.ParseIP("1.1.1.1"),
+		dstPort:      443,
+		clientWScale: 7,
+	}
+	entry.clientNextSeq.Store(100)
+
+	entry.addRecentSegment(1000, make([]byte, 500))
+	entry.addRecentSegment(1500, make([]byte, 500))
+	entry.addRecentSegment(2000, make([]byte, 500))
+
+	// Acknowledge up to seq 2000 -> first two segments (1000..1500, 1500..2000) must be pruned
+	entry.pruneAcked(2000)
+	if seg := entry.getRecentSegment(1000); seg != nil {
+		t.Fatalf("expected segment 1000 to be pruned")
+	}
+	if seg := entry.getRecentSegment(1500); seg != nil {
+		t.Fatalf("expected segment 1500 to be pruned")
+	}
+	oldest := entry.oldestSegment()
+	if oldest == nil || oldest.seq != 2000 {
+		t.Fatalf("expected oldest unacked segment seq=2000, got %+v", oldest)
+	}
+
+	// Verify RTO stall retransmit fires after >250ms unacked duration
+	var delivered [][]byte
+	tf := &TransitForwarder{
+		lookupPeer: func(vipOrID string) *peer.Peer {
+			return &peer.Peer{DeviceID: "client-dev-1", VirtualIP: "10.1.1.5/24"}
+		},
+		sendToPeer: func(destPeer *peer.Peer, packet []byte) error {
+			delivered = append(delivered, packet)
+			return nil
+		},
+	}
+	entry.lastAckNano.Store(time.Now().Add(-350 * time.Millisecond).UnixNano())
+	entry.lastRetransmitNano.Store(time.Now().Add(-350 * time.Millisecond).UnixNano())
+	tf.retransmitOldestIfStalled(entry)
+	if len(delivered) != 1 {
+		t.Fatalf("expected 1 RTO retransmit packet, got %d", len(delivered))
+	}
+	// Verify second immediate call is throttled by cooldown
+	tf.retransmitOldestIfStalled(entry)
+	if len(delivered) != 1 {
+		t.Fatalf("expected cooldown to suppress duplicate immediate retransmit, got %d", len(delivered))
+	}
+}

@@ -177,3 +177,36 @@ func TestClampTCPMSS(t *testing.T) {
 	})
 }
 
+func TestIsParasiticOrBroadcast_ZeroAllocCases(t *testing.T) {
+	makePkt := func(src, dst [4]byte, proto byte, dstPort uint16) []byte {
+		pkt := make([]byte, 40)
+		pkt[0] = 0x45
+		pkt[9] = proto
+		copy(pkt[12:16], src[:])
+		copy(pkt[16:20], dst[:])
+		binary.BigEndian.PutUint16(pkt[22:24], dstPort)
+		return pkt
+	}
+
+	myVIP := "10.1.1.5/24"
+	cases := []struct {
+		name string
+		pkt  []byte
+		want bool
+	}{
+		{"normal HTTPS", makePkt([4]byte{10, 1, 1, 5}, [4]byte{1, 1, 1, 1}, 6, 443), false},
+		{"self VIP", makePkt([4]byte{10, 1, 1, 9}, [4]byte{10, 1, 1, 5}, 6, 443), true},
+		{"src equals dst", makePkt([4]byte{10, 1, 1, 6}, [4]byte{10, 1, 1, 6}, 6, 443), true},
+		{"multicast", makePkt([4]byte{10, 1, 1, 5}, [4]byte{224, 0, 0, 251}, 17, 5353), true},
+		{"subnet broadcast", makePkt([4]byte{10, 1, 1, 5}, [4]byte{10, 1, 1, 255}, 17, 9999), true},
+		{"mDNS noise", makePkt([4]byte{10, 1, 1, 5}, [4]byte{10, 1, 1, 6}, 17, 5353), true},
+		{"DNS UDP allowed", makePkt([4]byte{10, 1, 1, 5}, [4]byte{8, 8, 8, 8}, 17, 53), false},
+	}
+
+	for _, tc := range cases {
+		if got := IsParasiticOrBroadcast(tc.pkt, myVIP); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+

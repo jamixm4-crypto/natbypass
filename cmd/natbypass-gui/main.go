@@ -106,7 +106,7 @@ func applyAWGProfileToGUI(p *config.Profile) {
 }
 
 var (
-	Version = "1.9.507-beta.51"
+	Version = "1.9.507"
 	Commit  = "release"
 )
 
@@ -5934,10 +5934,8 @@ func startEngineFromConfig(c *config.Config) {
 						if len(packet) < 20 {
 							continue
 						}
-						pktCopy := make([]byte, len(packet))
-						copy(pktCopy, packet)
 						select {
-						case pktCh <- pktCopy:
+						case pktCh <- packet:
 						default:
 						}
 					}
@@ -5946,6 +5944,9 @@ func startEngineFromConfig(c *config.Config) {
 
 			// Single sequential FIFO worker to guarantee zero TCP packet reordering
 			go func() {
+				var cachedMyLocal, cachedMyPub string
+				var cachedHasIPv6 bool
+				var lastAddrSnap time.Time
 				for {
 					select {
 					case <-ctx.Done():
@@ -5999,20 +6000,22 @@ func startEngineFromConfig(c *config.Config) {
 										targetEP = bestEP
 									}
 								}
+								if now := time.Now(); now.Sub(lastAddrSnap) >= 2*time.Second {
+									lastAddrSnap = now
+									if udpPuncher != nil {
+										cachedMyLocal = udpPuncher.LocalAddr()
+										cachedMyPub = udpPuncher.MappedIPString()
+									}
+									cachedHasIPv6 = network.HasGlobalIPv6()
+								}
 								// LAN Peer Priority Rule:
 								// If peer is on the same local network, prefer LocalAddr over STUNAddr to eliminate hairpin NAT blackhole on Wi-Fi routers!
-								myLocal := ""
-								myPub := ""
-								if udpPuncher != nil {
-									myLocal = udpPuncher.LocalAddr()
-									myPub = udpPuncher.MappedIPString()
-								}
-								if targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, myPub) {
+								if targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, cachedMyLocal, cachedMyPub) {
 									targetEP = targetPeer.LocalAddr
-								} else if (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+								} else if (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) && targetPeer.IPv6Addr != "" && cachedHasIPv6 {
 									targetEP = targetPeer.IPv6Addr
 								}
-								if targetEP == "" && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+								if targetEP == "" && targetPeer.IPv6Addr != "" && cachedHasIPv6 {
 									targetEP = targetPeer.IPv6Addr
 								}
 								if targetEP == "" {

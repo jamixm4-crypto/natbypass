@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	Version   = "1.9.507-beta.51"
+	Version   = "1.9.507"
 	Commit    = "release"
 	BuildDate = "unknown"
 )
@@ -86,10 +86,16 @@ func main() {
 		configFile = resolveConfigPath("config.yaml")
 	}
 
-	// Embedded router optimization: reduce GC and OS thread pressure on MIPS/ARM
+	// Embedded router optimization: bound RAM without choking multi-core MIPS/ARM forwarding via single-thread / ultra-aggressive GC
 	if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" || runtime.GOARCH == "arm" {
-		runtime.GOMAXPROCS(1)
-		debug.SetGCPercent(10)
+		cpus := runtime.NumCPU()
+		if cpus < 1 {
+			cpus = 1
+		} else if cpus > 2 {
+			cpus = 2
+		}
+		runtime.GOMAXPROCS(cpus)
+		debug.SetGCPercent(50)
 		debug.SetMemoryLimit(48 << 20) // soft 48 MB heap limit
 	}
 

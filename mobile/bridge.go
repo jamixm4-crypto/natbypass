@@ -38,7 +38,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "1.9.507-beta.51"
+const Version = "1.9.507"
 
 type logRing struct {
 	mu    sync.Mutex
@@ -113,19 +113,39 @@ func (lr *logRing) Clear() {
 	lr.lines = lr.lines[:0]
 }
 
+type pooledMobilePacket struct {
+	data    []byte
+	release func()
+}
+
 var (
-	engineMu       sync.Mutex
-	engineCtx      context.Context
-	engineCancel   context.CancelFunc
-	engineRunning  bool
-	globalRegistry *peer.Registry
-	globalSigMgr   *signaling.FallbackManager
-	globalConfig   *config.Config
-	globalDevID    string
-	globalDevName  string
-	globalPublicIP string
-	globalIPv6     string
-	globalSTUN     string
+	mobileTunRxPool = sync.Pool{
+		New: func() any {
+			b := make([]byte, 2048)
+			return &b
+		},
+	}
+	mobileTunTxPool = sync.Pool{
+		New: func() any {
+			b := make([]byte, 4096)
+			return &b
+		},
+	}
+)
+
+var (
+	engineMu                  sync.Mutex
+	engineCtx                 context.Context
+	engineCancel              context.CancelFunc
+	engineRunning             bool
+	globalRegistry            *peer.Registry
+	globalSigMgr              *signaling.FallbackManager
+	globalConfig              *config.Config
+	globalDevID               string
+	globalDevName             string
+	globalPublicIP            string
+	globalIPv6                string
+	globalSTUN                string
 	// S4: atomicGetVIP() теперь atomic.Value для безопасного чтения из горутин
 	// без захвата engineMu (TUN loop, signaling ticker читают без блокировки)
 	globalVirtualIP           sync.Map // used as atomic string via atomicGetVIP/atomicSetVIP
@@ -143,8 +163,8 @@ var (
 	globalTCPRelayClient      *relay.TCPRelayClient
 	globalTCPRelayServer      *relay.TCPRelayServer
 	globalTunFile             *os.File
-	globalTunCancel           context.CancelFunc // controls TUN goroutines lifecycle
-	globalTunRxCh             chan []byte        // decoupled high-throughput TUN write queue (4096 packets)
+	globalTunCancel           context.CancelFunc        // controls TUN goroutines lifecycle
+	globalTunRxCh             chan pooledMobilePacket // decoupled high-throughput TUN write queue
 	globalTunRxMu             sync.RWMutex
 	globalTxBytes             atomic.Uint64
 	globalRxBytes             atomic.Uint64
@@ -156,7 +176,7 @@ var (
 	logger                    zerolog.Logger
 )
 
-// enqueueTunRx delivers an inbound packet to the decoupled TUN write queue.
+// enqueueTunRx delivers an inbound packet to the decoupled TUN write queue using pooled buffers.
 // It is non-blocking to prevent UDP socket buffer overflow on Android.
 func enqueueTunRx(payload []byte) {
 	globalTunRxMu.RLock()
@@ -165,11 +185,28 @@ func enqueueTunRx(payload []byte) {
 	if rxCh == nil || len(payload) == 0 {
 		return
 	}
-	pktCopy := make([]byte, len(payload))
-	copy(pktCopy, payload)
+	var item pooledMobilePacket
+	if len(payload) <= 2048 {
+		bufPtr := mobileTunRxPool.Get().(*[]byte)
+		dst := (*bufPtr)[:len(payload)]
+		copy(dst, payload)
+		item = pooledMobilePacket{
+			data: dst,
+			release: func() {
+				mobileTunRxPool.Put(bufPtr)
+			},
+		}
+	} else {
+		pktCopy := make([]byte, len(payload))
+		copy(pktCopy, payload)
+		item = pooledMobilePacket{data: pktCopy}
+	}
 	select {
-	case rxCh <- pktCopy:
+	case rxCh <- item:
 	default:
+		if item.release != nil {
+			item.release()
+		}
 		// Queue full: drop packet without stalling caller UDP/Relay read loop
 	}
 }
@@ -607,11 +644,15 @@ func StartEngine(configYAML string, tunFd int) string {
 		defer nCancel()
 		report, err := diagnostic.RunNetcheck(nCtx)
 		if err == nil && report != nil {
+			// Only disable IPv4 UDP probing on confirmed systemic UDP blocking (TSPU),
+			// never on a transient startup STUN timeout on cellular CGNAT.
+			udpBlocked := report.UDPBlockedIPv4 && report.TSPUDetected
 			nr := network.NetcheckResult{
-				UDPBlockedIPv4: report.UDPBlockedIPv4,
+				UDPBlockedIPv4: udpBlocked,
 				UDPBlockedIPv6: report.UDPBlockedIPv6,
 				IPv6Available:  report.IPv6Available,
 				TCP443OK:       report.TCP443OK,
+				TSPUDetected:   report.TSPUDetected,
 			}
 			globalTransportSwitcher.Evaluate(nr)
 		}
@@ -1630,8 +1671,8 @@ func attachTUNLocked(tunFd int) {
 	globalTunCancel = tunCancel
 
 	// Высокопроизводительные кольцевые буферы (8192 пакетов)
-	tunRxCh := make(chan []byte, 8192)
-	tunTxCh := make(chan []byte, 8192)
+	tunRxCh := make(chan pooledMobilePacket, 8192)
+	tunTxCh := make(chan pooledMobilePacket, 8192)
 
 	globalTunRxMu.Lock()
 	globalTunRxCh = tunRxCh
@@ -1643,7 +1684,7 @@ func attachTUNLocked(tunFd int) {
 	// Работает в стандартном блокирующем режиме ядра Linux: f.Write() передает пакеты
 	// напрямую в сетевой стек ядра Android без вызовов poll() и 2ms задержек,
 	// исключая молчаливые потери пакетов (silent packet drop) и гарантируя полную скорость (300+ Мбит/с).
-	go func(ctx context.Context, f *os.File, rxCh <-chan []byte) {
+	go func(ctx context.Context, f *os.File, rxCh <-chan pooledMobilePacket) {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Warn().Msg(fmt.Sprintf("TUN writer recovered: %v", r))
@@ -1653,15 +1694,19 @@ func attachTUNLocked(tunFd int) {
 			select {
 			case <-ctx.Done():
 				return
-			case pkt, ok := <-rxCh:
+			case item, ok := <-rxCh:
 				if !ok {
 					return
 				}
+				pkt := item.data
 				if f != nil && len(pkt) >= 20 {
 					if pkt[0]>>4 == 4 {
 						ensureValidIPv4Checksum(pkt)
 					}
 					_, _ = f.Write(pkt)
+				}
+				if item.release != nil {
+					item.release()
 				}
 			}
 		}
@@ -1742,22 +1787,22 @@ func attachTUNLocked(tunFd int) {
 			enqueueTunRx(payload)
 		})
 
-		// 2. Выделенная горутина чтения из OS TUN -> tunTxCh
-		// Работает в блокирующем режиме: сисколл f.Read() мгновенно просыпается при поступлении пакета
-		// (0 мс задержки), а при отключении мгновенно завершается по закрытию дескриптора f.Close().
-		go func(myTunCtx context.Context, f *os.File, txCh chan<- []byte) {
+		// 2. Выделенная горутина чтения из OS TUN -> tunTxCh (с переиспользованием буферов)
+		go func(myTunCtx context.Context, f *os.File, txCh chan<- pooledMobilePacket) {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Warn().Msg(fmt.Sprintf("TUN reader recovered: %v", r))
 				}
 			}()
-			readBuf := make([]byte, 65535)
 			for {
 				if myTunCtx.Err() != nil {
 					return
 				}
-				n, err := f.Read(readBuf)
+				bufPtr := mobileTunTxPool.Get().(*[]byte)
+				buf := *bufPtr
+				n, err := f.Read(buf)
 				if err != nil {
+					mobileTunTxPool.Put(bufPtr)
 					if myTunCtx.Err() != nil {
 						return
 					}
@@ -1765,16 +1810,22 @@ func attachTUNLocked(tunFd int) {
 					return
 				}
 				if n <= 0 {
+					mobileTunTxPool.Put(bufPtr)
 					continue
 				}
 				globalTxBytes.Add(uint64(n))
 
-				pkt := make([]byte, n)
-				copy(pkt, readBuf[:n])
+				item := pooledMobilePacket{
+					data: buf[:n],
+					release: func() {
+						mobileTunTxPool.Put(bufPtr)
+					},
+				}
 
 				select {
-				case txCh <- pkt:
+				case txCh <- item:
 				default:
+					mobileTunTxPool.Put(bufPtr)
 					// Буфер переполнен: мягкий сброс во избежание backpressure
 				}
 			}
@@ -1783,21 +1834,47 @@ func attachTUNLocked(tunFd int) {
 		// 3. Выделенная строго последовательная горутина обработки исходящего трафика (FIFO).
 		// Строго последовательная передача пакетов гарантирует полное отсутствие TCP Out-Of-Order,
 		// исключая генерацию паразитных TCP DUP-ACK и предотвращая коллапс окна перегрузки (CWND) до 1-2 Мбит/с.
-		go func(myTunCtx context.Context, txCh <-chan []byte) {
+		go func(myTunCtx context.Context, txCh <-chan pooledMobilePacket) {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Warn().Msg(fmt.Sprintf("TUN worker recovered: %v", r))
 				}
 			}()
+			var cachedCleanVIP, cachedMyLocal string
+			var cachedHasIPv6 bool
+			var lastHintRefresh time.Time
+
+			dispatchItem := func(item pooledMobilePacket) {
+				if item.release != nil {
+					defer item.release()
+				}
+				now := time.Now()
+				if now.Sub(lastHintRefresh) >= 2*time.Second || cachedCleanVIP == "" {
+					lastHintRefresh = now
+					rawVIP := atomicGetVIP()
+					if idx := strings.IndexByte(rawVIP, '/'); idx >= 0 {
+						rawVIP = rawVIP[:idx]
+					}
+					cachedCleanVIP = strings.TrimSpace(rawVIP)
+					if globalPuncher != nil {
+						cachedMyLocal = globalPuncher.LocalAddr()
+					} else {
+						cachedMyLocal = ""
+					}
+					cachedHasIPv6 = network.HasGlobalIPv6()
+				}
+				processOutboundPacketWithHints(myTunCtx, item.data, cachedCleanVIP, cachedMyLocal, cachedHasIPv6)
+			}
+
 			for {
 				select {
 				case <-myTunCtx.Done():
 					return
-				case pkt, ok := <-txCh:
+				case item, ok := <-txCh:
 					if !ok {
 						return
 					}
-					processOutboundPacket(myTunCtx, pkt)
+					dispatchItem(item)
 				}
 			}
 		}(tunCtx, tunTxCh)
@@ -1806,13 +1883,24 @@ func attachTUNLocked(tunFd int) {
 
 // processOutboundPacket обрабатывает один исходящий IP-пакет из очереди TUN в пуле воркеров.
 func processOutboundPacket(ctx context.Context, pkt []byte) {
+	rawVIP := atomicGetVIP()
+	if idx := strings.IndexByte(rawVIP, '/'); idx >= 0 {
+		rawVIP = rawVIP[:idx]
+	}
+	myLocal := ""
+	if globalPuncher != nil {
+		myLocal = globalPuncher.LocalAddr()
+	}
+	processOutboundPacketWithHints(ctx, pkt, strings.TrimSpace(rawVIP), myLocal, network.HasGlobalIPv6())
+}
+
+// processOutboundPacketWithHints обрабатывает один исходящий IP-пакет с предвычисленными параметрами локального узла.
+func processOutboundPacketWithHints(ctx context.Context, pkt []byte, cleanVIP, myLocal string, hasGlobalIPv6 bool) {
 	if len(pkt) < 20 || (pkt[0]>>4) != 4 {
 		return
 	}
 	destIP := net.IPv4(pkt[16], pkt[17], pkt[18], pkt[19])
 	srcIP := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15])
-
-	cleanVIP := strings.TrimSpace(strings.Split(atomicGetVIP(), "/")[0])
 
 	// Защита от бродкаст-штормов, петель и паразитного трафика
 	if tunnel.IsParasiticOrBroadcast(pkt, cleanVIP) {
@@ -1822,22 +1910,27 @@ func processOutboundPacket(ctx context.Context, pkt []byte) {
 	// Userspace TCP MSS Clamping to prevent PMTU blackholes
 	_ = tunnel.ClampTCPMSS(pkt, constants.DefaultClampedMSS)
 
+	destStr := destIP.String()
 	var targetPeer *peer.Peer
 	if globalRegistry != nil {
-		targetPeer = globalRegistry.FindRelayDest(destIP.String(), globalDevID)
+		targetPeer = globalRegistry.FindRelayDest(destStr, globalDevID)
 	}
 
-	if destIP.String() == cleanVIP {
+	if destStr == cleanVIP {
 		enqueueTunRx(pkt)
 		return
 	}
 
 	if targetPeer == nil && globalExitNode != "" && globalRegistry != nil {
-		if ep, ok := globalRegistry.Get(globalExitNode); ok && ep != nil {
+		if ep, ok := globalRegistry.GetByIDOrVIP(globalExitNode); ok && ep != nil {
 			targetPeer = ep
 		} else {
 			for _, p := range globalRegistry.List() {
-				pVIP := strings.TrimSpace(strings.Split(p.VirtualIP, "/")[0])
+				pVIP := p.VirtualIP
+				if idx := strings.IndexByte(pVIP, '/'); idx >= 0 {
+					pVIP = pVIP[:idx]
+				}
+				pVIP = strings.TrimSpace(pVIP)
 				if p.DeviceID == globalExitNode || pVIP == globalExitNode || p.Nickname == globalExitNode || p.DeviceName == globalExitNode {
 					targetPeer = p
 					break
@@ -1861,17 +1954,13 @@ func processOutboundPacket(ctx context.Context, pkt []byte) {
 	// LAN Peer Priority Rule:
 	// If peer is on the same local network (shares Public IP or LocalAddr is in private LAN range),
 	// prefer LocalAddr over STUNAddr to eliminate hairpin NAT blackhole on Wi-Fi routers!
-	myLocal := ""
-	if globalPuncher != nil {
-		myLocal = globalPuncher.LocalAddr()
-	}
 	isLocalLAN := targetPeer.LocalAddr != "" && peer.IsLocalLANPeer(targetPeer.LocalAddr, targetPeer.PublicIP, myLocal, globalPublicIP)
 	if isLocalLAN && (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) {
 		targetEP = targetPeer.LocalAddr
-	} else if (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+	} else if (!targetPeer.DirectP2P || targetEP == "" || targetEP == targetPeer.STUNAddr) && targetPeer.IPv6Addr != "" && hasGlobalIPv6 {
 		targetEP = targetPeer.IPv6Addr
 	}
-	if targetEP == "" && targetPeer.IPv6Addr != "" && network.HasGlobalIPv6() {
+	if targetEP == "" && targetPeer.IPv6Addr != "" && hasGlobalIPv6 {
 		targetEP = targetPeer.IPv6Addr
 	}
 	if targetEP == "" {

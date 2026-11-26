@@ -56,7 +56,8 @@ func TestTrafficShaper_PuncherIntegration(t *testing.T) {
 	shaper := NewTrafficShaper(true)
 	p.SetTrafficShaper(shaper)
 
-	if p.trafficShaper == nil || !p.trafficShaper.IsEnabled() {
+	shaperLoaded := p.trafficShaper.Load()
+	if shaperLoaded == nil || !shaperLoaded.IsEnabled() {
 		t.Fatalf("expected traffic shaper to be set and enabled")
 	}
 }

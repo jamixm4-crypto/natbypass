@@ -62,23 +62,26 @@ type tcpSentSegment struct {
 }
 
 type tcpSessionEntry struct {
-	conn             net.Conn
-	clientVIP        net.IP
-	clientPort       uint16
-	dstIP            net.IP
-	dstPort          uint16
-	clientISN        uint32
-	serverISN        uint32
-	clientNextSeq    atomic.Uint32
-	serverNextSeq    atomic.Uint32
-	lastClientAckSeq atomic.Uint32
-	lastSeenAck      atomic.Uint32
-	dupAckCount      atomic.Uint32
-	clientWindow     atomic.Uint32
-	lastActive       atomic.Int64
-	closed           atomic.Bool
-	dialing          atomic.Bool
-	closeOnce        sync.Once
+	conn               net.Conn
+	clientVIP          net.IP
+	clientPort         uint16
+	dstIP              net.IP
+	dstPort            uint16
+	clientISN          uint32
+	serverISN          uint32
+	clientWScale       uint8
+	clientNextSeq      atomic.Uint32
+	serverNextSeq      atomic.Uint32
+	lastClientAckSeq   atomic.Uint32
+	lastSeenAck        atomic.Uint32
+	dupAckCount        atomic.Uint32
+	clientWindow       atomic.Uint32
+	lastAckNano        atomic.Int64
+	lastRetransmitNano atomic.Int64
+	lastActive         atomic.Int64
+	closed             atomic.Bool
+	dialing            atomic.Bool
+	closeOnce          sync.Once
 
 	recentPktsMu sync.Mutex
 	recentPkts   []tcpSentSegment
@@ -87,10 +90,38 @@ type tcpSessionEntry struct {
 func (e *tcpSessionEntry) addRecentSegment(seq uint32, data []byte) {
 	e.recentPktsMu.Lock()
 	defer e.recentPktsMu.Unlock()
-	if len(e.recentPkts) >= 256 {
+	if len(e.recentPkts) >= 1536 {
 		e.recentPkts = e.recentPkts[1:]
 	}
 	e.recentPkts = append(e.recentPkts, tcpSentSegment{seq: seq, data: data})
+}
+
+func (e *tcpSessionEntry) pruneAcked(ackNum uint32) {
+	e.recentPktsMu.Lock()
+	defer e.recentPktsMu.Unlock()
+	cut := 0
+	for cut < len(e.recentPkts) {
+		segEnd := e.recentPkts[cut].seq + uint32(len(e.recentPkts[cut].data))
+		if int32(segEnd-ackNum) <= 0 {
+			cut++
+		} else {
+			break
+		}
+	}
+	if cut > 0 {
+		rem := copy(e.recentPkts, e.recentPkts[cut:])
+		e.recentPkts = e.recentPkts[:rem]
+	}
+}
+
+func (e *tcpSessionEntry) oldestSegment() *tcpSentSegment {
+	e.recentPktsMu.Lock()
+	defer e.recentPktsMu.Unlock()
+	if len(e.recentPkts) == 0 {
+		return nil
+	}
+	cp := e.recentPkts[0]
+	return &cp
 }
 
 func (e *tcpSessionEntry) getRecentSegment(ackNum uint32) *tcpSentSegment {
@@ -677,15 +708,47 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 			tf.tcpSessions.Delete(key)
 		}
 
+		// Parse client TCP Window Scale option (RFC 1323) from SYN header
+		var synWScale uint8
+		for optOff := 20; optOff < dataOffset; {
+			k := tcpHdr[optOff]
+			if k == 0 {
+				break
+			}
+			if k == 1 {
+				optOff++
+				continue
+			}
+			if optOff+1 >= dataOffset {
+				break
+			}
+			l := int(tcpHdr[optOff+1])
+			if l < 2 || optOff+l > dataOffset {
+				break
+			}
+			if k == 3 && l == 3 {
+				ws := tcpHdr[optOff+2]
+				if ws > 14 {
+					ws = 14
+				}
+				synWScale = ws
+				break
+			}
+			optOff += l
+		}
+
 		placeholder := &tcpSessionEntry{
-			clientVIP:  srcIP,
-			clientPort: srcPort,
-			dstIP:      destIP,
-			dstPort:    dstPort,
-			clientISN:  seqNum,
+			clientVIP:    srcIP,
+			clientPort:   srcPort,
+			dstIP:        destIP,
+			dstPort:      dstPort,
+			clientISN:    seqNum,
+			clientWScale: synWScale,
 		}
 		placeholder.dialing.Store(true)
-		placeholder.lastActive.Store(time.Now().Unix())
+		nowUnix := time.Now()
+		placeholder.lastAckNano.Store(nowUnix.UnixNano())
+		placeholder.lastActive.Store(nowUnix.Unix())
 		tf.tcpSessions.Store(key, placeholder)
 
 		// Asynchronously dial target host to avoid blocking TUN reader
@@ -842,7 +905,12 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 	if ackNum > 0 {
 		win := uint32(binary.BigEndian.Uint16(tcpHdr[14:16]))
 		if win > 0 {
-			scaledWin := win * 16
+			ws := entry.clientWScale
+			if ws == 0 {
+				// Fallback shift for sessions where SYN arrived without WScale parsed
+				ws = 4
+			}
+			scaledWin := win << ws
 			if scaledWin < 1048576 {
 				scaledWin = 1048576
 			}
@@ -852,30 +920,69 @@ func (tf *TransitForwarder) handleTransitTCP(payload []byte, ihl int, srcIP, des
 		if ackNum == prevAck {
 			// Duplicate ACK received
 			count := entry.dupAckCount.Add(1)
-			if count == 3 {
-				// RFC 5681 Fast Retransmit: exactly 3 duplicate ACKs trigger retransmission of the lost segment
-				if lostSeg := entry.getRecentSegment(ackNum); lostSeg != nil {
-					curClientSeq := entry.clientNextSeq.Load()
-					retransPkt := buildIPv4TCPPacket(
-						destIP, dstPort,
-						srcIP, srcPort,
-						lostSeg.seq,
-						curClientSeq,
-						0x18, // PSH | ACK
-						64240,
-						lostSeg.data,
-					)
-					tf.deliverToClient(srcIP, retransPkt)
+			if count == 3 || (count > 3 && count%3 == 0) {
+				nowNano := time.Now().UnixNano()
+				lastRetx := entry.lastRetransmitNano.Load()
+				if count == 3 || nowNano-lastRetx >= int64(50*time.Millisecond) {
+					if entry.lastRetransmitNano.CompareAndSwap(lastRetx, nowNano) || count == 3 {
+						lostSeg := entry.getRecentSegment(ackNum)
+						if lostSeg == nil {
+							lostSeg = entry.oldestSegment()
+						}
+						if lostSeg != nil {
+							curClientSeq := entry.clientNextSeq.Load()
+							retransPkt := buildIPv4TCPPacket(
+								destIP, dstPort,
+								srcIP, srcPort,
+								lostSeg.seq,
+								curClientSeq,
+								0x18, // PSH | ACK
+								64240,
+								lostSeg.data,
+							)
+							tf.deliverToClient(srcIP, retransPkt)
+						}
+					}
 				}
 			}
 		} else if int32(ackNum-prevAck) > 0 {
 			// Advancing ACK: new data acknowledged (RFC 793 знаковая разность корректно обрабатывает wrap-around на 2^32)
 			entry.lastSeenAck.Store(ackNum)
 			entry.lastClientAckSeq.Store(ackNum)
+			entry.lastAckNano.Store(time.Now().UnixNano())
 			entry.dupAckCount.Store(0)
+			entry.pruneAcked(ackNum)
 		}
 	}
 	return true
+}
+
+// retransmitOldestIfStalled checks for unacknowledged in-flight data stalled past RTO (250ms)
+// and retransmits the oldest unacknowledged segment to recover tail drops and multi-packet losses.
+func (tf *TransitForwarder) retransmitOldestIfStalled(entry *tcpSessionEntry) {
+	nowNano := time.Now().UnixNano()
+	lastAck := entry.lastAckNano.Load()
+	lastRetx := entry.lastRetransmitNano.Load()
+	if nowNano-lastAck < int64(250*time.Millisecond) || nowNano-lastRetx < int64(250*time.Millisecond) {
+		return
+	}
+	lostSeg := entry.oldestSegment()
+	if lostSeg == nil {
+		return
+	}
+	if entry.lastRetransmitNano.CompareAndSwap(lastRetx, nowNano) {
+		curClientSeq := entry.clientNextSeq.Load()
+		retransPkt := buildIPv4TCPPacket(
+			entry.dstIP, entry.dstPort,
+			entry.clientVIP, entry.clientPort,
+			lostSeg.seq,
+			curClientSeq,
+			0x18, // PSH | ACK
+			64240,
+			lostSeg.data,
+		)
+		tf.deliverToClient(entry.clientVIP, retransPkt)
+	}
 }
 
 // tcpSessionReader reads data from the remote TCP connection and delivers it back to the client as TCP packets.
@@ -885,7 +992,7 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 		tf.tcpSessions.Delete(key)
 	}()
 
-	buf := make([]byte, 65536)
+	buf := make([]byte, 32768)
 	for {
 		select {
 		case <-tf.closed:
@@ -906,14 +1013,24 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 		lastAck := entry.lastClientAckSeq.Load()
 		inFlight := int32(curServerSeq - lastAck)
 		if lastAck != 0 && inFlight > int32(cWin) {
+			tf.retransmitOldestIfStalled(entry)
 			time.Sleep(1 * time.Millisecond)
 			continue
 		}
 
-		_ = entry.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		// Use short 250ms read deadline while data is unacknowledged in flight so tail-packet drops
+		// recover via RTO within 250ms instead of stalling 30 seconds.
+		if inFlight > 0 {
+			_ = entry.conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+		} else {
+			_ = entry.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		}
 		n, err := entry.conn.Read(buf)
 		if n > 0 {
 			entry.lastActive.Store(time.Now().Unix())
+			if inFlight == 0 {
+				entry.lastAckNano.Store(time.Now().UnixNano())
+			}
 			offset := 0
 			for offset < n {
 				chunkSize := n - offset
@@ -950,6 +1067,9 @@ func (tf *TransitForwarder) tcpSessionReader(key tcpSessionKey, entry *tcpSessio
 			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 				if time.Now().Unix()-entry.lastActive.Load() > 120 {
 					return
+				}
+				if curInFlight := int32(entry.serverNextSeq.Load() - entry.lastClientAckSeq.Load()); curInFlight > 0 {
+					tf.retransmitOldestIfStalled(entry)
 				}
 				continue
 			}
