@@ -58,14 +58,31 @@ func TestWindowOpenAPI(t *testing.T) {
 		t.Fatal("Timeout waiting for onOpenWindow callback")
 	}
 
-	// Test /api/logs/download endpoint
-	logResp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/logs/download", port))
+	// Test /api/logs/download endpoint (requires auth when authentication is enabled)
+	logURL := fmt.Sprintf("http://127.0.0.1:%d/api/logs/download", port)
+	if server.isAuthRequired() {
+		unauthResp, err := client.Get(logURL)
+		if err != nil {
+			t.Fatalf("Unauthenticated GET /api/logs/download failed: %v", err)
+		}
+		unauthResp.Body.Close()
+		if unauthResp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("Expected status 401 for unauthenticated /api/logs/download, got %d", unauthResp.StatusCode)
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, logURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to build request for /api/logs/download: %v", err)
+	}
+	req.SetBasicAuth("admin", "admin")
+	logResp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET /api/logs/download failed: %v", err)
 	}
 	defer logResp.Body.Close()
 	if logResp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected status 200 for /api/logs/download, got %d", logResp.StatusCode)
+		t.Fatalf("Expected status 200 for authenticated /api/logs/download, got %d", logResp.StatusCode)
 	}
 }
 
